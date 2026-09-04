@@ -4,7 +4,7 @@ using Relay.Core.Projects;
 
 namespace Relay.Core.Search;
 
-public sealed record SearchHit(string Kind, string Id, string? ProjectId, string? ProjectSlug, string Type, string Excerpt, double Score, SourceSpan? Span, DateTimeOffset At, string Text);
+public sealed record SearchHit(string Kind, string Id, string? ProjectId, string? ProjectSlug, string Type, string Excerpt, double Score, SourceSpan? Span, DateTimeOffset At, string Text, string Status = "active");
 
 /// <summary>
 /// A rebuildable in-memory projection over everything Relay may cite: stored captures (the raw
@@ -25,7 +25,7 @@ public sealed class SearchIndex
         "recall", "find", "search", "remember", "know", "have", "has", "had", "from", "into", "not", "no", "yes", "up", "so", "if", "then", "there",
     };
 
-    private sealed record Doc(string Kind, string Id, string? ProjectId, string? ProjectSlug, string Type, string Text, DateTimeOffset At, string? EventId, int SpanOffset, HashSet<string> Tokens);
+    private sealed record Doc(string Kind, string Id, string? ProjectId, string? ProjectSlug, string Type, string Text, DateTimeOffset At, string? EventId, int SpanOffset, HashSet<string> Tokens, string Status = "active");
 
     private readonly List<Doc> _docs = new();
 
@@ -67,7 +67,7 @@ public sealed class SearchIndex
     public void IndexNote(NoteDocument note, ProjectRecord project)
     {
         var span = note.Spans.FirstOrDefault();
-        Replace(new Doc(NoteKind, note.Id, project.Id, project.Slug, note.Type, note.Body, note.Created, span?.EventId, span?.Start ?? 0, new HashSet<string>(Tokenize(note.Body))));
+        Replace(new Doc(NoteKind, note.Id, project.Id, project.Slug, note.Type, note.Body, note.Created, span?.EventId, span?.Start ?? 0, new HashSet<string>(Tokenize(note.Body)), note.Status));
     }
 
     public void Remove(string kind, string id) => _docs.RemoveAll(d => d.Kind == kind && d.Id == id);
@@ -98,11 +98,12 @@ public sealed class SearchIndex
             var phraseIndex = phrase.Length >= 3 ? lower.IndexOf(phrase, StringComparison.Ordinal) : -1;
             if (matched == 0 && phraseIndex < 0) continue;
             var score = (terms.Count == 0 ? 0 : (double)matched / terms.Count) + (phraseIndex >= 0 ? 0.5 : 0);
+            if (doc.Status == NoteStatus.Superseded) score -= 0.3; // still findable, never erased, ranked below current conclusions
 
             var (start, end) = phraseIndex >= 0 ? (phraseIndex, phraseIndex + phrase.Length) : FirstTermRange(lower, terms);
             var excerpt = Excerpt(doc.Text, start, end);
             var span = doc.EventId is null ? null : new SourceSpan(doc.EventId, doc.SpanOffset + start, doc.SpanOffset + end);
-            hits.Add(new SearchHit(doc.Kind, doc.Id, doc.ProjectId, doc.ProjectSlug, doc.Type, excerpt, score, span, doc.At, doc.Text));
+            hits.Add(new SearchHit(doc.Kind, doc.Id, doc.ProjectId, doc.ProjectSlug, doc.Type, excerpt, score, span, doc.At, doc.Text, doc.Status));
         }
         return hits.OrderByDescending(h => h.Score).ThenByDescending(h => h.At).Take(limit).ToList();
     }

@@ -217,7 +217,8 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
                 SearchIndex.DraftKind => $"staging draft {h.Id}",
                 _ => $"{h.Type} capture {h.Id}",
             };
-            sb.Append(n++).Append(". [").Append(where).Append(", ").Append(h.At.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append("] ").Append(h.Excerpt).Append('\n');
+            var marker = h.Status switch { NoteStatus.Superseded => " (superseded)", NoteStatus.Disputed => " (disputed)", _ => "" };
+            sb.Append(n++).Append(". [").Append(where).Append(marker).Append(", ").Append(h.At.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append("] ").Append(h.Excerpt).Append('\n');
             citations.Add(new Citation(h.Kind, h.Id, h.ProjectId, h.ProjectSlug, h.Excerpt, h.Span));
         }
         return (sb.ToString().TrimEnd(), citations);

@@ -51,7 +51,7 @@ public class CaptureFlowTests : IDisposable
 
         h.Scheduler.Advance(TimeSpan.FromMilliseconds(600)); // stabilization without relay
         Assert.Equal(RelayState.Completed, h.Snap.State);
-        Assert.Contains("Saved 1 draft note", h.Snap.Receipt);
+        Assert.StartsWith("Saved 1 note", h.Snap.Receipt);
 
         var committed = h.Last(EventTypes.CaptureCommitted)!;
         Assert.Equal(text, committed.DataString("text"));

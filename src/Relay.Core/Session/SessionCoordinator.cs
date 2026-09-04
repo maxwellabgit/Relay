@@ -596,9 +596,14 @@ public sealed partial class SessionCoordinator
         }
     }
 
-    /// <summary>Stores a note capture as a verbatim draft note in staging. Returns the receipt text, or empty when the ledger locked.</summary>
+    /// <summary>
+    /// Stores a note capture. With the orchestrator off it becomes one verbatim draft note in staging;
+    /// otherwise it is extracted into atomic notes and routed (see the Memory partial). Returns the receipt text, or empty when the ledger locked.
+    /// </summary>
     private string OrganizeNote(CaptureDraft draft, string sourceEventId)
     {
+        if (OrchestratorEnabled) return OrganizeNoteMemory(draft, sourceEventId);
+
         var note = new DraftNote(
             Ulid.NewUlid(_clock.UtcNow), draft.CaptureId, sourceEventId, _clock.UtcNow,
             DraftNote.RawCaptureType, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null,
@@ -606,7 +611,7 @@ public sealed partial class SessionCoordinator
         var path = _notes.Write(note);
         if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId = draft.CaptureId, sourceEventId, chars = draft.Text.Length, path }) is null) return "";
         _services.Index.IndexDraft(note);
-        return OrganizeNoteMemory(note);
+        return "Saved 1 draft note · orchestrator is off, routing deferred";
     }
 
     private void ShowReceipt(string receipt)

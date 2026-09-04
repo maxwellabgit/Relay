@@ -165,22 +165,24 @@ public sealed class Executor
         var project = _registry.ById(d.NormalizedTarget["projectId"]) ?? throw new InvalidOperationException("Project vanished.");
         double? confidence = double.TryParse(d.NormalizedTarget.GetValueOrDefault("confidence"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var c) ? c : null;
         var type = d.NormalizedTarget.GetValueOrDefault("type") ?? (draft.Type == DraftNote.RawCaptureType ? NoteTypes.Idea : draft.Type);
+        var disputedWith = (d.NormalizedTarget.GetValueOrDefault("disputedWith") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         var note = new NoteDocument
         {
             Id = draft.NoteId,
             ProjectId = project.Id,
             Type = type,
-            Status = NoteStatus.Active,
+            Status = disputedWith.Count > 0 ? NoteStatus.Disputed : d.NormalizedTarget.GetValueOrDefault("status") ?? NoteStatus.Active,
             Created = draft.CreatedAt,
             Confidence = confidence,
             CaptureId = draft.CaptureId,
             Topic = d.NormalizedTarget.GetValueOrDefault("topic"),
             Spans = draft.Spans.ToList(),
+            DisputedWith = disputedWith,
             Body = draft.Text,
         };
         var written = ProjectNoteStore.WriteNew(project.RootPath, note);
         var stagingPath = _drafts.MarkRouted(draft.NoteId, project.Id, confidence);
-        sink.Record(EventTypes.NoteRouted, new { noteId = note.Id, projectId = project.Id, projectSlug = project.Slug, path = written.Path, confidence, by = p.ProposedBy, proposalId = p.ProposalId, stagingPath });
+        sink.Record(EventTypes.NoteRouted, new { noteId = note.Id, projectId = project.Id, projectSlug = project.Slug, path = written.Path, confidence, by = p.ProposedBy, proposalId = p.ProposalId, stagingPath, status = note.Status, type });
         sink.Record(EventTypes.NoteWritten, new { noteId = note.Id, projectId = project.Id, path = written.Path, sha256 = written.Sha256, version = written.Version, type });
         return ExecutionResult.Ok($"Filed note {note.Id} under {project.Slug}/{NoteTypes.Folder(type)}", new Dictionary<string, string> { ["path"] = written.Path, ["sha256"] = written.Sha256, ["projectId"] = project.Id });
     }
@@ -208,7 +210,11 @@ public sealed class Executor
         var found = ProjectNoteStore.Find(project.RootPath, d.NormalizedTarget["noteId"]) ?? throw new FileNotFoundException("Note vanished.");
         var note = found.Note;
         if (d.NormalizedTarget.TryGetValue("body", out var body) && !string.IsNullOrWhiteSpace(body)) note.Body = body;
-        if (d.NormalizedTarget.TryGetValue("status", out var status)) note.Status = status;
+        if (d.NormalizedTarget.TryGetValue("status", out var status))
+        {
+            note.Status = status;
+            if (status == NoteStatus.Active) note.DisputedWith.Clear(); // "keep both" resolves the dispute link
+        }
         if (d.NormalizedTarget.TryGetValue("type", out var type) && NoteTypes.All.Contains(type)) note.Type = type;
         if (d.NormalizedTarget.TryGetValue("topic", out var topic)) note.Topic = topic;
         var written = ProjectNoteStore.WriteVersion(project.RootPath, note);

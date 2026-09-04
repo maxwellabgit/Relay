@@ -95,6 +95,12 @@ public static class PolicyEngine
         var project = ResolveActiveProject(t, w, problems);
         if (project is not null && !Directory.Exists(project.RootPath)) problems.Add($"Project folder is missing: {project.RootPath}");
         if (t.TryGetValue("type", out var type) && !NoteTypes.All.Contains(type)) problems.Add("target.type is not a known note type.");
+        if (t.TryGetValue("status", out var status) && status is not (NoteStatus.Active or NoteStatus.Disputed or NoteStatus.Draft)) problems.Add("target.status for a routed note must be active, disputed or draft.");
+        if (t.TryGetValue("disputedWith", out var disputed) && project is not null)
+        {
+            foreach (var otherId in disputed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (!w.ProjectNoteExists(project.Id, otherId)) problems.Add($"Disputed note {otherId} does not exist in project {project.Slug}.");
+        }
         return problems;
     }
 
