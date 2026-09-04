@@ -1,0 +1,10 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Relay.Core</RootNamespace>
+    <!-- Relay.Core is platform-neutral: no UI, model, network, or Win32 dependencies.
+         It owns the state machine, the ledger format, storage layout and policy types. -->
+  </PropertyGroup>
+
+</Project>

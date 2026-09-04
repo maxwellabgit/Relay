@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+*.binlog
+TestResults/
+
+# Windows App SDK / WinUI generated
+*.pri
+Generated Files/
+
+# Local tooling
+.idea/
+*.swp
+
+# Never commit runtime data. The ledger, captures and configuration live in
+# %LOCALAPPDATA%\Relay, not in the repository.
+/data/
+/.relay-data/
