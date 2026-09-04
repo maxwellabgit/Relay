@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Relay.Core/Relay.Core.csproj" />
+    <Project Path="src/Relay.Gateway/Relay.Gateway.csproj" />
     <Project Path="src/Relay.Desktop/Relay.Desktop.csproj" />
     <Project Path="src/Relay.Windows/Relay.Windows.csproj" />
     <Project Path="src/Relay.Worker/Relay.Worker.csproj" />

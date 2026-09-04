@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -33,6 +33,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Relay.Core\Relay.Core.csproj" />
     <ProjectReference Include="..\Relay.Windows\Relay.Windows.csproj" />
+    <ProjectReference Include="..\Relay.Gateway\Relay.Gateway.csproj" />
     <!-- Built alongside so Relay.Worker.exe sits beside Relay.exe; the app never loads it, only launches it. -->
     <ProjectReference Include="..\Relay.Worker\Relay.Worker.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>

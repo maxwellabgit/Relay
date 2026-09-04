@@ -96,6 +96,7 @@ public static class ActivityFormatter
             EventTypes.AgentRunTerminated => $"Worker {Short(r.DataString("runId"))} terminated: {r.DataString("reason")}",
             EventTypes.PatchApplied => $"Applied worker output {r.DataString("output")} to {r.DataString("projectSlug")}/{Path.GetFileName(r.DataString("destination") ?? "")}" + (r.DataString("previousVersionPath") is null ? "" : " (previous version kept)"),
             EventTypes.SettingsChanged => $"Settings changed (orchestrator {r.DataString("orchestratorMode")}, model {(r.DataBool("modelEnabled") == true ? "on" : "off")})",
+            EventTypes.SecretChanged => $"Secret '{r.DataString("name")}' {r.DataString("action")}",
             EventTypes.SecretStored => $"Stored secret '{r.DataString("name")}' (DPAPI, this user only)",
             EventTypes.FlowRelaySent => $"Sent Flow {r.DataString("purpose")} chord {r.DataString("chord")}" + (r.DataBool("ok") == true ? "" : $" — failed: {r.DataString("error")}"),
             EventTypes.FlowRelaySkipped => $"Flow {r.DataString("purpose")} chord not sent: {r.DataString("reason")}",

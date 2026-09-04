@@ -186,7 +186,8 @@ public class WorkerTests : IDisposable
     {
         var workerDll = Path.Combine(AppContext.BaseDirectory, "Relay.Worker.dll");
         Assert.True(File.Exists(workerDll), "Relay.Worker.dll should be built beside the tests.");
-        var host = new ProcessWorkerHost(workerDll);
+        // The real Windows sandbox: the child runs inside a job object with kill-on-close, a memory cap and UI restrictions.
+        var host = new Relay.Windows.JobObjectWorkerHost(workerDll);
 
         using var h = new Harness(_tmp.Root, workerHost: host, inlinePost: false).Start();
         var ws = Path.Combine(Path.GetDirectoryName(_tmp.Root.Path)!, Path.GetFileName(_tmp.Root.Path) + "-ws");
@@ -214,7 +215,7 @@ public class WorkerTests : IDisposable
             Assert.Equal("executed", h.Snap.Response!.Outcome);
 
             var launched = h.Last(EventTypes.AgentRunLaunched)!;
-            Assert.Contains("child process", launched.DataString("host"));
+                Assert.Contains("job object sandbox", launched.DataString("host"));
             var completed = h.Last(EventTypes.AgentRunCompleted)!;
             Assert.True(completed.DataBool("ok"));
             Assert.Equal(0, completed.DataInt64("exitCode"));

@@ -1,20 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <RootNamespace>Relay.Windows</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Relay.Gateway</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <!-- The only project in Relay that opens a network connection. It speaks to exactly one
+         configured OpenAI-compatible endpoint over https, with a key from the secret store. -->
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Relay.Core\Relay.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

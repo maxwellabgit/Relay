@@ -4,6 +4,7 @@ using Relay.Core.Config;
 using Relay.Core.Execution;
 using Relay.Core.Ids;
 using Relay.Core.Ledger;
+using Relay.Core.Model;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
 using Relay.Core.Projects;
@@ -61,6 +62,7 @@ public sealed class Harness : IDisposable
             Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
             Index = Index,
             Workers = Workers,
+            Secrets = Secrets,
             IndexProblems = indexProblems,
         };
 
@@ -73,6 +75,7 @@ public sealed class Harness : IDisposable
     public SearchIndex Index { get; }
     public CoordinatorServices Services { get; }
     public WorkerRuntime? Workers { get; }
+    public MemorySecretStore Secrets { get; } = new();
 
     public DataRoot Root { get; }
     public FixedClock Clock { get; }

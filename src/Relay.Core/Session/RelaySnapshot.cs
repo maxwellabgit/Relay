@@ -114,7 +114,8 @@ public sealed record RelaySnapshot(
     string OrchestratorName,
     bool ModelEnabled,
     string? ModelEndpoint,
-    string? ModelName)
+    string? ModelName,
+    bool ModelKeyStored = false)
 {
     public bool CanCancel => State is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Planning or RelayState.AwaitingApproval or RelayState.Executing;
     public bool CanSubmitNow => State == RelayState.AwaitingTranscript && CaptureChars > 0;

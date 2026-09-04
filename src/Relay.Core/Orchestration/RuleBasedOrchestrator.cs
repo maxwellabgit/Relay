@@ -199,7 +199,10 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
             var hits = result.Hits ?? [];
             var (answer, citations) = RenderRecall(query, hits, context.Registry);
             steps.Add(hits.Count == 0 ? "Nothing matched" : $"Cite {hits.Count} passage(s) with their ledger spans");
-            return Done(new TurnPlan(true, $"Recall: {query}", steps, answer, citations, [], Name));
+            // A question-shaped instruction that matched nothing is not something the grammar understood; it keeps
+            // its honest answer for rules-only mode, but a model orchestrator, when present, gets the turn.
+            var understood = m.Success || hits.Count > 0;
+            return Done(new TurnPlan(understood, $"Recall: {query}", steps, answer, citations, [], Name));
         }
 
         return Done(TurnPlan.NotUnderstood(Name, "Instruction not covered by the built-in grammar"));

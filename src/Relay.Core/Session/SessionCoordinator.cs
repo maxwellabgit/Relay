@@ -1030,7 +1030,8 @@ public sealed partial class SessionCoordinator
                 _services.Orchestrator.Name,
                 _settings.Model.Enabled,
                 _settings.Model.Enabled ? _settings.Model.Endpoint : null,
-                _settings.Model.Enabled ? _settings.Model.Model : null);
+                _settings.Model.Enabled ? _settings.Model.Model : null,
+                ModelKeyStored);
         }
     }
 }

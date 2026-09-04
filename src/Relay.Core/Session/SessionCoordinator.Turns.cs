@@ -22,6 +22,8 @@ public sealed class CoordinatorServices
     public required IOrchestrator Orchestrator { get; init; }
     public required SearchIndex Index { get; init; }
     public IWorkerOperations? Workers { get; init; }
+    /// <summary>Where the model API key lives; null when the host has no protected store.</summary>
+    public Model.ISecretStore? Secrets { get; init; }
     public IReadOnlyList<string> IndexProblems { get; init; } = [];
 }
 
@@ -161,9 +163,9 @@ public sealed partial class SessionCoordinator : IExecutionSink
         {
             turn.Plan = plan with
             {
-                Answer = _settings.Model.Enabled
-                    ? "The instruction could not be interpreted."
-                    : "The built-in grammar did not understand that instruction, and the model gateway is not enabled. Try: \"create project <name>\", \"archive project <name>\", \"list projects\", \"remember that …\", \"file the last note under <project>\", \"what did I say about …\", \"summarize project <name>\", \"export a backup\".",
+                Answer = plan.Answer ?? (_settings.Model.Enabled || plan.Producer.StartsWith(Model.ModelOrchestrator.ProducerPrefix, StringComparison.Ordinal)
+                    ? "The instruction could not be interpreted: " + plan.Summary
+                    : "The built-in grammar did not understand that instruction, and the model gateway is not enabled. Try: \"create project <name>\", \"archive project <name>\", \"list projects\", \"remember that …\", \"file the last note under <project>\", \"what did I say about …\", \"summarize project <name>\", \"export a backup\"."),
             };
         }
 
@@ -535,6 +537,39 @@ public sealed partial class SessionCoordinator : IExecutionSink
     public event Action<RelaySettings>? SettingsChanged;
 
     public RelaySettings CurrentSettings => _settings;
+
+    /// <summary>Whether an API key is stored for the configured model secret. The key itself is never exposed.</summary>
+    public bool ModelKeyStored => _services.Secrets?.Exists(_settings.Model.SecretName) == true;
+
+    /// <summary>Stores or clears the model API key in the protected secret store. Only the secret's name reaches the ledger.</summary>
+    public bool SetModelApiKey(string? key)
+    {
+        if (_services.Secrets is null) { _notice = "This host has no protected secret store."; Notify(); return false; }
+        var name = _settings.Model.SecretName;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                var removed = _services.Secrets.Remove(name);
+                Append(EventTypes.SecretChanged, new { name, action = removed ? "removed" : "absent" });
+                _notice = removed ? "Model API key removed." : "No model API key was stored.";
+            }
+            else
+            {
+                _services.Secrets.Set(name, key.Trim());
+                Append(EventTypes.SecretChanged, new { name, action = "stored", chars = key.Trim().Length });
+                _notice = "Model API key stored (DPAPI, this Windows account only).";
+            }
+            Notify();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.Cryptography.CryptographicException)
+        {
+            _notice = "Could not update the model API key: " + ex.Message;
+            Notify();
+            return false;
+        }
+    }
 
     // ----------------------------------------------------------------------------------------
     // Persistence for crash detection

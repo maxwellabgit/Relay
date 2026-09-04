@@ -24,6 +24,8 @@ public sealed class RuntimeOptions
     public Func<RelaySettings, IOrchestrator?>? ModelOrchestratorFactory { get; init; }
     /// <summary>Builds the process host for workers (job object on Windows); null or a null result disables workers.</summary>
     public Func<RelaySettings, IWorkerHost?>? WorkerHostFactory { get; init; }
+    /// <summary>The protected secret store for the model API key; null when the host has none.</summary>
+    public Model.ISecretStore? Secrets { get; init; }
 }
 
 /// <summary>
@@ -89,6 +91,7 @@ public sealed class RelayRuntime : IDisposable
             Orchestrator = orchestrator,
             Index = index,
             Workers = workers,
+            Secrets = options.Secrets,
             IndexProblems = indexProblems,
         };
 

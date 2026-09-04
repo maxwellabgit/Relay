@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
@@ -22,6 +22,9 @@
     <!-- The worker is referenced so its protocol code runs in-process in scenario tests and its built
          executable is available beside the test assembly for the real-process tests. -->
     <ProjectReference Include="..\..\src\Relay.Worker\Relay.Worker.csproj" />
+    <ProjectReference Include="..\..\src\Relay.Gateway\Relay.Gateway.csproj" />
+    <!-- Windows-only pieces (DPAPI secrets, job-object sandbox) are tested for real; the product is Windows-only. -->
+    <ProjectReference Include="..\..\src\Relay.Windows\Relay.Windows.csproj" />
   </ItemGroup>
 
 </Project>
