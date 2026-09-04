@@ -1,0 +1,527 @@
+using Relay.Core.Config;
+using Relay.Core.Execution;
+using Relay.Core.Ledger;
+using Relay.Core.Notes;
+using Relay.Core.Orchestration;
+using Relay.Core.Policy;
+using Relay.Core.Projects;
+using Relay.Core.Session;
+using Relay.Core.State;
+using Relay.Core.Storage;
+using Relay.Tests.Support;
+
+namespace Relay.Tests;
+
+public class OrchestratorTurnTests : IDisposable
+{
+    private readonly TempRoot _tmp = new();
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public OrchestratorTurnTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
+
+    [Fact]
+    public void CreateProjectNeedsApprovalThenExecutesThroughTheFullPath()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("Create a project called Market Study")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.CreateProject, "pending")
+            .ExpectReview(ReviewItemKind.Proposal)
+            .ExpectProject("market-study", exists: false)
+            .Approve(Actions.CreateProject)
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("executed")
+            .ExpectProposal(Actions.CreateProject, "executed")
+            .ExpectProject("market-study");
+
+        var types = s.H.Records().Select(r => r.Type).ToList();
+        var expectedOrder = new[]
+        {
+            EventTypes.CaptureCommitted, EventTypes.CommandRecorded, EventTypes.TurnStarted, EventTypes.PlanProposed, EventTypes.ProposalReceived,
+            EventTypes.ProposalDecided, EventTypes.ApprovalGranted, EventTypes.ExecutionStarted, EventTypes.ProjectCreated, EventTypes.ExecutionCompleted, EventTypes.TurnCompleted,
+        };
+        var last = -1;
+        foreach (var type in expectedOrder)
+        {
+            var i = types.IndexOf(type, last + 1);
+            Assert.True(i > last, $"{type} missing or out of order.\n{s.Transcript()}");
+            last = i;
+        }
+        var project = s.H.Registry.FindActive("market-study")!;
+        Assert.Empty(ProjectLayout.Verify(project.RootPath));
+        Assert.StartsWith(s.WorkspacePath, project.RootPath, StringComparison.OrdinalIgnoreCase);
+        var approval = s.H.Last(EventTypes.ApprovalGranted)!;
+        Assert.Equal(s.H.Last(EventTypes.ProposalReceived)!.DataString("hash"), approval.DataString("proposalHash"));
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ProposalReceived && r.DataString("proposedBy") == "rules");
+    }
+
+    [Fact]
+    public void WithoutAWorkspaceCreateProjectIsDeniedVisibly()
+    {
+        using var s = Scenario.New(_tmp)
+            .Command("create project Atlas")
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("denied")
+            .ExpectProposal(Actions.CreateProject, "denied")
+            .ExpectNoEvent(EventTypes.ExecutionStarted)
+            .ExpectNoEvent(EventTypes.ApprovalGranted);
+        var denied = s.Response.Proposals.Single();
+        Assert.Contains(denied.Reasons, r => r.Contains("workspace", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("Deny", s.H.Last(EventTypes.ProposalDecided)!.DataString("outcome"));
+    }
+
+    [Fact]
+    public void RejectingRunsNothing()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .Reject(Actions.CreateProject, "not now")
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("rejected")
+            .ExpectProject("atlas", exists: false)
+            .ExpectEvent(EventTypes.ApprovalRejected)
+            .ExpectNoEvent(EventTypes.ExecutionStarted);
+        Assert.Equal("not now", s.H.Last(EventTypes.ApprovalRejected)!.DataString("reason"));
+    }
+
+    [Fact]
+    public void EditingReProposesUnderTheUsersName()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .Edit(Actions.CreateProject, ("slug", "atlas-2026"), ("name", "Atlas 2026"))
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.CreateProject, "edited")
+            .ExpectProposal(Actions.CreateProject, "pending")
+            .Approve()
+            .ExpectState(RelayState.Completed)
+            .ExpectProject("atlas-2026")
+            .ExpectProject("atlas", exists: false);
+        var edited = s.H.Last(EventTypes.ProposalEdited)!;
+        Assert.NotEqual(edited.DataString("fromProposalId"), edited.DataString("toProposalId"));
+        var executedProposal = s.Response.Proposals.Single(p => p.Status == "executed");
+        Assert.Equal(Producers.User, executedProposal.ProposedBy);
+    }
+
+    [Fact]
+    public void PermanentDeletionIsProhibitedAndArchivingIsOffered()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("permanently delete project Atlas")
+            .ExpectState(RelayState.Completed)
+            .ExpectProposal(Actions.DeleteProject, "denied")
+            .ExpectAnswerContains("archive")
+            .ExpectProject("atlas");
+        Assert.Equal("Prohibited", s.H.Last(EventTypes.ProposalDecided)!.DataString("tier"));
+    }
+
+    [Fact]
+    public void ArchiveIsRecoverableAndRestoreVerifiesTheManifest()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve().ExpectProject("atlas")
+            .Command("delete project atlas")
+            .ExpectProposal(Actions.ArchiveProject, "pending")
+            .Approve()
+            .ExpectState(RelayState.Completed)
+            .ExpectProject("atlas", exists: false)
+            .ExpectEvent(EventTypes.ProjectArchived);
+        var archived = s.H.Registry.Find("atlas")!;
+        Assert.Equal(ProjectRecord.ArchivedStatus, archived.Status);
+        Assert.True(Directory.Exists(archived.ArchivedPath));
+        Assert.True(File.Exists(archived.ArchivedPath + ".manifest.json"));
+
+        s.Command("restore project atlas").ExpectProposal(Actions.RestoreProject, "pending").Approve()
+            .ExpectState(RelayState.Completed)
+            .ExpectProject("atlas")
+            .ExpectEvent(EventTypes.ProjectRestored);
+        var restore = s.H.Last(EventTypes.ProjectRestored)!;
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, restore.Data.GetProperty("problems").ValueKind);
+        Assert.Equal(0, restore.Data.GetProperty("problems").GetArrayLength());
+    }
+
+    [Fact]
+    public void RememberFilesAndRecallWorkWithoutApproval()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("Remember that the Atlas launch moves to October 14")
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("executed")
+            .ExpectProposal(Actions.CreateDraftNote, "executed");
+        Assert.Single(s.H.Notes.Unrouted());
+        Assert.Equal(1, s.H.Count(EventTypes.ApprovalGranted)); // only the create_project approval
+
+        s.Command("file the last note under Atlas")
+            .ExpectState(RelayState.Completed)
+            .ExpectProposal(Actions.RouteNote, "executed")
+            .ExpectEvent(EventTypes.NoteRouted)
+            .ExpectEvent(EventTypes.NoteWritten);
+        Assert.Empty(s.H.Notes.Unrouted());
+        var project = s.H.Registry.FindActive("atlas")!;
+        var (notes, problems) = ProjectNoteStore.ReadAll(project.RootPath);
+        Assert.Empty(problems);
+        var note = Assert.Single(notes).Note;
+        Assert.Contains("October 14", note.Body);
+        Assert.Equal(project.Id, note.ProjectId);
+        var span = Assert.Single(note.Spans);
+        var source = s.H.Records().First(r => r.Type == EventTypes.CaptureCommitted && r.DataString("text")!.Contains("Remember"));
+        Assert.Equal(source.Id, span.EventId);
+        Assert.Equal(note.Body, source.DataString("text")![span.Start..span.End]); // the span is exactly the remembered words
+
+        s.Command("What did I say about the launch?")
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("October 14")
+            .ExpectNoProposals()
+            .ExpectEvent(EventTypes.ToolCalled)
+            .ExpectEvent(EventTypes.ToolReturned);
+        Assert.Contains(s.Response.Citations, c => c.Kind == "note" && c.Id == note.Id && c.ProjectSlug == "atlas");
+    }
+
+    [Fact]
+    public void RecallCitesTheOriginalCaptureSpan()
+    {
+        using var s = Scenario.New(_tmp)
+            .Note("Pricing idea: three tiers, and annual billing gets fifteen percent off.")
+            .ExpectState(RelayState.Completed)
+            .Command("what did I say about annual billing")
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("fifteen percent");
+        var citation = s.Response.Citations.First();
+        var capture = s.H.Records().First(r => r.Type == EventTypes.CaptureCommitted && r.DataString("mode") == "note");
+        Assert.NotNull(citation.Span);
+        Assert.Equal(capture.Id, citation.Span!.EventId);
+        var text = capture.DataString("text")!;
+        Assert.Contains("annual billing", text[citation.Span.Start..citation.Span.End], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ListProjectsAnswersFromTheRegistry()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("create project Beacon").Approve()
+            .Command("list my projects")
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("Atlas")
+            .ExpectAnswerContains("beacon")
+            .ExpectNoProposals();
+    }
+
+    [Fact]
+    public void UnknownInstructionsAreAnsweredNotExecuted()
+    {
+        using var s = Scenario.New(_tmp)
+            .Command("Please rearrange the deck chairs")
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("did not understand")
+            .ExpectNoProposals()
+            .ExpectNoEvent(EventTypes.ExecutionStarted);
+        Assert.False(s.H.Last(EventTypes.PlanProposed)!.DataBool("understood"));
+    }
+
+    [Fact]
+    public void CancelDuringPlanningReturnsToIdleAndIgnoresTheLatePlan()
+    {
+        var pausing = new PausingOrchestrator(new RuleBasedOrchestrator());
+        using var s = Scenario.New(_tmp, orchestrator: pausing).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.Planning)
+            .Cancel()
+            .ExpectState(RelayState.Idle)
+            .ExpectEvent(EventTypes.TurnCancelled);
+        Assert.True(pausing.LastToken.IsCancellationRequested);
+        Assert.False(pausing.Release()); // the gate was cancelled; nothing to release
+        Assert.Equal(RelayState.Idle, s.Snap.State);
+        Assert.Equal(0, s.H.Count(EventTypes.PlanProposed));
+        Assert.False(File.Exists(s.H.Root.CurrentTurnPath));
+    }
+
+    [Fact]
+    public void PlanningTimeoutFailsTheTurnWithAnIncident()
+    {
+        var pausing = new PausingOrchestrator(new RuleBasedOrchestrator());
+        using var s = Scenario.New(_tmp, orchestrator: pausing, configure: x => x.Orchestrator.PlanningTimeoutMs = 5000).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.Planning)
+            .Advance(TimeSpan.FromSeconds(6))
+            .ExpectState(RelayState.Failed)
+            .ExpectEvent(EventTypes.TurnFailed);
+        Assert.Equal("planning_timeout", s.Snap.Incident!.Kind);
+        Assert.False(s.Snap.CanRetry);
+        s.Dismiss().ExpectState(RelayState.Idle);
+    }
+
+    [Fact]
+    public void OrchestratorExceptionsBecomeAFailedTurnNotACrash()
+    {
+        using var s = Scenario.New(_tmp, orchestrator: new ThrowingOrchestrator())
+            .Command("anything")
+            .ExpectState(RelayState.Failed)
+            .ExpectEvent(EventTypes.TurnFailed);
+        Assert.Contains("model exploded", s.Snap.Incident!.Detail);
+        s.Dismiss().ExpectState(RelayState.Idle);
+    }
+
+    [Fact]
+    public void CancelWhileAwaitingApprovalRejectsEverything()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.AwaitingApproval)
+            .Cancel()
+            .ExpectState(RelayState.Idle)
+            .ExpectEvent(EventTypes.ApprovalRejected)
+            .ExpectEvent(EventTypes.TurnCancelled)
+            .ExpectProject("atlas", exists: false);
+    }
+
+    [Fact]
+    public void HotkeysAreRefusedWhileAProposalWaits()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.AwaitingApproval)
+            .Note("this should not start")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectEvent(EventTypes.HotkeyRejected);
+        Assert.Equal(TransitionTable.DecideProposalsFirst, s.Snap.Notice);
+    }
+
+    [Fact]
+    public void CrashWhileAwaitingApprovalIsReportedAtNextStart()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.AwaitingApproval);
+        Assert.True(File.Exists(s.H.Root.CurrentTurnPath));
+        s.CrashAndRestart()
+            .ExpectState(RelayState.Idle)
+            .ExpectEvent(EventTypes.TurnInterruptedFound)
+            .ExpectReview(ReviewItemKind.TurnInterrupted)
+            .ExpectProject("atlas", exists: false);
+        Assert.False(File.Exists(s.H.Root.CurrentTurnPath));
+        Assert.Single(Directory.GetFiles(s.H.Root.TurnsDirectory, "*.interrupted.json"));
+        Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TurnInterruptedFound)!.DataString("stage"));
+    }
+
+    [Fact]
+    public void CleanExitDuringATurnRecordsCancellationNotACrash()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.AwaitingApproval)
+            .Restart()
+            .ExpectState(RelayState.Idle)
+            .ExpectNoEvent(EventTypes.TurnInterruptedFound)
+            .ExpectEvent(EventTypes.TurnCancelled);
+    }
+
+    [Fact]
+    public void InterruptedExecutionJournalIsSurfacedInReview()
+    {
+        _tmp.Root.EnsureLayout(new FixedClock(Harness.T0));
+        Directory.CreateDirectory(_tmp.Root.ExecutionsDirectory);
+        File.WriteAllText(Path.Combine(_tmp.Root.ExecutionsDirectory, "P1.json"),
+            """{"proposalId":"P1","action":"archive_project","turnId":"T1","startedAt":"2026-09-04T11:59:00Z","target":{"projectId":"X"}}""");
+        using var s = Scenario.New(_tmp)
+            .ExpectState(RelayState.Idle)
+            .ExpectEvent(EventTypes.ExecutionInterruptedFound)
+            .ExpectReview(ReviewItemKind.ExecutionInterrupted);
+        var journal = File.ReadAllText(Path.Combine(_tmp.Root.ExecutionsDirectory, "P1.json"));
+        Assert.Contains("\"status\": \"interrupted\"", journal);
+        // A second start must not report it again.
+        s.Restart();
+        Assert.Equal(1, s.H.Count(EventTypes.ExecutionInterruptedFound));
+    }
+
+    [Fact]
+    public void UserInitiatedOperationsTakeTheSamePathAndAreVisible()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Do("Create project from UI", c => Assert.True(c.CreateProject("Field Notes")))
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("executed")
+            .ExpectProject("field-notes")
+            .ExpectEvent(EventTypes.ProposalReceived)
+            .ExpectEvent(EventTypes.ApprovalGranted)
+            .ExpectEvent(EventTypes.ExecutionCompleted);
+        Assert.True(s.H.Last(EventTypes.ApprovalGranted)!.DataBool("implicitViaUi"));
+        Assert.Equal("user_operation", s.H.Last(EventTypes.TurnStarted)!.DataString("kind"));
+
+        s.Do("Archive from UI", c => Assert.True(c.ArchiveProject(s.H.Registry.FindActive("field-notes")!.Id)))
+            .ExpectState(RelayState.Completed)
+            .ExpectProject("field-notes", exists: false);
+
+        s.Do("Duplicate slug is refused", c => Assert.False(c.CreateProject("Field Notes 2", "bad slug!")))
+            .ExpectState(RelayState.Completed);
+        Assert.Contains("not a valid slug", s.Snap.Notice);
+    }
+
+    [Fact]
+    public void ExportBackupProducesAVerifiedZip()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("export a backup")
+            .ExpectProposal(Actions.ExportBackup, "pending")
+            .Approve()
+            .ExpectState(RelayState.Completed)
+            .ExpectEvent(EventTypes.BackupExported)
+            .ExpectEvent(EventTypes.BackupVerified);
+        Assert.True(s.H.Last(EventTypes.BackupVerified)!.DataBool("ok"));
+        Assert.Single(Directory.GetFiles(s.H.Root.BackupsDirectory, "*.zip"));
+    }
+
+    [Fact]
+    public void CrossSessionContinuity()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("remember that Atlas ships in Q4")
+            .Command("file the last note under atlas")
+            .Restart()
+            .ExpectState(RelayState.Idle)
+            .Command("list projects").ExpectAnswerContains("atlas")
+            .Command("what did I say about Q4").ExpectAnswerContains("ships in Q4");
+        Assert.Contains(s.Response.Citations, c => c.Kind == "note" && c.ProjectSlug == "atlas");
+        Assert.Contains(s.Response.Citations, c => c.Kind == "capture");
+        _output.WriteLine(s.Transcript()); // the reviewable artifact: how the orchestrator handled each prompt
+    }
+
+    [Fact]
+    public void CannedPlansDriveTheSamePipeline()
+    {
+        var canned = new CannedOrchestrator()
+            .On("do the thing", (req, _) => new TurnPlan(true, "Canned plan", ["step one"], "Done thinking.", [],
+                [new Proposal("P-canned", Actions.CreateProject, "because", new Dictionary<string, string> { ["name"] = "Canned Project" }, [req.SourceEventId], ["folder"], Risks.ControlledWrite, false, Producers.Model)],
+                "canned"));
+        using var s = Scenario.New(_tmp, orchestrator: canned).WithWorkspace()
+            .Command("do the thing")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.CreateProject, "pending");
+        // The model claimed no approval was needed; policy overrode it and said so.
+        Assert.Contains(s.Response.Proposals.Single().Reasons, r => r.Contains("claimed no approval"));
+        s.Approve().ExpectState(RelayState.Completed).ExpectProject("canned-project");
+        Assert.Single(canned.Requests);
+    }
+
+    [Fact]
+    public void ProposalsWithoutSourcesAreDenied()
+    {
+        var canned = new CannedOrchestrator()
+            .On("x", new TurnPlan(true, "no source", [], null, [],
+                [new Proposal("P-nosrc", Actions.CreateProject, "r", new Dictionary<string, string> { ["name"] = "Nope" }, [], [], Risks.ControlledWrite, true, Producers.Model)], "canned"));
+        using var s = Scenario.New(_tmp, orchestrator: canned).WithWorkspace()
+            .Command("x")
+            .ExpectState(RelayState.Completed)
+            .ExpectProposal(Actions.CreateProject, "denied")
+            .ExpectProject("nope", exists: false);
+        Assert.Contains(s.Response.Proposals.Single().Reasons, r => r.Contains("no source"));
+    }
+
+    [Fact]
+    public void OrchestratorOffOnlyRecordsInstructions()
+    {
+        using var s = Scenario.New(_tmp, configure: x => x.Orchestrator.Mode = OrchestratorSettings.Off).WithWorkspace()
+            .Command("create project Atlas")
+            .ExpectState(RelayState.Completed)
+            .ExpectNoEvent(EventTypes.TurnStarted)
+            .ExpectReview(ReviewItemKind.RecordedInstruction)
+            .ExpectProject("atlas", exists: false);
+    }
+
+    public void Dispose() => _tmp.Dispose();
+}
+
+public class PolicyAndExecutorTests : IDisposable
+{
+    private readonly TempRoot _tmp = new();
+
+    [Theory]
+    [InlineData(Actions.CreateDraftNote, Tier.Automatic)]
+    [InlineData(Actions.RouteNote, Tier.Automatic)]
+    [InlineData(Actions.CreateProject, Tier.RequiresApproval)]
+    [InlineData(Actions.ModifyNote, Tier.RequiresApproval)]
+    [InlineData(Actions.ArchiveProject, Tier.RequiresApproval)]
+    [InlineData(Actions.LaunchWorker, Tier.RequiresApproval)]
+    [InlineData(Actions.DeleteProject, Tier.Prohibited)]
+    [InlineData(Actions.RunShell, Tier.Prohibited)]
+    [InlineData("format_disk", Tier.Prohibited)]
+    public void TiersAreFixedByAction(string action, Tier tier) => Assert.Equal(tier, PolicyEngine.TierOf(action));
+
+    [Fact]
+    public void ProposalHashCoversActionTargetAndSourcesOnly()
+    {
+        var a = new Proposal("1", Actions.CreateProject, "r1", new Dictionary<string, string> { ["name"] = "X", ["slug"] = "x" }, ["e1"], ["eff"], Risks.ControlledWrite, true, Producers.Rules);
+        var b = a with { ProposalId = "2", Reason = "different", ExpectedEffects = [] };
+        var c = a with { Target = new Dictionary<string, string> { ["slug"] = "x", ["name"] = "X" } };
+        var d = a with { Target = new Dictionary<string, string> { ["name"] = "Y", ["slug"] = "x" } };
+        Assert.Equal(a.Hash(), b.Hash());
+        Assert.Equal(a.Hash(), c.Hash());
+        Assert.NotEqual(a.Hash(), d.Hash());
+    }
+
+    [Fact]
+    public void CapabilitiesAreSingleUseAndBoundToTheProposalHash()
+    {
+        var issuer = new CapabilityIssuer();
+        var p = new Proposal("1", Actions.CreateProject, "r", new Dictionary<string, string> { ["name"] = "X" }, ["e1"], [], Risks.ControlledWrite, true, Producers.Rules);
+        var cap = issuer.Issue(p, Harness.T0);
+        Assert.True(issuer.Consume(cap, p, Harness.T0).Ok);
+        Assert.Contains("already used", issuer.Consume(cap, p, Harness.T0).Reason);
+
+        var cap2 = issuer.Issue(p, Harness.T0);
+        var changed = p with { Target = new Dictionary<string, string> { ["name"] = "Y" } };
+        Assert.Contains("changed after approval", issuer.Consume(cap2, changed, Harness.T0).Reason);
+        Assert.Contains("expired", issuer.Consume(cap2, p, Harness.T0 + TimeSpan.FromHours(1)).Reason);
+        var forged = cap2 with { Signature = new string('0', 64) };
+        Assert.Contains("signature", issuer.Consume(forged, p, Harness.T0).Reason);
+        Assert.False(new CapabilityIssuer().Consume(cap2, p, Harness.T0).Ok); // another session's key
+    }
+
+    [Fact]
+    public void ExecutorRechecksPolicyAtExecutionTime()
+    {
+        using var h = new Harness(_tmp.Root).Start();
+        var ws = Path.Combine(Path.GetDirectoryName(_tmp.Root.Path)!, Path.GetFileName(_tmp.Root.Path) + "-ws2");
+        Directory.CreateDirectory(ws);
+        try
+        {
+            h.Coordinator.RegisterWorkspace(ws);
+            var issuer = new CapabilityIssuer();
+            var executor = new Executor(_tmp.Root, h.Registry, h.Roots, h.Notes, h.Clock, issuer);
+            var world = new PolicyWorld { Registry = h.Registry, Roots = h.Roots, DataRoot = _tmp.Root, DraftNoteExists = _ => false, ProjectNoteExists = (_, _) => false };
+            var p = new Proposal("1", Actions.CreateProject, "r", new Dictionary<string, string> { ["name"] = "Atlas" }, ["e1"], [], Risks.ControlledWrite, true, Producers.Rules);
+            Assert.Equal(DecisionOutcome.NeedsApproval, PolicyEngine.Decide(p, world).Outcome);
+            var cap = issuer.Issue(p, h.Clock.UtcNow);
+
+            // The world changes between approval and execution: the target folder appears with content.
+            Directory.CreateDirectory(Path.Combine(ws, "atlas"));
+            File.WriteAllText(Path.Combine(ws, "atlas", "stray.txt"), "x");
+
+            var sink = new RecordingSink();
+            var result = executor.Execute(p, cap, world, "T", sink);
+            Assert.Equal(ExecutionStatus.Failed, result.Status);
+            Assert.Contains("Preconditions no longer hold", result.Error);
+            Assert.Contains(sink.Events, e => e.Type == EventTypes.ExecutionFailed && e.Stage == "recheck");
+            Assert.DoesNotContain(sink.Events, e => e.Type == EventTypes.ExecutionStarted);
+            Assert.Null(h.Registry.FindActive("atlas"));
+        }
+        finally { Directory.Delete(ws, recursive: true); }
+    }
+
+    private sealed class RecordingSink : IExecutionSink
+    {
+        public List<(string Type, string? Stage)> Events { get; } = new();
+        public LedgerRecord? Record(string type, object data)
+        {
+            var stage = data.GetType().GetProperty("stage")?.GetValue(data) as string;
+            Events.Add((type, stage));
+            return null;
+        }
+    }
+
+    public void Dispose() => _tmp.Dispose();
+}

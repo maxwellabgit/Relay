@@ -23,10 +23,13 @@ namespace Relay.Core.Session;
 /// removed, so a crash between the two leaves a redundant draft (harmless, detected at start)
 /// rather than a missing record.
 /// </summary>
-public sealed class SessionCoordinator
+public sealed partial class SessionCoordinator
 {
     private const int ActivityLimit = 400;
 
+    private readonly CoordinatorServices _services;
+    private readonly Execution.Executor _executor;
+    private readonly Policy.CapabilityIssuer _capabilities = new();
     private readonly ILedger _ledger;
     private readonly IDraftStore _drafts;
     private readonly IDraftNoteStore _notes;
@@ -85,9 +88,12 @@ public sealed class SessionCoordinator
         IClock clock,
         IScheduler scheduler,
         string appVersion,
-        int processId)
+        int processId,
+        CoordinatorServices services)
     {
         _root = root;
+        _services = services;
+        _executor = new Execution.Executor(root, services.Registry, services.Roots, notes, clock, _capabilities) { Workers = services.Workers };
         _ledger = ledger;
         _drafts = drafts;
         _notes = notes;
@@ -214,6 +220,8 @@ public sealed class SessionCoordinator
             }
         }
 
+        DetectInterruptedWork();
+
         if (_state == RelayState.Locked)
         {
             // A ledger write already failed during startup; nothing more to do.
@@ -296,6 +304,7 @@ public sealed class SessionCoordinator
         _receiptTimer?.Dispose();
         _receipt = null;
         _notice = null;
+        _lastTurn = null;
         _awaitTimedOut = false;
         _awaitExtensions = 0;
         _stabilizationPending = false;
@@ -452,6 +461,7 @@ public sealed class SessionCoordinator
 
     public void Cancel()
     {
+        if (_state.IsTurnActive()) { CancelTurn(); Notify(); return; }
         if (_draft is null || !_state.CanCancelFrom()) { _notice = TransitionTable.Next(_state, Trigger.Cancel).Message; Notify(); return; }
         var stateAtCancel = _state;
         var transition = Apply(Trigger.Cancel);
@@ -538,25 +548,26 @@ public sealed class SessionCoordinator
                 });
                 if (committed is null) return; // locked
                 _draftCommittedEventId = committed.Id;
+                _services.Index.IndexCapture(committed);
             }
 
             string receipt;
+            var startTurn = false;
             if (draft.Mode == CaptureMode.Note)
             {
-                var note = new DraftNote(
-                    Ulid.NewUlid(_clock.UtcNow), draft.CaptureId, _draftCommittedEventId, _clock.UtcNow,
-                    DraftNote.RawCaptureType, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null,
-                    draft.Text, [new SourceSpan(_draftCommittedEventId, 0, draft.Text.Length)]);
-                var path = _notes.Write(note);
-                if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId = draft.CaptureId, sourceEventId = _draftCommittedEventId, chars = draft.Text.Length, path }) is null) return;
-                receipt = "Saved 1 draft note · routing deferred (orchestrator not enabled in this build)";
+                receipt = OrganizeNote(draft, _draftCommittedEventId);
+                if (receipt.Length == 0) return; // locked
             }
             else
             {
-                if (Append(EventTypes.CommandRecorded, new { captureId = draft.CaptureId, sourceEventId = _draftCommittedEventId, chars = draft.Text.Length, executed = false }) is null) return;
-                _lastInstruction = draft.Text;
-                _lastInstructionCaptureId = draft.CaptureId;
-                receipt = "Instruction recorded · no tools ran (orchestrator not enabled in this build)";
+                startTurn = OrchestratorEnabled;
+                if (Append(EventTypes.CommandRecorded, new { captureId = draft.CaptureId, sourceEventId = _draftCommittedEventId, chars = draft.Text.Length, executed = false, orchestrator = _settings.Orchestrator.Mode }) is null) return;
+                if (!startTurn)
+                {
+                    _lastInstruction = draft.Text;
+                    _lastInstructionCaptureId = draft.CaptureId;
+                }
+                receipt = "Instruction recorded · orchestrator is off, no plan was made";
             }
 
             // Only now is the staging copy redundant.
@@ -566,18 +577,15 @@ public sealed class SessionCoordinator
             try { _drafts.RemoveCurrent(); }
             catch (IOException ex) { _notice = "Stored, but the staging draft could not be removed: " + ex.Message; }
 
+            var sourceEventId = _draftCommittedEventId;
             _draft = null;
             _draftCommittedEventId = null;
-            if (Apply(Trigger.OrganizeSucceeded).Accepted)
+            if (startTurn)
             {
-                _receipt = receipt;
-                _receiptTimer?.Dispose();
-                _receiptTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.CompletedReceiptMs), () =>
-                {
-                    _receiptTimer = null;
-                    if (_state == RelayState.Completed) { Apply(Trigger.Dismiss); Notify(); }
-                });
+                StartCommandTurn(draft, sourceEventId);
+                return;
             }
+            if (Apply(Trigger.OrganizeSucceeded).Accepted) ShowReceipt(receipt);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -586,6 +594,30 @@ public sealed class SessionCoordinator
             _retryable = true;
             Apply(Trigger.OrganizeFailed);
         }
+    }
+
+    /// <summary>Stores a note capture as a verbatim draft note in staging. Returns the receipt text, or empty when the ledger locked.</summary>
+    private string OrganizeNote(CaptureDraft draft, string sourceEventId)
+    {
+        var note = new DraftNote(
+            Ulid.NewUlid(_clock.UtcNow), draft.CaptureId, sourceEventId, _clock.UtcNow,
+            DraftNote.RawCaptureType, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null,
+            draft.Text, [new SourceSpan(sourceEventId, 0, draft.Text.Length)]);
+        var path = _notes.Write(note);
+        if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId = draft.CaptureId, sourceEventId, chars = draft.Text.Length, path }) is null) return "";
+        _services.Index.IndexDraft(note);
+        return OrganizeNoteMemory(note);
+    }
+
+    private void ShowReceipt(string receipt)
+    {
+        _receipt = receipt;
+        _receiptTimer?.Dispose();
+        _receiptTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.CompletedReceiptMs), () =>
+        {
+            _receiptTimer = null;
+            if (_state == RelayState.Completed) { Apply(Trigger.Dismiss); Notify(); }
+        });
     }
 
     // ----------------------------------------------------------------------------------------
@@ -721,6 +753,17 @@ public sealed class SessionCoordinator
         Append(EventTypes.AppFailed, new { where, exceptionType = exception.GetType().FullName, message = exception.Message, incidentPath });
         if (_state is RelayState.Locked) { Notify(); return; }
 
+        if (_turn is { } turn && _state.IsTurnActive())
+        {
+            turn.Timeout?.Dispose();
+            turn.Outcome = "failed";
+            Append(EventTypes.TurnFailed, new { turnId = turn.TurnId, kind = "app_failed", error = exception.Message, pendingOperation = turn.PendingOperation?.Proposal.ProposalId });
+            RequestWorkerStop?.Invoke(turn.PendingOperation?.Proposal.ProposalId);
+            ClearTurnFile(turn);
+            _turn = null;
+            turn.Cts.Cancel();
+        }
+
         if (_draft is not null && _state.IsCapturing())
         {
             StopAwaitingTimers();
@@ -750,6 +793,17 @@ public sealed class SessionCoordinator
         {
             if (_draftDirty) PersistDraftNow();
             if (_relay.Enabled && _state is RelayState.NoteCapture or RelayState.CommandCapture) SendRelay(_draft, RelayPurpose.Stop, requireEmptySurface: false);
+        }
+
+        if (_turn is { } turn && _state.IsTurnActive())
+        {
+            // A clean exit mid-turn is a cancellation, recorded as such so startup does not report a crash.
+            turn.Timeout?.Dispose();
+            RequestWorkerStop?.Invoke(turn.PendingOperation?.Proposal.ProposalId);
+            Append(EventTypes.TurnCancelled, new { turnId = turn.TurnId, stage = _state.Label().ToLowerInvariant(), reason = "shutdown:" + reason });
+            ClearTurnFile(turn);
+            _turn = null;
+            turn.Cts.Cancel();
         }
 
         Append(EventTypes.SessionEnded, new
@@ -918,13 +972,23 @@ public sealed class SessionCoordinator
                     "Held in memory only. Recover draft stores it as a capture; Forget drops it. It is gone when Relay exits.",
                     cancelled.Text));
             }
-            if (_lastInstruction is not null)
+            if (_turn is not null && _state == RelayState.AwaitingApproval)
+            {
+                foreach (var ps in _turn.Proposals.Where(p => p.Status == "pending"))
+                {
+                    var (title, detail) = Policy.ProposalText.Describe(ps.Proposal, ps.Decision);
+                    review.Add(new ReviewItem(ReviewItemKind.Proposal, title, detail, ps.Proposal.ProposalId));
+                }
+            }
+            if (_lastInstruction is not null && !OrchestratorEnabled)
             {
                 review.Add(new ReviewItem(ReviewItemKind.RecordedInstruction,
-                    "Instruction recorded — orchestrator not enabled in this build",
-                    "The exact instruction is preserved in the ledger. No plan was made and no tool ran.",
+                    "Instruction recorded — orchestrator is off",
+                    "The exact instruction is preserved in the ledger. No plan was made and no tool ran. Enable the orchestrator in settings to act on instructions.",
                     _lastInstruction));
             }
+            review.AddRange(MemoryReviewItems());
+            review.AddRange(_recoveryReview);
             review.AddRange(_staticReview);
 
             return new RelaySnapshot(
@@ -952,7 +1016,16 @@ public sealed class SessionCoordinator
                 _root.Path,
                 _appVersion,
                 _processId,
-                CanRetry);
+                CanRetry,
+                ResponseView(),
+                ProjectViews(),
+                WorkspaceViews(),
+                DraftViews(),
+                _settings.Orchestrator.Mode,
+                _services.Orchestrator.Name,
+                _settings.Model.Enabled,
+                _settings.Model.Enabled ? _settings.Model.Endpoint : null,
+                _settings.Model.Enabled ? _settings.Model.Model : null);
         }
     }
 }

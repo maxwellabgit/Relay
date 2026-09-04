@@ -19,10 +19,28 @@ public sealed class RelaySettings
     [JsonPropertyName("flowRelay")] public FlowRelaySettings FlowRelay { get; set; } = new();
     [JsonPropertyName("capture")] public CaptureSettings Capture { get; set; } = new();
     [JsonPropertyName("diagnostics")] public DiagnosticsSettings Diagnostics { get; set; } = new();
+    [JsonPropertyName("orchestrator")] public OrchestratorSettings Orchestrator { get; set; } = new();
+    [JsonPropertyName("model")] public ModelSettings Model { get; set; } = new();
+    [JsonPropertyName("workers")] public WorkerSettings Workers { get; set; } = new();
 
     public IReadOnlyList<string> Validate()
     {
         var problems = new List<string>();
+        if (Orchestrator.Mode is not (OrchestratorSettings.Off or OrchestratorSettings.Rules or OrchestratorSettings.RulesAndModel))
+            problems.Add($"orchestrator.mode must be one of off, rules, rules+model (was '{Orchestrator.Mode}').");
+        if (Orchestrator.AutoRouteThreshold is < 0 or > 1) problems.Add("orchestrator.autoRouteThreshold must be between 0 and 1.");
+        if (Orchestrator.ReviewThreshold is < 0 or > 1 || Orchestrator.ReviewThreshold > Orchestrator.AutoRouteThreshold)
+            problems.Add("orchestrator.reviewThreshold must be between 0 and autoRouteThreshold.");
+        if (Orchestrator.PlanningTimeoutMs < 1000) problems.Add("orchestrator.planningTimeoutMs must be at least 1000.");
+        if (Model.Enabled)
+        {
+            if (!Uri.TryCreate(Model.Endpoint, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+                problems.Add("model.endpoint must be an absolute https URL.");
+            if (string.IsNullOrWhiteSpace(Model.Model)) problems.Add("model.model must name a model.");
+            if (Model.TimeoutMs < 1000) problems.Add("model.timeoutMs must be at least 1000.");
+        }
+        if (Workers.WallClockSeconds < 5) problems.Add("workers.wallClockSeconds must be at least 5.");
+        if (Workers.MemoryMb < 64) problems.Add("workers.memoryMb must be at least 64.");
         if (!KeyChord.TryParse(Hotkeys.NoteKey, out var note, out var e1)) problems.Add($"hotkeys.noteKey: {e1}");
         if (!KeyChord.TryParse(Hotkeys.CommandKey, out var command, out var e2)) problems.Add($"hotkeys.commandKey: {e2}");
         if (note is not null && command is not null && note == command) problems.Add("hotkeys.noteKey and hotkeys.commandKey must differ.");
@@ -84,6 +102,43 @@ public sealed class DiagnosticsSettings
     [JsonPropertyName("flowProcessNames")] public List<string> FlowProcessNames { get; set; } = ["Wispr Flow", "WisprFlow", "Flow"];
 }
 
+public sealed class OrchestratorSettings
+{
+    public const string Off = "off";
+    public const string Rules = "rules";
+    public const string RulesAndModel = "rules+model";
+
+    /// <summary>off: instructions are recorded only. rules: deterministic command grammar. rules+model: grammar first, model gateway for the rest.</summary>
+    [JsonPropertyName("mode")] public string Mode { get; set; } = Rules;
+    /// <summary>Notes routed at or above this confidence are filed into the project automatically.</summary>
+    [JsonPropertyName("autoRouteThreshold")] public double AutoRouteThreshold { get; set; } = 0.75;
+    /// <summary>Notes between this and the auto threshold go to Review; below it they stay unrouted in staging.</summary>
+    [JsonPropertyName("reviewThreshold")] public double ReviewThreshold { get; set; } = 0.35;
+    [JsonPropertyName("planningTimeoutMs")] public int PlanningTimeoutMs { get; set; } = 60_000;
+    [JsonPropertyName("maxToolCalls")] public int MaxToolCalls { get; set; } = 8;
+}
+
+public sealed class ModelSettings
+{
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    /// <summary>The only network endpoint the process may contact. OpenAI-compatible chat completions.</summary>
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "https://api.openai.com/v1/chat/completions";
+    [JsonPropertyName("model")] public string Model { get; set; } = "gpt-4o-mini";
+    /// <summary>Name of the DPAPI-protected secret holding the API key. Never stored in this file.</summary>
+    [JsonPropertyName("secretName")] public string SecretName { get; set; } = "model-gateway";
+    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 30_000;
+    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 1_500;
+}
+
+public sealed class WorkerSettings
+{
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+    [JsonPropertyName("wallClockSeconds")] public int WallClockSeconds { get; set; } = 120;
+    [JsonPropertyName("memoryMb")] public int MemoryMb { get; set; } = 512;
+    /// <summary>Path to Relay.Worker.exe; null means the copy beside Relay.exe.</summary>
+    [JsonPropertyName("executable")] public string? Executable { get; set; }
+}
+
 public static class SettingsStore
 {
     public sealed record LoadResult(RelaySettings Settings, bool CreatedDefault, IReadOnlyList<string> Problems, string Hash);
@@ -124,7 +179,19 @@ public static class SettingsStore
             if (validation.Any(p => p.StartsWith("hotkeys", StringComparison.Ordinal))) settings.Hotkeys = defaults.Hotkeys;
             if (validation.Any(p => p.StartsWith("flowRelay", StringComparison.Ordinal))) settings.FlowRelay = defaults.FlowRelay;
             if (validation.Any(p => p.StartsWith("capture", StringComparison.Ordinal))) settings.Capture = defaults.Capture;
+            if (validation.Any(p => p.StartsWith("orchestrator", StringComparison.Ordinal))) settings.Orchestrator = defaults.Orchestrator;
+            if (validation.Any(p => p.StartsWith("model", StringComparison.Ordinal))) settings.Model = defaults.Model;
+            if (validation.Any(p => p.StartsWith("workers", StringComparison.Ordinal))) settings.Workers = defaults.Workers;
         }
         return new LoadResult(settings, false, problems, settings.ComputeHash());
+    }
+
+    /// <summary>Writes settings atomically after validation. Returns the problems when invalid (nothing is written).</summary>
+    public static IReadOnlyList<string> Save(DataRoot root, RelaySettings settings)
+    {
+        var problems = settings.Validate();
+        if (problems.Count > 0) return problems;
+        AtomicFile.WriteAllText(root.SettingsPath, JsonSerializer.Serialize(settings, RelayJson.Indented));
+        return problems;
     }
 }

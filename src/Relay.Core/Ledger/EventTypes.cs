@@ -82,6 +82,7 @@ public static class EventTypes
     public const string TurnCancelled = "turn.cancelled";
     public const string TurnFailed = "turn.failed";
     public const string TurnInterruptedFound = "turn.interrupted_found";
+    public const string TurnProgress = "turn.progress";
     public const string PlanProposed = "plan.proposed";
     public const string ToolCalled = "tool.called";
     public const string ToolReturned = "tool.returned";

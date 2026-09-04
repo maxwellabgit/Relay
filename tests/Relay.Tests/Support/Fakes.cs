@@ -30,6 +30,9 @@ public sealed class ManualScheduler : IScheduler
         return entry;
     }
 
+    /// <summary>Posted work runs immediately: tests control asynchrony at the orchestrator/worker fakes instead.</summary>
+    public void Post(Action action) => action();
+
     public void Advance(TimeSpan by)
     {
         var target = _clock.UtcNow + by;

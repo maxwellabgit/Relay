@@ -1,3 +1,4 @@
+using Relay.Core.Config;
 using Relay.Core.Ledger;
 using Relay.Core.Session;
 using Relay.Core.State;
@@ -75,7 +76,7 @@ public class CaptureFlowTests : IDisposable
     [Fact]
     public void CommandCaptureRecordsTheInstructionAndRunsNothing()
     {
-        using var h = new Harness(_tmp.Root).Start();
+        using var h = new Harness(_tmp.Root, configure: s => s.Orchestrator.Mode = OrchestratorSettings.Off).Start();
         h.Coordinator.PressCommandKey();
         Assert.Equal(RelayState.CommandCapture, h.Snap.State);
         h.Coordinator.TextChanged("Create a project called market study");

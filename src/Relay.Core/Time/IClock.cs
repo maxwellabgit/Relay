@@ -19,4 +19,10 @@ public sealed class SystemClock : IClock
 public interface IScheduler
 {
     IDisposable Schedule(TimeSpan delay, Action callback);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the coordinator's thread. Safe to call from any thread;
+    /// this is how asynchronous orchestrator and worker results re-enter the single-threaded core.
+    /// </summary>
+    void Post(Action action);
 }

@@ -1,12 +1,17 @@
 using Relay.Core.Captures;
 using Relay.Core.Config;
+using Relay.Core.Execution;
 using Relay.Core.Ids;
 using Relay.Core.Ledger;
 using Relay.Core.Notes;
+using Relay.Core.Orchestration;
+using Relay.Core.Projects;
 using Relay.Core.Recovery;
+using Relay.Core.Search;
 using Relay.Core.Session;
 using Relay.Core.Sessions;
 using Relay.Core.Storage;
+using Relay.Core.Workspaces;
 
 namespace Relay.Tests.Support;
 
@@ -15,7 +20,8 @@ public sealed class Harness : IDisposable
 {
     public static readonly DateTimeOffset T0 = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
-    public Harness(DataRoot root, bool relayEnabled = false, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null)
+    public Harness(DataRoot root, bool relayEnabled = false, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
+        IOrchestrator? orchestrator = null, IWorkerOperations? workers = null)
     {
         Root = root;
         Clock = clock ?? new FixedClock(T0);
@@ -39,8 +45,27 @@ public sealed class Harness : IDisposable
         FileLedger = FileLedger.Open(root.LedgerPath, Recovery.Verification, Ulid.NewUlid(Clock.UtcNow), Clock);
         Faulty = new FaultInjectingLedger(FileLedger) { FailAfterAppends = failLedgerAfter ?? int.MaxValue };
 
-        Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Relay, Clock, Scheduler, "0.1.0-test", 4242);
+        Registry = new ProjectRegistry(root);
+        Roots = new WorkspaceRoots(root);
+        var indexProblems = new List<string>();
+        Index = SearchIndex.Build(Recovery.Verification.Records, Notes, Registry, indexProblems);
+        Services = new CoordinatorServices
+        {
+            Registry = Registry,
+            Roots = Roots,
+            Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
+            Index = Index,
+            Workers = workers,
+            IndexProblems = indexProblems,
+        };
+
+        Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Relay, Clock, Scheduler, "0.1.0-test", 4242, Services);
     }
+
+    public ProjectRegistry Registry { get; }
+    public WorkspaceRoots Roots { get; }
+    public SearchIndex Index { get; }
+    public CoordinatorServices Services { get; }
 
     public DataRoot Root { get; }
     public FixedClock Clock { get; }

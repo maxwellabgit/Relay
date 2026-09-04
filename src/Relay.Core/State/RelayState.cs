@@ -51,6 +51,21 @@ public enum Trigger
     /// <summary>Integrity or policy protection stops the system (→ LOCKED).</summary>
     Lock,
     Unlock,
+
+    // Orchestrator turns (phases 3–4)
+    /// <summary>A command capture was stored and the orchestrator is enabled (ORGANIZING → PLANNING).</summary>
+    BeginPlanning,
+    /// <summary>The plan has no proposals that need approval or execution (PLANNING → COMPLETED).</summary>
+    PlanReady,
+    /// <summary>At least one proposal needs the user's decision (PLANNING → AWAITING_APPROVAL).</summary>
+    ApprovalRequired,
+    /// <summary>Approved or automatically allowed operations are about to run (→ EXECUTING). Also used for user-initiated operations from IDLE.</summary>
+    BeginExecution,
+    /// <summary>Every pending proposal was rejected; nothing runs (AWAITING_APPROVAL → COMPLETED).</summary>
+    AllRejected,
+    PlanFailed,
+    ExecutionSucceeded,
+    ExecutionFailed,
 }
 
 public static class RelayStateExtensions
@@ -75,6 +90,10 @@ public static class RelayStateExtensions
 
     public static bool IsCapturing(this RelayState state)
         => state is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript;
+
+    /// <summary>States in which an orchestrator turn owns the session.</summary>
+    public static bool IsTurnActive(this RelayState state)
+        => state is RelayState.Planning or RelayState.AwaitingApproval or RelayState.Executing;
 
     public static string Label(this CaptureMode mode) => mode switch
     {

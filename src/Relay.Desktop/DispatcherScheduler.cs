@@ -29,6 +29,14 @@ public sealed class DispatcherScheduler : IScheduler
         return handle;
     }
 
+    public void Post(Action action)
+    {
+        if (!_queue.TryEnqueue(() => action()))
+        {
+            // The queue is shutting down; there is no coordinator thread left to run on.
+        }
+    }
+
     private sealed class Handle : IDisposable
     {
         private readonly DispatcherQueueTimer _timer;
