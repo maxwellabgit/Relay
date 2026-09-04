@@ -72,11 +72,7 @@ public sealed class RelayRuntime : IDisposable
         var indexProblems = new List<string>();
         var index = SearchIndex.Build(recovery.Verification.Records, notes, registry, indexProblems);
 
-        IOrchestrator orchestrator = new RuleBasedOrchestrator();
-        if (settings.Settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Settings.Model.Enabled && options.ModelOrchestratorFactory?.Invoke(settings.Settings) is { } model)
-        {
-            orchestrator = new CompositeOrchestrator(orchestrator, model);
-        }
+        var orchestrator = BuildOrchestrator(settings.Settings, options);
 
         WorkerRuntime? workers = null;
         if (settings.Settings.Workers.Enabled && options.WorkerHostFactory?.Invoke(settings.Settings) is { } workerHost)
@@ -99,8 +95,19 @@ public sealed class RelayRuntime : IDisposable
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
             host, options.RelayFactory(settings.Settings), clock, scheduler, appVersion, processId, services);
         if (workers is not null) Connect(workers, coordinator);
+        // Orchestrator mode and model settings changed in the UI take effect on the next turn.
+        coordinator.SettingsChanged += changed => services.Orchestrator = BuildOrchestrator(changed, options);
 
         return new RelayRuntime(root, ledger, coordinator, recovery, settings, services);
+    }
+
+    /// <summary>Rules always; the model only when the mode asks for it, it is enabled, and the host can build a client.</summary>
+    public static IOrchestrator BuildOrchestrator(RelaySettings settings, RuntimeOptions options)
+    {
+        IOrchestrator orchestrator = new RuleBasedOrchestrator();
+        if (settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Model.Enabled && options.ModelOrchestratorFactory?.Invoke(settings) is { } model)
+            orchestrator = new CompositeOrchestrator(orchestrator, model);
+        return orchestrator;
     }
 
     /// <summary>Worker results re-enter the coordinator as pending-operation completions; stop requests flow the other way.</summary>

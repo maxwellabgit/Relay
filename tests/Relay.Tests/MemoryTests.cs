@@ -15,6 +15,18 @@ public class MemoryTests : IDisposable
 {
     private readonly TempRoot _tmp = new();
 
+    /// <summary>The README's scenario, verbatim, so the documentation cannot drift from the behaviour.</summary>
+    [Fact]
+    public void ReadmeScenarioHolds()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Note("We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers before then.")
+            .ExpectEvent(EventTypes.NoteRouted, atLeast: 2)
+            .Command("what did I say about the beta?")
+            .ExpectOutcome("answered").ExpectAnswerContains("October 14");
+    }
+
     // ----------------------------------------------------------------------------------------
     // Pure units
     // ----------------------------------------------------------------------------------------

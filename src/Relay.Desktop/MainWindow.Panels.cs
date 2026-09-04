@@ -1,0 +1,485 @@
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Relay.Core.Config;
+using Relay.Core.Notes;
+using Relay.Core.Policy;
+using Relay.Core.Search;
+using Relay.Core.Session;
+using Relay.Core.State;
+
+namespace Relay.Desktop;
+
+/// <summary>Response, Review, and Projects regions plus the dialogs they open. Pure rendering over the snapshot.</summary>
+public sealed partial class MainWindow
+{
+    // ------------------------------------------------------------------------------------
+    // RESPONSE: the orchestrator's visible reasoning and its proposals
+    // ------------------------------------------------------------------------------------
+
+    private void RenderResponse(RelaySnapshot s)
+    {
+        var r = s.Response;
+        ResponseCard.Visibility = Vis(r is not null);
+        if (r is null) { _responseSignature = ""; return; }
+
+        var signature = $"{r.TurnId}|{r.Outcome}|{r.Live}|{r.Steps.Count}|{r.Summary}|{r.Answer?.Length}|{string.Join(",", r.Proposals.Select(p => p.ProposalId + p.Status))}|{s.State}";
+        if (signature == _responseSignature) return;
+        _responseSignature = signature;
+
+        ResponseMeta.Text = $"{r.Producer} · {r.Outcome ?? (s.State == RelayState.Planning ? "planning" : s.State == RelayState.AwaitingApproval ? "awaiting approval" : s.State == RelayState.Executing ? "executing" : "in progress")} · {r.StartedAt.ToLocalTime():HH:mm:ss}";
+        ResponseInstruction.Text = "“" + Trim(r.Instruction, 240) + "”";
+        ResponseSummary.Text = r.Summary;
+
+        ResponseSteps.Children.Clear();
+        foreach (var step in r.Steps)
+            ResponseSteps.Children.Add(new TextBlock { Text = "›  " + step, FontSize = 12, Foreground = Secondary(), TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas") });
+
+        ResponseAnswerBorder.Visibility = Vis(!string.IsNullOrWhiteSpace(r.Answer));
+        ResponseAnswer.Text = r.Answer ?? "";
+
+        ResponseCitations.Children.Clear();
+        if (r.Citations.Count > 0)
+        {
+            ResponseCitations.Children.Add(new TextBlock { Text = $"SOURCES ({r.Citations.Count})", Style = (Style)RootGrid.Resources["RegionHeader"] });
+            var n = 1;
+            foreach (var c in r.Citations)
+            {
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var where = c.Kind switch
+                {
+                    SearchIndex.NoteKind => $"{c.ProjectSlug} · note {Short(c.Id)}",
+                    SearchIndex.DraftKind => $"staging · draft {Short(c.Id)}",
+                    _ => $"capture {Short(c.Id)}",
+                };
+                var span = c.Span is { } sp ? $" · ledger {Short(sp.EventId)} [{sp.Start}–{sp.End}]" : "";
+                var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, IsTextSelectionEnabled = true };
+                text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"{n++}. {where}{span}\n", Foreground = Secondary() });
+                text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Trim(c.Excerpt, 300) });
+                row.Children.Add(text);
+                if (c.Kind == SearchIndex.NoteKind && NotePath(c.ProjectId, c.Id) is { } path)
+                {
+                    var open = Button("Open", () => OpenInExplorer(path), small: true);
+                    Grid.SetColumn(open, 1);
+                    row.Children.Add(open);
+                }
+                ResponseCitations.Children.Add(row);
+            }
+        }
+
+        ResponseProposals.Children.Clear();
+        if (r.Proposals.Count > 0)
+        {
+            ResponseProposals.Children.Add(new TextBlock { Text = $"PROPOSALS ({r.Proposals.Count})", Style = (Style)RootGrid.Resources["RegionHeader"] });
+            foreach (var p in r.Proposals) ResponseProposals.Children.Add(ProposalCard(p, s));
+        }
+
+        ResponseButtons.Children.Clear();
+        var pending = r.Proposals.Count(p => p.Status == "pending");
+        if (pending > 1 && s.State == RelayState.AwaitingApproval) ResponseButtons.Children.Add(Button($"Approve all ({pending})", () => _coordinator!.ApproveAll(), accent: true));
+        if (s.State == RelayState.Executing) ResponseButtons.Children.Add(Button("Stop", () => _coordinator!.Cancel()));
+    }
+
+    private Border ProposalCard(ProposalView p, RelaySnapshot s)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        header.Children.Add(new TextBlock { Text = p.Title, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+        header.Children.Add(Chip(p.Action, "Mono"));
+        header.Children.Add(Chip(p.Tier switch { Tier.Automatic => "tier A · automatic", Tier.RequiresApproval => "tier B · needs approval", _ => "tier C · prohibited" }));
+        header.Children.Add(Chip(p.Status.ToUpperInvariant(), status: p.Status));
+        panel.Children.Add(header);
+        panel.Children.Add(new TextBlock { Text = p.Detail, TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        panel.Children.Add(new TextBlock { Text = $"Why: {p.Reason}  ·  proposed by {p.ProposedBy}", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        if (p.Target.Count > 0)
+            panel.Children.Add(new TextBlock { Text = string.Join("\n", p.Target.Select(kv => $"{kv.Key} = {Trim(kv.Value, 120)}")), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 11, Foreground = Secondary(), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        if (p.Reasons.Count > 0)
+            panel.Children.Add(new TextBlock { Text = "Policy: " + string.Join(" ", p.Reasons), TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = p.Status == "denied" ? Res("SystemFillColorCriticalBrush") : Secondary() });
+        if (p.ResultSummary is not null)
+            panel.Children.Add(new TextBlock { Text = p.ResultSummary, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Res("SystemFillColorSuccessBrush") });
+        if (p.Error is not null)
+            panel.Children.Add(new TextBlock { Text = p.Error, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Res("SystemFillColorCriticalBrush") });
+
+        if (p.Status == "pending" && s.State == RelayState.AwaitingApproval)
+        {
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            buttons.Children.Add(Button("Approve", () => _coordinator!.Approve(p.ProposalId), accent: true));
+            if (p.Editable) buttons.Children.Add(Button("Edit…", async () => await ShowEditProposalDialogAsync(p)));
+            buttons.Children.Add(Button("Reject", () => _coordinator!.Reject(p.ProposalId, "rejected by user")));
+            panel.Children.Add(buttons);
+        }
+
+        return new Border
+        {
+            BorderBrush = Res(p.Status switch { "pending" => "AccentFillColorDefaultBrush", "denied" or "failed" => "SystemFillColorCriticalBrush", _ => "CardStrokeColorDefaultBrush" }),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = panel,
+        };
+    }
+
+    // ------------------------------------------------------------------------------------
+    // REVIEW: everything that needs a human decision
+    // ------------------------------------------------------------------------------------
+
+    private void RenderReview(RelaySnapshot s)
+    {
+        var signature = string.Join("|", s.Review.Select(r => $"{r.Kind}:{r.Title}:{r.Detail.Length}:{r.Payload?.Length}")) + $"|{s.State}|{s.CanRetry}|{s.Projects.Count}";
+        ReviewCount.Text = s.Review.Count == 0 ? "" : $"{s.Review.Count} item(s)";
+        ReviewEmpty.Visibility = Vis(s.Review.Count == 0);
+        if (signature == _reviewSignature) return;
+        _reviewSignature = signature;
+
+        ReviewItems.Children.Clear();
+        foreach (var item in s.Review)
+        {
+            var panel = new StackPanel { Spacing = 6 };
+            panel.Children.Add(new TextBlock { Text = item.Title, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+            panel.Children.Add(new TextBlock { Text = item.Detail, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary(), IsTextSelectionEnabled = true });
+            if (!string.IsNullOrEmpty(item.Payload) && item.Kind is ReviewItemKind.InterruptedCapture or ReviewItemKind.CancelledDraft or ReviewItemKind.RecordedInstruction)
+            {
+                panel.Children.Add(new Border
+                {
+                    Background = Res("ControlFillColorDefaultBrush"),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(10, 6, 10, 6),
+                    Child = new TextBlock { Text = item.Payload, TextWrapping = TextWrapping.Wrap, MaxLines = 6, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 13, IsTextSelectionEnabled = true },
+                });
+            }
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var wrap = new StackPanel { Spacing = 6 };
+            switch (item.Kind)
+            {
+                case ReviewItemKind.InterruptedCapture:
+                    buttons.Children.Add(Button("Commit as captured", () => _coordinator!.CommitInterrupted(), accent: true, enabled: s.State == RelayState.Idle));
+                    buttons.Children.Add(Button("Discard to staging", () => _coordinator!.DiscardInterrupted()));
+                    break;
+                case ReviewItemKind.CancelledDraft:
+                    buttons.Children.Add(Button("Recover draft", () => _coordinator!.RecoverCancelledDraft(), accent: true, enabled: s.State == RelayState.Idle));
+                    buttons.Children.Add(Button("Forget", () => _coordinator!.ForgetCancelledDraft()));
+                    break;
+                case ReviewItemKind.Incident:
+                    if (s.State == RelayState.Locked) buttons.Children.Add(Button("Unlock", () => _coordinator!.Unlock(), accent: true));
+                    if (s.State == RelayState.Failed)
+                    {
+                        if (s.CanRetry) buttons.Children.Add(Button("Retry", () => _coordinator!.Retry(), accent: true));
+                        buttons.Children.Add(Button("Return to Idle", () => _coordinator!.Dismiss()));
+                    }
+                    if (item.Payload is { } incidentPath && File.Exists(incidentPath)) buttons.Children.Add(Button("Open incident file", () => OpenInExplorer(incidentPath)));
+                    break;
+                case ReviewItemKind.SettingsProblem:
+                case ReviewItemKind.HotkeyProblem:
+                    buttons.Children.Add(Button("Settings…", async () => await ShowSettingsDialogAsync()));
+                    buttons.Children.Add(Button("Open settings.json", () => OpenInExplorer(_runtime!.Root.SettingsPath)));
+                    break;
+                case ReviewItemKind.Proposal:
+                    if (item.Payload is { } proposalId && s.State == RelayState.AwaitingApproval)
+                    {
+                        var view = s.Response?.Proposals.FirstOrDefault(p => p.ProposalId == proposalId);
+                        buttons.Children.Add(Button("Approve", () => _coordinator!.Approve(proposalId), accent: true));
+                        if (view?.Editable == true) buttons.Children.Add(Button("Edit…", async () => await ShowEditProposalDialogAsync(view)));
+                        buttons.Children.Add(Button("Reject", () => _coordinator!.Reject(proposalId, "rejected by user")));
+                    }
+                    break;
+                case ReviewItemKind.ExecutionInterrupted:
+                    buttons.Children.Add(Button("Open executions folder", () => OpenInExplorer(_runtime!.Root.ExecutionsDirectory)));
+                    break;
+                case ReviewItemKind.RoutingDecision:
+                    if (item.Payload is { } noteId)
+                    {
+                        var decision = _coordinator!.PendingRoutingDecisions.FirstOrDefault(d => d.NoteId == noteId);
+                        foreach (var c in decision?.Candidates.Take(3) ?? [])
+                            buttons.Children.Add(Button($"File under {c.Name}", () => _coordinator!.RouteDraftNote(noteId, c.ProjectId), accent: c == decision!.Candidates[0]));
+                        buttons.Children.Add(Button("Other project…", async () => await ShowChooseProjectDialogAsync("File this note under", id => _coordinator!.RouteDraftNote(noteId, id))));
+                        buttons.Children.Add(Button("Keep unrouted", () => _coordinator!.KeepUnrouted(noteId)));
+                    }
+                    break;
+                case ReviewItemKind.DisputedNotes:
+                    if (item.Payload is { } newNoteId)
+                    {
+                        buttons.Children.Add(Button("New supersedes old", () => _coordinator!.ResolveDispute(newNoteId, true), accent: true));
+                        buttons.Children.Add(Button("Keep both", () => _coordinator!.ResolveDispute(newNoteId, false)));
+                    }
+                    break;
+                case ReviewItemKind.IndexProblem:
+                    if (item.Payload is { } problemPath && (File.Exists(problemPath) || Directory.Exists(problemPath))) buttons.Children.Add(Button("Open", () => OpenInExplorer(problemPath)));
+                    break;
+            }
+            if (buttons.Children.Count > 0) { wrap.Children.Add(buttons); panel.Children.Add(wrap); }
+
+            ReviewItems.Children.Add(new Border
+            {
+                BorderBrush = Res(item.Kind switch { ReviewItemKind.Incident => "SystemFillColorCriticalBrush", ReviewItemKind.Proposal => "AccentFillColorDefaultBrush", _ => "CardStrokeColorDefaultBrush" }),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 10, 12, 10),
+                Child = panel,
+            });
+        }
+    }
+
+    // ------------------------------------------------------------------------------------
+    // PROJECTS, WORKSPACES, STAGING
+    // ------------------------------------------------------------------------------------
+
+    private void RenderProjects(RelaySnapshot s)
+    {
+        var signature = string.Join("|", s.Projects.Select(p => $"{p.Id}:{p.Status}:{p.Name}:{p.FolderPresent}")) + "#" + string.Join("|", s.Workspaces.Select(w => $"{w.Path}:{w.Present}")) + "#" + string.Join("|", s.DraftNotes.Select(d => d.NoteId)) + $"#{s.State}";
+        var active = s.Projects.Where(p => p.Status == "active").ToList();
+        var archived = s.Projects.Count - active.Count;
+        ProjectsCount.Text = s.Projects.Count == 0 ? "" : $"{active.Count} active" + (archived > 0 ? $" · {archived} archived" : "");
+        ProjectsEmpty.Visibility = Vis(s.Projects.Count == 0);
+        WorkspacesEmpty.Visibility = Vis(s.Workspaces.Count == 0);
+        DraftsEmpty.Visibility = Vis(s.DraftNotes.Count == 0);
+        NewProjectButton.IsEnabled = s.Workspaces.Count > 0 && !s.TurnActive;
+        BackupButton.IsEnabled = !s.TurnActive;
+        if (signature == _projectsSignature) return;
+        _projectsSignature = signature;
+
+        ProjectItems.Children.Clear();
+        foreach (var p in s.Projects.OrderBy(p => p.Status == "active" ? 0 : 1).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = p.Name, FontWeight = FontWeights.SemiBold });
+            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"  {p.Slug} · {p.Status}" + (p.FolderPresent ? "" : " · FOLDER MISSING"), Foreground = p.FolderPresent ? Secondary() : Res("SystemFillColorCriticalBrush"), FontSize = 12 });
+            row.Children.Add(text);
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            if (p.FolderPresent) buttons.Children.Add(Button("Open", () => OpenInExplorer(p.RootPath), small: true));
+            if (p.Status == "active")
+            {
+                buttons.Children.Add(Button("Rename…", async () => await ShowRenameProjectDialogAsync(p), small: true, enabled: !s.TurnActive));
+                buttons.Children.Add(Button("Archive", () => _coordinator!.ArchiveProject(p.Id), small: true, enabled: !s.TurnActive));
+            }
+            else buttons.Children.Add(Button("Restore", () => _coordinator!.RestoreProject(p.Id), small: true, enabled: !s.TurnActive));
+            Grid.SetColumn(buttons, 1);
+            row.Children.Add(buttons);
+            ProjectItems.Children.Add(row);
+        }
+
+        WorkspaceItems.Children.Clear();
+        foreach (var w in s.Workspaces)
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = (w.Label is null ? "" : w.Label + "  ") + w.Path + (w.Present ? "" : "  (missing)"), FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true, Foreground = w.Present ? null : Res("SystemFillColorCriticalBrush") });
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            if (w.Present) buttons.Children.Add(Button("Open", () => OpenInExplorer(w.Path), small: true));
+            buttons.Children.Add(Button("Remove", () => _coordinator!.RemoveWorkspace(w.Path), small: true, enabled: !s.TurnActive));
+            Grid.SetColumn(buttons, 1);
+            row.Children.Add(buttons);
+            WorkspaceItems.Children.Add(row);
+        }
+
+        DraftItems.Children.Clear();
+        foreach (var d in s.DraftNotes.Take(20))
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true };
+            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"{d.Type} · {d.CreatedAt.ToLocalTime():MM-dd HH:mm}  ", Foreground = Secondary() });
+            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Trim(d.Text, 160) });
+            row.Children.Add(text);
+            var file = Button("File under…", async () => await ShowChooseProjectDialogAsync("File this note under", id => _coordinator!.PromoteDraftNote(d.NoteId, id)), small: true, enabled: !s.TurnActive && active.Count > 0);
+            Grid.SetColumn(file, 1);
+            row.Children.Add(file);
+            DraftItems.Children.Add(row);
+        }
+        if (s.DraftNotes.Count > 20) DraftItems.Children.Add(new TextBlock { Text = $"… and {s.DraftNotes.Count - 20} more in staging/notes", FontSize = 12, Foreground = Secondary() });
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Dialogs
+    // ------------------------------------------------------------------------------------
+
+    private ContentDialog Dialog(string title, UIElement content, string primary, string secondary = "Cancel")
+        => new()
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = title,
+            Content = content,
+            PrimaryButtonText = primary,
+            CloseButtonText = secondary,
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+    private async Task ShowNewProjectDialogAsync()
+    {
+        if (_coordinator is null) return;
+        var name = new TextBox { PlaceholderText = "Project name", Header = "Name" };
+        var slug = new TextBox { PlaceholderText = "derived from the name when empty", Header = "Folder slug (optional)" };
+        var parent = new ComboBox { Header = "Workspace", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var w in _snapshot?.Workspaces ?? []) parent.Items.Add(new ComboBoxItem { Content = w.Path, Tag = w.Path });
+        if (parent.Items.Count > 0) parent.SelectedIndex = 0;
+        var panel = new StackPanel { Spacing = 10, MinWidth = 380 };
+        panel.Children.Add(name);
+        panel.Children.Add(slug);
+        panel.Children.Add(parent);
+        panel.Children.Add(new TextBlock { Text = "Creating a project is a controlled write: it becomes a proposal you approve in Response before the folder exists.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        var dialog = Dialog("New project", panel, "Propose");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(name.Text)) return;
+        _coordinator.CreateProject(name.Text.Trim(), string.IsNullOrWhiteSpace(slug.Text) ? null : slug.Text.Trim(), (parent.SelectedItem as ComboBoxItem)?.Tag as string);
+    }
+
+    private async Task ShowRenameProjectDialogAsync(ProjectView project)
+    {
+        if (_coordinator is null) return;
+        var name = new TextBox { Text = project.Name, Header = "New name" };
+        var dialog = Dialog($"Rename “{project.Name}”", name, "Propose");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(name.Text) || name.Text.Trim() == project.Name) return;
+        _coordinator.RenameProject(project.Id, name.Text.Trim());
+    }
+
+    private async Task ShowAddWorkspaceDialogAsync()
+    {
+        if (_coordinator is null) return;
+        var path = new TextBox { PlaceholderText = @"C:\Users\you\Projects", Header = "Folder", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var label = new TextBox { PlaceholderText = "optional", Header = "Label" };
+        var browse = Button("Browse…", async () =>
+        {
+            var picker = new global::Windows.Storage.Pickers.FolderPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
+            picker.FileTypeFilter.Add("*");
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is not null) path.Text = folder.Path;
+        });
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(path);
+        browse.VerticalAlignment = VerticalAlignment.Bottom;
+        Grid.SetColumn(browse, 1);
+        row.Children.Add(browse);
+        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
+        panel.Children.Add(row);
+        panel.Children.Add(label);
+        panel.Children.Add(new TextBlock { Text = "Relay only ever writes inside registered workspace folders and its own data root. Registration itself is recorded in the ledger.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        var dialog = Dialog("Add workspace folder", panel, "Register");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(path.Text)) return;
+        _coordinator.RegisterWorkspace(path.Text.Trim(), string.IsNullOrWhiteSpace(label.Text) ? null : label.Text.Trim());
+    }
+
+    private async Task ShowChooseProjectDialogAsync(string title, Action<string> choose)
+    {
+        var projects = (_snapshot?.Projects ?? []).Where(p => p.Status == "active").OrderBy(p => p.Name).ToList();
+        if (projects.Count == 0) return;
+        var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, Header = "Project" };
+        foreach (var p in projects) combo.Items.Add(new ComboBoxItem { Content = $"{p.Name} ({p.Slug})", Tag = p.Id });
+        combo.SelectedIndex = 0;
+        var dialog = Dialog(title, combo, "File note");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if ((combo.SelectedItem as ComboBoxItem)?.Tag is string id) choose(id);
+    }
+
+    private async Task ShowEditProposalDialogAsync(ProposalView p)
+    {
+        if (_coordinator is null) return;
+        var panel = new StackPanel { Spacing = 8, MinWidth = 420 };
+        panel.Children.Add(new TextBlock { Text = "Change the target of this proposal. Policy re-evaluates the edited version and it still needs your approval.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        var boxes = new Dictionary<string, TextBox>(StringComparer.Ordinal);
+        foreach (var (key, value) in p.Target.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var box = new TextBox { Header = key, Text = value, IsReadOnly = key is "projectId" or "noteId" or "runId" or "captureId" };
+            boxes[key] = box;
+            panel.Children.Add(box);
+        }
+        var dialog = Dialog($"Edit {p.Action}", new ScrollViewer { Content = panel, MaxHeight = 480 }, "Save edit");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        var edited = boxes.ToDictionary(kv => kv.Key, kv => kv.Value.Text, StringComparer.Ordinal);
+        if (edited.Any(kv => p.Target.GetValueOrDefault(kv.Key) != kv.Value)) _coordinator.EditProposal(p.ProposalId, edited);
+    }
+
+    private async Task ShowSettingsDialogAsync()
+    {
+        if (_coordinator is null) return;
+        var current = _coordinator.CurrentSettings;
+        var panel = new StackPanel { Spacing = 12, MinWidth = 460 };
+
+        var mode = new ComboBox { Header = "Orchestrator", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var (value, label) in new[] { (OrchestratorSettings.Off, "Off — instructions are recorded only"), (OrchestratorSettings.Rules, "Rules — deterministic command grammar, no model"), (OrchestratorSettings.RulesAndModel, "Rules + model — grammar first, model for the rest") })
+            mode.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        mode.SelectedIndex = current.Orchestrator.Mode switch { OrchestratorSettings.Off => 0, OrchestratorSettings.Rules => 1, _ => 2 };
+        panel.Children.Add(mode);
+
+        var modelEnabled = new ToggleSwitch { Header = "Model gateway", IsOn = current.Model.Enabled, OnContent = "enabled — one https endpoint, no other network", OffContent = "disabled — no network at all" };
+        var endpoint = new TextBox { Header = "Endpoint (https, OpenAI-compatible chat completions)", Text = current.Model.Endpoint };
+        var modelName = new TextBox { Header = "Model", Text = current.Model.Model };
+        var key = new PasswordBox { Header = _coordinator.ModelKeyStored ? "API key (stored · DPAPI, this Windows account) — enter a new one to replace" : "API key (not stored)", PlaceholderText = "sk-…" };
+        var removeKey = new CheckBox { Content = "Remove the stored key", IsEnabled = _coordinator.ModelKeyStored };
+        panel.Children.Add(modelEnabled);
+        panel.Children.Add(endpoint);
+        panel.Children.Add(modelName);
+        panel.Children.Add(key);
+        panel.Children.Add(removeKey);
+
+        var workers = new ToggleSwitch { Header = "Worker agents", IsOn = current.Workers.Enabled, OnContent = "enabled — sandboxed child processes, approval per run", OffContent = "disabled — launch_worker is denied" };
+        panel.Children.Add(workers);
+
+        var auto = new NumberBox { Header = "Auto-file notes at confidence ≥", Value = current.Orchestrator.AutoRouteThreshold, Minimum = 0.5, Maximum = 1, SmallChange = 0.05, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+        var review = new NumberBox { Header = "Ask in Review at confidence ≥", Value = current.Orchestrator.ReviewThreshold, Minimum = 0, Maximum = 1, SmallChange = 0.05, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+        panel.Children.Add(auto);
+        panel.Children.Add(review);
+        panel.Children.Add(new TextBlock { Text = $"Hotkeys ({current.Hotkeys.NoteKey} / {current.Hotkeys.CommandKey}), Flow relay and capture timing are edited in settings.json and need a restart. Everything here applies to the next turn.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+
+        var dialog = Dialog("Settings", new ScrollViewer { Content = panel, MaxHeight = 560 }, "Save");
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        if (removeKey.IsChecked == true) _coordinator.SetModelApiKey(null);
+        else if (!string.IsNullOrWhiteSpace(key.Password)) _coordinator.SetModelApiKey(key.Password);
+
+        _coordinator.UpdateSettings(s =>
+        {
+            s.Orchestrator.Mode = (mode.SelectedItem as ComboBoxItem)?.Tag as string ?? s.Orchestrator.Mode;
+            s.Model.Enabled = modelEnabled.IsOn;
+            s.Model.Endpoint = endpoint.Text.Trim();
+            s.Model.Model = modelName.Text.Trim();
+            s.Workers.Enabled = workers.IsOn;
+            if (!double.IsNaN(auto.Value)) s.Orchestrator.AutoRouteThreshold = Math.Round(auto.Value, 2);
+            if (!double.IsNaN(review.Value)) s.Orchestrator.ReviewThreshold = Math.Round(review.Value, 2);
+        });
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Small helpers
+    // ------------------------------------------------------------------------------------
+
+    private Border Chip(string text, string? textStyle = null, string? status = null)
+    {
+        var chip = new Border { Style = (Style)RootGrid.Resources["Chip"], VerticalAlignment = VerticalAlignment.Center };
+        var block = new TextBlock { Text = text, FontSize = 11 };
+        if (textStyle is not null) block.Style = (Style)RootGrid.Resources[textStyle];
+        if (status is not null)
+            block.Foreground = status switch
+            {
+                "pending" => Res("AccentTextFillColorPrimaryBrush"),
+                "executed" or "allowed" => Res("SystemFillColorSuccessBrush"),
+                "denied" or "failed" => Res("SystemFillColorCriticalBrush"),
+                _ => Secondary(),
+            };
+        chip.Child = block;
+        return chip;
+    }
+
+    private string? NotePath(string? projectId, string noteId)
+    {
+        if (projectId is null || _runtime is null) return null;
+        var project = _runtime.Services.Registry.ById(projectId);
+        if (project is null || !Directory.Exists(project.RootPath)) return null;
+        return ProjectNoteStore.Find(project.RootPath, noteId)?.Path;
+    }
+
+    private static string Trim(string text, int max)
+    {
+        var flat = text.Replace("\r", "").Replace('\n', ' ');
+        return flat.Length <= max ? flat : flat[..(max - 1)] + "…";
+    }
+}

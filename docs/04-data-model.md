@@ -64,7 +64,38 @@ Verification (`LedgerVerifier.Verify`) walks the file once and yields one of:
 | `lock.engaged` | `reason[, brokenSeq]` | |
 | `lock.released` | `acknowledged, by` | |
 
-Future phases add `proposal.*`, `approval.*`, `execution.*`, `project.*`, `note.*`, `agent_run.*`, `artifact.*` families in the same envelope.
+### 1.2 Event catalog (phases 2–6, same envelope)
+
+No capture text appears in any of these except where marked; prompts sent to a model are never recorded, only their sizes.
+
+| Type | Data | Notes |
+| --- | --- | --- |
+| `workspace.registered` / `workspace.removed` | `path[, label, canonical]` | the only roots Relay may write under, besides its data root |
+| `project.created` | `projectId, slug, name, rootPath, by, proposalId` | folder layout + `project.toml` + `.orchestrator\` |
+| `project.renamed` / `project.archived` / `project.restored` | `projectId, slug, …, by, proposalId` | archive = move to `archive\` with manifest; nothing is deleted |
+| `note.extracted` | `captureId, sourceEventId, count, types` | note mode, orchestrator on |
+| `note.draft_created` | `noteId, captureId, sourceEventId, chars, type, topic, spanStart, spanEnd, path` | one per extracted note |
+| `note.routed` | `noteId, projectId, projectSlug, path, confidence, by, proposalId, stagingPath, status, type` | Tier A when confident; otherwise a Review decision |
+| `note.routing_deferred` | `noteId, reason, confidence, candidates` | Review or unrouted |
+| `note.written` / `note.modified` / `note.superseded` | `projectId, noteId, path, previousVersionPath, …` | every canonical write is versioned first |
+| `note.disputed` | `noteId, otherNoteId, projectId, reason, similarity` | both notes stay; Review resolves |
+| `backup.exported` / `backup.verified` | `path, files, bytes, manifestHash` | |
+| `turn.started` / `turn.progress` / `turn.completed` / `turn.cancelled` / `turn.failed` / `turn.interrupted_found` | `turnId, kind, captureId, orchestrator, …` | one command capture = one turn |
+| `plan.proposed` | `turnId, producer, understood, summary, steps, answer, citations, proposals, raw` | `raw` is the model's exact JSON when a model produced the plan |
+| `tool.called` / `tool.returned` | `turnId, tool, args / ok, summary, hits` | read-only tools only |
+| `model.requested` / `model.responded` | `turnId, host, model, promptChars, sources / ok, chars, elapsedMs, error` | never the prompt or the reply text |
+| `proposal.received` | `turnId, proposalId, action, reason, target, sourceEventIds, expectedEffects, risk, requiresApproval, proposedBy, hash` | from rules, model, router, or the user |
+| `proposal.decided` | `turnId, proposalId, action, outcome, tier, reasons, target` | outcome ∈ Allow, NeedsApproval, Deny |
+| `proposal.edited` | `proposalId, before, after` | edited proposals are re-decided |
+| `approval.granted` / `approval.rejected` | `proposalId, action, hash[, reason]` | approval is bound to the proposal hash |
+| `execution.started` / `execution.completed` / `execution.failed` | `proposalId, action, capabilityId, …` | single-use, time-limited capability per execution |
+| `execution.stop_requested` / `execution.interrupted_found` | `proposalId, …` | Stop during EXECUTING; journal recovery at startup |
+| `agent_run.launched` | `runId, proposalId, projectSlug, task, inputs, host, limits` | inputs are hashed copies in `staging\agents\{runId}\inputs` |
+| `agent_run.log` / `agent_run.tool_called` / `agent_run.tool_denied` | `runId, tool, path, bytes / reason` | every broker call, allowed or refused |
+| `agent_run.completed` / `agent_run.terminated` | `runId, ok, summary, toolCalls, exitCode, error / reason` | wall clock, hostile behaviour, or user stop |
+| `patch.applied` | `runId, projectSlug, output, destination, previousVersionPath` | a separate approved proposal; never automatic |
+| `settings.changed` | `hash, orchestratorMode, modelEnabled, endpoint, model` | from the Settings dialog |
+| `settings.secret_changed` | `name, action[, chars]` | the API key itself never reaches the ledger |
 
 ## 2. Session records (`sessions\{sessionId}.json`)
 

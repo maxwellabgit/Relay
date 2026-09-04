@@ -19,7 +19,8 @@ public sealed class CoordinatorServices
 {
     public required ProjectRegistry Registry { get; init; }
     public required WorkspaceRoots Roots { get; init; }
-    public required IOrchestrator Orchestrator { get; init; }
+    /// <summary>Replaced when the user changes orchestrator/model settings; read at the start of each turn.</summary>
+    public required IOrchestrator Orchestrator { get; set; }
     public required SearchIndex Index { get; init; }
     public IWorkerOperations? Workers { get; init; }
     /// <summary>Where the model API key lives; null when the host has no protected store.</summary>

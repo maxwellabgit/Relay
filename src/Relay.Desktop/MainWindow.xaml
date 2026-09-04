@@ -37,6 +37,11 @@
                 <Setter Property="CornerRadius" Value="4" />
                 <Setter Property="Padding" Value="8,3" />
             </Style>
+            <Style x:Key="SmallButton" TargetType="Button">
+                <Setter Property="Padding" Value="10,4" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="MinHeight" Value="0" />
+            </Style>
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -51,7 +56,7 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="Relay" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
-            <TextBlock x:Name="TitleSubtitle" Grid.Column="1" Style="{StaticResource Secondary}" VerticalAlignment="Center" Text="local-first orchestrator · v0.1 foundation" />
+            <TextBlock x:Name="TitleSubtitle" Grid.Column="1" Style="{StaticResource Secondary}" VerticalAlignment="Center" Text="local-first orchestrator" />
         </Grid>
 
         <!-- Startup failure (replaces everything when the runtime could not be created) -->
@@ -82,7 +87,7 @@
                             <TextBlock x:Name="StateDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Top">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
                                 <Border Style="{StaticResource Chip}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <Ellipse x:Name="NoteKeyDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
@@ -107,11 +112,20 @@
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Ellipse x:Name="OrchestratorDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="OrchestratorChip" FontSize="12" Text="Orchestrator" />
+                                    </StackPanel>
+                                </Border>
+                                <Button x:Name="SettingsButton" Style="{StaticResource SmallButton}" Content="Settings" Click="Settings_Click" />
+                            </StackPanel>
                         </StackPanel>
                     </Grid>
                 </Border>
 
-                <!-- 2. CAPTURE / RESPONSE -->
+                <!-- 2. CAPTURE -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -127,7 +141,7 @@
                             </InfoBar.ActionButton>
                         </InfoBar>
                         <TextBox x:Name="CaptureBox"
-                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="170" MaxHeight="360"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" MaxHeight="300"
                                  FontSize="15" IsReadOnly="True" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  PlaceholderText="Press F13 to start a silent note or F14 to give an instruction."
@@ -139,13 +153,34 @@
                             <Button x:Name="DismissButton" Content="Return to Idle" Click="Dismiss_Click" Visibility="Collapsed" />
                             <Button x:Name="RetryButton" Content="Retry" Click="Retry_Click" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}" />
                             <Button x:Name="UnlockButton" Content="Unlock" Click="Unlock_Click" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}" />
+                            <Button x:Name="TypeInstructionButton" Content="Type an instruction" Click="TypeInstruction_Click" Visibility="Collapsed" />
+                            <Button x:Name="TypeNoteButton" Content="Type a note" Click="TypeNote_Click" Visibility="Collapsed" />
                         </StackPanel>
                         <TextBlock x:Name="NoticeText" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
                         <TextBlock x:Name="ReceiptText" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorSuccessBrush}" Visibility="Collapsed" />
                     </StackPanel>
                 </Border>
 
-                <!-- 3. REVIEW -->
+                <!-- 3. RESPONSE: what the orchestrator did with the last instruction -->
+                <Border x:Name="ResponseCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="RESPONSE" Style="{StaticResource RegionHeader}" />
+                            <TextBlock x:Name="ResponseMeta" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock x:Name="ResponseInstruction" Style="{StaticResource Secondary}" FontStyle="Italic" />
+                        <TextBlock x:Name="ResponseSummary" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <StackPanel x:Name="ResponseSteps" Spacing="2" />
+                        <Border x:Name="ResponseAnswerBorder" Background="{ThemeResource ControlFillColorDefaultBrush}" CornerRadius="4" Padding="12,8" Visibility="Collapsed">
+                            <TextBlock x:Name="ResponseAnswer" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13" />
+                        </Border>
+                        <StackPanel x:Name="ResponseCitations" Spacing="4" />
+                        <StackPanel x:Name="ResponseProposals" Spacing="8" />
+                        <StackPanel x:Name="ResponseButtons" Orientation="Horizontal" Spacing="8" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 4. REVIEW -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -157,7 +192,30 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 4. ACTIVITY -->
+                <!-- 5. PROJECTS + MEMORY -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="PROJECTS" Style="{StaticResource RegionHeader}" />
+                            <TextBlock x:Name="ProjectsCount" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock x:Name="ProjectsEmpty" Style="{StaticResource Secondary}" Text="No projects yet. Register a workspace folder, then say “create project &lt;name&gt;” or use New project." />
+                        <StackPanel x:Name="ProjectItems" Spacing="6" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="NewProjectButton" Style="{StaticResource SmallButton}" Content="New project…" Click="NewProject_Click" />
+                            <Button x:Name="AddWorkspaceButton" Style="{StaticResource SmallButton}" Content="Add workspace folder…" Click="AddWorkspace_Click" />
+                            <Button x:Name="BackupButton" Style="{StaticResource SmallButton}" Content="Export backup" Click="Backup_Click" />
+                        </StackPanel>
+                        <TextBlock Text="WORKSPACES" Style="{StaticResource RegionHeader}" Margin="0,4,0,0" />
+                        <TextBlock x:Name="WorkspacesEmpty" Style="{StaticResource Secondary}" Text="No workspace registered. Projects can only be created inside a registered folder." />
+                        <StackPanel x:Name="WorkspaceItems" Spacing="4" />
+                        <TextBlock Text="STAGING" Style="{StaticResource RegionHeader}" Margin="0,4,0,0" />
+                        <TextBlock x:Name="DraftsEmpty" Style="{StaticResource Secondary}" Text="No unrouted notes." />
+                        <StackPanel x:Name="DraftItems" Spacing="4" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 6. ACTIVITY -->
                 <Border Style="{StaticResource Card}" Padding="16,12,16,8">
                     <StackPanel Spacing="8">
                         <Grid>

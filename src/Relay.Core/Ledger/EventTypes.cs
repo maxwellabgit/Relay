@@ -114,5 +114,4 @@ public static class EventTypes
     public const string SettingsChanged = "settings.changed";
     /// <summary>A protected secret was stored or removed; carries the secret's name only, never its value.</summary>
     public const string SecretChanged = "settings.secret_changed";
-    public const string SecretStored = "secret.stored";
 }

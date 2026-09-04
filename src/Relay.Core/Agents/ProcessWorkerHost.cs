@@ -104,9 +104,14 @@ public class ProcessWorkerHost : IWorkerHost
         var candidates = new List<string>();
         if (Environment.ProcessPath is { } self && Path.GetFileNameWithoutExtension(self).Equals("dotnet", StringComparison.OrdinalIgnoreCase)) candidates.Add(self);
         if (Environment.GetEnvironmentVariable("DOTNET_ROOT") is { } root) candidates.Add(Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
+        // The runtime this process runs on lives at <dotnet root>\shared\Microsoft.NETCore.App\<version>\; the host is three levels up.
+        var runtimeDir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+        if (Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir.TrimEnd(Path.DirectorySeparatorChar)))) is { } fromRuntime)
+            candidates.Add(Path.Combine(fromRuntime, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
         if (OperatingSystem.IsWindows())
         {
             candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "dotnet.exe"));
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "dotnet", "dotnet.exe"));
             foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)) candidates.Add(Path.Combine(dir, "dotnet.exe"));
         }
         else
