@@ -49,6 +49,8 @@ public sealed class TurnContext
     public required WorkspaceRoots Roots { get; init; }
     public required IDraftNoteStore Drafts { get; init; }
     public required OrchestratorSettings Settings { get; init; }
+    /// <summary>Completed, not-yet-applied worker runs for a project (newest first); empty when workers are not configured.</summary>
+    public Func<string, IReadOnlyList<Agents.AgentRunStatus>> CompletedRuns { get; init; } = _ => [];
 }
 
 public interface IOrchestrator

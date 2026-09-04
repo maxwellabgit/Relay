@@ -86,12 +86,15 @@ public static class ActivityFormatter
             EventTypes.BackupVerified => r.DataBool("ok") == true ? "Backup verified against its manifest" : "Backup verification FAILED",
 
             // Workers
-            EventTypes.AgentRunLaunched => $"Launched worker {Short(r.DataString("runId"))} ({r.DataString("task")}) pid {r.DataInt64("pid")}",
-            EventTypes.AgentRunToolCalled => $"Worker {Short(r.DataString("runId"))} used {r.DataString("tool")}: {r.DataString("path") ?? r.DataString("summary")}",
-            EventTypes.AgentRunToolDenied => $"Worker {Short(r.DataString("runId"))} DENIED {r.DataString("tool")}: {r.DataString("reason")}",
-            EventTypes.AgentRunCompleted => $"Worker {Short(r.DataString("runId"))} finished: {r.DataInt64("outputs")} output file(s)",
+            EventTypes.AgentRunLaunched => $"Launched worker {Short(r.DataString("runId"))} ({r.DataString("task")} {r.DataString("projectSlug")}): {r.DataInt64("inputs")} input copies, no network, {r.DataString("host")}",
+            EventTypes.AgentRunLog => $"Worker: {r.DataString("text")}",
+            EventTypes.AgentRunToolCalled => $"Worker {Short(r.DataString("runId"))} used {r.DataString("tool")} {r.DataString("path")}" + (r.DataInt64("bytes") is { } b ? $" ({b} bytes)" : "") + (r.DataInt64("items") is { } n ? $" ({n} items)" : ""),
+            EventTypes.AgentRunToolDenied => $"Worker {Short(r.DataString("runId"))} DENIED {r.DataString("tool")} {r.DataString("path")}: {r.DataString("reason")}",
+            EventTypes.AgentRunCompleted => r.DataBool("ok") == true
+                ? $"Worker {Short(r.DataString("runId"))} finished after {r.DataInt64("toolCalls")} tool call(s): {r.DataString("summary")}"
+                : $"Worker {Short(r.DataString("runId"))} failed: {r.DataString("error")}",
             EventTypes.AgentRunTerminated => $"Worker {Short(r.DataString("runId"))} terminated: {r.DataString("reason")}",
-            EventTypes.PatchApplied => $"Applied worker output to {r.DataString("path")}",
+            EventTypes.PatchApplied => $"Applied worker output {r.DataString("output")} to {r.DataString("projectSlug")}/{Path.GetFileName(r.DataString("destination") ?? "")}" + (r.DataString("previousVersionPath") is null ? "" : " (previous version kept)"),
             EventTypes.SettingsChanged => $"Settings changed (orchestrator {r.DataString("orchestratorMode")}, model {(r.DataBool("modelEnabled") == true ? "on" : "off")})",
             EventTypes.SecretStored => $"Stored secret '{r.DataString("name")}' (DPAPI, this user only)",
             EventTypes.FlowRelaySent => $"Sent Flow {r.DataString("purpose")} chord {r.DataString("chord")}" + (r.DataBool("ok") == true ? "" : $" — failed: {r.DataString("error")}"),

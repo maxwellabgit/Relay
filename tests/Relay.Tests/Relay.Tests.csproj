@@ -19,6 +19,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Relay.Core\Relay.Core.csproj" />
+    <!-- The worker is referenced so its protocol code runs in-process in scenario tests and its built
+         executable is available beside the test assembly for the real-process tests. -->
+    <ProjectReference Include="..\..\src\Relay.Worker\Relay.Worker.csproj" />
   </ItemGroup>
 
 </Project>

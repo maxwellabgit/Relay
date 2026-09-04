@@ -30,8 +30,36 @@ public sealed class ManualScheduler : IScheduler
         return entry;
     }
 
-    /// <summary>Posted work runs immediately: tests control asynchrony at the orchestrator/worker fakes instead.</summary>
-    public void Post(Action action) => action();
+    /// <summary>
+    /// With <see cref="InlinePost"/> (the default) posted work runs immediately, because the fakes keep everything on
+    /// the test thread. Real-process worker tests turn it off so background threads queue their work here and the
+    /// test drains it on its own thread with <see cref="PumpUntil"/>, exactly like the dispatcher does in the app.
+    /// </summary>
+    public bool InlinePost { get; set; } = true;
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _posted = new();
+    private readonly SemaphoreSlim _postedSignal = new(0);
+
+    public void Post(Action action)
+    {
+        if (InlinePost) { action(); return; }
+        _posted.Enqueue(action);
+        _postedSignal.Release();
+    }
+
+    /// <summary>Runs queued posts on the calling thread until <paramref name="condition"/> holds or the real-time timeout passes.</summary>
+    public bool PumpUntil(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            while (_posted.TryDequeue(out var action)) action();
+            if (condition()) return true;
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) return false;
+            _postedSignal.Wait(remaining < TimeSpan.FromMilliseconds(250) ? remaining : TimeSpan.FromMilliseconds(250));
+        }
+    }
 
     public void Advance(TimeSpan by)
     {

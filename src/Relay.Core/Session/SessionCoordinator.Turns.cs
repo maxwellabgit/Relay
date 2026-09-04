@@ -118,6 +118,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             Roots = _services.Roots,
             Drafts = _notes,
             Settings = _settings.Orchestrator,
+            CompletedRuns = projectId => Agents.AgentRunStatus.All(_root).Where(s => s.ProjectId == projectId && s.State == "completed" && !s.Applied).ToList(),
         };
 
         Task<TurnPlan> task;
@@ -242,7 +243,9 @@ public sealed partial class SessionCoordinator : IExecutionSink
         turn.PendingOperation = null;
         _executor.Complete(op.Proposal, turn.TurnId, result, this);
         op.Result = result;
-        op.Status = result.Status == ExecutionStatus.Completed ? "executed" : "failed";
+        // A worker killed because the user asked for a stop is not a failure of the turn; it is the stop working.
+        op.Status = result.Status == ExecutionStatus.Completed ? "executed" : turn.StopRequested ? "stopped" : "failed";
+        if (op.Status == "executed") RefreshIndexAfter(op);
         if (_state == RelayState.Executing) RunExecutionQueue(turn);
         Notify();
     }
@@ -255,9 +258,10 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var denied = turn.Proposals.Count(p => p.Status == "denied");
         var rejected = turn.Proposals.Count(p => p.Status is "rejected" or "edited");
         var skipped = turn.Proposals.Count(p => p.Status == "skipped");
-        turn.Outcome = failed > 0 ? "failed" : executed > 0 ? "executed" : denied > 0 && turn.Proposals.Count == denied ? "denied" : rejected > 0 && executed == 0 ? "rejected" : turn.Plan?.Answer is not null ? "answered" : "completed";
+        var stopped = turn.Proposals.Count(p => p.Status == "stopped");
+        turn.Outcome = failed > 0 ? "failed" : stopped > 0 ? "stopped" : executed > 0 ? "executed" : denied > 0 && turn.Proposals.Count == denied ? "denied" : rejected > 0 && executed == 0 ? "rejected" : turn.Plan?.Answer is not null ? "answered" : "completed";
 
-        Append(EventTypes.TurnCompleted, new { turnId = turn.TurnId, kind = turn.Kind, outcome = turn.Outcome, proposals = turn.Proposals.Count, executed, failed, denied, rejected, skipped, stopRequested = turn.StopRequested });
+        Append(EventTypes.TurnCompleted, new { turnId = turn.TurnId, kind = turn.Kind, outcome = turn.Outcome, proposals = turn.Proposals.Count, executed, failed, denied, rejected, skipped, stopped, stopRequested = turn.StopRequested });
         ClearTurnFile(turn);
         _turn = null;
 
@@ -273,6 +277,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var receipt = turn.Outcome switch
         {
             "executed" => $"Done · {executed} operation(s) executed" + (skipped > 0 ? $", {skipped} skipped after stop" : ""),
+            "stopped" => $"Stopped · worker terminated at your request, partial output kept in staging" + (executed > 0 ? $"; {executed} earlier operation(s) stand" : ""),
             "denied" => "Nothing ran · every proposal was denied by policy",
             "rejected" => "Nothing ran · proposals rejected",
             "answered" => "Answered · no changes made",

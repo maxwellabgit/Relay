@@ -1,4 +1,5 @@
 using System.Text;
+using Relay.Core.Agents;
 using Relay.Core.Config;
 using Relay.Core.Execution;
 using Relay.Core.Ledger;
@@ -20,24 +21,24 @@ public sealed class Scenario : IDisposable
     private readonly TempRoot _tmp;
     private readonly Action<RelaySettings>? _configure;
     private readonly IOrchestrator? _orchestrator;
-    private readonly IWorkerOperations? _workers;
+    private readonly IWorkerHost? _workerHost;
     private readonly StringBuilder _transcript = new();
     private Harness _h;
     private int _step;
     private long _activityFrom;
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerOperations? workers, FixedClock? clock)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock)
     {
         _tmp = tmp;
         _configure = configure;
         _orchestrator = orchestrator;
-        _workers = workers;
-        _h = new Harness(tmp.Root, configure: configure, orchestrator: orchestrator, workers: workers, clock: clock).Start();
+        _workerHost = workerHost;
+        _h = new Harness(tmp.Root, configure: configure, orchestrator: orchestrator, workerHost: workerHost, clock: clock).Start();
         Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
     }
 
-    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerOperations? workers = null, FixedClock? clock = null)
-        => new(tmp, configure, orchestrator, workers, clock);
+    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null)
+        => new(tmp, configure, orchestrator, workerHost, clock);
 
     public Harness H => _h;
     public SessionCoordinator C => _h.Coordinator;
@@ -142,7 +143,7 @@ public sealed class Scenario : IDisposable
         _h.CleanExit();
         Log("== Clean exit ==");
         clock.Advance(TimeSpan.FromSeconds(5));
-        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workers: _workers, clock: clock).Start();
+        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock).Start();
         _activityFrom = 0;
         Log($"== Session restarted ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
         return this;
@@ -155,7 +156,7 @@ public sealed class Scenario : IDisposable
         _h.Crash();
         Log("== CRASH ==");
         clock.Advance(TimeSpan.FromSeconds(5));
-        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workers: _workers, clock: clock).Start();
+        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock).Start();
         _activityFrom = 0;
         Log($"== Session restarted after crash ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
         return this;

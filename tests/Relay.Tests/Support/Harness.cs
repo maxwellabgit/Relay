@@ -1,3 +1,4 @@
+using Relay.Core.Agents;
 using Relay.Core.Captures;
 using Relay.Core.Config;
 using Relay.Core.Execution;
@@ -21,11 +22,14 @@ public sealed class Harness : IDisposable
     public static readonly DateTimeOffset T0 = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
     public Harness(DataRoot root, bool relayEnabled = false, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
-        IOrchestrator? orchestrator = null, IWorkerOperations? workers = null)
+        IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true)
     {
+        // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
+        // inlined; the in-process worker pipes depend on inline continuations to keep a whole run on this thread.
+        SynchronizationContext.SetSynchronizationContext(null);
         Root = root;
         Clock = clock ?? new FixedClock(T0);
-        Scheduler = new ManualScheduler(Clock);
+        Scheduler = new ManualScheduler(Clock) { InlinePost = inlinePost };
         Host = new FakeHost();
         Relay = new FakeRelay(relayEnabled);
 
@@ -49,23 +53,26 @@ public sealed class Harness : IDisposable
         Roots = new WorkspaceRoots(root);
         var indexProblems = new List<string>();
         Index = SearchIndex.Build(Recovery.Verification.Records, Notes, Registry, indexProblems);
+        if (workerHost is not null) Workers = new WorkerRuntime(root, Registry, workerHost, Clock, Scheduler, SettingsLoad.Settings.Workers);
         Services = new CoordinatorServices
         {
             Registry = Registry,
             Roots = Roots,
             Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
             Index = Index,
-            Workers = workers,
+            Workers = Workers,
             IndexProblems = indexProblems,
         };
 
         Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Relay, Clock, Scheduler, "0.1.0-test", 4242, Services);
+        if (Workers is not null) RelayRuntime.Connect(Workers, Coordinator);
     }
 
     public ProjectRegistry Registry { get; }
     public WorkspaceRoots Roots { get; }
     public SearchIndex Index { get; }
     public CoordinatorServices Services { get; }
+    public WorkerRuntime? Workers { get; }
 
     public DataRoot Root { get; }
     public FixedClock Clock { get; }
@@ -123,6 +130,7 @@ public sealed class Harness : IDisposable
 
     public void Dispose()
     {
+        try { Workers?.Stop(null, "test disposed"); } catch { }
         try { FileLedger.Dispose(); } catch { }
     }
 }

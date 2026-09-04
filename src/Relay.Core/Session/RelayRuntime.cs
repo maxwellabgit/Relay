@@ -1,3 +1,4 @@
+using Relay.Core.Agents;
 using Relay.Core.Captures;
 using Relay.Core.Config;
 using Relay.Core.Execution;
@@ -21,7 +22,8 @@ public sealed class RuntimeOptions
     public required Func<RelaySettings, IFlowRelay> RelayFactory { get; init; }
     /// <summary>Builds the model-backed orchestrator when settings enable it; null keeps rules only.</summary>
     public Func<RelaySettings, IOrchestrator?>? ModelOrchestratorFactory { get; init; }
-    public Func<RelaySettings, DataRoot, IWorkerOperations?>? WorkerFactory { get; init; }
+    /// <summary>Builds the process host for workers (job object on Windows); null or a null result disables workers.</summary>
+    public Func<RelaySettings, IWorkerHost?>? WorkerHostFactory { get; init; }
 }
 
 /// <summary>
@@ -74,21 +76,35 @@ public sealed class RelayRuntime : IDisposable
             orchestrator = new CompositeOrchestrator(orchestrator, model);
         }
 
+        WorkerRuntime? workers = null;
+        if (settings.Settings.Workers.Enabled && options.WorkerHostFactory?.Invoke(settings.Settings) is { } workerHost)
+        {
+            workers = new WorkerRuntime(root, registry, workerHost, clock, scheduler, settings.Settings.Workers);
+        }
+
         var services = new CoordinatorServices
         {
             Registry = registry,
             Roots = roots,
             Orchestrator = orchestrator,
             Index = index,
-            Workers = options.WorkerFactory?.Invoke(settings.Settings, root),
+            Workers = workers,
             IndexProblems = indexProblems,
         };
 
         var coordinator = new SessionCoordinator(
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
             host, options.RelayFactory(settings.Settings), clock, scheduler, appVersion, processId, services);
+        if (workers is not null) Connect(workers, coordinator);
 
         return new RelayRuntime(root, ledger, coordinator, recovery, settings, services);
+    }
+
+    /// <summary>Worker results re-enter the coordinator as pending-operation completions; stop requests flow the other way.</summary>
+    public static void Connect(WorkerRuntime workers, SessionCoordinator coordinator)
+    {
+        workers.Completed = coordinator.CompletePendingOperation;
+        coordinator.RequestWorkerStop = proposalId => workers.Stop(proposalId, "stop requested");
     }
 
     /// <summary>Records the startup findings and leaves the coordinator in IDLE or LOCKED.</summary>

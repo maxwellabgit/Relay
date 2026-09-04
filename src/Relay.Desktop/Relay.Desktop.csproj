@@ -33,6 +33,16 @@
   <ItemGroup>
     <ProjectReference Include="..\Relay.Core\Relay.Core.csproj" />
     <ProjectReference Include="..\Relay.Windows\Relay.Windows.csproj" />
+    <!-- Built alongside so Relay.Worker.exe sits beside Relay.exe; the app never loads it, only launches it. -->
+    <ProjectReference Include="..\Relay.Worker\Relay.Worker.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
+
+  <!-- Copy the worker's published files next to Relay.exe after each build. -->
+  <Target Name="CopyWorkerBesideApp" AfterTargets="Build">
+    <ItemGroup>
+      <WorkerFiles Include="..\Relay.Worker\bin\$(Configuration)\net10.0\Relay.Worker.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WorkerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
 
 </Project>

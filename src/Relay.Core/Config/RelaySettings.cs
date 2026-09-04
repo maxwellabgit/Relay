@@ -41,6 +41,8 @@ public sealed class RelaySettings
         }
         if (Workers.WallClockSeconds < 5) problems.Add("workers.wallClockSeconds must be at least 5.");
         if (Workers.MemoryMb < 64) problems.Add("workers.memoryMb must be at least 64.");
+        if (Workers.MaxToolCalls < 10) problems.Add("workers.maxToolCalls must be at least 10.");
+        if (Workers.MaxReadBytes < 65536 || Workers.MaxWriteBytes < 4096) problems.Add("workers.maxReadBytes/maxWriteBytes are too small to do anything.");
         if (!KeyChord.TryParse(Hotkeys.NoteKey, out var note, out var e1)) problems.Add($"hotkeys.noteKey: {e1}");
         if (!KeyChord.TryParse(Hotkeys.CommandKey, out var command, out var e2)) problems.Add($"hotkeys.commandKey: {e2}");
         if (note is not null && command is not null && note == command) problems.Add("hotkeys.noteKey and hotkeys.commandKey must differ.");
@@ -135,6 +137,9 @@ public sealed class WorkerSettings
     [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
     [JsonPropertyName("wallClockSeconds")] public int WallClockSeconds { get; set; } = 120;
     [JsonPropertyName("memoryMb")] public int MemoryMb { get; set; } = 512;
+    [JsonPropertyName("maxToolCalls")] public int MaxToolCalls { get; set; } = 400;
+    [JsonPropertyName("maxReadBytes")] public long MaxReadBytes { get; set; } = 8L * 1024 * 1024;
+    [JsonPropertyName("maxWriteBytes")] public long MaxWriteBytes { get; set; } = 2L * 1024 * 1024;
     /// <summary>Path to Relay.Worker.exe; null means the copy beside Relay.exe.</summary>
     [JsonPropertyName("executable")] public string? Executable { get; set; }
 }

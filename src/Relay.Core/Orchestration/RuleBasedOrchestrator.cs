@@ -30,6 +30,7 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
     [GeneratedRegex(@"^(?:please\s+)?(?:file|put|move|route|save|add)\s+(?<which>all|this|that|the\s+last|the\s+latest|my\s+last|the|my)\s+(?:draft\s+)?notes?\s+(?:in|into|under|to)\s+(?:the\s+)?(?:project\s+)?[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex FileNote();
     [GeneratedRegex(@"^(?:please\s+)?(?:remember|note|jot\s+down|write\s+down|record|keep\s+in\s+mind)(?:\s+that|\s+this)?[:,]?\s+(?<text>.+)$", Opts)] private static partial Regex Remember();
     [GeneratedRegex(@"^(?:please\s+)?(?:summari[sz]e|write\s+a\s+summary\s+of|sum\s+up)\s+(?:the\s+)?(?:notes\s+(?:in|of|for|from)\s+)?(?:the\s+)?(?:project\s+)?[""“']?(?<name>.+?)[""”']?(?:'s\s+notes|\s+notes)?$", Opts)] private static partial Regex Summarize();
+    [GeneratedRegex(@"^(?:please\s+)?(?:apply|accept|keep|save|file)\s+(?:the\s+)?(?:worker(?:'s)?\s+|latest\s+|new\s+)?(?:summary|output|result|report)(?:\s+(?:from|of)\s+the\s+worker)?\s+(?:to|for|into|under|in)\s+(?:the\s+)?(?:project\s+)?[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex ApplyOutput();
     [GeneratedRegex(@"^(?:please\s+)?(?:export|create|make|run|take)\s+(?:a\s+)?(?:full\s+)?backup(?:\s+now)?$|^back\s?up\s+(?:everything|relay|my\s+data|now)$", Opts)] private static partial Regex Backup();
     [GeneratedRegex(@"^(?:please\s+)?(?:what(?:'s|\s+is)\s+in|show\s+(?:me\s+)?(?:the\s+)?notes\s+(?:in|of|for)|list\s+(?:the\s+)?notes\s+(?:in|of|for))\s+(?:the\s+)?(?:project\s+)?[""“']?(?<name>.+?)[""”']?\??$", Opts)] private static partial Regex ProjectNotes();
     [GeneratedRegex(@"^(?:please\s+)?(?:what\s+did\s+i\s+say\s+about|what\s+do\s+(?:i|we)\s+know\s+about|what\s+have\s+i\s+(?:noted|said|written)\s+about|recall|find|search(?:\s+for)?|look\s+up|remind\s+me\s+about|show\s+me\s+(?:notes|everything)\s+about|anything\s+about|do\s+i\s+have\s+(?:any\s+)?notes\s+(?:about|on))\s+(?<q>.+?)\??$", Opts)] private static partial Regex Recall();
@@ -167,6 +168,22 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
                 [Propose(request, Actions.LaunchWorker, "A summary is derived content; a sandboxed worker writes it to staging and a second approval applies it.",
                     new() { ["projectId"] = project.Id, ["task"] = "summarize", ["objective"] = $"Summarize the notes of project {project.Slug}", ["network"] = "false" },
                     ["Worker process reads the project's notes through the broker (read-only)", "Writes summary.md to the run's staging out folder", "You then decide whether to apply it as artifacts/summary.md"], Risks.ControlledWrite, true)], Name));
+        }
+        if ((m = ApplyOutput().Match(text)).Success)
+        {
+            var name = Clean(m.Groups["name"].Value);
+            var project = context.Registry.FindActive(name);
+            if (project is null) return Done(Unknown(steps, $"Apply worker output to '{name}'", name, context));
+            steps.Add($"Look for completed, unapplied worker runs for {project.Slug}");
+            var run = context.CompletedRuns(project.Id).FirstOrDefault();
+            if (run is null) return Done(Answer(steps, $"Apply worker output to '{project.Name}'", $"No completed worker output is waiting for '{project.Name}'. Say \"summarize {project.Slug}\" to produce one."));
+            var output = run.Outputs.FirstOrDefault(o => o.StartsWith("out/", StringComparison.Ordinal))?[4..] ?? "summary.md";
+            var destination = "artifacts/" + output;
+            steps.Add($"Propose apply_patch for run {run.RunId} → {destination} (requires approval)");
+            return Done(new TurnPlan(true, $"Apply worker output to '{project.Name}'", steps, null, [],
+                [Propose(request, Actions.ApplyPatch, $"Worker run {run.RunId} completed ({run.Summary}); applying its output is a separate decision.",
+                    new() { ["projectId"] = project.Id, ["runId"] = run.RunId, ["output"] = output, ["destination"] = destination },
+                    [$"Write {destination} in {project.Slug} from the run's staging out folder", "An existing file at that path is versioned first, never overwritten in place"], Risks.ControlledWrite, true)], Name));
         }
         if (Backup().IsMatch(text))
         {

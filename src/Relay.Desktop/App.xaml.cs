@@ -53,10 +53,20 @@ public partial class App : Application
         {
             _window = new MainWindow();
             var host = _window.CaptureHost;
+            var options = new RuntimeOptions
+            {
+                RelayFactory = settings => settings.FlowRelay.Enabled ? new FixedChordRelay(KeyChord.Parse(settings.FlowRelay.HandsFreeChord)) : DisabledFlowRelay.Instance,
+                WorkerHostFactory = settings =>
+                {
+                    var worker = Relay.Core.Agents.ProcessWorkerHost.Locate(settings.Workers.Executable, AppContext.BaseDirectory);
+                    return worker is null ? null : new JobObjectWorkerHost(worker);
+                },
+                ModelOrchestratorFactory = settings => ModelComposition.Create(settings, root),
+            };
             _runtime = RelayRuntime.Create(
                 root,
                 host,
-                settings => settings.FlowRelay.Enabled ? new FixedChordRelay(KeyChord.Parse(settings.FlowRelay.HandsFreeChord)) : DisabledFlowRelay.Instance,
+                options,
                 SystemClock.Instance,
                 new DispatcherScheduler(_dispatcher),
                 Version,

@@ -105,6 +105,7 @@ public static class EventTypes
     public const string AgentRunLaunched = "agent_run.launched";
     public const string AgentRunToolCalled = "agent_run.tool_called";
     public const string AgentRunToolDenied = "agent_run.tool_denied";
+    public const string AgentRunLog = "agent_run.log";
     public const string AgentRunCompleted = "agent_run.completed";
     public const string AgentRunTerminated = "agent_run.terminated";
     public const string PatchApplied = "patch.applied";
