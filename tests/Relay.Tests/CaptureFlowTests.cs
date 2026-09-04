@@ -22,8 +22,15 @@ public class CaptureFlowTests : IDisposable
         Assert.Equal("IDLE", h.Last(EventTypes.StateChanged)!.DataString("to"));
         Assert.True(File.Exists(h.Sessions.PathFor(h.Coordinator.SessionId)));
         Assert.True(h.SettingsLoad.CreatedDefault);
-        Assert.Equal("F13", h.Snap.NoteKey.Chord);
-        Assert.Equal("F14", h.Snap.CommandKey.Chord);
+        Assert.Equal("Ctrl+Alt", h.Snap.NoteKey.Chord);
+        Assert.Equal("Ctrl+X", h.Snap.CommandKey.Chord);
+        Assert.True(h.Snap.NoteKey.WindowScoped);
+
+        // The host reports how it wired the chords; the ledger records the scope so a reader knows they were never global.
+        h.Coordinator.ReportHotkey("NOTE_KEY", "Ctrl+Alt", registered: true, error: null, scope: "window");
+        var registered = h.Last(EventTypes.HotkeyRegistered)!;
+        Assert.Equal("window", registered.DataString("scope"));
+        Assert.Contains("this window only", ActivityFormatter.Format(registered).Text);
     }
 
     [Fact]

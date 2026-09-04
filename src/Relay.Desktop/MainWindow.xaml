@@ -5,20 +5,20 @@
     xmlns:local="using:Relay.Desktop"
     Title="Relay">
 
-    <Grid x:Name="RootGrid">
+    <Grid x:Name="RootGrid" PreviewKeyDown="RootGrid_PreviewKeyDown">
         <Grid.Resources>
+            <!-- Flat cards on the dark Mica surface: a translucent layer, no outline, soft corners. -->
             <Style x:Key="Card" TargetType="Border">
-                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
-                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="Padding" Value="16,12" />
+                <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="18,14" />
             </Style>
             <Style x:Key="RegionHeader" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontSize" Value="11" />
                 <Setter Property="FontWeight" Value="SemiBold" />
-                <Setter Property="CharacterSpacing" Value="60" />
-                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="CharacterSpacing" Value="140" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
             </Style>
             <Style x:Key="Secondary" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="12" />
@@ -30,12 +30,18 @@
                 <Setter Property="FontSize" Value="11" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
             </Style>
+            <!-- Pills instead of boxed chips. -->
             <Style x:Key="Chip" TargetType="Border">
-                <Setter Property="Background" Value="{ThemeResource ControlFillColorDefaultBrush}" />
-                <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="CornerRadius" Value="4" />
-                <Setter Property="Padding" Value="8,3" />
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="999" />
+                <Setter Property="Padding" Value="10,3" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="ChipText" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
             <Style x:Key="SmallButton" TargetType="Button">
                 <Setter Property="Padding" Value="10,4" />
@@ -45,18 +51,18 @@
         </Grid.Resources>
 
         <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
+            <RowDefinition Height="44" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Title bar -->
-        <Grid x:Name="TitleBarGrid" Grid.Row="0" Padding="16,0" ColumnSpacing="10">
+        <Grid x:Name="TitleBarGrid" Grid.Row="0" Padding="18,0" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="Relay" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
-            <TextBlock x:Name="TitleSubtitle" Grid.Column="1" Style="{StaticResource Secondary}" VerticalAlignment="Center" Text="local-first orchestrator" />
+            <TextBlock Text="RELAY" FontWeight="SemiBold" FontSize="12" CharacterSpacing="220" VerticalAlignment="Center" />
+            <TextBlock x:Name="TitleSubtitle" Grid.Column="1" Style="{StaticResource Mono}" VerticalAlignment="Center" Text="local-first orchestrator" />
         </Grid>
 
         <!-- Startup failure (replaces everything when the runtime could not be created) -->
@@ -68,61 +74,62 @@
             </StackPanel>
         </Border>
 
-        <ScrollViewer x:Name="MainScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,0,16,16">
-            <StackPanel Spacing="12">
+        <ScrollViewer x:Name="MainScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
+            <StackPanel Spacing="10">
 
                 <!-- 1. STATUS -->
-                <Border Style="{StaticResource Card}">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="6">
+                <Border Style="{StaticResource Card}" Padding="18,16">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <Ellipse x:Name="StateDot" Width="12" Height="12" VerticalAlignment="Center" Fill="Gray" />
-                                <TextBlock x:Name="StateLabel" Text="STARTING" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <TextBlock x:Name="ModeLabel" Style="{StaticResource Secondary}" VerticalAlignment="Center" FontSize="14" />
+                                <Ellipse x:Name="StateDot" Width="10" Height="10" VerticalAlignment="Center" Fill="Gray" />
+                                <TextBlock x:Name="StateLabel" Text="STARTING" FontSize="24" FontWeight="SemiBold" CharacterSpacing="40" VerticalAlignment="Center" />
+                                <TextBlock x:Name="ModeLabel" Style="{StaticResource Secondary}" VerticalAlignment="Center" FontSize="13" Margin="2,3,0,0" />
                             </StackPanel>
-                            <TextBlock x:Name="StateDetail" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource SmallButton}" Content="Settings" Click="Settings_Click" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock x:Name="StateDetail" TextWrapping="Wrap" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Ellipse x:Name="NoteKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="NoteKeyChip" Style="{StaticResource ChipText}" Text="NOTE" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Ellipse x:Name="CommandKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="CommandKeyChip" Style="{StaticResource ChipText}" Text="COMMAND" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource Chip}">
+                                    <TextBlock x:Name="ScopeChip" Style="{StaticResource ChipText}" Text="this window only" />
+                                </Border>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Ellipse x:Name="OrchestratorDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="OrchestratorChip" Style="{StaticResource ChipText}" Text="Orchestrator" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Ellipse x:Name="LedgerDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="LedgerChip" Style="{StaticResource ChipText}" Text="Ledger" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource Chip}">
+                                    <TextBlock x:Name="RelayChip" Style="{StaticResource ChipText}" Text="Flow relay off" />
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Top">
-                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="NoteKeyDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="NoteKeyChip" FontSize="12" Text="F13 NOTE" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="CommandKeyDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="CommandKeyChip" FontSize="12" Text="F14 COMMAND" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                                <Border Style="{StaticResource Chip}">
-                                    <TextBlock x:Name="RelayChip" FontSize="12" Text="Flow relay off" />
-                                </Border>
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="LedgerDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="LedgerChip" FontSize="12" Text="Ledger" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="OrchestratorDot" Width="7" Height="7" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="OrchestratorChip" FontSize="12" Text="Orchestrator" />
-                                    </StackPanel>
-                                </Border>
-                                <Button x:Name="SettingsButton" Style="{StaticResource SmallButton}" Content="Settings" Click="Settings_Click" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Grid>
+                    </StackPanel>
                 </Border>
 
                 <!-- 2. CAPTURE -->
@@ -141,10 +148,12 @@
                             </InfoBar.ActionButton>
                         </InfoBar>
                         <TextBox x:Name="CaptureBox"
-                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" MaxHeight="300"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110" MaxHeight="300"
                                  FontSize="15" IsReadOnly="True" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                                 BorderThickness="0" CornerRadius="8" Padding="14,10"
+                                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PlaceholderText="Press F13 to start a silent note or F14 to give an instruction."
+                                 PlaceholderText="Press Ctrl+Alt to start a silent note or Ctrl+X to give an instruction."
                                  TextChanged="CaptureBox_TextChanged" GotFocus="CaptureBox_GotFocus" LostFocus="CaptureBox_LostFocus" KeyDown="CaptureBox_KeyDown" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button x:Name="CancelButton" Content="Cancel  (Esc)" Click="Cancel_Click" Visibility="Collapsed" />
@@ -171,8 +180,8 @@
                         <TextBlock x:Name="ResponseInstruction" Style="{StaticResource Secondary}" FontStyle="Italic" />
                         <TextBlock x:Name="ResponseSummary" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <StackPanel x:Name="ResponseSteps" Spacing="2" />
-                        <Border x:Name="ResponseAnswerBorder" Background="{ThemeResource ControlFillColorDefaultBrush}" CornerRadius="4" Padding="12,8" Visibility="Collapsed">
-                            <TextBlock x:Name="ResponseAnswer" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13" />
+                        <Border x:Name="ResponseAnswerBorder" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Visibility="Collapsed">
+                            <TextBlock x:Name="ResponseAnswer" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13" LineHeight="20" />
                         </Border>
                         <StackPanel x:Name="ResponseCitations" Spacing="4" />
                         <StackPanel x:Name="ResponseProposals" Spacing="8" />
@@ -216,13 +225,13 @@
                 </Border>
 
                 <!-- 6. ACTIVITY -->
-                <Border Style="{StaticResource Card}" Padding="16,12,16,8">
+                <Border Style="{StaticResource Card}" Padding="18,14,18,8">
                     <StackPanel Spacing="8">
                         <Grid>
                             <TextBlock Text="ACTIVITY" Style="{StaticResource RegionHeader}" />
                             <TextBlock x:Name="ActivityCount" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
                         </Grid>
-                        <ListView x:Name="ActivityList" Height="220" SelectionMode="None" IsItemClickEnabled="False"
+                        <ListView x:Name="ActivityList" Height="200" SelectionMode="None" IsItemClickEnabled="False"
                                   ScrollViewer.VerticalScrollBarVisibility="Auto" Padding="0" Margin="-12,0"
                                   Loaded="ActivityList_Loaded">
                             <ListView.ItemContainerStyle>

@@ -140,7 +140,7 @@ Written at start; `endedAt`, `cleanShutdown: true` and `endedBy` are set at clea
 ```json
 {
   "schemaVersion": 1,
-  "hotkeys":    { "noteKey": "F13", "commandKey": "F14" },
+  "hotkeys":    { "scope": "window", "noteKey": "Ctrl+Alt", "commandKey": "Ctrl+X" },
   "flowRelay":  { "enabled": false, "handsFreeChord": "Ctrl+Win+F24", "startDelayMs": 200 },
   "capture":    { "transcriptTimeoutMs": 10000, "stabilizationMs": 1500, "stabilizationWithoutRelayMs": 600,
                   "completedReceiptMs": 4000, "draftPersistDebounceMs": 200 },

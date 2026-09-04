@@ -3,16 +3,18 @@
 Status: implemented in slice 1 unless marked *later*.
 Parent: `orchestrator_foundation_v0_1.md` §3–§4, §18.
 
-Relay has exactly two global inputs (`NOTE_KEY`, `COMMAND_KEY`), one local key (`Esc`, only while Relay's capture surface is focused), and a small set of visible buttons. Everything the user can do is listed here; nothing else exists.
+Relay has exactly two chord inputs (`NOTE_KEY`, `COMMAND_KEY`), one local key (`Esc`, only while Relay's capture surface is focused), and a small set of visible buttons. Everything the user can do is listed here; nothing else exists.
 
 ## 1. Inputs
 
 | Input | Scope | Default | Configurable |
 | --- | --- | --- | --- |
-| `NOTE_KEY` | Global (`RegisterHotKey`) | `F13` | `config\settings.json → hotkeys.noteKey` |
-| `COMMAND_KEY` | Global (`RegisterHotKey`) | `F14` | `hotkeys.commandKey` |
+| `NOTE_KEY` | `hotkeys.scope`: `window` (default; matched by the Relay window only while it is active, nothing registered system-wide) or `global` (`RegisterHotKey`) | `Ctrl+Alt` | `config\settings.json → hotkeys.noteKey` |
+| `COMMAND_KEY` | same scope as `NOTE_KEY` | `Ctrl+X` | `hotkeys.commandKey` |
 | `Esc` | Only when the capture surface has keyboard focus | fixed | no |
 | Buttons | Only in the Relay window | — | — |
+
+A modifier-only chord (`Ctrl+Alt`) is valid in `window` scope, where it fires when its last modifier goes down with exactly the others held; `global` scope needs a non-modifier key (`Ctrl+Alt+N`). `hotkey.registered` records the scope.
 
 Rules:
 

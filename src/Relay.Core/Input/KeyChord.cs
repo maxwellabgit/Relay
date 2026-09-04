@@ -14,10 +14,14 @@ public enum KeyModifiers
 /// A key combination expressed as modifiers plus one virtual-key code, parsed from a
 /// human-readable string such as <c>F13</c>, <c>Ctrl+Alt+N</c> or <c>Ctrl+Win+F24</c>.
 /// Virtual-key values follow the Win32 table so the Windows layer can pass them straight
-/// to RegisterHotKey and SendInput without a second mapping.
+/// to RegisterHotKey and SendInput without a second mapping. A chord made of modifiers only
+/// (<c>Ctrl+Alt</c>) is valid for window-local accelerators, which see raw key state, but not
+/// for global registration or SendInput, which need a key.
 /// </summary>
 public sealed record KeyChord(KeyModifiers Modifiers, ushort VirtualKey, string KeyName)
 {
+    public bool IsModifierOnly => VirtualKey == 0;
+
     public override string ToString()
     {
         var parts = new List<string>(5);
@@ -25,7 +29,7 @@ public sealed record KeyChord(KeyModifiers Modifiers, ushort VirtualKey, string 
         if (Modifiers.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
         if (Modifiers.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
         if (Modifiers.HasFlag(KeyModifiers.Win)) parts.Add("Win");
-        parts.Add(KeyName);
+        if (!IsModifierOnly) parts.Add(KeyName);
         return string.Join("+", parts);
     }
 
@@ -35,7 +39,9 @@ public sealed record KeyChord(KeyModifiers Modifiers, ushort VirtualKey, string 
         return chord;
     }
 
-    public static bool TryParse(string? text, out KeyChord chord, out string error)
+    public static bool TryParse(string? text, out KeyChord chord, out string error) => TryParse(text, allowModifierOnly: false, out chord, out error);
+
+    public static bool TryParse(string? text, bool allowModifierOnly, out KeyChord chord, out string error)
     {
         chord = null!;
         error = "";
@@ -69,7 +75,12 @@ public sealed record KeyChord(KeyModifiers Modifiers, ushort VirtualKey, string 
 
         if (keyName is null)
         {
-            error = $"Key chord '{text}' has no non-modifier key.";
+            if (allowModifierOnly && modifiers != KeyModifiers.None)
+            {
+                chord = new KeyChord(modifiers, 0, "");
+                return true;
+            }
+            error = allowModifierOnly ? $"Key chord '{text}' names no key." : $"Key chord '{text}' has no non-modifier key.";
             return false;
         }
         if (!VirtualKeys.TryLookup(keyName, out var vk, out var canonical))

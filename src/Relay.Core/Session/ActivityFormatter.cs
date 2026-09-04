@@ -22,7 +22,7 @@ public static class ActivityFormatter
             EventTypes.SettingsInvalid => $"Settings problem: {r.DataString("problem")}",
             EventTypes.StorageAclApplied => "Restricted data folder to this user and SYSTEM",
             EventTypes.StorageAclFailed => $"Could not restrict data folder permissions: {r.DataString("error")}",
-            EventTypes.HotkeyRegistered => $"Registered {r.DataString("name")} as {r.DataString("chord")}",
+            EventTypes.HotkeyRegistered => $"Registered {r.DataString("name")} as {r.DataString("chord")}" + (r.DataString("scope") == "window" ? " (this window only)" : ""),
             EventTypes.HotkeyRegistrationFailed => $"Could not register {r.DataString("name")} ({r.DataString("chord")}): {r.DataString("error")}",
             EventTypes.HotkeyRejected => $"{r.DataString("key")} ignored while {r.DataString("state")}: {r.DataString("reason")}",
             EventTypes.StateChanged => $"{r.DataString("from")} → {r.DataString("to")} ({r.DataString("trigger")})",

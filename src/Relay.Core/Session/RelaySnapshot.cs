@@ -37,7 +37,11 @@ public sealed record ReviewItem(ReviewItemKind Kind, string Title, string Detail
 
 public sealed record ActivityEntry(long Seq, DateTimeOffset Timestamp, string Type, string Text);
 
-public sealed record HotkeyStatus(string Name, string Chord, bool Registered, string? Error);
+/// <summary><paramref name="Scope"/> is "window" (active only while Relay is the foreground window) or "global".</summary>
+public sealed record HotkeyStatus(string Name, string Chord, bool Registered, string? Error, string Scope = "global")
+{
+    public bool WindowScoped => Scope == "window";
+}
 
 public sealed record AwaitingStatus(bool TimedOut, int Extensions, bool StabilizationPending);
 

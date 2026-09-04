@@ -112,15 +112,19 @@ public sealed partial class MainWindow
             panel.Children.Add(buttons);
         }
 
-        return new Border
-        {
-            BorderBrush = Res(p.Status switch { "pending" => "AccentFillColorDefaultBrush", "denied" or "failed" => "SystemFillColorCriticalBrush", _ => "CardStrokeColorDefaultBrush" }),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(12, 10, 12, 10),
-            Child = panel,
-        };
+        return SubCard(panel, p.Status switch { "pending" => "AccentFillColorDefaultBrush", "denied" or "failed" => "SystemFillColorCriticalBrush", _ => null });
     }
+
+    /// <summary>A flat inner card: subtle fill, no outline, an optional 2 px accent stripe on the left edge.</summary>
+    private static Border SubCard(UIElement child, string? stripeBrush) => new()
+    {
+        Background = Res("SubtleFillColorSecondaryBrush"),
+        BorderBrush = stripeBrush is null ? null : Res(stripeBrush),
+        BorderThickness = stripeBrush is null ? new Thickness(0) : new Thickness(2, 0, 0, 0),
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(14, 10, 14, 10),
+        Child = child,
+    };
 
     // ------------------------------------------------------------------------------------
     // REVIEW: everything that needs a human decision
@@ -212,14 +216,7 @@ public sealed partial class MainWindow
             }
             if (buttons.Children.Count > 0) { wrap.Children.Add(buttons); panel.Children.Add(wrap); }
 
-            ReviewItems.Children.Add(new Border
-            {
-                BorderBrush = Res(item.Kind switch { ReviewItemKind.Incident => "SystemFillColorCriticalBrush", ReviewItemKind.Proposal => "AccentFillColorDefaultBrush", _ => "CardStrokeColorDefaultBrush" }),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(12, 10, 12, 10),
-                Child = panel,
-            });
+            ReviewItems.Children.Add(SubCard(panel, item.Kind switch { ReviewItemKind.Incident => "SystemFillColorCriticalBrush", ReviewItemKind.Proposal => "AccentFillColorDefaultBrush", _ => null }));
         }
     }
 
@@ -428,7 +425,8 @@ public sealed partial class MainWindow
         var review = new NumberBox { Header = "Ask in Review at confidence ≥", Value = current.Orchestrator.ReviewThreshold, Minimum = 0, Maximum = 1, SmallChange = 0.05, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
         panel.Children.Add(auto);
         panel.Children.Add(review);
-        panel.Children.Add(new TextBlock { Text = $"Hotkeys ({current.Hotkeys.NoteKey} / {current.Hotkeys.CommandKey}), Flow relay and capture timing are edited in settings.json and need a restart. Everything here applies to the next turn.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        var scopeText = current.Hotkeys.IsWindowScoped ? "active only while this window is focused" : "registered system-wide";
+        panel.Children.Add(new TextBlock { Text = $"Chords: {current.Hotkeys.NoteKey} for a note, {current.Hotkeys.CommandKey} for an instruction ({scopeText}). Chords, Flow relay and capture timing are edited in settings.json and need a restart. Everything here applies to the next turn.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
 
         var dialog = Dialog("Settings", new ScrollViewer { Content = panel, MaxHeight = 560 }, "Save");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;

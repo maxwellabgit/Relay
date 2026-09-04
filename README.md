@@ -2,10 +2,12 @@
 
 A local-first Windows desktop orchestrator for your ideas, notes, projects, and approved agent work. One persistent, transparent system owns the conversation history, project memory, activity ledger, and file structure. An AI may *propose*; deterministic software enforces permissions and executes; you approve anything that changes a project.
 
-Two global hotkeys drive it, with Wispr Flow (or plain typing) supplying the words:
+Two chords drive it, active only while the Relay window is in front (nothing is registered system-wide, so `Ctrl+X` still cuts everywhere else), with Wispr Flow (or plain typing) supplying the words:
 
-- **F13 · Silent Note Mode** — Relay stores what you said verbatim, extracts typed notes (decisions, tasks, questions, ideas) with exact character spans back to the transcript, files confident ones into projects, and asks in **Review** about the rest. It never replies.
-- **F14 · Command Mode** — Relay shows *Ready*, records the instruction, plans with read-only tools, shows its reasoning and sources, and puts every change in front of you as a proposal to approve, edit, or reject.
+- **Ctrl+Alt · Silent Note Mode** — Relay stores what you said verbatim, extracts typed notes (decisions, tasks, questions, ideas) with exact character spans back to the transcript, files confident ones into projects, and asks in **Review** about the rest. It never replies.
+- **Ctrl+X · Command Mode** — Relay shows *Ready*, records the instruction, plans with read-only tools, shows its reasoning and sources, and puts every change in front of you as a proposal to approve, edit, or reject.
+
+Set `"hotkeys": { "scope": "global", "noteKey": "F13", "commandKey": "F14" }` to register system-wide hotkeys instead (a global chord needs a non-modifier key).
 
 The product and security contract is `orchestrator_foundation_v0_1.md`. The engineering specifications are in `docs/`:
 
@@ -52,8 +54,8 @@ The executable is `src\Relay.Desktop\bin\x64\Debug\net10.0-windows10.0.26100.0\R
 ## Using it
 
 1. **Register a workspace** — *Projects → Add workspace folder…*. Relay writes only inside registered folders and its own data root.
-2. **Create a project** — say `create project Atlas` (F14) or use *New project…*. The proposal appears in **Response**; approve it. The folder gets `project.toml`, `.orchestrator\`, `notes\`, `decisions\`, `tasks\`, `artifacts\`.
-3. **Take notes** — F13, speak, F13. *"We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers."* becomes a decision and a task filed under Atlas, each pointing at the exact characters of the capture. A sentence that names no project is routed by vocabulary overlap: filed when confident, otherwise it waits in **Review** with the candidate projects, or stays in staging. Conflicting decisions also wait in Review.
+2. **Create a project** — say `create project Atlas` (Ctrl+X) or use *New project…*. The proposal appears in **Response**; approve it. The folder gets `project.toml`, `.orchestrator\`, `notes\`, `decisions\`, `tasks\`, `artifacts\`.
+3. **Take notes** — Ctrl+Alt, speak, Ctrl+Alt. *"We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers."* becomes a decision and a task filed under Atlas, each pointing at the exact characters of the capture. A sentence that names no project is routed by vocabulary overlap: filed when confident, otherwise it waits in **Review** with the candidate projects, or stays in staging. Conflicting decisions also wait in Review.
 4. **Ask** — `what did I say about the beta?` returns the passages with their ledger spans; superseded decisions are marked as such and ranked below current ones.
 5. **Delegate** — `summarize atlas` proposes a worker run (approve), which produces `staging\agents\{run}\out\summary.md` inside the sandbox. `apply the summary to atlas` is a second proposal that versions and writes `artifacts\summary.md`.
 6. **Housekeeping** — `archive project Atlas`, `rename project Atlas to Atlas Beta`, `export a backup`. Deletion does not exist; `delete project X` is treated as archive and a request to purge is denied on record.
@@ -75,7 +77,7 @@ Flow types into whatever control has focus; Relay's capture box is focused and b
 ```json
 {
   "schemaVersion": 1,
-  "hotkeys": { "noteKey": "F13", "commandKey": "F14" },
+  "hotkeys": { "scope": "window", "noteKey": "Ctrl+Alt", "commandKey": "Ctrl+X" },
   "flowRelay": { "enabled": false, "handsFreeChord": "Ctrl+Win+F24", "startDelayMs": 200 },
   "capture": { "transcriptTimeoutMs": 10000, "stabilizationMs": 1500, "stabilizationWithoutRelayMs": 600, "completedReceiptMs": 4000, "draftPersistDebounceMs": 200 },
   "orchestrator": { "mode": "rules", "autoRouteThreshold": 0.75, "reviewThreshold": 0.35, "planningTimeoutMs": 60000, "maxToolCalls": 8 },

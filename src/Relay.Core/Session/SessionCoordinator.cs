@@ -107,8 +107,8 @@ public sealed partial class SessionCoordinator
         _appVersion = appVersion;
         _processId = processId;
         _ledgerHealth = verificationAtOpen.Health;
-        _noteKey = new HotkeyStatus("NOTE_KEY", _settings.Hotkeys.NoteKey, false, "not registered yet");
-        _commandKey = new HotkeyStatus("COMMAND_KEY", _settings.Hotkeys.CommandKey, false, "not registered yet");
+        _noteKey = new HotkeyStatus("NOTE_KEY", _settings.Hotkeys.NoteKey, false, "not registered yet", _settings.Hotkeys.Scope);
+        _commandKey = new HotkeyStatus("COMMAND_KEY", _settings.Hotkeys.CommandKey, false, "not registered yet", _settings.Hotkeys.Scope);
 
         foreach (var record in verificationAtOpen.Records.Skip(Math.Max(0, verificationAtOpen.Records.Count - ActivityLimit)))
         {
@@ -251,17 +251,17 @@ public sealed partial class SessionCoordinator
         Notify();
     }
 
-    public void ReportHotkey(string name, string chord, bool registered, string? error)
+    public void ReportHotkey(string name, string chord, bool registered, string? error, string scope = HotkeySettings.GlobalScope)
     {
-        var status = new HotkeyStatus(name, chord, registered, error);
+        var status = new HotkeyStatus(name, chord, registered, error, scope);
         if (name == "NOTE_KEY") _noteKey = status; else _commandKey = status;
         if (registered)
         {
-            Append(EventTypes.HotkeyRegistered, new { name, chord });
+            Append(EventTypes.HotkeyRegistered, new { name, chord, scope });
         }
         else
         {
-            Append(EventTypes.HotkeyRegistrationFailed, new { name, chord, error });
+            Append(EventTypes.HotkeyRegistrationFailed, new { name, chord, scope, error });
             _staticReview.Add(new ReviewItem(ReviewItemKind.HotkeyProblem, $"{name} ({chord}) is not active", error ?? "Registration failed."));
         }
         Notify();

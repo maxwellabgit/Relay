@@ -66,7 +66,7 @@ Relay disabled: identical, minus the two `SendInput` lines; the user presses Flo
 ## 5. User setup checklist
 
 1. Install Wispr Flow; confirm it dictates into Notepad.
-2. Choose Relay hotkeys (`F13`/`F14` default). If the keyboard lacks F13/F14, set `hotkeys.noteKey` / `commandKey` to e.g. `Ctrl+Alt+N` / `Ctrl+Alt+M` in `config\settings.json` and restart Relay.
+2. Choose Relay chords (`Ctrl+Alt` / `Ctrl+X` default, active only while the Relay window is in front). For system-wide hotkeys set `hotkeys.scope = "global"` with keyed chords such as `F13` / `F14` or `Ctrl+Alt+N` / `Ctrl+Alt+M` in `config\settings.json` and restart Relay.
 3. Optional relay: in Flow, bind **Hands-free mode** to a chord nothing else uses (default `Ctrl+Win+F24`), then set `flowRelay.enabled = true` in settings. Start a capture and check **Activity** for `flow.relay_sent … ok`.
 4. In Flow, disable Context Awareness for Relay (or globally).
 5. Verify in **Diagnostics**: hotkeys registered, Flow process detected, capture surface focused during capture.

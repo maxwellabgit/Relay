@@ -99,6 +99,18 @@ public partial class App : Application
 
     private void RegisterHotkeys(SessionCoordinator coordinator, RelaySettings settings)
     {
+        if (settings.Hotkeys.IsWindowScoped)
+        {
+            // Window-scoped chords: handled by the Relay window itself, only while it is the active window.
+            // Nothing is registered system-wide, so a chord like Ctrl+X keeps meaning "cut" everywhere else.
+            var noteOk = KeyChord.TryParse(settings.Hotkeys.NoteKey, allowModifierOnly: true, out var note, out var noteError);
+            var commandOk = KeyChord.TryParse(settings.Hotkeys.CommandKey, allowModifierOnly: true, out var command, out var commandError);
+            _window!.SetWindowChords(noteOk ? note : null, commandOk ? command : null, coordinator.PressNoteKey, coordinator.PressCommandKey);
+            coordinator.ReportHotkey("NOTE_KEY", noteOk ? note.ToString() : settings.Hotkeys.NoteKey, noteOk, noteOk ? null : noteError, HotkeySettings.WindowScope);
+            coordinator.ReportHotkey("COMMAND_KEY", commandOk ? command.ToString() : settings.Hotkeys.CommandKey, commandOk, commandOk ? null : commandError, HotkeySettings.WindowScope);
+            return;
+        }
+
         try
         {
             _hotkeys = new HotkeyListener();

@@ -43,8 +43,10 @@ public sealed class RelaySettings
         if (Workers.MemoryMb < 64) problems.Add("workers.memoryMb must be at least 64.");
         if (Workers.MaxToolCalls < 10) problems.Add("workers.maxToolCalls must be at least 10.");
         if (Workers.MaxReadBytes < 65536 || Workers.MaxWriteBytes < 4096) problems.Add("workers.maxReadBytes/maxWriteBytes are too small to do anything.");
-        if (!KeyChord.TryParse(Hotkeys.NoteKey, out var note, out var e1)) problems.Add($"hotkeys.noteKey: {e1}");
-        if (!KeyChord.TryParse(Hotkeys.CommandKey, out var command, out var e2)) problems.Add($"hotkeys.commandKey: {e2}");
+        if (Hotkeys.Scope is not (HotkeySettings.WindowScope or HotkeySettings.GlobalScope)) problems.Add("hotkeys.scope must be \"window\" or \"global\".");
+        var modifierOnlyOk = Hotkeys.IsWindowScoped;
+        if (!KeyChord.TryParse(Hotkeys.NoteKey, modifierOnlyOk, out var note, out var e1)) problems.Add($"hotkeys.noteKey: {e1}" + (modifierOnlyOk ? "" : " (a global hotkey needs a key, e.g. Ctrl+Alt+N)"));
+        if (!KeyChord.TryParse(Hotkeys.CommandKey, modifierOnlyOk, out var command, out var e2)) problems.Add($"hotkeys.commandKey: {e2}" + (modifierOnlyOk ? "" : " (a global hotkey needs a key, e.g. Ctrl+Alt+N)"));
         if (note is not null && command is not null && note == command) problems.Add("hotkeys.noteKey and hotkeys.commandKey must differ.");
         if (FlowRelay.Enabled)
         {
@@ -66,10 +68,18 @@ public sealed class RelaySettings
 
 public sealed class HotkeySettings
 {
+    /// <summary>Chords work only while the Relay window is active; they never reach other applications.</summary>
+    public const string WindowScope = "window";
+    /// <summary>Chords are registered system-wide with RegisterHotKey and need a non-modifier key.</summary>
+    public const string GlobalScope = "global";
+
+    [JsonPropertyName("scope")] public string Scope { get; set; } = WindowScope;
     /// <summary>NOTE_KEY: starts or stops silent note capture.</summary>
-    [JsonPropertyName("noteKey")] public string NoteKey { get; set; } = "F13";
+    [JsonPropertyName("noteKey")] public string NoteKey { get; set; } = "Ctrl+Alt";
     /// <summary>COMMAND_KEY: opens or closes an instruction turn.</summary>
-    [JsonPropertyName("commandKey")] public string CommandKey { get; set; } = "F14";
+    [JsonPropertyName("commandKey")] public string CommandKey { get; set; } = "Ctrl+X";
+
+    public bool IsWindowScoped => Scope == WindowScope;
 }
 
 public sealed class FlowRelaySettings

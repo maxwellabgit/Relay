@@ -32,6 +32,20 @@ public class KeyChordTests
         Assert.False(KeyChord.TryParse(input, out _, out var error));
         Assert.False(string.IsNullOrEmpty(error));
     }
+
+    [Fact]
+    public void ModifierOnlyChordsAreAllowedOnlyWhenAskedFor()
+    {
+        Assert.True(KeyChord.TryParse("ctrl + alt", allowModifierOnly: true, out var chord, out _));
+        Assert.True(chord.IsModifierOnly);
+        Assert.Equal(KeyModifiers.Control | KeyModifiers.Alt, chord.Modifiers);
+        Assert.Equal(0, chord.VirtualKey);
+        Assert.Equal("Ctrl+Alt", chord.ToString());
+
+        Assert.False(KeyChord.TryParse("Ctrl+Alt", allowModifierOnly: false, out _, out var error));
+        Assert.Contains("no non-modifier key", error);
+        Assert.False(KeyChord.TryParse("+", allowModifierOnly: true, out _, out _));
+    }
 }
 
 public class SettingsTests : IDisposable
@@ -45,8 +59,10 @@ public class SettingsTests : IDisposable
         var load = SettingsStore.Load(_tmp.Root);
         Assert.True(load.CreatedDefault);
         Assert.Empty(load.Problems);
-        Assert.Equal("F13", load.Settings.Hotkeys.NoteKey);
-        Assert.Equal("F14", load.Settings.Hotkeys.CommandKey);
+        // Window-scoped by default: the chords work only while Relay is the active window, so Ctrl+X still cuts elsewhere.
+        Assert.Equal(HotkeySettings.WindowScope, load.Settings.Hotkeys.Scope);
+        Assert.Equal("Ctrl+Alt", load.Settings.Hotkeys.NoteKey);
+        Assert.Equal("Ctrl+X", load.Settings.Hotkeys.CommandKey);
         Assert.False(load.Settings.FlowRelay.Enabled);
         Assert.True(File.Exists(_tmp.Root.SettingsPath));
     }
@@ -59,15 +75,34 @@ public class SettingsTests : IDisposable
         var load = SettingsStore.Load(_tmp.Root);
         Assert.False(load.CreatedDefault);
         Assert.Contains(load.Problems, p => p.Contains("noteKey"));
-        Assert.Equal("F13", load.Settings.Hotkeys.NoteKey);
+        Assert.Equal("Ctrl+Alt", load.Settings.Hotkeys.NoteKey);
     }
 
     [Fact]
     public void IdenticalHotkeysAreRejected()
     {
         var s = new RelaySettings();
-        s.Hotkeys.CommandKey = "F13";
+        s.Hotkeys.CommandKey = "Ctrl+Alt";
         Assert.Contains(s.Validate(), p => p.Contains("must differ"));
+    }
+
+    [Fact]
+    public void GlobalScopeRequiresARealKeyAndScopeMustBeKnown()
+    {
+        var s = new RelaySettings();
+        Assert.Empty(s.Validate());
+
+        s.Hotkeys.Scope = HotkeySettings.GlobalScope;
+        var problems = s.Validate();
+        Assert.Contains(problems, p => p.StartsWith("hotkeys.noteKey") && p.Contains("global hotkey needs a key"));
+        Assert.DoesNotContain(problems, p => p.StartsWith("hotkeys.commandKey"));
+
+        s.Hotkeys.NoteKey = "F13";
+        s.Hotkeys.CommandKey = "F14";
+        Assert.Empty(s.Validate());
+
+        s.Hotkeys.Scope = "everywhere";
+        Assert.Contains(s.Validate(), p => p.Contains("hotkeys.scope"));
     }
 
     [Fact]
@@ -75,7 +110,7 @@ public class SettingsTests : IDisposable
     {
         var s = new RelaySettings();
         s.FlowRelay.Enabled = true;
-        s.FlowRelay.HandsFreeChord = "F13";
+        s.FlowRelay.HandsFreeChord = "Ctrl+X";
         Assert.Contains(s.Validate(), p => p.Contains("flowRelay.handsFreeChord"));
     }
 

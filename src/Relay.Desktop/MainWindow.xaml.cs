@@ -8,12 +8,14 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Relay.Core.Config;
+using Relay.Core.Input;
 using Relay.Core.Ledger;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Storage;
 using Relay.Windows;
 using Windows.UI;
+using VirtualKey = Windows.System.VirtualKey;
 
 namespace Relay.Desktop;
 
@@ -42,6 +44,10 @@ public sealed partial class MainWindow : Window
     private string _responseSignature = "";
     private string _projectsSignature = "";
     private RelaySnapshot? _snapshot;
+    private KeyChord? _noteChord;
+    private KeyChord? _commandChord;
+    private Action? _noteAction;
+    private Action? _commandAction;
 
     public MainWindow()
     {
@@ -51,11 +57,18 @@ public sealed partial class MainWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarGrid);
-        SystemBackdrop = new MicaBackdrop();
+        SystemBackdrop = new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt };
         AppWindow.Title = "Relay";
+        AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
+        AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        AppWindow.TitleBar.ButtonForegroundColor = Color.FromArgb(255, 220, 220, 224);
+        AppWindow.TitleBar.ButtonInactiveForegroundColor = Color.FromArgb(255, 120, 120, 128);
+        AppWindow.TitleBar.ButtonHoverBackgroundColor = Color.FromArgb(24, 255, 255, 255);
+        AppWindow.TitleBar.ButtonHoverForegroundColor = Colors.White;
+        AppWindow.TitleBar.ButtonPressedBackgroundColor = Color.FromArgb(40, 255, 255, 255);
 
         var scale = WindowMetrics.ScaleFor(_hwnd);
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)(680 * scale), (int)(980 * scale)));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)(660 * scale), (int)(940 * scale)));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.PreferredMinimumWidth = (int)(560 * scale);
@@ -90,6 +103,67 @@ public sealed partial class MainWindow : Window
 
     public void BringForward() => ForegroundWindows.BringToForeground(_hwnd);
 
+    /// <summary>
+    /// Window-scoped chords. They are matched against raw key state in this window's tunnelling key
+    /// handler, so they only fire while Relay is the active window and nothing is registered with the
+    /// system; Ctrl+X keeps meaning "cut" everywhere else. A modifier-only chord (Ctrl+Alt) fires when
+    /// its last modifier goes down with exactly the others held.
+    /// </summary>
+    public void SetWindowChords(KeyChord? note, KeyChord? command, Action onNote, Action onCommand)
+    {
+        _noteChord = note;
+        _commandChord = command;
+        _noteAction = onNote;
+        _commandAction = onCommand;
+    }
+
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.KeyStatus.WasKeyDown) return; // auto-repeat while held
+        if (_noteChord is { } note && WindowChords.Matches(note, e.Key))
+        {
+            e.Handled = true;
+            _noteAction?.Invoke();
+        }
+        else if (_commandChord is { } command && WindowChords.Matches(command, e.Key))
+        {
+            e.Handled = true;
+            _commandAction?.Invoke();
+        }
+    }
+
+    private static class WindowChords
+    {
+        public static bool Matches(KeyChord chord, VirtualKey pressed)
+        {
+            var pressedModifier = ModifierOf(pressed);
+            var held = Held() | pressedModifier;
+            if (chord.IsModifierOnly) return pressedModifier != KeyModifiers.None && held == chord.Modifiers;
+            return pressedModifier == KeyModifiers.None && (ushort)pressed == chord.VirtualKey && held == chord.Modifiers;
+        }
+
+        private static KeyModifiers Held()
+        {
+            var held = KeyModifiers.None;
+            if (Down(VirtualKey.Control)) held |= KeyModifiers.Control;
+            if (Down(VirtualKey.Menu)) held |= KeyModifiers.Alt;
+            if (Down(VirtualKey.Shift)) held |= KeyModifiers.Shift;
+            if (Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) held |= KeyModifiers.Win;
+            return held;
+        }
+
+        private static bool Down(VirtualKey key) => Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        private static KeyModifiers ModifierOf(VirtualKey key) => key switch
+        {
+            VirtualKey.Control or VirtualKey.LeftControl or VirtualKey.RightControl => KeyModifiers.Control,
+            VirtualKey.Menu or VirtualKey.LeftMenu or VirtualKey.RightMenu => KeyModifiers.Alt,
+            VirtualKey.Shift or VirtualKey.LeftShift or VirtualKey.RightShift => KeyModifiers.Shift,
+            VirtualKey.LeftWindows or VirtualKey.RightWindows => KeyModifiers.Win,
+            _ => KeyModifiers.None,
+        };
+    }
+
     // ------------------------------------------------------------------------------------
     // Rendering
     // ------------------------------------------------------------------------------------
@@ -123,6 +197,7 @@ public sealed partial class MainWindow : Window
         NoteKeyDot.Fill = new SolidColorBrush(s.NoteKey.Registered ? Palette.Good : Palette.Bad);
         CommandKeyChip.Text = $"{s.CommandKey.Chord}  COMMAND";
         CommandKeyDot.Fill = new SolidColorBrush(s.CommandKey.Registered ? Palette.Good : Palette.Bad);
+        ScopeChip.Text = s.NoteKey.WindowScoped ? "this window only" : "system-wide";
         RelayChip.Text = s.FlowRelayEnabled ? $"Flow relay {s.FlowRelayChord}" : "Flow relay off";
         LedgerChip.Text = s.LedgerHealth == LedgerHealth.IntegrityFailure ? $"Ledger broken · {s.LedgerRecords}" : $"Ledger {s.LedgerRecords}";
         LedgerDot.Fill = new SolidColorBrush(s.LedgerHealth == LedgerHealth.Ok ? Palette.Good : s.LedgerHealth == LedgerHealth.TornTail ? Palette.Warn : Palette.Bad);
@@ -149,7 +224,7 @@ public sealed partial class MainWindow : Window
         {
             RelayState.Starting => "Verifying the ledger and checking for interrupted work…",
             RelayState.Idle => (s.NoteKey.Registered || s.CommandKey.Registered)
-                ? $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction. Nothing is recording."
+                ? $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
                 : "Hotkeys are not active. See Review for the reason. You can still type a note or an instruction below.",
             RelayState.NoteCapture => $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply.",
             RelayState.CommandCapture => $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels.",
@@ -391,14 +466,15 @@ public sealed partial class MainWindow : Window
         _ => Palette.Neutral,
     };
 
+    /// <summary>Indicator colours tuned for the dark surface: saturated enough to read at 6–10 px.</summary>
     private static class Palette
     {
-        public static readonly Color Neutral = Color.FromArgb(255, 138, 138, 138);
-        public static readonly Color Note = Color.FromArgb(255, 15, 123, 108);
-        public static readonly Color Command = Color.FromArgb(255, 91, 95, 199);
-        public static readonly Color Warn = Color.FromArgb(255, 193, 156, 0);
-        public static readonly Color Good = Color.FromArgb(255, 15, 123, 15);
-        public static readonly Color Bad = Color.FromArgb(255, 196, 43, 28);
+        public static readonly Color Neutral = Color.FromArgb(255, 128, 128, 136);
+        public static readonly Color Note = Color.FromArgb(255, 45, 212, 191);
+        public static readonly Color Command = Color.FromArgb(255, 129, 140, 248);
+        public static readonly Color Warn = Color.FromArgb(255, 251, 191, 36);
+        public static readonly Color Good = Color.FromArgb(255, 74, 222, 128);
+        public static readonly Color Bad = Color.FromArgb(255, 248, 113, 113);
     }
 
     /// <summary>The coordinator's view of this window. Only the capture surface is ever touched.</summary>
