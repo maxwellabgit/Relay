@@ -48,6 +48,18 @@ public sealed class DataRoot
     public string DraftNotesDirectory => Combine("staging", "notes");
     public string IncidentsDirectory => Combine("incidents");
     public string LogsDirectory => Combine("logs");
+    public string RegistryDirectory => Combine("registry");
+    public string ProjectsRegistryPath => Combine("registry", "projects.json");
+    public string WorkspacesPath => Combine("config", "workspaces.json");
+    public string SecretsDirectory => Combine("config", "secrets");
+    public string ArchiveDirectory => Combine("archive");
+    public string BackupsDirectory => Combine("backups");
+    public string ReviewDirectory => Combine("staging", "review");
+    public string TurnsDirectory => Combine("staging", "turns");
+    public string CurrentTurnPath => Combine("staging", "turns", "current.json");
+    public string ExecutionsDirectory => Combine("staging", "executions");
+    public string AgentsDirectory => Combine("staging", "agents");
+    public string ProposalsDirectory => Combine("staging", "proposals");
 
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
@@ -68,6 +80,8 @@ public sealed class DataRoot
         {
             Path, ConfigDirectory, LedgerDirectory, LedgerQuarantineDirectory, SessionsDirectory,
             DraftsDirectory, DiscardedDraftsDirectory, DraftNotesDirectory, IncidentsDirectory, LogsDirectory,
+            RegistryDirectory, SecretsDirectory, ArchiveDirectory, BackupsDirectory, ReviewDirectory, TurnsDirectory,
+            ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

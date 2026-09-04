@@ -58,4 +58,57 @@ public static class EventTypes
     public const string AppFailed = "app.failed";
     public const string LockEngaged = "lock.engaged";
     public const string LockReleased = "lock.released";
+
+    // Workspaces and projects (phase 2)
+    public const string WorkspaceRegistered = "workspace.registered";
+    public const string WorkspaceRemoved = "workspace.removed";
+    public const string ProjectCreated = "project.created";
+    public const string ProjectRenamed = "project.renamed";
+    public const string ProjectArchived = "project.archived";
+    public const string ProjectRestored = "project.restored";
+    public const string NoteRouted = "note.routed";
+    public const string NoteWritten = "note.written";
+    public const string NoteModified = "note.modified";
+    public const string NoteExtracted = "note.extracted";
+    public const string NoteRoutingDeferred = "note.routing_deferred";
+    public const string NoteDisputed = "note.disputed";
+    public const string NoteSuperseded = "note.superseded";
+    public const string BackupExported = "backup.exported";
+    public const string BackupVerified = "backup.verified";
+
+    // Orchestrator turns (phase 3)
+    public const string TurnStarted = "turn.started";
+    public const string TurnCompleted = "turn.completed";
+    public const string TurnCancelled = "turn.cancelled";
+    public const string TurnFailed = "turn.failed";
+    public const string TurnInterruptedFound = "turn.interrupted_found";
+    public const string PlanProposed = "plan.proposed";
+    public const string ToolCalled = "tool.called";
+    public const string ToolReturned = "tool.returned";
+    public const string ModelRequested = "model.requested";
+    public const string ModelResponded = "model.responded";
+
+    // Proposals, approvals, execution (phase 4)
+    public const string ProposalReceived = "proposal.received";
+    public const string ProposalDecided = "proposal.decided";
+    public const string ProposalEdited = "proposal.edited";
+    public const string ApprovalGranted = "approval.granted";
+    public const string ApprovalRejected = "approval.rejected";
+    public const string ExecutionStarted = "execution.started";
+    public const string ExecutionCompleted = "execution.completed";
+    public const string ExecutionFailed = "execution.failed";
+    public const string ExecutionStopRequested = "execution.stop_requested";
+    public const string ExecutionInterruptedFound = "execution.interrupted_found";
+
+    // Worker agents (phase 5)
+    public const string AgentRunLaunched = "agent_run.launched";
+    public const string AgentRunToolCalled = "agent_run.tool_called";
+    public const string AgentRunToolDenied = "agent_run.tool_denied";
+    public const string AgentRunCompleted = "agent_run.completed";
+    public const string AgentRunTerminated = "agent_run.terminated";
+    public const string PatchApplied = "patch.applied";
+
+    // Settings changed through the UI
+    public const string SettingsChanged = "settings.changed";
+    public const string SecretStored = "secret.stored";
 }
