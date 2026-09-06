@@ -123,7 +123,7 @@ public sealed class SelfChangeRuntime : ISelfChangeOperations
                 return ExecutionResult.Fail($"Unhandled key {key}.");
         }
         if (!result.Ok) return ExecutionResult.Fail(result.Error ?? "change set failed");
-        sink.Record(EventTypes.ChangeSetApplied, new { taskId, proposalId = proposal.ProposalId, changeSetId = result.ChangeSet!.ChangeSetId, kind = result.ChangeSet.Kind, path = result.ChangeSet.Path, key, afterSha256 = result.ChangeSet.AfterSha256 });
+        sink.Record(EventTypes.ChangeSetApplied, new { taskId, proposalId = proposal.ProposalId, changeSetId = result.ChangeSet!.ChangeSetId, kind = result.ChangeSet.Kind, path = result.ChangeSet.Path, key, afterSha256 = result.ChangeSet.AfterSha256, acceptance = proposal.Target.GetValueOrDefault("acceptance") });
         return ExecutionResult.Ok(summary, new Dictionary<string, string> { ["changeSetId"] = result.ChangeSet.ChangeSetId, ["key"] = key });
     }
 
@@ -137,7 +137,7 @@ public sealed class SelfChangeRuntime : ISelfChangeOperations
         var path = Path.Combine(_root.PromptsDirectory, name + ".md");
         var result = _changes.Apply(ChangeKinds.Prompt, path, content + Environment.NewLine, proposal.Reason, _clock(), taskId, proposal.ProposalId);
         if (!result.Ok) return ExecutionResult.Fail(result.Error ?? "change set failed");
-        sink.Record(EventTypes.ChangeSetApplied, new { taskId, proposalId = proposal.ProposalId, changeSetId = result.ChangeSet!.ChangeSetId, kind = result.ChangeSet.Kind, path, afterSha256 = result.ChangeSet.AfterSha256 });
+        sink.Record(EventTypes.ChangeSetApplied, new { taskId, proposalId = proposal.ProposalId, changeSetId = result.ChangeSet!.ChangeSetId, kind = result.ChangeSet.Kind, path, afterSha256 = result.ChangeSet.AfterSha256, acceptance = proposal.Target.GetValueOrDefault("acceptance") });
         return ExecutionResult.Ok($"Prompt fragment '{name}' updated ({content.Length} chars)", new Dictionary<string, string> { ["changeSetId"] = result.ChangeSet.ChangeSetId, ["name"] = name });
     }
 

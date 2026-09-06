@@ -25,6 +25,8 @@ public sealed class PolicyWorld
     public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge"];
     /// <summary>Origin of the task the proposal belongs to. Some actions may only be proposed from a direct request; null means unknown and is treated as direct.</summary>
     public Tasks.TaskOrigin? Origin { get; init; }
+    /// <summary>Kind of the task the proposal belongs to. An improve task's self-changes must carry the improvement contract.</summary>
+    public Tasks.TaskKind? Kind { get; init; }
     /// <summary>
     /// Slugs of projects that a prerequisite proposal in the same task would create. A dependent proposal may
     /// name one as its destination at decision time; the check is repeated against the real registry when it runs.
@@ -88,8 +90,8 @@ public static class PolicyEngine
             Actions.MoveNote => ValidateMoveNote(target, w),
             Actions.DeleteProject => ValidateDelete(target, w),
             Actions.ModelRequest => ValidateModelRequest(target, w),
-            Actions.UpdatePreference => ValidateUpdatePreference(target),
-            Actions.UpdatePrompt => ValidateUpdatePrompt(target, w),
+            Actions.UpdatePreference => ValidateUpdatePreference(target).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
+            Actions.UpdatePrompt => ValidateUpdatePrompt(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             _ => ["Unhandled action."],
         };
         if (problems.Count > 0)
@@ -410,6 +412,27 @@ public static class PolicyEngine
             default:
                 problems.Add($"'{key}' is not a preference Relay knows.");
                 break;
+        }
+        return problems;
+    }
+
+    /// <summary>The four fields every self-change proposed by an improve task must state; on other kinds they are optional but validated when present.</summary>
+    public static readonly string[] ContractKeys = ["benefit", "permissions", "scope", "acceptance"];
+
+    private static List<string> ValidateImprovementContract(Dictionary<string, string> t, PolicyWorld w, string proposedBy)
+    {
+        var problems = new List<string>();
+        // The user changing a setting is configuration, not an improvement Relay argues for; only Relay's own proposals owe the contract.
+        var required = w.Kind == Tasks.TaskKind.Improve && proposedBy != Producers.User;
+        foreach (var key in ContractKeys)
+        {
+            var value = t.GetValueOrDefault(key);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                if (required) problems.Add($"An improvement must state its {key} (target.{key}).");
+                continue;
+            }
+            if (value.Length > 400) problems.Add($"target.{key} is longer than 400 characters.");
         }
         return problems;
     }

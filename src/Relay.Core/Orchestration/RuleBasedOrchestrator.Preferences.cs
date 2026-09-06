@@ -54,7 +54,10 @@ public sealed partial class RuleBasedOrchestrator
             steps.Add($"Propose sources.allowOnlineSearch = {(allow ? "true" : "false")} (requires approval; revertible)");
             return new TurnPlan(true, allow ? "Allow online search" : "Disallow online search", steps, null, [],
                 [Propose(request, Actions.UpdatePreference, allow ? "Instruction allowed external tasks to search online." : "Instruction withdrew the standing permission to search online.",
-                    new() { ["key"] = "sources.allowOnlineSearch", ["value"] = allow ? "true" : "false" },
+                    Contract(new() { ["key"] = "sources.allowOnlineSearch", ["value"] = allow ? "true" : "false" },
+                        allow ? "External tasks that need current information can search without a per-task note" : "No external task searches online unless you approve that task",
+                        "Writes config\\preferences.json (change set)", "One typed preference: sources.allowOnlineSearch",
+                        allow ? "The next model.request proposal with search reads 'allowed by your sources preference'" : "The next model.request proposal with search reads 'not granted by preference'"),
                     [allow ? "External tasks approved with search on no longer need a per-task note; each still shows what leaves the machine" : "Every external task that wants to search online says so in its proposal and needs your approval for that task"], Risks.ControlledWrite, true)], "rules");
         }
         if ((m = ResponseStyle().Match(text)).Success)
@@ -66,14 +69,20 @@ public sealed partial class RuleBasedOrchestrator
             var proposals = new List<Proposal>
             {
                 Propose(request, Actions.UpdatePreference, $"Instruction asked for {verbosity} responses. The typed preference sets the answer length limits and the style line RELAY0 is given.",
-                    new() { ["key"] = "response.verbosity", ["value"] = verbosity }, [$"response.verbosity = {verbosity} (change set, revertible)", "Answer length limits and the response-style prompt line follow from it"], Risks.ControlledWrite, true),
+                    Contract(new() { ["key"] = "response.verbosity", ["value"] = verbosity },
+                        $"Answers are {verbosity}: shorter to read, fewer completion tokens per task", "Writes config\\preferences.json (change set)",
+                        "One typed preference: response.verbosity; answer limits and the style line derive from it", $"Compiled preferences report verbosity '{verbosity}' and the next answer stays within its character limit"),
+                    [$"response.verbosity = {verbosity} (change set, revertible)", "Answer length limits and the response-style prompt line follow from it"], Risks.ControlledWrite, true),
             };
             var fragment = ComposeFragment(context.PromptFragment, line);
             if (fragment is not null)
             {
                 steps.Add("Also propose the instruction, in your words, as a line of the planner prompt fragment");
                 proposals.Add(Propose(request, Actions.UpdatePrompt, "Your own wording is kept as an approved planner instruction so the model follows it verbatim; it is a change set with the previous text stored.",
-                    new() { ["name"] = "planner", ["content"] = fragment }, [$"config\\prompts\\planner.md gains the line \"{line}\" (change set, revertible)"], Risks.ControlledWrite, true));
+                    Contract(new() { ["name"] = "planner", ["content"] = fragment },
+                        "RELAY0's planner is told the style in your own words, so model answers follow it verbatim", "Writes config\\prompts\\planner.md (change set)",
+                        $"One added line: \"{line}\"", "The planner system prompt contains the line; reverting the change set removes it"),
+                    [$"config\\prompts\\planner.md gains the line \"{line}\" (change set, revertible)"], Risks.ControlledWrite, true));
             }
             return new TurnPlan(true, $"Make responses {verbosity}", steps, current is null ? null : $"Current style: {Truncate(current, 120)}", [], proposals, "rules");
         }
@@ -85,7 +94,10 @@ public sealed partial class RuleBasedOrchestrator
                 return Answer(steps, $"Always show '{term}'", $"'{term}' is already pinned: its definition is refreshed in place whenever it comes up.");
             steps.Add($"Propose display.alwaysShow = '{term}' (requires approval; revertible)");
             return new TurnPlan(true, $"Always show '{term}'", steps, null, [],
-                [Propose(request, Actions.UpdatePreference, $"Instruction asked to always show what '{term}' means.", new() { ["key"] = "display.alwaysShow", ["value"] = term },
+                [Propose(request, Actions.UpdatePreference, $"Instruction asked to always show what '{term}' means.",
+                    Contract(new() { ["key"] = "display.alwaysShow", ["value"] = term },
+                        $"'{term}' is defined on screen the moment it comes up, without asking", "Writes config\\preferences.json (change set); listening reads local sources only",
+                        "One watched term; the pinned card refreshes in place and bypasses the result budget", $"Hearing '{term}' while listening shows a pinned result within one judge pass"),
                     [$"'{term}' becomes a watched term: resolved as soon as it is heard, shown as a pinned card, refreshed in place"], Risks.ControlledWrite, true)], "rules");
         }
         if ((m = StopShowing().Match(text)).Success)
@@ -96,7 +108,10 @@ public sealed partial class RuleBasedOrchestrator
                 return Answer(steps, $"Stop showing '{term}'", $"'{term}' is not pinned. Pinned terms: {(context.Preferences is { WatchedTerms.Count: > 0 } p ? string.Join(", ", p.WatchedTerms) : "none")}.");
             steps.Add($"Propose display.stopShowing = '{term}'");
             return new TurnPlan(true, $"Stop showing '{term}'", steps, null, [],
-                [Propose(request, Actions.UpdatePreference, $"Instruction asked to stop pinning '{term}'.", new() { ["key"] = "display.stopShowing", ["value"] = term },
+                [Propose(request, Actions.UpdatePreference, $"Instruction asked to stop pinning '{term}'.",
+                    Contract(new() { ["key"] = "display.stopShowing", ["value"] = term },
+                        $"No more pinned card for '{term}'; one less thing on screen", "Writes config\\preferences.json (change set)",
+                        "Removes one watched term", $"Hearing '{term}' no longer produces a pinned result"),
                     [$"'{term}' is no longer a watched term"], Risks.ControlledWrite, true)], "rules");
         }
         if ((m = GrantFilingA().Match(text)).Success || (m = GrantFilingB().Match(text)).Success)
@@ -108,7 +123,9 @@ public sealed partial class RuleBasedOrchestrator
             if (context.Preferences?.Grants.Any(g => g.Action == Actions.RouteNote && g.ProjectId == project.Id && (g.NoteType is null || g.NoteType == type)) == true)
                 return Answer(steps, $"File {project.Name} {TypeLabel(type)} automatically", $"{project.Name} {TypeLabel(type)} are already filed without asking.");
             steps.Add($"Propose a standing grant: route_note for {project.Slug}" + (type is null ? "" : $" ({type} notes)") + " (requires approval; revocable)");
-            var target = new Dictionary<string, string> { ["key"] = "filing.grant", ["value"] = Actions.RouteNote, ["action"] = Actions.RouteNote, ["projectId"] = project.Id };
+            var target = Contract(new Dictionary<string, string> { ["key"] = "filing.grant", ["value"] = Actions.RouteNote, ["action"] = Actions.RouteNote, ["projectId"] = project.Id },
+                $"{project.Name} {TypeLabel(type)} stop waiting in Review; fewer approvals for a repeatable filing", $"Standing approval for route_note into {project.Slug}" + (type is null ? "" : $" ({type} notes)") + "; additive writes only",
+                "One standing grant recorded in preferences; revocable in one step", $"A {type ?? "note"} routed to {project.Slug} with moderate confidence is filed and the ledger shows grant.applied");
             if (type is not null) target["noteType"] = type;
             return new TurnPlan(true, $"File {project.Name} {TypeLabel(type)} without asking", steps, null, [],
                 [Propose(request, Actions.UpdatePreference, $"Instruction asked Relay to file {project.Name} {TypeLabel(type)} on its own.", target,
@@ -124,10 +141,26 @@ public sealed partial class RuleBasedOrchestrator
             if (grants.Count == 0) return Answer(steps, $"Stop filing {project.Name} {TypeLabel(type)} automatically", $"There is no standing grant to file {project.Name} {TypeLabel(type)}; Relay already asks.");
             steps.Add($"Propose revoking {grants.Count} standing grant(s)");
             var proposals = grants.Select(g => Propose(request, Actions.UpdatePreference, $"Instruction asked Relay to stop filing {project.Name} {TypeLabel(g.NoteType)} on its own.",
-                new() { ["key"] = "filing.revoke", ["value"] = g.GrantId, ["projectId"] = project.Id }, [$"Grant {g.GrantId} ({g.Action} for {project.Slug}{(g.NoteType is null ? "" : ", " + g.NoteType + " notes")}) is removed; such notes wait for your decision again"], Risks.ControlledWrite, true)).ToList();
+                Contract(new() { ["key"] = "filing.revoke", ["value"] = g.GrantId, ["projectId"] = project.Id },
+                    $"{project.Name} {TypeLabel(g.NoteType)} wait for your decision again", "Writes config\\preferences.json (change set); removes a standing grant, adds none",
+                    $"Removes grant {g.GrantId}", $"The next {g.NoteType ?? "note"} routed to {project.Slug} appears in Review instead of being filed"),
+                [$"Grant {g.GrantId} ({g.Action} for {project.Slug}{(g.NoteType is null ? "" : ", " + g.NoteType + " notes")}) is removed; such notes wait for your decision again"], Risks.ControlledWrite, true)).ToList();
             return new TurnPlan(true, $"Stop filing {project.Name} {TypeLabel(type)} without asking", steps, null, [], proposals, "rules");
         }
         return null;
+    }
+
+    /// <summary>
+    /// The improvement contract every self-change carries: the concrete benefit, the permissions it needs,
+    /// the implementation scope, and how to tell it worked. Policy requires all four on an improve task.
+    /// </summary>
+    private static Dictionary<string, string> Contract(Dictionary<string, string> target, string benefit, string permissions, string scope, string acceptance)
+    {
+        target["benefit"] = benefit;
+        target["permissions"] = permissions;
+        target["scope"] = scope;
+        target["acceptance"] = acceptance;
+        return target;
     }
 
     private static string StyleOf(string word)

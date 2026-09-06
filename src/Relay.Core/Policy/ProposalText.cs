@@ -28,11 +28,22 @@ public static class ProposalText
             Actions.MoveNote => ($"Move note {Short(Get("noteId"))} from '{slug}' to '{Get("toProjectSlug", Get("toProjectId", Get("toProject")))}'",
                 "The note file and its version history move to the destination project; the source keeps a pointer in .orchestrator." + (t.ContainsKey("toProjectPlanned") ? "\nThe destination is created by a prerequisite in this task; this move runs only after it has." : "")),
             Actions.ModelRequest => ($"Send a package to external model '{Get("profile")}'", $"Objective: {Get("objective")}\nReferences leaving the machine: {(Get("refs", "").Length == 0 ? "none" : Get("refs"))}\nBudget: {Get("budgetTokens")} tokens · online search: {Get("allowSearch", "false")}\nThe exact package is hashed and logged; the response is stored as a source artifact."),
-            Actions.UpdatePreference => ($"Change preference {Get("key")}", $"New value: {Get("value")}\nApplied as a reversible change set to config\\preferences.json."),
-            Actions.UpdatePrompt => ($"Change the '{Get("name")}' prompt fragment", $"New text ({Get("content").Length} chars): {Truncate(Get("content"), 300)}\nApplied as a reversible change set; the previous text is kept."),
+            Actions.UpdatePreference => ($"Change preference {Get("key")}", $"New value: {Get("value")}\nApplied as a reversible change set to config\\preferences.json." + Contract(t)),
+            Actions.UpdatePrompt => ($"Change the '{Get("name")}' prompt fragment", $"New text ({Get("content").Length} chars): {Truncate(Get("content"), 300)}\nApplied as a reversible change set; the previous text is kept." + Contract(t)),
             _ => (p.Action, string.Join("\n", p.Target.Select(kv => $"{kv.Key}: {kv.Value}"))),
         };
         return (title, detail + (string.IsNullOrWhiteSpace(p.Reason) ? "" : $"\n\nWhy: {p.Reason}"));
+    }
+
+    /// <summary>The improvement contract of a self-change, rendered in full so the card states benefit, permissions, scope, and acceptance.</summary>
+    private static string Contract(IReadOnlyDictionary<string, string> t)
+    {
+        var lines = new List<string>();
+        if (t.TryGetValue("benefit", out var b) && b.Length > 0) lines.Add($"Benefit: {b}");
+        if (t.TryGetValue("permissions", out var p) && p.Length > 0) lines.Add($"Permissions: {p}");
+        if (t.TryGetValue("scope", out var s) && s.Length > 0) lines.Add($"Scope: {s}");
+        if (t.TryGetValue("acceptance", out var a) && a.Length > 0) lines.Add($"Acceptance: {a}");
+        return lines.Count == 0 ? "" : "\n" + string.Join("\n", lines);
     }
 
     /// <summary>Target keys the user may change in Review before re-proposing.</summary>

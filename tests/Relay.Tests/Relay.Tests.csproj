@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Authored evaluation cases (the unseen and failure sets); recorded cases are derived from task diagnostics at run time. -->
+    <Content Include="Evaluation\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Relay.Core\Relay.Core.csproj" />
     <!-- The worker is referenced so its protocol code runs in-process in scenario tests and its built
          executable is available beside the test assembly for the real-process tests. -->

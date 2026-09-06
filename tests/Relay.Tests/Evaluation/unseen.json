@@ -1,0 +1,106 @@
+[
+  {
+    "id": "unseen:recall-agreed-on",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "what have we agreed on the Atlas beta?",
+    "expect": { "understood": true, "actions": [], "answerContains": ["October 14", "atlas/"] },
+    "tags": ["recall", "atlas"],
+    "why": "A recall phrased differently from every recorded ask still answers from the stored decision and cites it."
+  },
+  {
+    "id": "unseen:recall-nothing-stored",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "remind me about the quarterly budget review",
+    "expect": { "understood": true, "actions": [], "answerContains": ["Nothing stored mentions"], "answerAvoids": ["October"] },
+    "tags": ["recall"],
+    "why": "When nothing matches, the answer says so instead of borrowing an unrelated note."
+  },
+  {
+    "id": "unseen:create-project-phrasing",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "organize",
+    "instruction": "set up a new project called Lighthouse",
+    "expect": { "understood": true, "actions": ["create_project"], "targets": ["create_project.name=Lighthouse", "create_project.slug=lighthouse"] },
+    "tags": ["projects"]
+  },
+  {
+    "id": "unseen:archive-project-phrasing",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "organize",
+    "instruction": "retire the project Home",
+    "expect": { "understood": true, "actions": ["archive_project"], "forbiddenActions": ["delete_project"] },
+    "tags": ["projects"],
+    "why": "Retiring is archiving (recoverable); it must never be read as deletion."
+  },
+  {
+    "id": "unseen:move-topic-into-new-project",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "organize",
+    "instruction": "transfer every backyard note to a new project called Garden",
+    "expect": { "understood": true, "actions": ["create_project", "move_note", "move_note", "move_note"], "targets": ["create_project.slug=garden", "move_note.toProject=Garden"] },
+    "tags": ["organize", "backyard"]
+  },
+  {
+    "id": "unseen:move-topic-into-existing-project",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "organize",
+    "instruction": "refile the notes about the backyard under Atlas",
+    "expect": { "understood": true, "actions": ["move_note", "move_note", "move_note"], "forbiddenActions": ["create_project"] },
+    "tags": ["organize", "backyard"],
+    "why": "An existing destination needs no prerequisite."
+  },
+  {
+    "id": "unseen:remember-phrasing",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "remember",
+    "instruction": "jot down that the Lighthouse kickoff is on Monday",
+    "expect": { "understood": true, "actions": ["create_draft_note"], "targets": ["create_draft_note.text=the Lighthouse kickoff is on Monday"] },
+    "tags": ["remember"]
+  },
+  {
+    "id": "unseen:research-without-profile",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "research",
+    "instruction": "look into how competitors price onboarding and draft an implementation plan",
+    "expect": { "understood": true, "actions": [], "knowledgeGap": true, "capabilityGap": true, "answerContains": ["Missing:", "Capability:"] },
+    "tags": ["research", "knowledge-state"],
+    "why": "Without an external profile the two-axis gap is stated and nothing leaves the machine."
+  },
+  {
+    "id": "unseen:pin-term-phrasing",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "improve",
+    "instruction": "always display what OKR stands for",
+    "expect": { "understood": true, "actions": ["update_preference"], "targets": ["update_preference.key=display.alwaysShow", "update_preference.value=OKR"], "contract": true },
+    "tags": ["preferences", "contract"]
+  },
+  {
+    "id": "unseen:judge-decision-about-known-project",
+    "source": "unseen",
+    "origin": "observed",
+    "kind": "remember",
+    "segments": ["We decided the Home kitchen gets repainted before the holidays."],
+    "expect": { "significant": true, "findingKind": "remember" },
+    "tags": ["judge", "remember"]
+  },
+  {
+    "id": "unseen:judge-watched-term",
+    "source": "unseen",
+    "origin": "observed",
+    "kind": "resolve",
+    "segments": ["The CAD export still breaks on the new build."],
+    "expect": { "significant": true, "findingKind": "resolve" },
+    "tags": ["judge", "watched-term"]
+  }
+]

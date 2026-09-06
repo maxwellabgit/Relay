@@ -147,6 +147,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         ReferenceExists = ReferenceExists,
         PromptFragments = SelfChangeRuntime.PromptNames,
         Origin = task?.Origin,
+        Kind = task?.Kind,
     };
 
     private PolicyWorld World => WorldFor(null);
