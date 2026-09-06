@@ -97,8 +97,6 @@ public static class ActivityFormatter
             EventTypes.PatchApplied => $"Applied worker output {r.DataString("output")} to {r.DataString("projectSlug")}/{Path.GetFileName(r.DataString("destination") ?? "")}" + (r.DataString("previousVersionPath") is null ? "" : " (previous version kept)"),
             EventTypes.SettingsChanged => $"Settings changed (orchestrator {r.DataString("orchestratorMode")}, model {(r.DataBool("modelEnabled") == true ? "on" : "off")})",
             EventTypes.SecretChanged => $"Secret '{r.DataString("name")}' {r.DataString("action")}",
-            EventTypes.FlowRelaySent => $"Sent Flow {r.DataString("purpose")} chord {r.DataString("chord")}" + (r.DataBool("ok") == true ? "" : $" — failed: {r.DataString("error")}"),
-            EventTypes.FlowRelaySkipped => $"Flow {r.DataString("purpose")} chord not sent: {r.DataString("reason")}",
             EventTypes.AppFailed => $"Failure in {r.DataString("where")}: {r.DataString("exceptionType")}: {r.DataString("message")}",
             EventTypes.LockEngaged => $"LOCKED: {r.DataString("reason")}",
             EventTypes.LockReleased => "Unlocked by user",

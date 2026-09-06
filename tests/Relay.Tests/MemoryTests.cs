@@ -151,7 +151,7 @@ public class MemoryTests : IDisposable
     }
 
     [Fact]
-    public void NoteModeLeavesUnmentionedNotesUnroutedAndPutsAmbiguousOnesInReview()
+    public void NoteModeLeavesUnmentionedNotesInTheInboxAndAttachesCandidatesToAmbiguousOnes()
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas").Approve()
@@ -162,47 +162,73 @@ public class MemoryTests : IDisposable
             .ExpectNoEvent(EventTypes.NoteRouted);
         Assert.Contains("unrouted", s.Snap.Receipt);
         Assert.Single(s.H.Notes.Unrouted());
-        Assert.DoesNotContain(s.Snap.Review, r => r.Kind == ReviewItemKind.RoutingDecision); // no evidence → nothing to ask
+        var compost = Assert.Single(s.Snap.Inbox);
+        Assert.False(compost.HasSuggestions); // no evidence → nothing to ask, the note simply waits
+        Assert.Empty(s.Snap.Review);          // routing is never a Review item
 
         s.Note("Atlas and Garden both need a budget line before the board meeting.")
             .ExpectState(RelayState.Completed)
-            .ExpectReview(ReviewItemKind.RoutingDecision)
             .ExpectNoEvent(EventTypes.NoteRouted);
         Assert.Contains("need your routing decision", s.Snap.Receipt);
-        var item = s.Snap.Review.Single(r => r.Kind == ReviewItemKind.RoutingDecision);
-        Assert.Contains("atlas", item.Detail);
-        Assert.Contains("garden", item.Detail);
-        Assert.Contains("ambiguous", item.Detail);
+        Assert.Empty(s.Snap.Review);
+        var inbox = s.Snap.Inbox;
+        Assert.Equal(2, inbox.Count);
+        var budget = inbox.Single(i => i.HasSuggestions); // shown once, with the candidates attached
+        Assert.Equal(inbox[0].NoteId, budget.NoteId);     // newest first
+        Assert.Contains("ambiguous", budget.Summary);
+        Assert.Equal(["atlas", "garden"], budget.Candidates.Select(c => c.Slug).Order().ToArray());
 
-        // The user resolves it: the note is filed by the same controlled path with confidence 1 and the item leaves Review.
-        var noteId = item.Payload!;
+        // The user resolves it: the note is filed by the same controlled path with confidence 1 and leaves the inbox.
         var garden = s.H.Registry.FindActive("garden")!;
-        s.Do("route to garden", c => Assert.True(c.RouteDraftNote(noteId, garden.Id)))
+        s.Do("route to garden", c => Assert.True(c.RouteDraftNote(budget.NoteId, garden.Id)))
             .ExpectEvent(EventTypes.NoteRouted)
             .ExpectEvent(EventTypes.ApprovalGranted); // the click is recorded as the approval
-        Assert.DoesNotContain(s.Snap.Review, r => r.Kind == ReviewItemKind.RoutingDecision);
+        Assert.Equal([compost.NoteId], s.Snap.Inbox.Select(i => i.NoteId).ToArray()); // the compost note is still waiting, untouched
+        Assert.Empty(s.C.PendingRoutingDecisions);
         var (notes, _) = ProjectNoteStore.ReadAll(garden.RootPath);
-        Assert.Contains(notes, n => n.Note.Id == noteId && n.Note.Confidence == 1);
-        Assert.Single(s.H.Notes.Unrouted()); // the compost note is still waiting, untouched
+        Assert.Contains(notes, n => n.Note.Id == budget.NoteId && n.Note.Confidence == 1);
+
+        // A note without suggestions is filed the same way from the inbox.
+        var atlas = s.H.Registry.FindActive("atlas")!;
+        s.Do("file compost under atlas", c => Assert.True(c.RouteDraftNote(compost.NoteId, atlas.Id)));
+        Assert.Empty(s.Snap.Inbox);
+        Assert.Empty(s.H.Notes.Unrouted());
     }
 
     [Fact]
-    public void PendingRoutingDecisionsSurviveRestartAndCanBeKeptUnrouted()
+    public void InboxSuggestionsSurviveRestartAndCanBeDismissedKeepingTheNote()
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas").Approve()
             .Command("create project Garden").Approve()
-            .Note("Atlas and Garden both need a budget line before the board meeting.")
-            .ExpectReview(ReviewItemKind.RoutingDecision)
-            .Restart()
-            .ExpectReview(ReviewItemKind.RoutingDecision);
+            .Note("Atlas and Garden both need a budget line before the board meeting.");
+        Assert.True(Assert.Single(s.Snap.Inbox).HasSuggestions);
+        s.Restart();
+        var item = Assert.Single(s.Snap.Inbox);
+        Assert.True(item.HasSuggestions);
 
-        var noteId = s.Snap.Review.Single(r => r.Kind == ReviewItemKind.RoutingDecision).Payload!;
-        s.Do("keep unrouted", c => c.KeepUnrouted(noteId));
-        Assert.DoesNotContain(s.Snap.Review, r => r.Kind == ReviewItemKind.RoutingDecision);
+        s.Do("keep here", c => c.KeepUnrouted(item.NoteId));
+        var kept = Assert.Single(s.Snap.Inbox);
+        Assert.Equal(item.NoteId, kept.NoteId);
+        Assert.False(kept.HasSuggestions); // the note stays; only the suggestions are retired
         Assert.Single(s.H.Notes.Unrouted());
         Assert.Contains(Directory.EnumerateFiles(Path.Combine(_tmp.Root.ReviewDirectory, "routing", "resolved")), f => f.Contains("kept-unrouted")); // nothing deleted
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.NoteRoutingDeferred && r.DataString("reason") == "kept unrouted by user");
+    }
+
+    [Fact]
+    public void AStaleRoutingDecisionWithoutItsNoteIsNotShown()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .Command("create project Garden").Approve()
+            .Note("Atlas and Garden both need a budget line before the board meeting.");
+        var item = Assert.Single(s.Snap.Inbox);
+        // Simulate a hand-deleted staging note: the pending decision file is orphaned.
+        File.Delete(Path.Combine(_tmp.Root.DraftNotesDirectory, item.NoteId + ".json"));
+        s.Restart();
+        Assert.Empty(s.Snap.Inbox);
+        Assert.Single(s.C.PendingRoutingDecisions); // still on disk for inspection, just not offered
     }
 
     [Fact]
@@ -300,8 +326,9 @@ public class MemoryTests : IDisposable
 
         s.Note("The Atlas kickoff is on Monday.")
             .ExpectState(RelayState.Completed)
-            .ExpectNoEvent(EventTypes.NoteRouted)
-            .ExpectReview(ReviewItemKind.RoutingDecision);
+            .ExpectNoEvent(EventTypes.NoteRouted);
+        var item = Assert.Single(s.Snap.Inbox);
+        Assert.Equal("atlas", Assert.Single(item.Candidates).Slug); // offered, not filed
     }
 
     [Fact]

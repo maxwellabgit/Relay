@@ -17,12 +17,12 @@ using Relay.Core.Workspaces;
 
 namespace Relay.Tests.Support;
 
-/// <summary>One simulated application run against a data root, with real file stores and fake host/relay/time.</summary>
+/// <summary>One simulated application run against a data root, with real file stores and a fake host and clock.</summary>
 public sealed class Harness : IDisposable
 {
     public static readonly DateTimeOffset T0 = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
-    public Harness(DataRoot root, bool relayEnabled = false, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
+    public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
         IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
@@ -32,7 +32,6 @@ public sealed class Harness : IDisposable
         Clock = clock ?? new FixedClock(T0);
         Scheduler = new ManualScheduler(Clock) { InlinePost = inlinePost };
         Host = new FakeHost();
-        Relay = new FakeRelay(relayEnabled);
 
         root.EnsureLayout(Clock);
         if (configure is not null)
@@ -66,7 +65,7 @@ public sealed class Harness : IDisposable
             IndexProblems = indexProblems,
         };
 
-        Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Relay, Clock, Scheduler, "0.1.0-test", 4242, Services);
+        Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Clock, Scheduler, "0.1.0-test", 4242, Services);
         if (Workers is not null) RelayRuntime.Connect(Workers, Coordinator);
     }
 
@@ -81,7 +80,6 @@ public sealed class Harness : IDisposable
     public FixedClock Clock { get; }
     public ManualScheduler Scheduler { get; }
     public FakeHost Host { get; }
-    public FakeRelay Relay { get; }
     public SettingsStore.LoadResult SettingsLoad { get; }
     public FileDraftStore Drafts { get; }
     public FileDraftNoteStore Notes { get; }

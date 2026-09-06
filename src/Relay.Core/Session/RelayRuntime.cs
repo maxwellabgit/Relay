@@ -19,7 +19,6 @@ namespace Relay.Core.Session;
 /// <summary>Host-supplied factories for the parts that depend on platform or network.</summary>
 public sealed class RuntimeOptions
 {
-    public required Func<RelaySettings, IFlowRelay> RelayFactory { get; init; }
     /// <summary>Builds the model-backed orchestrator when settings enable it; null keeps rules only.</summary>
     public Func<RelaySettings, IOrchestrator?>? ModelOrchestratorFactory { get; init; }
     /// <summary>Builds the process host for workers (job object on Windows); null or a null result disables workers.</summary>
@@ -51,9 +50,6 @@ public sealed class RelayRuntime : IDisposable
     public RecoveryReport Recovery { get; }
     public SettingsStore.LoadResult Settings { get; }
     public CoordinatorServices Services { get; }
-
-    public static RelayRuntime Create(DataRoot root, ICaptureHost host, Func<RelaySettings, IFlowRelay> relayFactory, IClock clock, IScheduler scheduler, string appVersion, int processId)
-        => Create(root, host, new RuntimeOptions { RelayFactory = relayFactory }, clock, scheduler, appVersion, processId);
 
     public static RelayRuntime Create(DataRoot root, ICaptureHost host, RuntimeOptions options, IClock clock, IScheduler scheduler, string appVersion, int processId)
     {
@@ -93,7 +89,7 @@ public sealed class RelayRuntime : IDisposable
 
         var coordinator = new SessionCoordinator(
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
-            host, options.RelayFactory(settings.Settings), clock, scheduler, appVersion, processId, services);
+            host, clock, scheduler, appVersion, processId, services);
         if (workers is not null) Connect(workers, coordinator);
         // Orchestrator mode and model settings changed in the UI take effect on the next turn.
         coordinator.SettingsChanged += changed => services.Orchestrator = BuildOrchestrator(changed, options);

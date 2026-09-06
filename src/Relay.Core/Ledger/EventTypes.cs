@@ -50,10 +50,6 @@ public static class EventTypes
     public const string NoteDraftCreated = "note.draft_created";
     public const string CommandRecorded = "command.recorded";
 
-    // Flow relay adapter
-    public const string FlowRelaySent = "flow.relay_sent";
-    public const string FlowRelaySkipped = "flow.relay_skipped";
-
     // Failure and protection
     public const string AppFailed = "app.failed";
     public const string LockEngaged = "lock.engaged";

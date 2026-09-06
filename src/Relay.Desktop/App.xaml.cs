@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -55,7 +55,6 @@ public partial class App : Application
             var host = _window.CaptureHost;
             var options = new RuntimeOptions
             {
-                RelayFactory = settings => settings.FlowRelay.Enabled ? new FixedChordRelay(KeyChord.Parse(settings.FlowRelay.HandsFreeChord)) : DisabledFlowRelay.Instance,
                 WorkerHostFactory = settings =>
                 {
                     var worker = Relay.Core.Agents.ProcessWorkerHost.Locate(settings.Workers.Executable, AppContext.BaseDirectory);

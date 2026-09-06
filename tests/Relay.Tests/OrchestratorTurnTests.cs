@@ -26,9 +26,11 @@ public class OrchestratorTurnTests : IDisposable
             .Command("Create a project called Market Study")
             .ExpectState(RelayState.AwaitingApproval)
             .ExpectProposal(Actions.CreateProject, "pending")
-            .ExpectReview(ReviewItemKind.Proposal)
-            .ExpectProject("market-study", exists: false)
-            .Approve(Actions.CreateProject)
+            .ExpectProject("market-study", exists: false);
+        // The pending proposal is shown once, in Response next to the plan; Review is for everything else.
+        Assert.Single(s.Snap.PendingProposals);
+        Assert.Empty(s.Snap.Review);
+        s.Approve(Actions.CreateProject)
             .ExpectState(RelayState.Completed)
             .ExpectOutcome("executed")
             .ExpectProposal(Actions.CreateProject, "executed")
@@ -56,7 +58,7 @@ public class OrchestratorTurnTests : IDisposable
     }
 
     [Fact]
-    public void WithoutAWorkspaceCreateProjectIsDeniedVisibly()
+    public void WithoutAProjectFolderCreateProjectIsDeniedVisibly()
     {
         using var s = Scenario.New(_tmp)
             .Command("create project Atlas")
@@ -66,8 +68,48 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectNoEvent(EventTypes.ExecutionStarted)
             .ExpectNoEvent(EventTypes.ApprovalGranted);
         var denied = s.Response.Proposals.Single();
-        Assert.Contains(denied.Reasons, r => r.Contains("workspace", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(denied.Reasons, r => r.Contains("New project", StringComparison.Ordinal)); // points at the one way to pick a folder
         Assert.Equal("Deny", s.H.Last(EventTypes.ProposalDecided)!.DataString("outcome"));
+    }
+
+    [Fact]
+    public void NewProjectInAFolderRegistersItOnceAndLaterVoiceCommandsReuseIt()
+    {
+        var folder = Path.Combine(Path.GetDirectoryName(_tmp.Root.Path)!, Path.GetFileName(_tmp.Root.Path) + "-projects");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            using var s = Scenario.New(_tmp);
+            Assert.Empty(s.Snap.Workspaces);
+
+            // The dialog path: the chosen folder becomes a registered project folder, then the project is created in it.
+            s.Do("New project… in a fresh folder", c => Assert.True(c.CreateProjectIn(folder, "Atlas")))
+                .ExpectState(RelayState.Completed)
+                .ExpectEvent(EventTypes.WorkspaceRegistered)
+                .ExpectEvent(EventTypes.ProjectCreated)
+                .ExpectProject("atlas");
+            Assert.Single(s.Snap.Workspaces);
+            Assert.StartsWith(folder, s.H.Registry.FindActive("atlas")!.RootPath, StringComparison.OrdinalIgnoreCase);
+
+            // A second project in the same folder does not register it again.
+            s.Do("New project… in the same folder", c => Assert.True(c.CreateProjectIn(folder, "Garden")))
+                .ExpectProject("garden");
+            Assert.Equal(1, s.H.Count(EventTypes.WorkspaceRegistered));
+
+            // By voice, with no folder given, the registered folder is the default.
+            s.Command("create project Harbor").Approve()
+                .ExpectProject("harbor");
+            Assert.StartsWith(folder, s.H.Registry.FindActive("harbor")!.RootPath, StringComparison.OrdinalIgnoreCase);
+
+            // An empty folder is refused before anything is registered or proposed.
+            s.Do("New project… without a folder", c => Assert.False(c.CreateProjectIn("", "Nowhere")));
+            Assert.Contains("Choose the folder", s.Snap.Notice);
+            Assert.Equal(1, s.H.Count(EventTypes.WorkspaceRegistered));
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); } catch { }
+        }
     }
 
     [Fact]

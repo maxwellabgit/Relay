@@ -228,46 +228,22 @@ public class CaptureFlowTests : IDisposable
     }
 
     [Fact]
-    public void RelaySendsStartAndStopOnlyWhenForeground()
+    public void RelayNeverSynthesizesInputAndTheCaptureSurfaceIsTheOnlyInput()
     {
-        using var h = new Harness(_tmp.Root, relayEnabled: true, configure: s => s.FlowRelay.Enabled = true).Start();
+        // Flow is started and stopped by its own shortcut; Relay only prepares the surface and waits for text.
+        using var h = new Harness(_tmp.Root).Start();
         h.Coordinator.PressNoteKey();
-        Assert.Empty(h.Relay.Sent); // waits for the start delay
-        h.Scheduler.Advance(TimeSpan.FromMilliseconds(200));
-        Assert.Equal([RelayPurpose.Start], h.Relay.Sent);
-        Assert.Equal("start", h.Last(EventTypes.FlowRelaySent)!.DataString("purpose"));
-        Assert.Equal("Ctrl+Win+F24", h.Last(EventTypes.FlowRelaySent)!.DataString("chord"));
-
+        Assert.Equal(1, h.Host.PrepareCalls);
+        h.Scheduler.Advance(TimeSpan.FromSeconds(1));
         h.Coordinator.TextChanged("dictated words");
-        h.Host.Foreground = false;
         h.Coordinator.PressNoteKey();
-        Assert.Equal([RelayPurpose.Start], h.Relay.Sent);
-        Assert.Equal("stop", h.Last(EventTypes.FlowRelaySkipped)!.DataString("purpose"));
-        Assert.Contains("not foreground", h.Last(EventTypes.FlowRelaySkipped)!.DataString("reason"));
-
-        h.Scheduler.Advance(TimeSpan.FromMilliseconds(1500));
+        h.Scheduler.Advance(TimeSpan.FromMilliseconds(700));
         Assert.Equal(RelayState.Completed, h.Snap.State);
-    }
 
-    [Fact]
-    public void RelayStartIsSkippedWhenTextAlreadyPresent()
-    {
-        using var h = new Harness(_tmp.Root, relayEnabled: true, configure: s => s.FlowRelay.Enabled = true).Start();
-        h.Coordinator.PressNoteKey();
-        h.Coordinator.TextChanged("typed before Flow started");
-        h.Scheduler.Advance(TimeSpan.FromMilliseconds(200));
-        Assert.Empty(h.Relay.Sent);
-        Assert.Contains("not empty", h.Last(EventTypes.FlowRelaySkipped)!.DataString("reason"));
-    }
-
-    [Fact]
-    public void CancelWhileFlowIsListeningSendsStop()
-    {
-        using var h = new Harness(_tmp.Root, relayEnabled: true, configure: s => s.FlowRelay.Enabled = true).Start();
-        h.Coordinator.PressCommandKey();
-        h.Scheduler.Advance(TimeSpan.FromMilliseconds(200));
-        h.Coordinator.Cancel();
-        Assert.Equal([RelayPurpose.Start, RelayPurpose.Stop], h.Relay.Sent);
+        var started = h.Last(EventTypes.CaptureStarted)!;
+        Assert.Null(started.DataString("flowRelayEnabled"));
+        Assert.DoesNotContain(h.Records(), r => r.Type.StartsWith("flow.", StringComparison.Ordinal));
+        Assert.Equal(1, h.Host.PrepareCalls);
     }
 
     [Fact]

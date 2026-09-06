@@ -1,4 +1,4 @@
-﻿using Relay.Core.Config;
+using Relay.Core.Config;
 using Relay.Core.Ids;
 using Relay.Core.Input;
 using Relay.Core.Storage;
@@ -63,8 +63,20 @@ public class SettingsTests : IDisposable
         Assert.Equal(HotkeySettings.WindowScope, load.Settings.Hotkeys.Scope);
         Assert.Equal("Ctrl+Alt", load.Settings.Hotkeys.NoteKey);
         Assert.Equal("Ctrl+X", load.Settings.Hotkeys.CommandKey);
-        Assert.False(load.Settings.FlowRelay.Enabled);
+        Assert.Equal(600, load.Settings.Capture.StabilizationMs);
         Assert.True(File.Exists(_tmp.Root.SettingsPath));
+        // No relay section: Relay has no way to synthesize input.
+        Assert.DoesNotContain("flowRelay", File.ReadAllText(_tmp.Root.SettingsPath));
+    }
+
+    [Fact]
+    public void ObsoleteRelaySettingsAreIgnoredWithoutComplaint()
+    {
+        _tmp.Root.EnsureLayout(new FixedClock(Harness.T0));
+        AtomicFile.WriteAllText(_tmp.Root.SettingsPath, """{"flowRelay":{"enabled":true,"handsFreeChord":"Ctrl+Win+F24"},"capture":{"stabilizationWithoutRelayMs":600}}""");
+        var load = SettingsStore.Load(_tmp.Root);
+        Assert.Empty(load.Problems);
+        Assert.Equal(600, load.Settings.Capture.StabilizationMs);
     }
 
     [Fact]
@@ -103,15 +115,6 @@ public class SettingsTests : IDisposable
 
         s.Hotkeys.Scope = "everywhere";
         Assert.Contains(s.Validate(), p => p.Contains("hotkeys.scope"));
-    }
-
-    [Fact]
-    public void RelayChordMustDifferFromPrimaryKeys()
-    {
-        var s = new RelaySettings();
-        s.FlowRelay.Enabled = true;
-        s.FlowRelay.HandsFreeChord = "Ctrl+X";
-        Assert.Contains(s.Validate(), p => p.Contains("flowRelay.handsFreeChord"));
     }
 
     public void Dispose() => _tmp.Dispose();

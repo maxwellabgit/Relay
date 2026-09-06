@@ -113,7 +113,7 @@ public sealed partial class SessionCoordinator
     // Review resolutions
     // ----------------------------------------------------------------------------------------
 
-    /// <summary>The user picked a project for a note whose routing was uncertain.</summary>
+    /// <summary>The user filed an inbox note under a project. Any pending routing suggestion for it is retired as resolved.</summary>
     public bool RouteDraftNote(string noteId, string projectId)
     {
         var ok = PromoteDraftNote(noteId, projectId);
@@ -122,7 +122,7 @@ public sealed partial class SessionCoordinator
         return ok;
     }
 
-    /// <summary>The user chose to leave a note in staging; the decision file is retired and the choice recorded.</summary>
+    /// <summary>The user chose to leave a note in the inbox; its routing suggestions are retired (file kept under resolved) and the choice recorded.</summary>
     public void KeepUnrouted(string noteId)
     {
         if (ReviewStore.ResolveRouting(noteId, "kept-unrouted"))
@@ -153,16 +153,27 @@ public sealed partial class SessionCoordinator
 
     private IEnumerable<ReviewItem> MemoryReviewItems()
     {
-        foreach (var r in ReviewStore.PendingRouting())
-        {
-            var candidates = r.Candidates.Count == 0 ? "No project matched." : string.Join("\n", r.Candidates.Select(c => $"• {c.Name} ({c.Slug}) — {c.Confidence:0.00}: {string.Join(", ", c.Reasons)}"));
-            yield return new ReviewItem(ReviewItemKind.RoutingDecision, $"Where does this {r.Type} belong?", $"{r.Text}\n\n{candidates}", r.NoteId);
-        }
         foreach (var d in ReviewStore.PendingDisputes())
         {
             yield return new ReviewItem(ReviewItemKind.DisputedNotes, $"Two decisions in '{d.ProjectSlug}' may conflict",
                 $"New: {d.NewText}\n\nExisting: {d.ExistingText}\n\n{d.Reason}. Both are kept; choose whether the new one supersedes the old.", d.NewNoteId);
         }
+    }
+
+    /// <summary>
+    /// The inbox: every unrouted note in staging exactly once, newest first, carrying the router's
+    /// candidates when it asked for a decision. A routing decision whose note is no longer in staging
+    /// is stale and is not shown.
+    /// </summary>
+    private IReadOnlyList<InboxItem> InboxViews()
+    {
+        var pending = ReviewStore.PendingRouting().ToDictionary(r => r.NoteId, StringComparer.Ordinal);
+        return _notes.Unrouted()
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => pending.TryGetValue(d.NoteId, out var r)
+                ? new InboxItem(d.NoteId, d.Type, d.CreatedAt, d.Text, r.Summary, r.Candidates)
+                : new InboxItem(d.NoteId, d.Type, d.CreatedAt, d.Text, null, []))
+            .ToList();
     }
 
     public IReadOnlyList<RoutingDecisionRecord> PendingRoutingDecisions => ReviewStore.PendingRouting();

@@ -4,6 +4,7 @@ namespace Relay.Windows;
 
 /// <summary>
 /// The complete set of Win32 entry points Relay uses. Anything not listed here is not called.
+/// In particular there is no SendInput: Relay never synthesizes keyboard or mouse input.
 /// </summary>
 internal static partial class NativeMethods
 {
@@ -22,15 +23,6 @@ internal static partial class NativeMethods
 
     public const int SW_RESTORE = 9;
     public const int SW_SHOW = 5;
-
-    public const uint INPUT_KEYBOARD = 1;
-    public const uint KEYEVENTF_KEYUP = 0x0002;
-    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
-
-    public const ushort VK_SHIFT = 0x10;
-    public const ushort VK_CONTROL = 0x11;
-    public const ushort VK_MENU = 0x12;
-    public const ushort VK_LWIN = 0x5B;
 
     public static readonly IntPtr HWND_MESSAGE = new(-3);
 
@@ -61,36 +53,6 @@ internal static partial class NativeMethods
         public IntPtr lpszMenuName;
         public IntPtr lpszClassName;
         public IntPtr hIconSm;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT
-    {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    public struct INPUT
-    {
-        [FieldOffset(0)] public uint type;
-        // KEYBDINPUT is the largest union member we use; pad to the MOUSEINPUT size (28/32 bytes) so the struct size matches the OS definition.
-        [FieldOffset(8)] public KEYBDINPUT ki;
-        [FieldOffset(8)] public MOUSEINPUT mi;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MOUSEINPUT
-    {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
     }
 
     public delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -155,9 +117,6 @@ internal static partial class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
 
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetModuleHandleW(IntPtr lpModuleName);

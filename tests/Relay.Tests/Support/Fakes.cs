@@ -1,4 +1,3 @@
-using Relay.Core.Input;
 using Relay.Core.Ledger;
 using Relay.Core.Session;
 using Relay.Core.Storage;
@@ -89,33 +88,10 @@ public sealed class ManualScheduler : IScheduler
 public sealed class FakeHost : ICaptureHost
 {
     public int PrepareCalls { get; private set; }
-    public bool Foreground { get; set; } = true;
     public string? ForegroundProcess { get; set; } = "notepad";
 
     public void PrepareCaptureSurface() => PrepareCalls++;
-    public bool IsCaptureSurfaceForeground() => Foreground;
     public string? ForegroundProcessName() => ForegroundProcess;
-}
-
-public sealed class FakeRelay : IFlowRelay
-{
-    public FakeRelay(bool enabled, string chord = "Ctrl+Win+F24")
-    {
-        Enabled = enabled;
-        Chord = KeyChord.Parse(chord);
-    }
-
-    public bool Enabled { get; }
-    public KeyChord? Chord { get; }
-    public List<RelayPurpose> Sent { get; } = new();
-    public bool Fail { get; set; }
-
-    public RelayResult SendHandsFreeToggle(RelayPurpose purpose)
-    {
-        if (Fail) return new RelayResult(false, "SendInput returned 0");
-        Sent.Add(purpose);
-        return new RelayResult(true, null);
-    }
 }
 
 /// <summary>Wraps a real ledger and starts failing after a configurable number of appends.</summary>

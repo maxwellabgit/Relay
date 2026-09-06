@@ -15,8 +15,8 @@ using Relay.Core.Time;
 namespace Relay.Core.Session;
 
 /// <summary>
-/// Owns the primary state and performs every side effect of the v0.1 slice: ledger records,
-/// crash-safe draft persistence, the Flow relay, transcript timers, and recovery handling.
+/// Owns the primary state and performs every side effect of the capture slice: ledger records,
+/// crash-safe draft persistence, transcript timers, and recovery handling.
 /// Single-threaded: the host must call it, and run scheduler callbacks, on one thread.
 ///
 /// Ordering rule for durability: the ledger record is written before any staging file is
@@ -38,7 +38,6 @@ public sealed partial class SessionCoordinator
     private readonly IScheduler _scheduler;
     private readonly RelaySettings _settings;
     private readonly ICaptureHost _host;
-    private readonly IFlowRelay _relay;
     private readonly DataRoot _root;
     private readonly string _appVersion;
     private readonly int _processId;
@@ -72,7 +71,6 @@ public sealed partial class SessionCoordinator
     private IDisposable? _stabilizationTimer;
     private IDisposable? _receiptTimer;
     private IDisposable? _draftPersistTimer;
-    private IDisposable? _relayStartTimer;
     private bool _draftDirty;
 
     public SessionCoordinator(
@@ -84,7 +82,6 @@ public sealed partial class SessionCoordinator
         SessionStore sessions,
         SettingsStore.LoadResult settingsLoad,
         ICaptureHost host,
-        IFlowRelay relay,
         IClock clock,
         IScheduler scheduler,
         string appVersion,
@@ -101,7 +98,6 @@ public sealed partial class SessionCoordinator
         _settingsLoad = settingsLoad;
         _settings = settingsLoad.Settings;
         _host = host;
-        _relay = relay;
         _clock = clock;
         _scheduler = scheduler;
         _appVersion = appVersion;
@@ -327,34 +323,17 @@ public sealed partial class SessionCoordinator
             captureId = _draft.CaptureId,
             mode = _draft.ModeWire,
             previousForegroundProcess = _draft.PreviousForegroundProcess,
-            flowRelayEnabled = _relay.Enabled,
         }) is null) return;
 
         PersistDraftNow();
         _host.PrepareCaptureSurface();
         _surfaceFocused = true;
-
-        if (_relay.Enabled)
-        {
-            var captureId = _draft.CaptureId;
-            _relayStartTimer?.Dispose();
-            _relayStartTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.FlowRelay.StartDelayMs), () =>
-            {
-                _relayStartTimer = null;
-                if (_draft?.CaptureId != captureId || _state is not (RelayState.NoteCapture or RelayState.CommandCapture)) return;
-                SendRelay(_draft, RelayPurpose.Start, requireEmptySurface: true);
-                Notify();
-            });
-        }
     }
 
     private void RequestStop()
     {
         if (_draft is null) return;
-        _relayStartTimer?.Dispose();
-        _relayStartTimer = null;
         if (Append(EventTypes.CaptureStopRequested, new { captureId = _draft.CaptureId, chars = _draft.Text.Length }) is null) return;
-        if (_relay.Enabled) SendRelay(_draft, RelayPurpose.Stop, requireEmptySurface: false);
         StartAwaitingTimers(restartTimeout: true);
     }
 
@@ -373,9 +352,8 @@ public sealed partial class SessionCoordinator
     {
         var generation = _awaitGeneration;
         _stabilizationTimer?.Dispose();
-        var quiet = _relay.Enabled ? _settings.Capture.StabilizationMs : _settings.Capture.StabilizationWithoutRelayMs;
         _stabilizationPending = true;
-        _stabilizationTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(quiet), () => OnTranscriptStable(generation));
+        _stabilizationTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.StabilizationMs), () => OnTranscriptStable(generation));
     }
 
     private void OnTranscriptStable(int generation)
@@ -467,8 +445,6 @@ public sealed partial class SessionCoordinator
         var transition = Apply(Trigger.Cancel);
         if (!transition.Accepted) { Notify(); return; }
 
-        _relayStartTimer?.Dispose();
-        _relayStartTimer = null;
         StopAwaitingTimers();
         _draftPersistTimer?.Dispose();
         _draftPersistTimer = null;
@@ -485,9 +461,6 @@ public sealed partial class SessionCoordinator
             chars = draft.Text.Length,
             stateAtCancel = stateAtCancel.Label(),
         });
-
-        // Flow may still be listening if the user cancelled before the stop press.
-        if (_relay.Enabled && stateAtCancel is RelayState.NoteCapture or RelayState.CommandCapture) SendRelay(draft, RelayPurpose.Stop, requireEmptySurface: false);
 
         try { _drafts.RemoveCurrent(); }
         catch (IOException ex) { _notice = "Cancelled, but the staging draft could not be removed: " + ex.Message; }
@@ -772,10 +745,7 @@ public sealed partial class SessionCoordinator
         if (_draft is not null && _state.IsCapturing())
         {
             StopAwaitingTimers();
-            _relayStartTimer?.Dispose();
-            _relayStartTimer = null;
             if (_draftDirty) PersistDraftNow();
-            if (_relay.Enabled && _state is RelayState.NoteCapture or RelayState.CommandCapture) SendRelay(_draft, RelayPurpose.Stop, requireEmptySurface: false);
             // The draft stays in staging and becomes an interrupted capture when the user dismisses the failure.
         }
         _retryable = false;
@@ -792,13 +762,8 @@ public sealed partial class SessionCoordinator
         _stabilizationTimer?.Dispose();
         _receiptTimer?.Dispose();
         _draftPersistTimer?.Dispose();
-        _relayStartTimer?.Dispose();
 
-        if (_draft is not null && _state.IsCapturing())
-        {
-            if (_draftDirty) PersistDraftNow();
-            if (_relay.Enabled && _state is RelayState.NoteCapture or RelayState.CommandCapture) SendRelay(_draft, RelayPurpose.Stop, requireEmptySurface: false);
-        }
+        if (_draft is not null && _state.IsCapturing() && _draftDirty) PersistDraftNow();
 
         if (_turn is { } turn && _state.IsTurnActive())
         {
@@ -916,28 +881,6 @@ public sealed partial class SessionCoordinator
         }
     }
 
-    /// <summary>
-    /// Emits the single configured Flow chord, but only when Relay's own capture surface is the
-    /// foreground target (so the chord cannot reach another application) and, for a start, only
-    /// when the surface is still empty. Every decision is recorded.
-    /// </summary>
-    private void SendRelay(CaptureDraft draft, RelayPurpose purpose, bool requireEmptySurface)
-    {
-        var purposeName = purpose.ToString().ToLowerInvariant();
-        if (!_host.IsCaptureSurfaceForeground())
-        {
-            Append(EventTypes.FlowRelaySkipped, new { captureId = draft.CaptureId, purpose = purposeName, reason = "capture surface is not foreground" });
-            return;
-        }
-        if (requireEmptySurface && draft.Text.Length > 0)
-        {
-            Append(EventTypes.FlowRelaySkipped, new { captureId = draft.CaptureId, purpose = purposeName, reason = "capture surface is not empty" });
-            return;
-        }
-        var result = _relay.SendHandsFreeToggle(purpose);
-        Append(EventTypes.FlowRelaySent, new { captureId = draft.CaptureId, purpose = purposeName, chord = _relay.Chord?.ToString(), ok = result.Sent, error = result.Error });
-    }
-
     private string? SafeForegroundProcess()
     {
         try { return _host.ForegroundProcessName(); }
@@ -977,14 +920,7 @@ public sealed partial class SessionCoordinator
                     "Held in memory only. Recover draft stores it as a capture; Forget drops it. It is gone when Relay exits.",
                     cancelled.Text));
             }
-            if (_turn is not null && _state == RelayState.AwaitingApproval)
-            {
-                foreach (var ps in _turn.Proposals.Where(p => p.Status == "pending"))
-                {
-                    var (title, detail) = Policy.ProposalText.Describe(ps.Proposal, ps.Decision);
-                    review.Add(new ReviewItem(ReviewItemKind.Proposal, title, detail, ps.Proposal.ProposalId));
-                }
-            }
+            // Proposals awaiting approval are not Review items: they live only in Response, next to the plan that produced them.
             if (_lastInstruction is not null && !OrchestratorEnabled)
             {
                 review.Add(new ReviewItem(ReviewItemKind.RecordedInstruction,
@@ -1011,8 +947,6 @@ public sealed partial class SessionCoordinator
                 _activity.AsReadOnly(),
                 _noteKey,
                 _commandKey,
-                _relay.Enabled,
-                _relay.Chord?.ToString(),
                 _ledger.Path,
                 _ledger.LastSeq,
                 _ledger.LastHash,
@@ -1025,7 +959,7 @@ public sealed partial class SessionCoordinator
                 ResponseView(),
                 ProjectViews(),
                 WorkspaceViews(),
-                DraftViews(),
+                InboxViews(),
                 _settings.Orchestrator.Mode,
                 _services.Orchestrator.Name,
                 _settings.Model.Enabled,

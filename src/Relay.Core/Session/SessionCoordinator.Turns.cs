@@ -413,6 +413,19 @@ public sealed partial class SessionCoordinator : IExecutionSink
     public bool CreateProject(string name, string? slug = null, string? parent = null)
         => RunUserOperation(Actions.CreateProject, $"Create project '{name}'", Targets(("name", name), ("slug", slug), ("parent", parent)), "Created from the Projects panel.");
 
+    /// <summary>
+    /// The New project dialog: the user picks the folder the project should live in. When that folder
+    /// is not already inside a registered project folder it is registered first (recorded, never proposed),
+    /// then the project itself goes through proposal → policy → executor like every other write.
+    /// </summary>
+    public bool CreateProjectIn(string folder, string name, string? slug = null)
+    {
+        if (_shutDown) return false;
+        if (string.IsNullOrWhiteSpace(folder)) { _notice = "Choose the folder the project should be created in."; Notify(); return false; }
+        if (!_services.Roots.Check(folder).Ok && !RegisterWorkspace(folder)) return false;
+        return CreateProject(name, slug, folder);
+    }
+
     public bool ArchiveProject(string projectId)
         => RunUserOperation(Actions.ArchiveProject, "Archive project", Targets(("projectId", projectId)), "Archived from the Projects panel.");
 
@@ -477,7 +490,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
     }
 
     // ----------------------------------------------------------------------------------------
-    // Workspaces (UI-only; never proposed)
+    // Project folders (registered roots): the only places project writes may touch. Registration is
+    // a direct user act (New project… in a new folder, or a test), recorded in the ledger, never proposed.
     // ----------------------------------------------------------------------------------------
 
     public bool RegisterWorkspace(string path, string? label = null)
@@ -492,7 +506,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         {
-            _notice = "Workspace not registered: " + ex.Message;
+            _notice = "Project folder not registered: " + ex.Message;
             Notify();
             return false;
         }
@@ -527,7 +541,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         _settings.Model = copy.Model;
         _settings.Workers = copy.Workers;
         _settings.Hotkeys = copy.Hotkeys;
-        _settings.FlowRelay = copy.FlowRelay;
         _settings.Capture = copy.Capture;
         Append(EventTypes.SettingsChanged, new { hash = copy.ComputeHash(), orchestratorMode = copy.Orchestrator.Mode, modelEnabled = copy.Model.Enabled, endpoint = copy.Model.Endpoint, model = copy.Model.Model });
         SettingsChanged?.Invoke(copy);
@@ -715,9 +728,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
 
     private IReadOnlyList<WorkspaceView> WorkspaceViews()
         => _services.Roots.Registered.Select(r => new WorkspaceView(r.Path, r.Label, Directory.Exists(r.Path))).ToList();
-
-    private IReadOnlyList<DraftNoteView> DraftViews()
-        => _notes.Unrouted().Select(d => new DraftNoteView(d.NoteId, d.Type, d.CreatedAt, d.Text)).ToList();
 
     /// <summary>Marshals orchestrator progress onto the coordinator thread and into the ledger while the turn is live.</summary>
     private sealed class TurnSink : ITurnSink

@@ -121,7 +121,7 @@ public static class PolicyEngine
         string? parent = t.GetValueOrDefault("parent");
         if (string.IsNullOrWhiteSpace(parent))
         {
-            if (roots.Count == 0) { problems.Add("No workspace root is registered. Register a folder for projects first."); return problems; }
+            if (roots.Count == 0) { problems.Add("No project folder is known yet. Use New project… once to choose the folder projects live in."); return problems; }
             parent = roots[0].Path;
         }
         var check = w.Roots.Check(parent);

@@ -19,14 +19,10 @@ public enum ReviewItemKind
     HotkeyProblem,
     /// <summary>Why the system is LOCKED or FAILED. Actions: Unlock / Retry / Return to Idle.</summary>
     Incident,
-    /// <summary>A proposal awaiting the user's decision. Actions: Approve, Edit, Reject. Payload = proposalId.</summary>
-    Proposal,
     /// <summary>An instruction was mid-turn when the previous process ended. Informational.</summary>
     TurnInterrupted,
     /// <summary>A controlled write started but never finished in a previous run. Payload = proposalId.</summary>
     ExecutionInterrupted,
-    /// <summary>A note whose project routing is uncertain. Actions: choose project / keep unrouted. Payload = noteId.</summary>
-    RoutingDecision,
     /// <summary>Two notes that appear to conflict. Actions: keep both / supersede. Payload = json.</summary>
     DisputedNotes,
     /// <summary>Content that could not be indexed or read (e.g. a hand-edited note file).</summary>
@@ -79,9 +75,19 @@ public sealed record TurnResponse(
 
 public sealed record ProjectView(string Id, string Slug, string Name, string Status, string RootPath, bool FolderPresent);
 
+/// <summary>A registered project folder. Registration happens as a side effect of creating a project in a new folder; it is never proposed.</summary>
 public sealed record WorkspaceView(string Path, string? Label, bool Present);
 
-public sealed record DraftNoteView(string NoteId, string Type, DateTimeOffset CreatedAt, string Text);
+/// <summary>
+/// One unrouted note waiting in staging. When routing was uncertain, <paramref name="Candidates"/>
+/// holds the projects the router considered (best first) and <paramref name="Summary"/> says why it
+/// did not decide; otherwise both are empty and the note simply had no home. Actions: file under a
+/// project, or keep it here (which retires the suggestions).
+/// </summary>
+public sealed record InboxItem(string NoteId, string Type, DateTimeOffset CreatedAt, string Text, string? Summary, IReadOnlyList<Memory.RoutingCandidate> Candidates)
+{
+    public bool HasSuggestions => Candidates.Count > 0;
+}
 
 /// <summary>Everything the UI renders. Rebuilt by the coordinator after every change.</summary>
 public sealed record RelaySnapshot(
@@ -99,8 +105,6 @@ public sealed record RelaySnapshot(
     IReadOnlyList<ActivityEntry> Activity,
     HotkeyStatus NoteKey,
     HotkeyStatus CommandKey,
-    bool FlowRelayEnabled,
-    string? FlowRelayChord,
     string LedgerPath,
     long LedgerRecords,
     string LedgerLastHash,
@@ -113,7 +117,7 @@ public sealed record RelaySnapshot(
     TurnResponse? Response,
     IReadOnlyList<ProjectView> Projects,
     IReadOnlyList<WorkspaceView> Workspaces,
-    IReadOnlyList<DraftNoteView> DraftNotes,
+    IReadOnlyList<InboxItem> Inbox,
     string OrchestratorMode,
     string OrchestratorName,
     bool ModelEnabled,

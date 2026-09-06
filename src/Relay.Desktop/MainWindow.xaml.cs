@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
     private long _lastActivitySeq;
     private string _reviewSignature = "";
     private string _responseSignature = "";
+    private string _inboxSignature = "";
     private string _projectsSignature = "";
     private RelaySnapshot? _snapshot;
     private KeyChord? _noteChord;
@@ -178,6 +179,7 @@ public sealed partial class MainWindow : Window
         RenderCapture(s);
         RenderResponse(s);
         RenderReview(s);
+        RenderInbox(s);
         RenderProjects(s);
         RenderActivity(s);
         if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
@@ -198,7 +200,6 @@ public sealed partial class MainWindow : Window
         CommandKeyChip.Text = $"{s.CommandKey.Chord}  COMMAND";
         CommandKeyDot.Fill = new SolidColorBrush(s.CommandKey.Registered ? Palette.Good : Palette.Bad);
         ScopeChip.Text = s.NoteKey.WindowScoped ? "this window only" : "system-wide";
-        RelayChip.Text = s.FlowRelayEnabled ? $"Flow relay {s.FlowRelayChord}" : "Flow relay off";
         LedgerChip.Text = s.LedgerHealth == LedgerHealth.IntegrityFailure ? $"Ledger broken · {s.LedgerRecords}" : $"Ledger {s.LedgerRecords}";
         LedgerDot.Fill = new SolidColorBrush(s.LedgerHealth == LedgerHealth.Ok ? Palette.Good : s.LedgerHealth == LedgerHealth.TornTail ? Palette.Warn : Palette.Bad);
 
@@ -225,7 +226,7 @@ public sealed partial class MainWindow : Window
             RelayState.Starting => "Verifying the ledger and checking for interrupted work…",
             RelayState.Idle => (s.NoteKey.Registered || s.CommandKey.Registered)
                 ? $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
-                : "Hotkeys are not active. See Review for the reason. You can still type a note or an instruction below.",
+                : "The chords are not active. See Review for the reason and fix hotkeys in settings.json, then restart Relay.",
             RelayState.NoteCapture => $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply.",
             RelayState.CommandCapture => $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels.",
             RelayState.AwaitingTranscript => s.Awaiting?.TimedOut == true
@@ -280,16 +281,9 @@ public sealed partial class MainWindow : Window
         RetryButton.Visibility = Vis(s.CanRetry);
         UnlockButton.Visibility = Vis(s.State == RelayState.Locked);
 
-        // Keyboard-only path: the same transitions as the hotkeys, for machines without F13/F14 or without Flow.
-        TypeInstructionButton.Visibility = Vis(s.State is RelayState.Idle or RelayState.Completed or RelayState.CommandCapture);
-        TypeInstructionButton.Content = s.State == RelayState.CommandCapture ? "Send instruction" : "Type an instruction";
-        TypeNoteButton.Visibility = Vis(s.State is RelayState.Idle or RelayState.Completed or RelayState.NoteCapture);
-        TypeNoteButton.Content = s.State == RelayState.NoteCapture ? "Finish note" : "Type a note";
-
+        // The receipt for a completed capture is shown once, in the status line (StateDetailText).
         NoticeText.Text = s.Notice ?? "";
         NoticeText.Visibility = Vis(!string.IsNullOrEmpty(s.Notice));
-        ReceiptText.Text = s.Receipt ?? "";
-        ReceiptText.Visibility = Vis(s.State == RelayState.Completed && !string.IsNullOrEmpty(s.Receipt));
     }
 
     private void RenderActivity(RelaySnapshot s)
@@ -326,11 +320,11 @@ public sealed partial class MainWindow : Window
             ("Orchestrator", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nplanning timeout {settings.Orchestrator.PlanningTimeoutMs} ms · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
             ("Model", s.ModelEnabled ? $"{s.ModelName} at {s.ModelEndpoint}\nkey {(s.ModelKeyStored ? "stored (DPAPI, this account)" : "NOT STORED")} · timeout {settings.Model.TimeoutMs} ms · max output {settings.Model.MaxOutputTokens} tokens" : "disabled — no network connection is ever opened", null),
             ("Workers", settings.Workers.Enabled ? $"enabled · {settings.Workers.WallClockSeconds}s wall clock · {settings.Workers.MemoryMb} MB · {settings.Workers.MaxToolCalls} tool calls · job object sandbox" : "disabled (launch_worker is denied by policy)", _runtime.Root.AgentsDirectory),
-            ("Hotkeys", $"NOTE_KEY {s.NoteKey.Chord}: {(s.NoteKey.Registered ? "registered" : "FAILED — " + s.NoteKey.Error)}\nCOMMAND_KEY {s.CommandKey.Chord}: {(s.CommandKey.Registered ? "registered" : "FAILED — " + s.CommandKey.Error)}", null),
-            ("Flow relay", s.FlowRelayEnabled ? $"enabled · emits only {s.FlowRelayChord} · after {settings.FlowRelay.StartDelayMs} ms" : "disabled (flowRelay.enabled = false). Trigger Flow with its own hotkey.", null),
+            ("Hotkeys", $"NOTE_KEY {s.NoteKey.Chord}: {(s.NoteKey.Registered ? "registered" : "FAILED — " + s.NoteKey.Error)}\nCOMMAND_KEY {s.CommandKey.Chord}: {(s.CommandKey.Registered ? "registered" : "FAILED — " + s.CommandKey.Error)}\nscope {(s.NoteKey.WindowScoped ? "this window only" : "system-wide")} · Relay never synthesizes input; start and stop Flow with its own shortcut", null),
+            ("Project folders", s.Workspaces.Count == 0 ? "none yet — New project… registers the folder you pick" : string.Join("\n", s.Workspaces.Select(w => w.Path + (w.Present ? "" : "  (missing)"))), _runtime.Root.WorkspacesPath),
             ("Flow process", flow.Found ? $"detected: {flow.Name} (pid {flow.ProcessId})" : $"not detected (looking for {string.Join(", ", settings.Diagnostics.FlowProcessNames)})", null),
             ("Foreground", $"{ForegroundWindows.ForegroundProcessName() ?? "?"} · Relay is foreground: {ForegroundWindows.IsForeground(_hwnd)} · capture surface focused: {s.CaptureSurfaceFocused}", null),
-            ("Timeouts", $"transcript {settings.Capture.TranscriptTimeoutMs} ms · quiet {settings.Capture.StabilizationMs}/{settings.Capture.StabilizationWithoutRelayMs} ms · draft debounce {settings.Capture.DraftPersistDebounceMs} ms", null),
+            ("Timeouts", $"transcript {settings.Capture.TranscriptTimeoutMs} ms · quiet {settings.Capture.StabilizationMs} ms · draft debounce {settings.Capture.DraftPersistDebounceMs} ms", null),
             ("Window", $"hwnd 0x{_hwnd.ToInt64():X} · scale {WindowMetrics.ScaleFor(_hwnd):0.00}", null),
         };
 
@@ -405,11 +399,8 @@ public sealed partial class MainWindow : Window
     private void Dismiss_Click(object sender, RoutedEventArgs e) => _coordinator?.Dismiss();
     private void Retry_Click(object sender, RoutedEventArgs e) => _coordinator?.Retry();
     private void Unlock_Click(object sender, RoutedEventArgs e) => _coordinator?.Unlock();
-    private void TypeInstruction_Click(object sender, RoutedEventArgs e) => _coordinator?.PressCommandKey();
-    private void TypeNote_Click(object sender, RoutedEventArgs e) => _coordinator?.PressNoteKey();
     private async void Settings_Click(object sender, RoutedEventArgs e) => await ShowSettingsDialogAsync();
     private async void NewProject_Click(object sender, RoutedEventArgs e) => await ShowNewProjectDialogAsync();
-    private async void AddWorkspace_Click(object sender, RoutedEventArgs e) => await ShowAddWorkspaceDialogAsync();
     private void Backup_Click(object sender, RoutedEventArgs e) => _coordinator?.ExportBackup();
 
     private void ActivityList_Loaded(object sender, RoutedEventArgs e) => ScrollActivityToEnd();
@@ -492,9 +483,6 @@ public sealed partial class MainWindow : Window
             ForegroundWindows.BringToForeground(_w._hwnd);
             _w.CaptureBox.Focus(FocusState.Programmatic);
         }
-
-        public bool IsCaptureSurfaceForeground()
-            => ForegroundWindows.IsForeground(_w._hwnd) && _w.CaptureBoxHasFocus();
 
         public string? ForegroundProcessName() => ForegroundWindows.ForegroundProcessName();
     }

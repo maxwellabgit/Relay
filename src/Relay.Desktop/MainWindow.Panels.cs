@@ -181,27 +181,8 @@ public sealed partial class MainWindow
                     buttons.Children.Add(Button("Settings…", async () => await ShowSettingsDialogAsync()));
                     buttons.Children.Add(Button("Open settings.json", () => OpenInExplorer(_runtime!.Root.SettingsPath)));
                     break;
-                case ReviewItemKind.Proposal:
-                    if (item.Payload is { } proposalId && s.State == RelayState.AwaitingApproval)
-                    {
-                        var view = s.Response?.Proposals.FirstOrDefault(p => p.ProposalId == proposalId);
-                        buttons.Children.Add(Button("Approve", () => _coordinator!.Approve(proposalId), accent: true));
-                        if (view?.Editable == true) buttons.Children.Add(Button("Edit…", async () => await ShowEditProposalDialogAsync(view)));
-                        buttons.Children.Add(Button("Reject", () => _coordinator!.Reject(proposalId, "rejected by user")));
-                    }
-                    break;
                 case ReviewItemKind.ExecutionInterrupted:
                     buttons.Children.Add(Button("Open executions folder", () => OpenInExplorer(_runtime!.Root.ExecutionsDirectory)));
-                    break;
-                case ReviewItemKind.RoutingDecision:
-                    if (item.Payload is { } noteId)
-                    {
-                        var decision = _coordinator!.PendingRoutingDecisions.FirstOrDefault(d => d.NoteId == noteId);
-                        foreach (var c in decision?.Candidates.Take(3) ?? [])
-                            buttons.Children.Add(Button($"File under {c.Name}", () => _coordinator!.RouteDraftNote(noteId, c.ProjectId), accent: c == decision!.Candidates[0]));
-                        buttons.Children.Add(Button("Other project…", async () => await ShowChooseProjectDialogAsync("File this note under", id => _coordinator!.RouteDraftNote(noteId, id))));
-                        buttons.Children.Add(Button("Keep unrouted", () => _coordinator!.KeepUnrouted(noteId)));
-                    }
                     break;
                 case ReviewItemKind.DisputedNotes:
                     if (item.Payload is { } newNoteId)
@@ -216,24 +197,68 @@ public sealed partial class MainWindow
             }
             if (buttons.Children.Count > 0) { wrap.Children.Add(buttons); panel.Children.Add(wrap); }
 
-            ReviewItems.Children.Add(SubCard(panel, item.Kind switch { ReviewItemKind.Incident => "SystemFillColorCriticalBrush", ReviewItemKind.Proposal => "AccentFillColorDefaultBrush", _ => null }));
+            ReviewItems.Children.Add(SubCard(panel, item.Kind == ReviewItemKind.Incident ? "SystemFillColorCriticalBrush" : null));
         }
     }
 
     // ------------------------------------------------------------------------------------
-    // PROJECTS, WORKSPACES, STAGING
+    // INBOX: unrouted notes, each shown once, with the router's candidates when it asked
+    // ------------------------------------------------------------------------------------
+
+    private void RenderInbox(RelaySnapshot s)
+    {
+        var active = s.Projects.Where(p => p.Status == "active").ToList();
+        var signature = string.Join("|", s.Inbox.Select(i => $"{i.NoteId}:{i.Candidates.Count}")) + $"#{s.TurnActive}#{active.Count}";
+        var asking = s.Inbox.Count(i => i.HasSuggestions);
+        InboxCount.Text = s.Inbox.Count == 0 ? "" : $"{s.Inbox.Count} unrouted" + (asking > 0 ? $" · {asking} with suggestions" : "");
+        InboxEmpty.Visibility = Vis(s.Inbox.Count == 0);
+        if (signature == _inboxSignature) return;
+        _inboxSignature = signature;
+
+        InboxItems.Children.Clear();
+        foreach (var item in s.Inbox.Take(20))
+        {
+            var panel = new StackPanel { Spacing = 6 };
+            var header = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+            header.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"{item.Type} · {item.CreatedAt.ToLocalTime():MM-dd HH:mm}  ", Foreground = Secondary(), FontSize = 12 });
+            header.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Trim(item.Text, 240), FontSize = 13 });
+            panel.Children.Add(header);
+            if (item.HasSuggestions)
+            {
+                var why = item.Candidates.Select(c => $"{c.Name} {c.Confidence:0.00} ({string.Join(", ", c.Reasons)})");
+                panel.Children.Add(new TextBlock { Text = $"{item.Summary}  ·  " + string.Join("  ·  ", why), TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+            }
+
+            var noteId = item.NoteId;
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var first = true;
+            foreach (var c in item.Candidates.Take(3))
+            {
+                var projectId = c.ProjectId;
+                buttons.Children.Add(Button($"File under {c.Name}", () => _coordinator!.RouteDraftNote(noteId, projectId), accent: first, small: true, enabled: !s.TurnActive));
+                first = false;
+            }
+            buttons.Children.Add(Button(item.HasSuggestions ? "Other project…" : "File under…", async () => await ShowChooseProjectDialogAsync("File this note under", id => _coordinator!.RouteDraftNote(noteId, id)), small: true, enabled: !s.TurnActive && active.Count > 0));
+            if (item.HasSuggestions) buttons.Children.Add(Button("Keep here", () => _coordinator!.KeepUnrouted(noteId), small: true, enabled: !s.TurnActive));
+            panel.Children.Add(buttons);
+
+            InboxItems.Children.Add(SubCard(panel, item.HasSuggestions ? "AccentFillColorDefaultBrush" : null));
+        }
+        if (s.Inbox.Count > 20) InboxItems.Children.Add(new TextBlock { Text = $"… and {s.Inbox.Count - 20} more in staging\\notes", FontSize = 12, Foreground = Secondary() });
+    }
+
+    // ------------------------------------------------------------------------------------
+    // PROJECTS
     // ------------------------------------------------------------------------------------
 
     private void RenderProjects(RelaySnapshot s)
     {
-        var signature = string.Join("|", s.Projects.Select(p => $"{p.Id}:{p.Status}:{p.Name}:{p.FolderPresent}")) + "#" + string.Join("|", s.Workspaces.Select(w => $"{w.Path}:{w.Present}")) + "#" + string.Join("|", s.DraftNotes.Select(d => d.NoteId)) + $"#{s.State}";
+        var signature = string.Join("|", s.Projects.Select(p => $"{p.Id}:{p.Status}:{p.Name}:{p.FolderPresent}")) + $"#{s.State}";
         var active = s.Projects.Where(p => p.Status == "active").ToList();
         var archived = s.Projects.Count - active.Count;
         ProjectsCount.Text = s.Projects.Count == 0 ? "" : $"{active.Count} active" + (archived > 0 ? $" · {archived} archived" : "");
         ProjectsEmpty.Visibility = Vis(s.Projects.Count == 0);
-        WorkspacesEmpty.Visibility = Vis(s.Workspaces.Count == 0);
-        DraftsEmpty.Visibility = Vis(s.DraftNotes.Count == 0);
-        NewProjectButton.IsEnabled = s.Workspaces.Count > 0 && !s.TurnActive;
+        NewProjectButton.IsEnabled = !s.TurnActive;
         BackupButton.IsEnabled = !s.TurnActive;
         if (signature == _projectsSignature) return;
         _projectsSignature = signature;
@@ -260,38 +285,6 @@ public sealed partial class MainWindow
             row.Children.Add(buttons);
             ProjectItems.Children.Add(row);
         }
-
-        WorkspaceItems.Children.Clear();
-        foreach (var w in s.Workspaces)
-        {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = (w.Label is null ? "" : w.Label + "  ") + w.Path + (w.Present ? "" : "  (missing)"), FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true, Foreground = w.Present ? null : Res("SystemFillColorCriticalBrush") });
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            if (w.Present) buttons.Children.Add(Button("Open", () => OpenInExplorer(w.Path), small: true));
-            buttons.Children.Add(Button("Remove", () => _coordinator!.RemoveWorkspace(w.Path), small: true, enabled: !s.TurnActive));
-            Grid.SetColumn(buttons, 1);
-            row.Children.Add(buttons);
-            WorkspaceItems.Children.Add(row);
-        }
-
-        DraftItems.Children.Clear();
-        foreach (var d in s.DraftNotes.Take(20))
-        {
-            var row = new Grid { ColumnSpacing = 8 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true };
-            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"{d.Type} · {d.CreatedAt.ToLocalTime():MM-dd HH:mm}  ", Foreground = Secondary() });
-            text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Trim(d.Text, 160) });
-            row.Children.Add(text);
-            var file = Button("File under…", async () => await ShowChooseProjectDialogAsync("File this note under", id => _coordinator!.PromoteDraftNote(d.NoteId, id)), small: true, enabled: !s.TurnActive && active.Count > 0);
-            Grid.SetColumn(file, 1);
-            row.Children.Add(file);
-            DraftItems.Children.Add(row);
-        }
-        if (s.DraftNotes.Count > 20) DraftItems.Children.Add(new TextBlock { Text = $"… and {s.DraftNotes.Count - 20} more in staging/notes", FontSize = 12, Foreground = Secondary() });
     }
 
     // ------------------------------------------------------------------------------------
@@ -314,17 +307,43 @@ public sealed partial class MainWindow
         if (_coordinator is null) return;
         var name = new TextBox { PlaceholderText = "Project name", Header = "Name" };
         var slug = new TextBox { PlaceholderText = "derived from the name when empty", Header = "Folder slug (optional)" };
-        var parent = new ComboBox { Header = "Workspace", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var w in _snapshot?.Workspaces ?? []) parent.Items.Add(new ComboBoxItem { Content = w.Path, Tag = w.Path });
-        if (parent.Items.Count > 0) parent.SelectedIndex = 0;
-        var panel = new StackPanel { Spacing = 10, MinWidth = 380 };
+        var known = (_snapshot?.Workspaces ?? []).Where(w => w.Present).Select(w => w.Path).ToList();
+        var folder = new TextBox { Header = "Create in folder", Text = known.FirstOrDefault() ?? "", PlaceholderText = @"C:\Users\you\Projects", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var browse = Button("Browse…", async () =>
+        {
+            var picker = new global::Windows.Storage.Pickers.FolderPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
+            picker.FileTypeFilter.Add("*");
+            var picked = await picker.PickSingleFolderAsync();
+            if (picked is not null) folder.Text = picked.Path;
+        });
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(folder);
+        browse.VerticalAlignment = VerticalAlignment.Bottom;
+        Grid.SetColumn(browse, 1);
+        row.Children.Add(browse);
+
+        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
         panel.Children.Add(name);
         panel.Children.Add(slug);
-        panel.Children.Add(parent);
-        panel.Children.Add(new TextBlock { Text = "Creating a project is a controlled write: it becomes a proposal you approve in Response before the folder exists.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        panel.Children.Add(row);
+        if (known.Count > 1)
+        {
+            var others = new ComboBox { Header = "Folders already in use", HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "pick one to reuse" };
+            foreach (var path in known) others.Items.Add(new ComboBoxItem { Content = path, Tag = path });
+            others.SelectionChanged += (_, _) => { if ((others.SelectedItem as ComboBoxItem)?.Tag is string path) folder.Text = path; };
+            panel.Children.Add(others);
+        }
+        panel.Children.Add(new TextBlock
+        {
+            Text = "The project folder is created inside the folder you choose. A folder Relay has not used before is registered as a project folder first (recorded in the ledger); Relay never writes outside registered folders and its own data root. Creating the project is a controlled write: it becomes a proposal you approve in Response.",
+            TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary(),
+        });
         var dialog = Dialog("New project", panel, "Propose");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(name.Text)) return;
-        _coordinator.CreateProject(name.Text.Trim(), string.IsNullOrWhiteSpace(slug.Text) ? null : slug.Text.Trim(), (parent.SelectedItem as ComboBoxItem)?.Tag as string);
+        _coordinator.CreateProjectIn(folder.Text.Trim(), name.Text.Trim(), string.IsNullOrWhiteSpace(slug.Text) ? null : slug.Text.Trim());
     }
 
     private async Task ShowRenameProjectDialogAsync(ProjectView project)
@@ -334,35 +353,6 @@ public sealed partial class MainWindow
         var dialog = Dialog($"Rename “{project.Name}”", name, "Propose");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(name.Text) || name.Text.Trim() == project.Name) return;
         _coordinator.RenameProject(project.Id, name.Text.Trim());
-    }
-
-    private async Task ShowAddWorkspaceDialogAsync()
-    {
-        if (_coordinator is null) return;
-        var path = new TextBox { PlaceholderText = @"C:\Users\you\Projects", Header = "Folder", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var label = new TextBox { PlaceholderText = "optional", Header = "Label" };
-        var browse = Button("Browse…", async () =>
-        {
-            var picker = new global::Windows.Storage.Pickers.FolderPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
-            picker.FileTypeFilter.Add("*");
-            var folder = await picker.PickSingleFolderAsync();
-            if (folder is not null) path.Text = folder.Path;
-        });
-        var row = new Grid { ColumnSpacing = 8 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.Children.Add(path);
-        browse.VerticalAlignment = VerticalAlignment.Bottom;
-        Grid.SetColumn(browse, 1);
-        row.Children.Add(browse);
-        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
-        panel.Children.Add(row);
-        panel.Children.Add(label);
-        panel.Children.Add(new TextBlock { Text = "Relay only ever writes inside registered workspace folders and its own data root. Registration itself is recorded in the ledger.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
-        var dialog = Dialog("Add workspace folder", panel, "Register");
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(path.Text)) return;
-        _coordinator.RegisterWorkspace(path.Text.Trim(), string.IsNullOrWhiteSpace(label.Text) ? null : label.Text.Trim());
     }
 
     private async Task ShowChooseProjectDialogAsync(string title, Action<string> choose)
@@ -426,7 +416,7 @@ public sealed partial class MainWindow
         panel.Children.Add(auto);
         panel.Children.Add(review);
         var scopeText = current.Hotkeys.IsWindowScoped ? "active only while this window is focused" : "registered system-wide";
-        panel.Children.Add(new TextBlock { Text = $"Chords: {current.Hotkeys.NoteKey} for a note, {current.Hotkeys.CommandKey} for an instruction ({scopeText}). Chords, Flow relay and capture timing are edited in settings.json and need a restart. Everything here applies to the next turn.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        panel.Children.Add(new TextBlock { Text = $"Chords: {current.Hotkeys.NoteKey} for a note, {current.Hotkeys.CommandKey} for an instruction ({scopeText}). Chords and capture timing are edited in settings.json and need a restart. Everything here applies to the next turn.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
 
         var dialog = Dialog("Settings", new ScrollViewer { Content = panel, MaxHeight = 560 }, "Save");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;

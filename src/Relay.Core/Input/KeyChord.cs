@@ -14,9 +14,9 @@ public enum KeyModifiers
 /// A key combination expressed as modifiers plus one virtual-key code, parsed from a
 /// human-readable string such as <c>F13</c>, <c>Ctrl+Alt+N</c> or <c>Ctrl+Win+F24</c>.
 /// Virtual-key values follow the Win32 table so the Windows layer can pass them straight
-/// to RegisterHotKey and SendInput without a second mapping. A chord made of modifiers only
-/// (<c>Ctrl+Alt</c>) is valid for window-local accelerators, which see raw key state, but not
-/// for global registration or SendInput, which need a key.
+/// to RegisterHotKey without a second mapping. A chord made of modifiers only (<c>Ctrl+Alt</c>)
+/// is valid for window-local accelerators, which see raw key state, but not for global
+/// registration, which needs a key.
 /// </summary>
 public sealed record KeyChord(KeyModifiers Modifiers, ushort VirtualKey, string KeyName)
 {
