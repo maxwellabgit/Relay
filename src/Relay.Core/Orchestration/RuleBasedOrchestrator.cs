@@ -132,6 +132,7 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
             }
             return Done(new TurnPlan(true, $"Show notes in '{project.Name}'", steps, sb.ToString().TrimEnd(), [], [], Name));
         }
+        if (TryShape(text, request, context, steps) is { } shaped) return Done(shaped);
         if ((m = FileNote().Match(text)).Success)
         {
             var name = Clean(m.Groups["name"].Value);

@@ -129,9 +129,11 @@ public static class ActivityFormatter
             EventTypes.TaskCancelled => $"Task {Short(r.DataString("taskId"))} cancelled while {r.DataString("stage")}",
             EventTypes.TaskUserResponse => $"You responded to task {Short(r.DataString("taskId"))}",
             EventTypes.TaskInterruptedFound => $"Found a {r.DataString("origin")} task that was {r.DataString("stage")} when the previous session ended",
-            EventTypes.GrantApplied => r.DataString("proposalId") is null
-                ? $"Standing grant {Short(r.DataString("grantId"))} created for {r.DataString("action")}"
-                : $"Standing grant {Short(r.DataString("grantId"))} approved {r.DataString("action")} ({Short(r.DataString("proposalId"))})",
+            EventTypes.GrantApplied => r.DataString("noteId") is { } grantedNote
+                ? $"Standing grant {Short(r.DataString("grantId"))} filed note {Short(grantedNote)} without asking"
+                : r.DataString("proposalId") is null
+                    ? $"Standing grant {Short(r.DataString("grantId"))} created for {r.DataString("action")}"
+                    : $"Standing grant {Short(r.DataString("grantId"))} approved {r.DataString("action")} ({Short(r.DataString("proposalId"))})",
 
             // Transformations and self-change
             EventTypes.NoteMoved => $"Moved note {Short(r.DataString("noteId"))} to {Path.GetFileName(Path.GetDirectoryName(r.DataString("toPath") ?? "") ?? "")}",

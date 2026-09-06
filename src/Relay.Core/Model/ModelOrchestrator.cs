@@ -185,6 +185,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         sb.Append("for a check task, search first, set consistent, cite both the stored note and the excerpt, and when the stated fact conflicts with a stored decision propose supersede_note with newText (the corrected decision in one sentence) so the user can update the record with one approval; ");
         sb.Append("state the knowledge gap honestly: 'missing' is what has no local source, 'capability_gap' is true only when you cannot do the work even with the sources; propose model.request only when capability_gap is true and the user's request needs it; ");
         sb.Append("when several operations belong together give each an id and use depends_on so a prerequisite can be approved before its dependents; ");
+        sb.Append("for a direct request about how Relay itself should behave propose update_preference with the typed key (and for response style also update_prompt planner: the current fragment plus the user's instruction as one line) rather than answering in prose; ");
         sb.Append("when the request is ambiguous say so in the answer and propose nothing; keep summary and steps short and factual.");
         if (context?.Preferences is { } prefs) sb.Append("\n\nResponse style (the user's preference; obey it): ").Append(prefs.PromptFragment);
         if (!string.IsNullOrWhiteSpace(context?.PromptFragment)) sb.Append("\n\nAdditional instructions approved by the user: ").Append(context!.PromptFragment);

@@ -1,9 +1,20 @@
 using Relay.Core.Ledger;
+using Relay.Core.Orchestration;
 using Relay.Core.Session;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 
 namespace Relay.Tests.Support;
+
+/// <summary>A planner sink that records nothing, for driving an orchestrator outside a task.</summary>
+public sealed class NullTurnSink : ITurnSink
+{
+    public void Progress(string text) { }
+    public void ToolCalled(string tool, IReadOnlyDictionary<string, string> args) { }
+    public void ToolReturned(string tool, bool ok, string summary, int items) { }
+    public void ModelRequested(string host, string model, int promptChars, int sources) { }
+    public void ModelResponded(bool ok, int chars, long elapsedMs, string? error, int promptTokens = 0, int completionTokens = 0) { }
+}
 
 public sealed class FixedClock : IClock
 {

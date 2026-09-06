@@ -130,6 +130,28 @@ public sealed class Harness : IDisposable
 
     public RelaySnapshot Snap => Coordinator.Snapshot;
 
+    /// <summary>A reader over the same prompt fragments and change sets the coordinator's self-change runtime writes.</summary>
+    public SelfChangeRuntime SelfChange => _selfChange ??= new SelfChangeRuntime(Root, Preferences, ChangeSets, () => Clock.UtcNow);
+    private SelfChangeRuntime? _selfChange;
+
+    /// <summary>A planner context equivalent to the one the coordinator hands a task, for driving an orchestrator directly.</summary>
+    public TurnContext PlannerContext(ITurnSink? sink = null)
+    {
+        var s = sink ?? new NullTurnSink();
+        return new TurnContext
+        {
+            Tools = new ToolBroker(new ToolSources { Registry = Registry, Drafts = Notes, Index = Index, Excerpts = Excerpts, Preferences = () => Preferences.Compiled() }, s, SettingsLoad.Settings.Orchestrator.MaxToolCalls),
+            Sink = s,
+            Registry = Registry,
+            Roots = Roots,
+            Drafts = Notes,
+            Settings = SettingsLoad.Settings.Orchestrator,
+            Preferences = Preferences.Compiled(),
+            ExternalProfiles = External?.ProfileNames ?? [],
+            PromptFragment = SelfChange.PromptFragment("planner"),
+        };
+    }
+
     public Harness Start()
     {
         Coordinator.Start(Recovery);

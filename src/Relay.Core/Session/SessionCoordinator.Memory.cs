@@ -101,9 +101,17 @@ public sealed partial class SessionCoordinator
         var auto = _settings.Orchestrator.AutoRouteThreshold;
         var review = _settings.Orchestrator.ReviewThreshold;
         var projectAuto = best is { } b && _services.Registry.ById(b.ProjectId) is { } p ? p.Policy.AutoRouteThreshold ?? auto : auto;
-        if (best is not null && best.Confidence >= projectAuto)
+        // A standing grant ("file Atlas decisions without asking") files at the Review threshold instead of waiting for the user.
+        var grant = best is null ? null : Preferences.Grants.FirstOrDefault(g => g.Covers(Actions.RouteNote, new Dictionary<string, string> { ["projectId"] = best.ProjectId, ["type"] = type }));
+        var threshold = grant is null ? projectAuto : Math.Min(projectAuto, review);
+        if (best is not null && best.Confidence >= threshold)
         {
             var project = _services.Registry.ById(best.ProjectId)!;
+            if (grant is not null && best.Confidence < projectAuto)
+            {
+                Append(EventTypes.GrantApplied, new { taskId, noteId = note.NoteId, action = Actions.RouteNote, grantId = grant.GrantId, projectId = project.Id, noteType = grant.NoteType, confidence = best.Confidence });
+                best = best with { Reasons = [.. best.Reasons, $"standing grant {grant.GrantId} files {project.Slug} {(grant.NoteType is null ? "notes" : grant.NoteType + "s")} without asking"] };
+            }
             var existing = Directory.Exists(project.RootPath) ? ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note).ToList() : [];
             var disputes = DisputeDetector.Find(type, text, existing);
             var target = new Dictionary<string, string>(StringComparer.Ordinal)

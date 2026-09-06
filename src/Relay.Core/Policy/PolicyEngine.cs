@@ -360,10 +360,15 @@ public static class PolicyEngine
                 if (string.IsNullOrWhiteSpace(value) || value.Length > 300) problems.Add("value must be a prompt line under 300 characters.");
                 break;
             case "filing.grant":
-            case "filing.revoke":
                 if (string.IsNullOrWhiteSpace(value)) problems.Add("value must be the granted action (e.g. route_note).");
                 else if (Actions.NeverGranted.Contains(value)) problems.Add($"'{value}' can never be covered by a standing grant.");
                 else if (TierOf(value) == Tier.Prohibited) problems.Add($"'{value}' is not an action that can be granted.");
+                else if (t.TryGetValue("action", out var granted) && granted != value) problems.Add("target.action must equal target.value (the granted action).");
+                if (string.IsNullOrWhiteSpace(t.GetValueOrDefault("projectId"))) problems.Add("A standing grant must name target.projectId.");
+                if (t.TryGetValue("noteType", out var noteType) && !string.IsNullOrWhiteSpace(noteType) && !Notes.NoteTypes.All.Contains(noteType)) problems.Add($"target.noteType '{noteType}' is not a note type.");
+                break;
+            case "filing.revoke":
+                if (string.IsNullOrWhiteSpace(value) || !Ids.Ulid.IsValid(value)) problems.Add("value must be the id of the standing grant to revoke.");
                 break;
             case "sources.allowOnlineSearch":
                 if (value is not ("true" or "false")) problems.Add("value must be true or false.");
