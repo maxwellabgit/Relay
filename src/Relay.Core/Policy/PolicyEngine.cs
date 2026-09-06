@@ -346,7 +346,7 @@ public static class PolicyEngine
         var problems = new List<string>();
         var key = t.GetValueOrDefault("key");
         var value = t.GetValueOrDefault("value");
-        if (string.IsNullOrWhiteSpace(key)) { problems.Add("target.key is required (response.verbosity, display.alwaysShow, filing.grant, response.promptLine, sources.allowOnlineSearch, retention.bufferSeconds)."); return problems; }
+        if (string.IsNullOrWhiteSpace(key)) { problems.Add("target.key is required (response.verbosity, response.promptLine, display.alwaysShow, display.stopShowing, display.maxAlertsPer10Minutes, display.maxResultsPer5Minutes, display.cooldownSeconds, filing.grant, filing.revoke, retention.bufferSeconds, retention.excerptMaxSeconds, sources.allowOnlineSearch)."); return problems; }
         switch (key)
         {
             case "response.verbosity":
@@ -370,6 +370,16 @@ public static class PolicyEngine
                 break;
             case "retention.bufferSeconds":
                 if (!int.TryParse(value, out var s) || s is < 15 or > 600) problems.Add("value must be 15–600 seconds.");
+                break;
+            case "retention.excerptMaxSeconds":
+                if (!int.TryParse(value, out var e) || e is < 5 or > 120) problems.Add("value must be 5–120 seconds.");
+                break;
+            case "display.maxAlertsPer10Minutes":
+            case "display.maxResultsPer5Minutes":
+                if (!int.TryParse(value, out var n) || n is < 0 or > 50) problems.Add("value must be a count from 0 to 50.");
+                break;
+            case "display.cooldownSeconds":
+                if (!int.TryParse(value, out var c) || c is < 0 or > 3600) problems.Add("value must be 0–3600 seconds.");
                 break;
             default:
                 problems.Add($"'{key}' is not a preference Relay knows.");

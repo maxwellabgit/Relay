@@ -137,14 +137,15 @@ public sealed class AttentionArbiter
             return (Presentation.Result, "a direct ask is always answered");
         }
 
-        // The user already answered this finding's proposal card (approved or rejected): a subtle confirmation, never a second alert.
-        if (x.ExecutedOperations > 0) return (Presentation.Ambient, $"{x.ExecutedOperations} approved operation(s) ran; subtle confirmation only");
+        if (x.Kind == TaskKind.Remember) return (Presentation.Ambient, x.ExecutedOperations > 0 ? "note filed; subtle indicator only" : "note kept in the inbox; subtle indicator only");
+
+        // Something ran (approved by the user or covered by a standing grant), or the user declined the proposal card:
+        // a subtle confirmation at most, never a second alert about a finding that was already handled.
+        if (x.ExecutedOperations > 0) return (Presentation.Ambient, $"{x.ExecutedOperations} operation(s) ran (approved or granted); subtle confirmation only");
         if (x.RejectedProposals > 0) return (Presentation.None, "the proposal was declined; nothing more to show");
 
         switch (x.Kind)
         {
-            case TaskKind.Remember:
-                return (Presentation.Ambient, x.ExecutedOperations > 0 ? "note filed; subtle indicator only" : "note kept in the inbox; subtle indicator only");
             case TaskKind.Check:
                 if (x.Consistent == true) return (Presentation.None, "observed statement agrees with stored facts; nothing to show");
                 if (x.Consistent == false)
@@ -160,7 +161,7 @@ public sealed class AttentionArbiter
                 return (x.HasAnswer ? Presentation.Findings : Presentation.None, x.HasAnswer ? "findings ready" : "nothing learned");
             case TaskKind.Organize:
             case TaskKind.Improve:
-                return (x.ExecutedOperations > 0 ? Presentation.Ambient : Presentation.None, x.ExecutedOperations > 0 ? "granted operation ran" : "nothing to propose");
+                return (Presentation.None, "nothing to propose");
             case TaskKind.Answer:
                 return (x.HasAnswer ? Presentation.Result : Presentation.None, x.HasAnswer ? "answer to something overheard" : "no answer");
             default:

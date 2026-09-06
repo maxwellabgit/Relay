@@ -179,7 +179,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         sb.Append("- launch_worker {projectId, task:\"summarize\", objective}\n- apply_patch {projectId, runId, output, destination}\n- export_backup {path?}\n");
         sb.Append("- model.request {profile, objective, refs:\"<comma-separated ids returned by tools>\", budgetTokens, allowSearch} to delegate bounded work to a named external model");
         if (context is { ExternalProfiles.Count: > 0 }) sb.Append(" (profiles: ").Append(string.Join(", ", context.ExternalProfiles)).Append(')');
-        sb.Append("\n- update_preference {key, value} for response.verbosity | display.alwaysShow | display.stopShowing | filing.grant | filing.revoke | response.promptLine | sources.allowOnlineSearch | retention.bufferSeconds\n");
+        sb.Append("\n- update_preference {key, value} for response.verbosity | response.promptLine | display.alwaysShow | display.stopShowing | display.maxAlertsPer10Minutes | display.maxResultsPer5Minutes | display.cooldownSeconds | filing.grant | filing.revoke | sources.allowOnlineSearch | retention.bufferSeconds | retention.excerptMaxSeconds\n");
         sb.Append("- update_prompt {name:\"planner\"|\"judge\", content}\n\n");
         sb.Append("Rules: cite only ids that a tool returned in this task; never invent ids, paths, or facts; prefer tool results over guessing; ");
         sb.Append("for a check task, search first, set consistent, cite both the stored note and the excerpt, and when the stated fact conflicts with a stored decision propose supersede_note with newText (the corrected decision in one sentence) so the user can update the record with one approval; ");
