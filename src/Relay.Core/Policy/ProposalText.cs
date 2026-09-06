@@ -22,7 +22,11 @@ public static class ProposalText
             Actions.LaunchWorker => ($"Run a sandboxed worker: {Get("task")} '{slug}'", $"Objective: {Get("objective")}\nNetwork: {Get("network", "false")}\nThe worker reads project notes through the broker and writes only to its staging out folder. Applying its output is a separate approval."),
             Actions.ApplyPatch => ($"Apply worker output to '{slug}/{Get("destination")}'", $"From run {Short(Get("runId"))} file {Get("output")}. Existing files are versioned before being replaced."),
             Actions.ExportBackup => ("Export a verified backup", $"Zip: {Get("path", "(backups folder)")}\nContains the data root and every active project with a hashed manifest; verified after writing."),
-            Actions.DeleteProject => ($"Permanently delete project '{slug}'", "Prohibited: Relay archives, it never deletes."),
+            Actions.DeleteProject => ($"Permanently delete project '{slug}'", "Removes the folder and every note in it. This is not an archive: nothing can be restored afterwards. A verified backup of the project is written to the backups folder first."),
+            Actions.MoveNote => ($"Move note {Short(Get("noteId"))} from '{slug}' to '{Get("toProjectSlug", Get("toProjectId"))}'", "The note file and its version history move to the destination project; the source keeps a pointer in .orchestrator."),
+            Actions.ModelRequest => ($"Send a package to external model '{Get("profile")}'", $"Objective: {Get("objective")}\nReferences leaving the machine: {(Get("refs", "").Length == 0 ? "none" : Get("refs"))}\nBudget: {Get("budgetTokens")} tokens · online search: {Get("allowSearch", "false")}\nThe exact package is hashed and logged; the response is stored as a source artifact."),
+            Actions.UpdatePreference => ($"Change preference {Get("key")}", $"New value: {Get("value")}\nApplied as a reversible change set to config\\preferences.json."),
+            Actions.UpdatePrompt => ($"Change the '{Get("name")}' prompt fragment", $"New text ({Get("content").Length} chars): {Truncate(Get("content"), 300)}\nApplied as a reversible change set; the previous text is kept."),
             _ => (p.Action, string.Join("\n", p.Target.Select(kv => $"{kv.Key}: {kv.Value}"))),
         };
         return (title, detail + (string.IsNullOrWhiteSpace(p.Reason) ? "" : $"\n\nWhy: {p.Reason}"));
@@ -37,6 +41,10 @@ public static class ProposalText
         Actions.ApplyPatch => ["destination"],
         Actions.ExportBackup => ["path"],
         Actions.ModifyNote => ["body", "status"],
+        Actions.MoveNote => ["toProjectId"],
+        Actions.ModelRequest => ["objective", "profile", "budgetTokens", "allowSearch"],
+        Actions.UpdatePreference => ["value"],
+        Actions.UpdatePrompt => ["content"],
         _ => [],
     };
 

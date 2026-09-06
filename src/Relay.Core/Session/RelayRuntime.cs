@@ -2,15 +2,21 @@ using Relay.Core.Agents;
 using Relay.Core.Captures;
 using Relay.Core.Config;
 using Relay.Core.Execution;
+using Relay.Core.External;
 using Relay.Core.Ids;
+using Relay.Core.Judge;
 using Relay.Core.Ledger;
+using Relay.Core.Model;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
+using Relay.Core.Preferences;
 using Relay.Core.Projects;
 using Relay.Core.Recovery;
 using Relay.Core.Search;
+using Relay.Core.SelfChange;
 using Relay.Core.Sessions;
 using Relay.Core.Storage;
+using Relay.Core.Stream;
 using Relay.Core.Time;
 using Relay.Core.Workspaces;
 
@@ -19,18 +25,19 @@ namespace Relay.Core.Session;
 /// <summary>Host-supplied factories for the parts that depend on platform or network.</summary>
 public sealed class RuntimeOptions
 {
-    /// <summary>Builds the model-backed orchestrator when settings enable it; null keeps rules only.</summary>
-    public Func<RelaySettings, IOrchestrator?>? ModelOrchestratorFactory { get; init; }
+    /// <summary>Builds a chat client for a model endpoint (RELAY0's own, or an external profile). Null keeps everything local and heuristic.</summary>
+    public Func<ModelSettings, IModelClient?>? ModelClientFactory { get; init; }
     /// <summary>Builds the process host for workers (job object on Windows); null or a null result disables workers.</summary>
     public Func<RelaySettings, IWorkerHost?>? WorkerHostFactory { get; init; }
-    /// <summary>The protected secret store for the model API key; null when the host has none.</summary>
-    public Model.ISecretStore? Secrets { get; init; }
+    /// <summary>The protected secret store for API keys; null when the host has none.</summary>
+    public ISecretStore? Secrets { get; init; }
 }
 
 /// <summary>
 /// Composition root for one application run. Performs the startup sequence in the only safe
 /// order: lay out storage → load settings → verify and repair the ledger → open it for append
-/// (acquiring the single-writer lock) → build the projections and coordinator → let it record the findings.
+/// (acquiring the single-writer lock) → build the projections, judge, planner, runtimes and the
+/// coordinator → let it record the findings.
 /// </summary>
 public sealed class RelayRuntime : IDisposable
 {
@@ -65,10 +72,14 @@ public sealed class RelayRuntime : IDisposable
 
         var registry = new ProjectRegistry(root);
         var roots = new WorkspaceRoots(root);
+        var excerpts = new ExcerptStore(root);
+        var changeSets = new ChangeSetStore(root);
+        var preferences = new PreferenceStore(root, changeSets);
         var indexProblems = new List<string>();
-        var index = SearchIndex.Build(recovery.Verification.Records, notes, registry, indexProblems);
+        var index = SearchIndex.Build(recovery.Verification.Records, notes, registry, indexProblems, excerpts);
 
         var orchestrator = BuildOrchestrator(settings.Settings, options);
+        var judge = BuildJudge(settings.Settings, options);
 
         WorkerRuntime? workers = null;
         if (settings.Settings.Workers.Enabled && options.WorkerHostFactory?.Invoke(settings.Settings) is { } workerHost)
@@ -76,13 +87,28 @@ public sealed class RelayRuntime : IDisposable
             workers = new WorkerRuntime(root, registry, workerHost, clock, scheduler, settings.Settings.Workers);
         }
 
-        var services = new CoordinatorServices
+        ExternalRuntime? external = null;
+        CoordinatorServices? servicesRef = null;
+        if (options.ModelClientFactory is { } factory)
+        {
+            external = new ExternalRuntime(root, settings.Settings.ExternalModels, profile => factory(profile.AsModelSettings()) ?? throw new ArgumentException("no client for profile " + profile.Name),
+                () => new ToolSources { Registry = registry, Drafts = notes, Index = servicesRef!.Index, Excerpts = excerpts, ReadArtifact = id => servicesRef!.External!.ReadArtifact(id), Preferences = () => preferences.Compiled() },
+                scheduler, () => clock.UtcNow);
+            foreach (var (id, text, at) in external.AllArtifacts()) index.IndexArtifact(id, text, at);
+        }
+
+        var services = servicesRef = new CoordinatorServices
         {
             Registry = registry,
             Roots = roots,
             Orchestrator = orchestrator,
+            Judge = judge,
             Index = index,
             Workers = workers,
+            External = external,
+            Excerpts = excerpts,
+            ChangeSets = changeSets,
+            Preferences = preferences,
             Secrets = options.Secrets,
             IndexProblems = indexProblems,
         };
@@ -91,19 +117,36 @@ public sealed class RelayRuntime : IDisposable
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
             host, clock, scheduler, appVersion, processId, services);
         if (workers is not null) Connect(workers, coordinator);
-        // Orchestrator mode and model settings changed in the UI take effect on the next turn.
-        coordinator.SettingsChanged += changed => services.Orchestrator = BuildOrchestrator(changed, options);
+        if (external is not null) external.Completed = coordinator.CompletePendingOperation;
+        // Model, judge and orchestrator settings changed in the UI take effect on the next task or judge pass.
+        coordinator.SettingsChanged += changed =>
+        {
+            services.Orchestrator = BuildOrchestrator(changed, options);
+            services.Judge = BuildJudge(changed, options);
+        };
 
         return new RelayRuntime(root, ledger, coordinator, recovery, settings, services);
     }
 
-    /// <summary>Rules always; the model only when the mode asks for it, it is enabled, and the host can build a client.</summary>
+    /// <summary>
+    /// The deterministic grammar plans first (instant, free, exact for the fixed commands); RELAY0's
+    /// model takes everything the grammar does not cover — prose asks, judge findings, follow-ups.
+    /// </summary>
     public static IOrchestrator BuildOrchestrator(RelaySettings settings, RuntimeOptions options)
     {
-        IOrchestrator orchestrator = new RuleBasedOrchestrator();
-        if (settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Model.Enabled && options.ModelOrchestratorFactory?.Invoke(settings) is { } model)
-            orchestrator = new CompositeOrchestrator(orchestrator, model);
-        return orchestrator;
+        IOrchestrator rules = new RuleBasedOrchestrator();
+        if (settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Model.Enabled && options.ModelClientFactory?.Invoke(settings.Model) is { } client)
+            return new CompositeOrchestrator(rules, new ModelOrchestrator(client, settings.Model.MaxOutputTokens));
+        return rules;
+    }
+
+    /// <summary>The judge: off, the labeled heuristic, or RELAY0's model (which falls back to the heuristic per pass when unreachable).</summary>
+    public static IJudge BuildJudge(RelaySettings settings, RuntimeOptions options)
+    {
+        if (settings.Judge.Mode == JudgeSettings.Off) return new NullJudge();
+        if (settings.Judge.Mode == JudgeSettings.Model && settings.Model.Enabled && options.ModelClientFactory?.Invoke(settings.Model) is { } client)
+            return new ModelJudge(client, settings.Judge.MaxOutputTokens, settings.Judge.MinConfidence);
+        return new HeuristicJudge();
     }
 
     /// <summary>Worker results re-enter the coordinator as pending-operation completions; stop requests flow the other way.</summary>

@@ -2,17 +2,22 @@ using Relay.Core.Agents;
 using Relay.Core.Captures;
 using Relay.Core.Config;
 using Relay.Core.Execution;
+using Relay.Core.External;
 using Relay.Core.Ids;
+using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Model;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
+using Relay.Core.Preferences;
 using Relay.Core.Projects;
 using Relay.Core.Recovery;
 using Relay.Core.Search;
+using Relay.Core.SelfChange;
 using Relay.Core.Session;
 using Relay.Core.Sessions;
 using Relay.Core.Storage;
+using Relay.Core.Stream;
 using Relay.Core.Workspaces;
 
 namespace Relay.Tests.Support;
@@ -22,8 +27,19 @@ public sealed class Harness : IDisposable
 {
     public static readonly DateTimeOffset T0 = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// The test profile applied to a fresh data root: the judge is off, so the note chord dictates a
+    /// note (the path most tests exercise). Listening tests turn the judge on in <c>configure</c>.
+    /// Settings already on disk (restarts) are left alone.
+    /// </summary>
+    public static void TestProfile(RelaySettings s)
+    {
+        s.Judge.Mode = JudgeSettings.Off;
+    }
+
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
-        IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true)
+        IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true,
+        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
         // inlined; the in-process worker pipes depend on inline continuations to keep a whole run on this thread.
@@ -32,15 +48,18 @@ public sealed class Harness : IDisposable
         Clock = clock ?? new FixedClock(T0);
         Scheduler = new ManualScheduler(Clock) { InlinePost = inlinePost };
         Host = new FakeHost();
+        Secrets = secrets ?? new MemorySecretStore();
 
         root.EnsureLayout(Clock);
-        if (configure is not null)
+        var first = SettingsStore.Load(root);
+        if (first.CreatedDefault || configure is not null)
         {
-            var s = SettingsStore.Load(root).Settings;
-            configure(s);
+            var s = first.Settings;
+            if (first.CreatedDefault) TestProfile(s);
+            configure?.Invoke(s);
             AtomicFile.WriteAllText(root.SettingsPath, System.Text.Json.JsonSerializer.Serialize(s, RelayJson.Indented));
         }
-        SettingsLoad = SettingsStore.Load(root);
+        SettingsLoad = SettingsStore.Load(root) with { CreatedDefault = first.CreatedDefault };
 
         Drafts = new FileDraftStore(root);
         Notes = new FileDraftNoteStore(root);
@@ -51,30 +70,50 @@ public sealed class Harness : IDisposable
 
         Registry = new ProjectRegistry(root);
         Roots = new WorkspaceRoots(root);
+        Excerpts = new ExcerptStore(root);
+        ChangeSets = new ChangeSetStore(root);
+        Preferences = new PreferenceStore(root, ChangeSets);
         var indexProblems = new List<string>();
-        Index = SearchIndex.Build(Recovery.Verification.Records, Notes, Registry, indexProblems);
+        Index = SearchIndex.Build(Recovery.Verification.Records, Notes, Registry, indexProblems, Excerpts);
         if (workerHost is not null) Workers = new WorkerRuntime(root, Registry, workerHost, Clock, Scheduler, SettingsLoad.Settings.Workers);
+        if (externalClients is not null)
+        {
+            External = new ExternalRuntime(root, SettingsLoad.Settings.ExternalModels, externalClients,
+                () => new ToolSources { Registry = Registry, Drafts = Notes, Index = Index, Excerpts = Excerpts, ReadArtifact = id => External!.ReadArtifact(id), Preferences = () => Preferences.Compiled() },
+                Scheduler, () => Clock.UtcNow);
+            foreach (var (id, text, at) in External.AllArtifacts()) Index.IndexArtifact(id, text, at);
+        }
         Services = new CoordinatorServices
         {
             Registry = Registry,
             Roots = Roots,
             Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
+            Judge = judge ?? (SettingsLoad.Settings.Judge.Mode == JudgeSettings.Off ? new NullJudge() : new HeuristicJudge()),
             Index = Index,
             Workers = Workers,
+            External = External,
+            Excerpts = Excerpts,
+            ChangeSets = ChangeSets,
+            Preferences = Preferences,
             Secrets = Secrets,
             IndexProblems = indexProblems,
         };
 
         Coordinator = new SessionCoordinator(root, Faulty, Recovery.Verification, Drafts, Notes, Sessions, SettingsLoad, Host, Clock, Scheduler, "0.1.0-test", 4242, Services);
         if (Workers is not null) RelayRuntime.Connect(Workers, Coordinator);
+        if (External is not null) External.Completed = Coordinator.CompletePendingOperation;
     }
 
     public ProjectRegistry Registry { get; }
     public WorkspaceRoots Roots { get; }
     public SearchIndex Index { get; }
+    public ExcerptStore Excerpts { get; }
+    public ChangeSetStore ChangeSets { get; }
+    public PreferenceStore Preferences { get; }
+    public ExternalRuntime? External { get; }
     public CoordinatorServices Services { get; }
     public WorkerRuntime? Workers { get; }
-    public MemorySecretStore Secrets { get; } = new();
+    public MemorySecretStore Secrets { get; }
 
     public DataRoot Root { get; }
     public FixedClock Clock { get; }

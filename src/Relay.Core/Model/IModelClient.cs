@@ -2,8 +2,13 @@ namespace Relay.Core.Model;
 
 public sealed record ModelMessage(string Role, string Content);
 
-/// <summary>One chat completion request. The gateway sends exactly this and nothing else.</summary>
-public sealed record ModelRequest(string Model, IReadOnlyList<ModelMessage> Messages, int MaxOutputTokens, bool JsonObject);
+/// <summary>
+/// One chat completion request. The gateway sends exactly this and nothing else. When
+/// <see cref="JsonSchema"/> is set the gateway asks for schema-constrained output (llama.cpp turns
+/// it into a grammar; OpenAI-compatible hosts use structured outputs); <see cref="JsonObject"/> is
+/// the weaker "any JSON object" request for hosts that cannot take a schema.
+/// </summary>
+public sealed record ModelRequest(string Model, IReadOnlyList<ModelMessage> Messages, int MaxOutputTokens, bool JsonObject, string? JsonSchema = null, string SchemaName = "relay");
 
 public sealed record ModelResponse(bool Ok, string? Content, int PromptTokens, int CompletionTokens, long ElapsedMs, string? Error, int? HttpStatus = null)
 {
@@ -12,7 +17,8 @@ public sealed record ModelResponse(bool Ok, string? Content, int PromptTokens, i
 
 /// <summary>
 /// The only way a model is reached. Implementations live outside Relay.Core (the core has no
-/// network); the single implementation talks to one allow-listed OpenAI-compatible endpoint.
+/// network); the implementation talks to one allow-listed OpenAI-compatible endpoint: loopback
+/// http for the local RELAY0 model, https for anything else.
 /// </summary>
 public interface IModelClient
 {

@@ -100,19 +100,37 @@ public sealed class ModelGatewayTests : IDisposable
     public void ModelProposingAProhibitedActionIsDeniedOnTheRecord()
     {
         var model = new ScriptedModelClient()
-            .Reply(ScriptedModelClient.Final("Delete the project", null, null,
-                ScriptedModelClient.Proposal("delete_project", "User asked to get rid of it.", ("projectId", "whatever"))));
+            .Reply(ScriptedModelClient.Final("Clean up with a shell command", null, null,
+                ScriptedModelClient.Proposal("run_shell", "Fastest way to tidy the folder.", ("command", "del /s /q *.tmp"))));
 
         using var s = Scenario.New(_tmp, ModelOn, RulesThen(model)).WithWorkspace()
-            .Command("just get rid of that old thing entirely")
+            .Command("just tidy up the temp junk somehow")
             .ExpectState(RelayState.Completed)
             .ExpectOutcome("denied")
-            .ExpectProposal("delete_project", "denied");
+            .ExpectProposal("run_shell", "denied");
 
         var decided = s.H.Last(EventTypes.ProposalDecided)!;
         Assert.Equal("Deny", decided.DataString("outcome"));
         Assert.Equal("Prohibited", decided.DataString("tier"));
         Assert.DoesNotContain(s.H.Records(), r => r.Type == EventTypes.ApprovalGranted);
+    }
+
+    [Fact]
+    public void ModelProposingDeletionWaitsForApprovalLikeAnyOtherWrite()
+    {
+        var model = new ScriptedModelClient();
+        using var s = Scenario.New(_tmp, ModelOn, RulesThen(model)).WithWorkspace()
+            .Command("create project Atlas").Approve();
+        var projectId = s.H.Registry.FindActive("atlas")!.Id;
+        model.Reply(ScriptedModelClient.Final("Delete Atlas as asked", null, null,
+            ScriptedModelClient.Proposal("delete_project", "The user asked for Atlas to be gone for good.", ("projectId", projectId), ("confirm", "delete"))));
+
+        s.Command("I want atlas gone for good, wipe it out")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.DeleteProject, "pending")
+            .ExpectProject("atlas");
+        Assert.Equal("RequiresApproval", s.H.Last(EventTypes.ProposalDecided)!.DataString("tier"));
+        s.Reject().ExpectState(RelayState.Completed).ExpectProject("atlas");
     }
 
     [Fact]
@@ -126,7 +144,7 @@ public sealed class ModelGatewayTests : IDisposable
             .ExpectNoProposals()
             .ExpectAnswerContains("JSON contract");
 
-        var plan = s.H.Last(EventTypes.PlanProposed)!;
+        var plan = s.H.Last(EventTypes.TaskPlanned)!;
         Assert.False(plan.DataBool("understood"));
         Assert.Contains("Sure!", plan.DataString("raw"));
         Assert.DoesNotContain(s.H.Records(), r => r.Type == EventTypes.ProposalReceived);
@@ -171,11 +189,27 @@ public sealed class ModelGatewayTests : IDisposable
     {
         var prompt = ModelOrchestrator.SystemPrompt();
         foreach (var tool in ToolBroker.Descriptors) Assert.Contains(tool.Name, prompt);
-        foreach (var action in new[] { Actions.CreateProject, Actions.ArchiveProject, Actions.RouteNote, Actions.LaunchWorker, Actions.ApplyPatch, Actions.ExportBackup })
+        foreach (var action in new[] { Actions.CreateProject, Actions.ArchiveProject, Actions.RouteNote, Actions.LaunchWorker, Actions.ApplyPatch, Actions.ExportBackup, Actions.DeleteProject, Actions.MoveNote, Actions.ModelRequest, Actions.UpdatePreference, Actions.UpdatePrompt })
             Assert.Contains(action, prompt);
         Assert.Contains("never invent ids", prompt);
-        Assert.Contains("deletion does not exist", prompt);
+        Assert.Contains("only when the user explicitly asked to delete", prompt);
         Assert.Contains("exactly one JSON object", prompt);
+        Assert.Contains("knowledge", prompt);
+        Assert.Contains("depends_on", prompt);
+        Assert.DoesNotContain(Actions.RunShell, prompt);
+
+        // The compiled preference and the user's approved prompt fragment ride along; external profiles are named.
+        var prefs = Relay.Core.Preferences.PreferenceCompiler.Compile(new Relay.Core.Preferences.UserPreferences { Response = { Verbosity = Relay.Core.Preferences.ResponsePreferences.Minimalist } });
+        using var h = new Harness(_tmp.Root).Start();
+        var context = new TurnContext
+        {
+            Tools = null!, Sink = null!, Registry = h.Registry, Roots = h.Roots, Drafts = h.Notes, Settings = h.SettingsLoad.Settings.Orchestrator,
+            Preferences = prefs, ExternalProfiles = ["research"], PromptFragment = "Never use bullet lists.",
+        };
+        var withContext = ModelOrchestrator.SystemPrompt(context);
+        Assert.Contains("one short sentence", withContext);
+        Assert.Contains("profiles: research", withContext);
+        Assert.Contains("Never use bullet lists.", withContext);
     }
 
     [Fact]

@@ -60,6 +60,19 @@ public sealed class DataRoot
     public string ExecutionsDirectory => Combine("staging", "executions");
     public string AgentsDirectory => Combine("staging", "agents");
     public string ProposalsDirectory => Combine("staging", "proposals");
+    /// <summary>The live stream buffer window only; rewritten as the buffer changes and removed when the stream stops.</summary>
+    public string StreamDirectory => Combine("staging", "stream");
+    public string CurrentStreamPath => Combine("staging", "stream", "current.json");
+    /// <summary>Selected conversation excerpts: the only place stream text outlives the buffer.</summary>
+    public string ExcerptsDirectory => Combine("excerpts");
+    /// <summary>Per-task diagnostics records.</summary>
+    public string TasksDirectory => Combine("tasks");
+    /// <summary>Every change Relay made to itself, with the before image.</summary>
+    public string ChangeSetsDirectory => Combine("changesets");
+    public string PreferencesPath => Combine("config", "preferences.json");
+    public string PromptsDirectory => Combine("config", "prompts");
+    /// <summary>Responses from approved external tasks, kept as source artifacts.</summary>
+    public string ExternalArtifactsDirectory => Combine("artifacts", "external");
 
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
@@ -82,6 +95,7 @@ public sealed class DataRoot
             DraftsDirectory, DiscardedDraftsDirectory, DraftNotesDirectory, IncidentsDirectory, LogsDirectory,
             RegistryDirectory, SecretsDirectory, ArchiveDirectory, BackupsDirectory, ReviewDirectory, TurnsDirectory,
             ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
+            StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

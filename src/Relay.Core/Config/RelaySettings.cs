@@ -14,12 +14,15 @@ namespace Relay.Core.Config;
 /// </summary>
 public sealed class RelaySettings
 {
-    [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 1;
+    [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 2;
     [JsonPropertyName("hotkeys")] public HotkeySettings Hotkeys { get; set; } = new();
     [JsonPropertyName("capture")] public CaptureSettings Capture { get; set; } = new();
+    [JsonPropertyName("stream")] public StreamSettings Stream { get; set; } = new();
+    [JsonPropertyName("judge")] public JudgeSettings Judge { get; set; } = new();
     [JsonPropertyName("diagnostics")] public DiagnosticsSettings Diagnostics { get; set; } = new();
     [JsonPropertyName("orchestrator")] public OrchestratorSettings Orchestrator { get; set; } = new();
     [JsonPropertyName("model")] public ModelSettings Model { get; set; } = new();
+    [JsonPropertyName("externalModels")] public List<ExternalModelProfile> ExternalModels { get; set; } = new();
     [JsonPropertyName("workers")] public WorkerSettings Workers { get; set; } = new();
 
     public IReadOnlyList<string> Validate()
@@ -33,11 +36,26 @@ public sealed class RelaySettings
         if (Orchestrator.PlanningTimeoutMs < 1000) problems.Add("orchestrator.planningTimeoutMs must be at least 1000.");
         if (Model.Enabled)
         {
-            if (!Uri.TryCreate(Model.Endpoint, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-                problems.Add("model.endpoint must be an absolute https URL.");
+            if (!ModelSettings.IsAllowedEndpoint(Model.Endpoint, out var why)) problems.Add("model.endpoint: " + why);
             if (string.IsNullOrWhiteSpace(Model.Model)) problems.Add("model.model must name a model.");
             if (Model.TimeoutMs < 1000) problems.Add("model.timeoutMs must be at least 1000.");
         }
+        foreach (var profile in ExternalModels)
+        {
+            if (string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))) problems.Add("externalModels[].name must be a simple identifier.");
+            if (!Uri.TryCreate(profile.Endpoint, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) problems.Add($"externalModels[{profile.Name}].endpoint must be an absolute https URL; external models never use plain http.");
+            if (string.IsNullOrWhiteSpace(profile.Model)) problems.Add($"externalModels[{profile.Name}].model must name a model.");
+            if (string.IsNullOrWhiteSpace(profile.SecretName)) problems.Add($"externalModels[{profile.Name}].secretName is required.");
+        }
+        if (ExternalModels.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != ExternalModels.Count) problems.Add("externalModels names must be unique.");
+        if (Judge.Mode is not (JudgeSettings.Off or JudgeSettings.Heuristic or JudgeSettings.Model)) problems.Add("judge.mode must be off, heuristic, or model.");
+        if (Judge.MinConfidence is < 0 or > 1) problems.Add("judge.minConfidence must be between 0 and 1.");
+        if (Judge.TimeoutMs < 1000) problems.Add("judge.timeoutMs must be at least 1000.");
+        if (Stream.BufferSeconds is < 15 or > 600) problems.Add("stream.bufferSeconds must be 15–600.");
+        if (Stream.SegmentQuietMs is < 200 or > 10000) problems.Add("stream.segmentQuietMs must be 200–10000.");
+        if (Stream.ObserveIntervalMs is < 500 or > 60000) problems.Add("stream.observeIntervalMs must be 500–60000.");
+        if (Stream.ExcerptMaxSeconds is < 5 or > 120) problems.Add("stream.excerptMaxSeconds must be 5–120.");
+        if (Stream.MaxRetainedFraction is <= 0 or > 1) problems.Add("stream.maxRetainedFraction must be in (0, 1].");
         if (Workers.WallClockSeconds < 5) problems.Add("workers.wallClockSeconds must be at least 5.");
         if (Workers.MemoryMb < 64) problems.Add("workers.memoryMb must be at least 64.");
         if (Workers.MaxToolCalls < 10) problems.Add("workers.maxToolCalls must be at least 10.");
@@ -99,8 +117,8 @@ public sealed class OrchestratorSettings
     public const string Rules = "rules";
     public const string RulesAndModel = "rules+model";
 
-    /// <summary>off: instructions are recorded only. rules: deterministic command grammar. rules+model: grammar first, model gateway for the rest.</summary>
-    [JsonPropertyName("mode")] public string Mode { get; set; } = Rules;
+    /// <summary>off: instructions are recorded only. rules: deterministic command grammar only. rules+model: RELAY0's model plans first, the grammar is its fallback.</summary>
+    [JsonPropertyName("mode")] public string Mode { get; set; } = RulesAndModel;
     /// <summary>Notes routed at or above this confidence are filed into the project automatically.</summary>
     [JsonPropertyName("autoRouteThreshold")] public double AutoRouteThreshold { get; set; } = 0.75;
     /// <summary>Notes between this and the auto threshold go to Review; below it they stay unrouted in staging.</summary>
@@ -109,16 +127,69 @@ public sealed class OrchestratorSettings
     [JsonPropertyName("maxToolCalls")] public int MaxToolCalls { get; set; } = 8;
 }
 
+/// <summary>RELAY0's model: the local judge and planner. Loopback http (llama.cpp on this machine) or https.</summary>
 public sealed class ModelSettings
 {
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
-    /// <summary>The only network endpoint the process may contact. OpenAI-compatible chat completions.</summary>
-    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "https://api.openai.com/v1/chat/completions";
-    [JsonPropertyName("model")] public string Model { get; set; } = "gpt-4o-mini";
-    /// <summary>Name of the DPAPI-protected secret holding the API key. Never stored in this file.</summary>
+    /// <summary>The endpoint RELAY0 talks to. OpenAI-compatible chat completions; plain http only on loopback.</summary>
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "http://127.0.0.1:8080/v1/chat/completions";
+    [JsonPropertyName("model")] public string Model { get; set; } = "ministral-8b-instruct";
+    /// <summary>Name of the DPAPI-protected secret holding the API key. Never stored in this file. Optional for loopback.</summary>
     [JsonPropertyName("secretName")] public string SecretName { get; set; } = "model-gateway";
     [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 30_000;
-    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 1_500;
+    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 800;
+
+    public bool IsLoopback => Uri.TryCreate(Endpoint, UriKind.Absolute, out var uri) && uri.IsLoopback;
+
+    /// <summary>https anywhere, or http strictly on loopback (127.0.0.1, ::1, localhost). Nothing else.</summary>
+    public static bool IsAllowedEndpoint(string? endpoint, out string reason)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) { reason = "must be an absolute URL."; return false; }
+        if (uri.Scheme == Uri.UriSchemeHttps) { reason = ""; return true; }
+        if (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback) { reason = ""; return true; }
+        reason = "must be https, or http on loopback (127.0.0.1 / localhost) for a local model server.";
+        return false;
+    }
+}
+
+/// <summary>A named external model the planner may propose delegating to. Always https; every request is a separate approval.</summary>
+public sealed class ExternalModelProfile
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "research";
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "https://api.openai.com/v1/chat/completions";
+    [JsonPropertyName("model")] public string Model { get; set; } = "gpt-5-nano";
+    [JsonPropertyName("secretName")] public string SecretName { get; set; } = "external-research";
+    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 120_000;
+    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 4_000;
+    /// <summary>Whether the profile's host may be asked to search online on Relay's behalf (only when a task is approved with allowSearch).</summary>
+    [JsonPropertyName("supportsSearch")] public bool SupportsSearch { get; set; }
+
+    public ModelSettings AsModelSettings() => new() { Enabled = true, Endpoint = Endpoint, Model = Model, SecretName = SecretName, TimeoutMs = TimeoutMs, MaxOutputTokens = MaxOutputTokens };
+}
+
+/// <summary>Listening: how the stream is cut, how long it is held, how often RELAY0 judges it, how much may be retained.</summary>
+public sealed class StreamSettings
+{
+    [JsonPropertyName("bufferSeconds")] public int BufferSeconds { get; set; } = 90;
+    /// <summary>Text without a sentence end becomes a segment after this much quiet.</summary>
+    [JsonPropertyName("segmentQuietMs")] public int SegmentQuietMs { get; set; } = 1_200;
+    /// <summary>How often the judge sees new segments (watched terms and acronyms are judged at once).</summary>
+    [JsonPropertyName("observeIntervalMs")] public int ObserveIntervalMs { get; set; } = 4_000;
+    [JsonPropertyName("excerptMaxSeconds")] public int ExcerptMaxSeconds { get; set; } = 30;
+    [JsonPropertyName("maxRetainedFraction")] public double MaxRetainedFraction { get; set; } = 0.25;
+}
+
+public sealed class JudgeSettings
+{
+    public const string Off = "off";
+    public const string Heuristic = "heuristic";
+    public const string Model = "model";
+
+    /// <summary>off: streams are buffered and discarded, nothing is judged. heuristic: cue words (labeled as such). model: RELAY0 judges; falls back to heuristic when the model is unavailable.</summary>
+    [JsonPropertyName("mode")] public string Mode { get; set; } = Model;
+    [JsonPropertyName("minConfidence")] public double MinConfidence { get; set; } = 0.55;
+    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 8_000;
+    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 600;
 }
 
 public sealed class WorkerSettings
@@ -174,6 +245,9 @@ public static class SettingsStore
             if (validation.Any(p => p.StartsWith("capture", StringComparison.Ordinal))) settings.Capture = defaults.Capture;
             if (validation.Any(p => p.StartsWith("orchestrator", StringComparison.Ordinal))) settings.Orchestrator = defaults.Orchestrator;
             if (validation.Any(p => p.StartsWith("model", StringComparison.Ordinal))) settings.Model = defaults.Model;
+            if (validation.Any(p => p.StartsWith("externalModels", StringComparison.Ordinal))) settings.ExternalModels = defaults.ExternalModels;
+            if (validation.Any(p => p.StartsWith("judge", StringComparison.Ordinal))) settings.Judge = defaults.Judge;
+            if (validation.Any(p => p.StartsWith("stream", StringComparison.Ordinal))) settings.Stream = defaults.Stream;
             if (validation.Any(p => p.StartsWith("workers", StringComparison.Ordinal))) settings.Workers = defaults.Workers;
         }
         return new LoadResult(settings, false, problems, settings.ComputeHash());

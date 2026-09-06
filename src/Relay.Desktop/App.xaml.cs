@@ -60,7 +60,7 @@ public partial class App : Application
                     var worker = Relay.Core.Agents.ProcessWorkerHost.Locate(settings.Workers.Executable, AppContext.BaseDirectory);
                     return worker is null ? null : new JobObjectWorkerHost(worker);
                 },
-                ModelOrchestratorFactory = settings => ModelComposition.Create(settings, root),
+                ModelClientFactory = settings => ModelComposition.Client(settings, root),
                 Secrets = ModelComposition.Secrets(root),
             };
             _runtime = RelayRuntime.Create(

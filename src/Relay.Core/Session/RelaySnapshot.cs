@@ -1,7 +1,11 @@
+using Relay.Core.Attention;
 using Relay.Core.Ledger;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
+using Relay.Core.Preferences;
 using Relay.Core.State;
+using Relay.Core.Tasks;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Core.Session;
 
@@ -56,12 +60,28 @@ public sealed record ProposalView(
     string? Error,
     bool Editable,
     string ProposedBy,
-    string Reason);
+    string Reason,
+    IReadOnlyList<string> DependsOn,
+    string? GrantedBy);
 
-/// <summary>The orchestrator's visible output for the current or most recent turn.</summary>
-public sealed record TurnResponse(
-    string TurnId,
-    string Kind,
+/// <summary>Tokens and time one task cost. Shown in the diagnostics drawer and summed for the session.</summary>
+public sealed record TaskCost(int PromptTokens, int CompletionTokens, int ModelCalls, int ToolCalls, long WallMs)
+{
+    public int TotalTokens => PromptTokens + CompletionTokens;
+}
+
+/// <summary>
+/// One task as the UI sees it: what it was asked (or overheard), what the planner did, what policy
+/// said, what ran, how it was presented and what it cost. <paramref name="Lane"/> names where it
+/// came from (command, ask, observed, user_operation, dialogue); <paramref name="Tag"/> is the process tag.
+/// </summary>
+public sealed record TaskView(
+    string TaskId,
+    TaskOrigin Origin,
+    TaskKind Kind,
+    TaskStatus Status,
+    string Tag,
+    string Lane,
     string Instruction,
     string Summary,
     IReadOnlyList<string> Steps,
@@ -71,7 +91,49 @@ public sealed record TurnResponse(
     string Producer,
     string? Outcome,
     DateTimeOffset StartedAt,
-    bool Live);
+    DateTimeOffset? CompletedAt,
+    bool Live,
+    bool Foreground,
+    string? ExcerptId,
+    string? Title,
+    string? Why,
+    double Confidence,
+    KnowledgeState Knowledge,
+    bool? Consistent,
+    Presentation Presentation,
+    string? PresentationReason,
+    TaskCost Cost,
+    IReadOnlyList<ToolCallRecord> ToolCalls,
+    IReadOnlyList<ModelCallRecord> ModelCalls,
+    string? UserResponse,
+    string? ParentTaskId)
+{
+    public IEnumerable<ProposalView> PendingProposals => Proposals.Where(p => p.Status == "pending");
+}
+
+/// <summary>The live stream while listening: sizes and counts only.</summary>
+public sealed record ListeningStatus(
+    string StreamId,
+    DateTimeOffset StartedAt,
+    double HeldSeconds,
+    int HeldSegments,
+    int TotalSegments,
+    double WindowSeconds,
+    int JudgePasses,
+    int Findings,
+    int Excerpts,
+    int Tasks,
+    double RetainedSeconds,
+    string Judge,
+    DateTimeOffset? LastCheckAt,
+    bool Judging,
+    bool Finishing,
+    string? LastError);
+
+public sealed record ChangeSetView(string ChangeSetId, string Kind, string File, string Reason, DateTimeOffset AppliedAt, DateTimeOffset? RevertedAt, string? TaskId)
+{
+    public bool Reverted => RevertedAt is not null;
+}
 
 public sealed record ProjectView(string Id, string Slug, string Name, string Status, string RootPath, bool FolderPresent);
 
@@ -114,7 +176,7 @@ public sealed record RelaySnapshot(
     string AppVersion,
     int ProcessId,
     bool CanRetry,
-    TurnResponse? Response,
+    TaskView? Response,
     IReadOnlyList<ProjectView> Projects,
     IReadOnlyList<WorkspaceView> Workspaces,
     IReadOnlyList<InboxItem> Inbox,
@@ -123,12 +185,26 @@ public sealed record RelaySnapshot(
     bool ModelEnabled,
     string? ModelEndpoint,
     string? ModelName,
-    bool ModelKeyStored = false)
+    bool ModelKeyStored,
+    IReadOnlyList<TaskView> Tasks,
+    IReadOnlyList<AttentionItem> Attention,
+    ListeningStatus? Listening,
+    bool ListeningEnabled,
+    string JudgeMode,
+    string JudgeName,
+    CompiledPreferences Preferences,
+    IReadOnlyList<ChangeSetView> ChangeSets,
+    IReadOnlyList<string> ExternalProfiles)
 {
     public bool CanCancel => State is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Planning or RelayState.AwaitingApproval or RelayState.Executing;
     public bool CanSubmitNow => State == RelayState.AwaitingTranscript && CaptureChars > 0;
     public bool CanRetryWait => State == RelayState.AwaitingTranscript && Awaiting?.TimedOut == true;
     public bool SurfaceEditable => State is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript;
     public bool TurnActive => State.IsTurnActive();
-    public IEnumerable<ProposalView> PendingProposals => Response?.Proposals.Where(p => p.Status == "pending") ?? [];
+    /// <summary>Whether a direct ask can be submitted now (the ask box): any settled state, including while listening.</summary>
+    public bool CanAsk => State is RelayState.Idle or RelayState.Completed or RelayState.NoteCapture or RelayState.AwaitingApproval or RelayState.Executing or RelayState.Planning;
+    /// <summary>Proposals awaiting approval across every live task (foreground first).</summary>
+    public IEnumerable<ProposalView> PendingProposals => Tasks.Where(t => t.Live).OrderByDescending(t => t.Foreground).SelectMany(t => t.PendingProposals);
+    public IEnumerable<TaskView> LiveTasks => Tasks.Where(t => t.Live);
+    public TaskCost SessionCost => new(Tasks.Sum(t => t.Cost.PromptTokens), Tasks.Sum(t => t.Cost.CompletionTokens), Tasks.Sum(t => t.Cost.ModelCalls), Tasks.Sum(t => t.Cost.ToolCalls), Tasks.Sum(t => t.Cost.WallMs));
 }

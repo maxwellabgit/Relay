@@ -100,12 +100,91 @@ public static class ActivityFormatter
             EventTypes.AppFailed => $"Failure in {r.DataString("where")}: {r.DataString("exceptionType")}: {r.DataString("message")}",
             EventTypes.LockEngaged => $"LOCKED: {r.DataString("reason")}",
             EventTypes.LockReleased => "Unlocked by user",
+
+            // Listening (ids, sizes and timings only)
+            EventTypes.StreamStarted => $"Listening started ({r.DataInt64("bufferSeconds")}s buffer, judge {r.DataString("judge")})",
+            EventTypes.StreamSegment => $"Heard a segment ({r.DataInt64("chars")} chars, {r.DataInt64("held")} held)",
+            EventTypes.StreamStopped => $"Listening {r.DataString("reason")} after {Seconds(r)}: {r.DataInt64("segments")} segment(s), {r.DataInt64("passes")} check(s), {r.DataInt64("findings")} finding(s), {r.DataInt64("excerpts")} excerpt(s) kept",
+            EventTypes.StreamInterruptedFound => $"A buffer window from a previous session was found and discarded ({r.DataInt64("segments")} segment(s), {r.DataInt64("chars")} chars)",
+            EventTypes.ObserveChecked => $"{r.DataString("judge")} checked {Count(r, "segments")} new segment(s): nothing significant" + Tokens(r),
+            EventTypes.ObserveFound => $"{r.DataString("judge")} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
+            EventTypes.ObserveFailed => $"Judge {r.DataString("judge")} failed: {r.DataString("error")}",
+            EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}): {r.DataString("reason")}",
+            EventTypes.AskRecorded => $"You asked ({r.DataInt64("chars")} chars)" + (r.DataBool("whileListening") == true ? " while listening" : ""),
+
+            // Tasks
+            EventTypes.TaskCreated => r.DataString("lane") == "user_operation" ? $"You requested: {r.DataString("title")}"
+                : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("title")} ({FormatDouble(r, "confidence")})"
+                : r.DataString("origin") == "dialogue" ? $"Follow-up → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("title")}"
+                : $"{Capitalize(r.DataString("kind"))} task {Short(r.DataString("taskId"))} started with {r.DataString("planner")}",
+            EventTypes.TaskPlanned => r.DataBool("understood") == true
+                ? $"Plan by {r.DataString("producer")}: {r.DataString("summary")} ({r.DataInt64("proposals")} proposal(s), {r.DataInt64("toolCalls")} tool call(s)" + Tokens(r) + ")"
+                : $"{r.DataString("producer")} did not understand the request",
+            EventTypes.TaskPresented => $"Shown as {r.DataString("level")}: {r.DataString("title")}" + (r.DataString("reason") is { } why ? $" ({why})" : ""),
+            EventTypes.TaskMerged => $"Merged with an earlier card ({r.DataString("key")})",
+            EventTypes.TaskCompleted => $"Task {Short(r.DataString("taskId"))} finished: {r.DataString("outcome")} ({r.DataInt64("executed")} executed, {r.DataInt64("denied")} denied, {r.DataInt64("rejected")} rejected" + Tokens(r) + $", {r.DataInt64("wallMs")} ms)",
+            EventTypes.TaskFailed => $"Task {Short(r.DataString("taskId"))} failed ({r.DataString("failure")}): {r.DataString("error")}",
+            EventTypes.TaskCancelled => $"Task {Short(r.DataString("taskId"))} cancelled while {r.DataString("stage")}",
+            EventTypes.TaskUserResponse => $"You responded to task {Short(r.DataString("taskId"))}",
+            EventTypes.TaskInterruptedFound => $"Found a {r.DataString("origin")} task that was {r.DataString("stage")} when the previous session ended",
+            EventTypes.GrantApplied => r.DataString("proposalId") is null
+                ? $"Standing grant {Short(r.DataString("grantId"))} created for {r.DataString("action")}"
+                : $"Standing grant {Short(r.DataString("grantId"))} approved {r.DataString("action")} ({Short(r.DataString("proposalId"))})",
+
+            // Transformations and self-change
+            EventTypes.NoteMoved => $"Moved note {Short(r.DataString("noteId"))} to {Path.GetFileName(Path.GetDirectoryName(r.DataString("toPath") ?? "") ?? "")}",
+            EventTypes.ProjectDeleted => $"Deleted project {r.DataString("slug")} ({r.DataInt64("files")} files; safety copy at {r.DataString("safetyBackup")})",
+            EventTypes.ChangeSetApplied => $"Applied change set {Short(r.DataString("changeSetId"))} to {Path.GetFileName(r.DataString("path") ?? "")}" + (r.DataString("key") is { } key ? $" ({key})" : ""),
+            EventTypes.ChangeSetReverted => $"Reverted change set {Short(r.DataString("changeSetId"))}: {r.DataString("reason")}",
+
+            // External work
+            EventTypes.ExternalPackaged => $"Packaged {r.DataInt64("sources")} source(s), {r.DataInt64("chars")} chars for {r.DataString("profile")} ({r.DataString("model")})",
+            EventTypes.ExternalResponded => r.DataBool("ok") == true ? $"{r.DataString("profile")} answered ({r.DataInt64("chars")} chars" + Tokens(r) + $", {r.DataInt64("elapsedMs")} ms)" : $"{r.DataString("profile")} failed: {r.DataString("error")}",
+            EventTypes.ArtifactStored => $"Stored artifact {Short(r.DataString("artifactId"))} ({r.DataInt64("chars")} chars)",
+
+            // Attention
+            EventTypes.AttentionShown => $"Shown [{r.DataString("level")}]: {r.DataString("title")}",
+            EventTypes.AttentionSuppressed => $"Not shown ({r.DataString("reason")}) for task {Short(r.DataString("taskId"))}",
+            EventTypes.AttentionDismissed => $"Dismissed card {Short(r.DataString("itemId"))}",
             _ => r.Type,
         };
         return new ActivityEntry(r.Seq, r.Timestamp, r.Type, text);
     }
 
     private static string Short(string? id) => id is null ? "?" : id.Length > 10 ? id[^8..] : id;
+
+    private static string Capitalize(string? s) => string.IsNullOrEmpty(s) ? "Direct" : char.ToUpperInvariant(s[0]) + s[1..];
+
+    private static string Seconds(LedgerRecord r)
+    {
+        var s = FormatDouble(r, "seconds");
+        return s == "n/a" ? "?" : s + "s";
+    }
+
+    private static string Tokens(LedgerRecord r)
+    {
+        var p = r.DataInt64("promptTokens") ?? 0;
+        var c = r.DataInt64("completionTokens") ?? 0;
+        return p + c == 0 ? "" : $", {p}+{c} tokens";
+    }
+
+    private static long Count(LedgerRecord r, string property)
+    {
+        try
+        {
+            return r.Data.TryGetProperty(property, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Array ? v.GetArrayLength() : r.DataInt64(property) ?? 0;
+        }
+        catch (InvalidOperationException) { return 0; }
+    }
+
+    private static string FormatDouble(LedgerRecord r, string property)
+    {
+        try
+        {
+            return r.Data.TryGetProperty(property, out var c) && c.ValueKind == System.Text.Json.JsonValueKind.Number ? c.GetDouble().ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "n/a";
+        }
+        catch (InvalidOperationException) { return "n/a"; }
+    }
 
     private static string FormatConfidence(LedgerRecord r)
     {

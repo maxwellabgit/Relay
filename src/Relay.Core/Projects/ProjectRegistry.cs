@@ -33,6 +33,8 @@ public sealed class ProjectRecord
 {
     public const string ActiveStatus = "active";
     public const string ArchivedStatus = "archived";
+    /// <summary>Deleted on the user's direct, approved request. The record stays so the history remains readable; the folder is gone.</summary>
+    public const string DeletedStatus = "deleted";
 
     [JsonPropertyName("id")] public required string Id { get; init; }
     [JsonPropertyName("slug")] public required string Slug { get; set; }

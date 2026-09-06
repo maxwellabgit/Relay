@@ -15,6 +15,14 @@ public sealed class PolicyWorld
     public required Func<string, string, bool> ProjectNoteExists { get; init; }
     public bool WorkersEnabled { get; init; } = true;
     public Func<string, bool>? AgentRunHasOutput { get; init; }
+    /// <summary>Names of configured external model profiles; a model.request proposal must name one.</summary>
+    public IReadOnlyList<string> ExternalProfiles { get; init; } = [];
+    /// <summary>Whether a reference (note id, excerpt id, capture id) resolves to something Relay holds; external packages may only carry these.</summary>
+    public Func<string, bool>? ReferenceExists { get; init; }
+    /// <summary>Prompt fragment names that may be changed through change sets.</summary>
+    public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge"];
+    /// <summary>Origin of the task the proposal belongs to. Some actions may only be proposed from a direct request; null means unknown and is treated as direct.</summary>
+    public Tasks.TaskOrigin? Origin { get; init; }
 }
 
 /// <summary>
@@ -28,8 +36,9 @@ public static class PolicyEngine
     public static Tier TierOf(string action) => action switch
     {
         Actions.CreateDraftNote or Actions.RouteNote => Tier.Automatic,
-        Actions.CreateProject or Actions.ModifyNote or Actions.SupersedeNote or Actions.RenameProject
-            or Actions.ArchiveProject or Actions.RestoreProject or Actions.LaunchWorker or Actions.ApplyPatch or Actions.ExportBackup => Tier.RequiresApproval,
+        Actions.CreateProject or Actions.ModifyNote or Actions.SupersedeNote or Actions.MoveNote or Actions.RenameProject
+            or Actions.ArchiveProject or Actions.RestoreProject or Actions.DeleteProject or Actions.LaunchWorker or Actions.ApplyPatch or Actions.ExportBackup
+            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt => Tier.RequiresApproval,
         _ => Tier.Prohibited,
     };
 
@@ -45,6 +54,10 @@ public static class PolicyEngine
         if (p.SourceEventIds.Count == 0 && p.ProposedBy != Producers.User)
         {
             return Decision.Deny(tier, "Proposal cites no source event; every proposal must trace to an instruction or capture.");
+        }
+        if (w.Origin is { } origin && origin != Tasks.TaskOrigin.Direct && Actions.DirectOnly.Contains(p.Action))
+        {
+            return Decision.Deny(tier, $"'{p.Action}' may only be proposed from a direct request, never from something overheard or a follow-up.");
         }
         if (tier == Tier.RequiresApproval && !p.RequiresApproval && p.ProposedBy != Producers.User)
         {
@@ -64,6 +77,11 @@ public static class PolicyEngine
             Actions.LaunchWorker => ValidateLaunchWorker(target, w),
             Actions.ApplyPatch => ValidateApplyPatch(target, w),
             Actions.ExportBackup => ValidateExportBackup(target, w),
+            Actions.MoveNote => ValidateMoveNote(target, w),
+            Actions.DeleteProject => ValidateDelete(target, w),
+            Actions.ModelRequest => ValidateModelRequest(target, w),
+            Actions.UpdatePreference => ValidateUpdatePreference(target),
+            Actions.UpdatePrompt => ValidateUpdatePrompt(target, w),
             _ => ["Unhandled action."],
         };
         if (problems.Count > 0)
@@ -254,6 +272,108 @@ public static class PolicyEngine
             if (!canonical.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) problems.Add("Backup path must end in .zip.");
             t["path"] = canonical;
         }
+        return problems;
+    }
+
+    private static List<string> ValidateMoveNote(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var from = ResolveActiveProject(t, w, problems);
+        var noteId = t.GetValueOrDefault("noteId");
+        if (string.IsNullOrWhiteSpace(noteId)) problems.Add("target.noteId is required.");
+        else if (from is not null && !w.ProjectNoteExists(from.Id, noteId)) problems.Add($"Note {noteId} does not exist in project {from.Slug}.");
+        var toKey = t.GetValueOrDefault("toProjectId") ?? t.GetValueOrDefault("toProject");
+        if (string.IsNullOrWhiteSpace(toKey)) { problems.Add("target.toProjectId is required."); return problems; }
+        var to = w.Registry.FindActive(toKey);
+        if (to is null) problems.Add($"No active project matches '{toKey}'.");
+        else
+        {
+            if (from is not null && to.Id == from.Id) problems.Add("The note is already in that project.");
+            if (!Directory.Exists(to.RootPath)) problems.Add($"Destination project folder is missing: {to.RootPath}");
+            t["toProjectId"] = to.Id;
+            t["toProjectSlug"] = to.Slug;
+        }
+        return problems;
+    }
+
+    private static List<string> ValidateDelete(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var project = ResolveActiveProject(t, w, problems);
+        if (project is not null && !Directory.Exists(project.RootPath)) problems.Add($"Project folder is missing: {project.RootPath}");
+        if (project is not null)
+        {
+            var check = w.Roots.Check(project.RootPath);
+            if (!check.Ok) problems.Add($"Project folder is outside every registered root: {check.Reason}");
+        }
+        if (!string.Equals(t.GetValueOrDefault("confirm"), "delete", StringComparison.Ordinal)) problems.Add("target.confirm must be the word 'delete': deletion is permanent and needs the explicit word.");
+        return problems;
+    }
+
+    private static List<string> ValidateModelRequest(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var profile = t.GetValueOrDefault("profile");
+        if (string.IsNullOrWhiteSpace(profile)) problems.Add("target.profile must name an external model profile.");
+        else if (!w.ExternalProfiles.Contains(profile, StringComparer.Ordinal)) problems.Add($"No external model profile named '{profile}' is configured." + (w.ExternalProfiles.Count == 0 ? " Add one in Settings → External models." : $" Known: {string.Join(", ", w.ExternalProfiles)}."));
+        if (string.IsNullOrWhiteSpace(t.GetValueOrDefault("objective"))) problems.Add("target.objective is required: what the external model is asked to do.");
+        var refs = (t.GetValueOrDefault("refs") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var r in refs)
+        {
+            if (w.ReferenceExists is not null && !w.ReferenceExists(r)) problems.Add($"Reference '{r}' is not something Relay holds; packages may only carry local references returned by tools.");
+        }
+        t["refs"] = string.Join(",", refs);
+        if (!int.TryParse(t.GetValueOrDefault("budgetTokens"), out var budget) || budget <= 0) t["budgetTokens"] = "4000";
+        else if (budget > 200_000) problems.Add("target.budgetTokens is unreasonably large.");
+        t["allowSearch"] = string.Equals(t.GetValueOrDefault("allowSearch"), "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false";
+        return problems;
+    }
+
+    private static List<string> ValidateUpdatePreference(Dictionary<string, string> t)
+    {
+        var problems = new List<string>();
+        var key = t.GetValueOrDefault("key");
+        var value = t.GetValueOrDefault("value");
+        if (string.IsNullOrWhiteSpace(key)) { problems.Add("target.key is required (response.verbosity, display.alwaysShow, filing.grant, response.promptLine, sources.allowOnlineSearch, retention.bufferSeconds)."); return problems; }
+        switch (key)
+        {
+            case "response.verbosity":
+                if (!Preferences.ResponsePreferences.Verbosities.Contains(value ?? "")) problems.Add("value must be minimalist, concise, or normal.");
+                break;
+            case "display.alwaysShow":
+            case "display.stopShowing":
+                if (string.IsNullOrWhiteSpace(value)) problems.Add("value must be the term.");
+                break;
+            case "response.promptLine":
+                if (string.IsNullOrWhiteSpace(value) || value.Length > 300) problems.Add("value must be a prompt line under 300 characters.");
+                break;
+            case "filing.grant":
+            case "filing.revoke":
+                if (string.IsNullOrWhiteSpace(value)) problems.Add("value must be the granted action (e.g. route_note).");
+                else if (Actions.NeverGranted.Contains(value)) problems.Add($"'{value}' can never be covered by a standing grant.");
+                else if (TierOf(value) == Tier.Prohibited) problems.Add($"'{value}' is not an action that can be granted.");
+                break;
+            case "sources.allowOnlineSearch":
+                if (value is not ("true" or "false")) problems.Add("value must be true or false.");
+                break;
+            case "retention.bufferSeconds":
+                if (!int.TryParse(value, out var s) || s is < 15 or > 600) problems.Add("value must be 15–600 seconds.");
+                break;
+            default:
+                problems.Add($"'{key}' is not a preference Relay knows.");
+                break;
+        }
+        return problems;
+    }
+
+    private static List<string> ValidateUpdatePrompt(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var name = t.GetValueOrDefault("name");
+        if (string.IsNullOrWhiteSpace(name) || !w.PromptFragments.Contains(name, StringComparer.Ordinal)) problems.Add($"target.name must be one of the prompt fragments: {string.Join(", ", w.PromptFragments)}.");
+        var content = t.GetValueOrDefault("content");
+        if (string.IsNullOrWhiteSpace(content)) problems.Add("target.content is required.");
+        else if (content.Length > 2000) problems.Add("target.content is longer than 2000 characters.");
         return problems;
     }
 

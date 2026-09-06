@@ -13,18 +13,28 @@ public static class Actions
     public const string CreateProject = "create_project";        // Tier B
     public const string ModifyNote = "modify_note";              // Tier B
     public const string SupersedeNote = "supersede_note";        // Tier B
+    public const string MoveNote = "move_note";                  // Tier B: a note changes project; versions travel with it
     public const string RenameProject = "rename_project";        // Tier B
-    public const string ArchiveProject = "archive_project";      // Tier B (the only "delete")
+    public const string ArchiveProject = "archive_project";      // Tier B
     public const string RestoreProject = "restore_project";      // Tier B
+    public const string DeleteProject = "delete_project";        // Tier B: permanent, only ever from a direct request, never covered by a standing grant
     public const string LaunchWorker = "launch_worker";          // Tier B
     public const string ApplyPatch = "apply_patch";              // Tier B
     public const string ExportBackup = "export_backup";          // Tier B
-    public const string DeleteProject = "delete_project";        // Prohibited
+    public const string ModelRequest = "model.request";          // Tier B: an exact package leaves the machine for a named external model
+    public const string UpdatePreference = "update_preference";  // Tier B: a change set to preferences
+    public const string UpdatePrompt = "update_prompt";          // Tier B: a change set to a prompt fragment
     public const string RunShell = "run_shell";                  // Prohibited
     public const string SendMessage = "send_message";            // Prohibited
-    public const string AddTool = "add_tool";                    // Prohibited
+    public const string AddTool = "add_tool";                    // Prohibited in this build (tool.build/test/promote is a later slice)
 
-    public static readonly string[] Prohibited = [DeleteProject, RunShell, SendMessage, AddTool];
+    public static readonly string[] Prohibited = [RunShell, SendMessage, AddTool];
+
+    /// <summary>Actions a standing grant may never cover: each needs a fresh approval every time.</summary>
+    public static readonly string[] NeverGranted = [DeleteProject, ModelRequest, UpdatePreference, UpdatePrompt, LaunchWorker, ApplyPatch];
+
+    /// <summary>Actions an observed task may not propose: a destructive or self-modifying step needs the user's own words.</summary>
+    public static readonly string[] DirectOnly = [DeleteProject, UpdatePreference, UpdatePrompt, ModelRequest];
 }
 
 public static class Producers
@@ -34,6 +44,8 @@ public static class Producers
     public const string User = "user";
     public const string Router = "router";
     public const string Canned = "canned";
+    public const string Judge = "judge";
+    public const string Engine = "engine";
 }
 
 public static class Risks
@@ -41,6 +53,7 @@ public static class Risks
     public const string ReadOnly = "read_only";
     public const string StagingWrite = "staging_write";
     public const string ControlledWrite = "controlled_write";
+    public const string External = "external";
     public const string Prohibited = "prohibited";
 }
 
@@ -49,6 +62,8 @@ public static class Risks
 /// string map so it can be shown verbatim, hashed canonically, and edited by the user without
 /// the model in the loop. <see cref="RequiresApproval"/> is what the proposer believes; the
 /// policy engine recomputes it and the engine's answer is the one that counts.
+/// <see cref="DependsOn"/> names proposals in the same task that must have executed first; a
+/// dependent whose prerequisite was rejected cannot be approved on its own.
 /// </summary>
 public sealed record Proposal(
     [property: JsonPropertyName("proposalId")] string ProposalId,
@@ -59,9 +74,12 @@ public sealed record Proposal(
     [property: JsonPropertyName("expectedEffects")] IReadOnlyList<string> ExpectedEffects,
     [property: JsonPropertyName("risk")] string Risk,
     [property: JsonPropertyName("requiresApproval")] bool RequiresApproval,
-    [property: JsonPropertyName("proposedBy")] string ProposedBy)
+    [property: JsonPropertyName("proposedBy")] string ProposedBy,
+    [property: JsonPropertyName("dependsOn")] IReadOnlyList<string>? DependsOn = null)
 {
     public string? TargetOrNull(string key) => Target.TryGetValue(key, out var v) ? v : null;
+
+    [JsonIgnore] public IReadOnlyList<string> Dependencies => DependsOn ?? [];
 
     /// <summary>SHA-256 over the canonical form: action, sorted target pairs, sorted source ids. Reason and effects are not part of what is approved.</summary>
     public string Hash()

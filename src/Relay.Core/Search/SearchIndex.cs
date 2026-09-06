@@ -17,6 +17,10 @@ public sealed class SearchIndex
     public const string CaptureKind = "capture";
     public const string DraftKind = "draft";
     public const string NoteKind = "note";
+    /// <summary>A retained conversation excerpt: the only stream text that is searchable.</summary>
+    public const string ExcerptKind = "excerpt";
+    /// <summary>A stored response from an approved external task.</summary>
+    public const string ArtifactKind = "artifact";
 
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {
@@ -68,6 +72,19 @@ public sealed class SearchIndex
     {
         var span = note.Spans.FirstOrDefault();
         Replace(new Doc(NoteKind, note.Id, project.Id, project.Slug, note.Type, note.Body, note.Created, span?.EventId, span?.Start ?? 0, new HashSet<string>(Tokenize(note.Body)), note.Status));
+    }
+
+    public void IndexExcerpt(Stream.Excerpt excerpt)
+    {
+        var text = excerpt.Text;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        Replace(new Doc(ExcerptKind, excerpt.ExcerptId, null, null, "excerpt", text, excerpt.From, excerpt.ExcerptId, 0, new HashSet<string>(Tokenize(text))));
+    }
+
+    public void IndexArtifact(string artifactId, string text, DateTimeOffset at)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        Replace(new Doc(ArtifactKind, artifactId, null, null, "artifact", text, at, artifactId, 0, new HashSet<string>(Tokenize(text))));
     }
 
     public void Remove(string kind, string id) => _docs.RemoveAll(d => d.Kind == kind && d.Id == id);
@@ -129,12 +146,14 @@ public sealed class SearchIndex
         return (from > 0 ? "…" : "") + slice.Trim() + (to < text.Length ? "…" : "");
     }
 
-    /// <summary>Builds the projection from the verified ledger, staging drafts, and every active project folder.</summary>
-    public static SearchIndex Build(IEnumerable<LedgerRecord> records, IDraftNoteStore drafts, ProjectRegistry registry, ICollection<string>? problems = null)
+    /// <summary>Builds the projection from the verified ledger, staging drafts, retained excerpts, stored artifacts, and every active project folder.</summary>
+    public static SearchIndex Build(IEnumerable<LedgerRecord> records, IDraftNoteStore drafts, ProjectRegistry registry, ICollection<string>? problems = null, Stream.ExcerptStore? excerpts = null, IEnumerable<(string Id, string Text, DateTimeOffset At)>? artifacts = null)
     {
         var index = new SearchIndex();
         foreach (var record in records) index.IndexCapture(record);
         foreach (var draft in drafts.Unrouted()) index.IndexDraft(draft);
+        if (excerpts is not null) foreach (var excerpt in excerpts.All()) index.IndexExcerpt(excerpt);
+        if (artifacts is not null) foreach (var (id, text, at) in artifacts) index.IndexArtifact(id, text, at);
         foreach (var project in registry.Active)
         {
             if (!Directory.Exists(project.RootPath)) { problems?.Add($"Project folder missing: {project.Slug} → {project.RootPath}"); continue; }

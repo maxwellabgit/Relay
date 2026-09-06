@@ -39,8 +39,8 @@ public class OrchestratorTurnTests : IDisposable
         var types = s.H.Records().Select(r => r.Type).ToList();
         var expectedOrder = new[]
         {
-            EventTypes.CaptureCommitted, EventTypes.CommandRecorded, EventTypes.TurnStarted, EventTypes.PlanProposed, EventTypes.ProposalReceived,
-            EventTypes.ProposalDecided, EventTypes.ApprovalGranted, EventTypes.ExecutionStarted, EventTypes.ProjectCreated, EventTypes.ExecutionCompleted, EventTypes.TurnCompleted,
+            EventTypes.CaptureCommitted, EventTypes.CommandRecorded, EventTypes.TaskCreated, EventTypes.TaskPlanned, EventTypes.ProposalReceived,
+            EventTypes.ProposalDecided, EventTypes.ApprovalGranted, EventTypes.ExecutionStarted, EventTypes.ProjectCreated, EventTypes.ExecutionCompleted, EventTypes.TaskCompleted,
         };
         var last = -1;
         foreach (var type in expectedOrder)
@@ -146,16 +146,59 @@ public class OrchestratorTurnTests : IDisposable
     }
 
     [Fact]
-    public void PermanentDeletionIsProhibitedAndArchivingIsOffered()
+    public void DeletionIsAnApprovedActionThatKeepsASafetyCopy()
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas").Approve()
+            .Command("remember that Atlas ships in Q4")
+            .Command("file the last note under Atlas")
             .Command("permanently delete project Atlas")
-            .ExpectState(RelayState.Completed)
-            .ExpectProposal(Actions.DeleteProject, "denied")
-            .ExpectAnswerContains("archive")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.DeleteProject, "pending")
             .ExpectProject("atlas");
-        Assert.Equal("Prohibited", s.H.Last(EventTypes.ProposalDecided)!.DataString("tier"));
+        // Nothing is gone until the words are approved; rejecting leaves everything in place.
+        Assert.Equal("RequiresApproval", s.H.Last(EventTypes.ProposalDecided)!.DataString("tier"));
+        s.Reject(Actions.DeleteProject).ExpectState(RelayState.Completed).ExpectProject("atlas").ExpectNoEvent(EventTypes.ProjectDeleted);
+
+        s.Command("delete project Atlas forever")
+            .ExpectProposal(Actions.DeleteProject, "pending")
+            .Approve()
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("executed")
+            .ExpectEvent(EventTypes.ProjectDeleted)
+            .ExpectProject("atlas", exists: false);
+        var deleted = s.H.Registry.Find("atlas")!;
+        Assert.Equal(ProjectRecord.DeletedStatus, deleted.Status);
+        Assert.False(Directory.Exists(deleted.RootPath));
+        var safety = s.H.Last(EventTypes.ProjectDeleted)!.DataString("safetyBackup")!;
+        Assert.True(File.Exists(safety), "the safety zip must exist");
+        Assert.StartsWith(s.H.Root.BackupsDirectory, safety, StringComparison.OrdinalIgnoreCase);
+        using var zip = System.IO.Compression.ZipFile.OpenRead(safety);
+        Assert.Contains(zip.Entries, e => e.FullName.EndsWith(".md", StringComparison.OrdinalIgnoreCase));
+        // The registry keeps the tombstone and says so; nothing else about the project remains.
+        s.Command("list projects").ExpectState(RelayState.Completed);
+        Assert.Contains("deleted", s.Response.Answer!, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(s.H.Index.Search("ships in Q4", null, 5).Where(h => h.ProjectSlug == "atlas"));
+    }
+
+    [Fact]
+    public void DeletionCanNeverComeFromSomethingOverheard()
+    {
+        // The grammar handles the direct command; the canned planner stands in for the model on the judge's focused prompt.
+        var canned = new CannedOrchestrator().Otherwise((req, ctx) => new TurnPlan(true, "Overheard deletion", [], null, [],
+            [new Proposal("P-del", Actions.DeleteProject, "they said to delete it", new Dictionary<string, string> { ["projectId"] = ctx.Registry.FindActive("atlas")!.Id, ["confirm"] = "delete" }, [req.SourceEventId], [], Risks.ControlledWrite, true, Producers.Model)], "canned"));
+        var judge = new ScriptedJudge().When("scrap the atlas project", Relay.Core.Tasks.TaskKind.Organize, "The user wants project Atlas deleted.");
+        using var s = Scenario.New(_tmp, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), canned), judge: judge, configure: x => x.Judge.Mode = JudgeSettings.Heuristic).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .StartListening()
+            .Hear("Honestly we should just scrap the atlas project.")
+            .Observe()
+            .ExpectAnyProposal(Actions.DeleteProject, "denied")
+            .ExpectProject("atlas")
+            .ExpectNoEvent(EventTypes.ProjectDeleted)
+            .StopListening();
+        var decided = s.H.Records().Last(r => r.Type == EventTypes.ProposalDecided && r.DataString("action") == Actions.DeleteProject);
+        Assert.Contains("direct request", string.Join(" ", decided.Data.GetProperty("reasons").EnumerateArray().Select(e => e.GetString())));
     }
 
     [Fact]
@@ -163,7 +206,7 @@ public class OrchestratorTurnTests : IDisposable
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas").Approve().ExpectProject("atlas")
-            .Command("delete project atlas")
+            .Command("archive project atlas")
             .ExpectProposal(Actions.ArchiveProject, "pending")
             .Approve()
             .ExpectState(RelayState.Completed)
@@ -260,7 +303,7 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectAnswerContains("did not understand")
             .ExpectNoProposals()
             .ExpectNoEvent(EventTypes.ExecutionStarted);
-        Assert.False(s.H.Last(EventTypes.PlanProposed)!.DataBool("understood"));
+        Assert.False(s.H.Last(EventTypes.TaskPlanned)!.DataBool("understood"));
     }
 
     [Fact]
@@ -272,16 +315,16 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectState(RelayState.Planning)
             .Cancel()
             .ExpectState(RelayState.Idle)
-            .ExpectEvent(EventTypes.TurnCancelled);
+            .ExpectEvent(EventTypes.TaskCancelled);
         Assert.True(pausing.LastToken.IsCancellationRequested);
         Assert.False(pausing.Release()); // the gate was cancelled; nothing to release
         Assert.Equal(RelayState.Idle, s.Snap.State);
-        Assert.Equal(0, s.H.Count(EventTypes.PlanProposed));
-        Assert.False(File.Exists(s.H.Root.CurrentTurnPath));
+        Assert.Equal(0, s.H.Count(EventTypes.TaskPlanned));
+        Assert.Empty(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
     }
 
     [Fact]
-    public void PlanningTimeoutFailsTheTurnWithAnIncident()
+    public void PlanningTimeoutFailsTheTaskWithAnIncident()
     {
         var pausing = new PausingOrchestrator(new RuleBasedOrchestrator());
         using var s = Scenario.New(_tmp, orchestrator: pausing, configure: x => x.Orchestrator.PlanningTimeoutMs = 5000).WithWorkspace()
@@ -289,19 +332,19 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectState(RelayState.Planning)
             .Advance(TimeSpan.FromSeconds(6))
             .ExpectState(RelayState.Failed)
-            .ExpectEvent(EventTypes.TurnFailed);
+            .ExpectEvent(EventTypes.TaskFailed);
         Assert.Equal("planning_timeout", s.Snap.Incident!.Kind);
         Assert.False(s.Snap.CanRetry);
         s.Dismiss().ExpectState(RelayState.Idle);
     }
 
     [Fact]
-    public void OrchestratorExceptionsBecomeAFailedTurnNotACrash()
+    public void OrchestratorExceptionsBecomeAFailedTaskNotACrash()
     {
         using var s = Scenario.New(_tmp, orchestrator: new ThrowingOrchestrator())
             .Command("anything")
             .ExpectState(RelayState.Failed)
-            .ExpectEvent(EventTypes.TurnFailed);
+            .ExpectEvent(EventTypes.TaskFailed);
         Assert.Contains("model exploded", s.Snap.Incident!.Detail);
         s.Dismiss().ExpectState(RelayState.Idle);
     }
@@ -315,7 +358,7 @@ public class OrchestratorTurnTests : IDisposable
             .Cancel()
             .ExpectState(RelayState.Idle)
             .ExpectEvent(EventTypes.ApprovalRejected)
-            .ExpectEvent(EventTypes.TurnCancelled)
+            .ExpectEvent(EventTypes.TaskCancelled)
             .ExpectProject("atlas", exists: false);
     }
 
@@ -337,27 +380,29 @@ public class OrchestratorTurnTests : IDisposable
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas")
             .ExpectState(RelayState.AwaitingApproval);
-        Assert.True(File.Exists(s.H.Root.CurrentTurnPath));
+        Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
         s.CrashAndRestart()
             .ExpectState(RelayState.Idle)
-            .ExpectEvent(EventTypes.TurnInterruptedFound)
+            .ExpectEvent(EventTypes.TaskInterruptedFound)
             .ExpectReview(ReviewItemKind.TurnInterrupted)
             .ExpectProject("atlas", exists: false);
-        Assert.False(File.Exists(s.H.Root.CurrentTurnPath));
-        Assert.Single(Directory.GetFiles(s.H.Root.TurnsDirectory, "*.interrupted.json"));
-        Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TurnInterruptedFound)!.DataString("stage"));
+        Assert.Empty(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.interrupted.json"));
+        Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TaskInterruptedFound)!.DataString("stage"));
+        Assert.Equal("direct", s.H.Last(EventTypes.TaskInterruptedFound)!.DataString("origin"));
     }
 
     [Fact]
-    public void CleanExitDuringATurnRecordsCancellationNotACrash()
+    public void CleanExitDuringATaskRecordsCancellationNotACrash()
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Command("create project Atlas")
             .ExpectState(RelayState.AwaitingApproval)
             .Restart()
             .ExpectState(RelayState.Idle)
-            .ExpectNoEvent(EventTypes.TurnInterruptedFound)
-            .ExpectEvent(EventTypes.TurnCancelled);
+            .ExpectNoEvent(EventTypes.TaskInterruptedFound)
+            .ExpectEvent(EventTypes.TaskCancelled);
+        Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TaskCancelled)!.DataString("stage"));
     }
 
     [Fact]
@@ -390,7 +435,8 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectEvent(EventTypes.ApprovalGranted)
             .ExpectEvent(EventTypes.ExecutionCompleted);
         Assert.True(s.H.Last(EventTypes.ApprovalGranted)!.DataBool("implicitViaUi"));
-        Assert.Equal("user_operation", s.H.Last(EventTypes.TurnStarted)!.DataString("kind"));
+        Assert.Equal("user_operation", s.H.Last(EventTypes.TaskCreated)!.DataString("lane"));
+        Assert.Equal("direct", s.H.Last(EventTypes.TaskCreated)!.DataString("origin"));
 
         s.Do("Archive from UI", c => Assert.True(c.ArchiveProject(s.H.Registry.FindActive("field-notes")!.Id)))
             .ExpectState(RelayState.Completed)
@@ -469,7 +515,7 @@ public class OrchestratorTurnTests : IDisposable
         using var s = Scenario.New(_tmp, configure: x => x.Orchestrator.Mode = OrchestratorSettings.Off).WithWorkspace()
             .Command("create project Atlas")
             .ExpectState(RelayState.Completed)
-            .ExpectNoEvent(EventTypes.TurnStarted)
+            .ExpectNoEvent(EventTypes.TaskCreated)
             .ExpectReview(ReviewItemKind.RecordedInstruction)
             .ExpectProject("atlas", exists: false);
     }
@@ -488,7 +534,9 @@ public class PolicyAndExecutorTests : IDisposable
     [InlineData(Actions.ModifyNote, Tier.RequiresApproval)]
     [InlineData(Actions.ArchiveProject, Tier.RequiresApproval)]
     [InlineData(Actions.LaunchWorker, Tier.RequiresApproval)]
-    [InlineData(Actions.DeleteProject, Tier.Prohibited)]
+    [InlineData(Actions.DeleteProject, Tier.RequiresApproval)]
+    [InlineData(Actions.ModelRequest, Tier.RequiresApproval)]
+    [InlineData(Actions.UpdatePreference, Tier.RequiresApproval)]
     [InlineData(Actions.RunShell, Tier.Prohibited)]
     [InlineData("format_disk", Tier.Prohibited)]
     public void TiersAreFixedByAction(string action, Tier tier) => Assert.Equal(tier, PolicyEngine.TierOf(action));

@@ -1,23 +1,30 @@
 using Relay.Core.Captures;
 using Relay.Core.Execution;
 using Relay.Core.Ids;
+using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Memory;
 using Relay.Core.Notes;
+using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Projects;
+using Relay.Core.Stream;
+using Relay.Core.Tasks;
 
 namespace Relay.Core.Session;
 
 /// <summary>
-/// Note-mode organizing (phase 6): the capture is already durable in the ledger; this cuts it into
-/// atomic notes with exact spans, routes each by confidence (file / Review / leave unrouted),
-/// detects conflicting decisions, and leaves every uncertain call to the user in Review.
+/// Remembering. Two paths feed one filing step: a dictated note capture (judge off) is cut into
+/// atomic notes with exact spans; a judge finding while listening arrives already cut, with the
+/// excerpt as its source. Each note is routed by confidence (file / Review / leave in the inbox),
+/// checked for conflicting decisions, and every uncertain call is left to the user in Review.
 /// </summary>
 public sealed partial class SessionCoordinator
 {
     private ReviewStore ReviewStore => _reviewStore ??= new ReviewStore(_root);
     private ReviewStore? _reviewStore;
+
+    private sealed record FilingOutcome(bool Filed, bool Pending, bool Unrouted, int Disputes, string? ProjectSlug, string NoteId, string? Error);
 
     private string OrganizeNoteMemory(CaptureDraft draft, string sourceEventId)
     {
@@ -25,65 +32,15 @@ public sealed partial class SessionCoordinator
         if (extracted.Count == 0) extracted = [new ExtractedNote(NoteTypes.Idea, draft.Text, 0, draft.Text.Length, NoteExtractor.Topic(draft.Text))];
         if (Append(EventTypes.NoteExtracted, new { captureId = draft.CaptureId, sourceEventId, count = extracted.Count, types = extracted.Select(e => e.Type) }) is null) return "";
 
-        var profiles = _services.Registry.Active.Select(ProjectProfile.Build).ToList();
-        var auto = _settings.Orchestrator.AutoRouteThreshold;
-        var review = _settings.Orchestrator.ReviewThreshold;
         int filed = 0, pending = 0, unrouted = 0, disputed = 0;
-
         foreach (var x in extracted)
         {
-            var now = _clock.UtcNow;
-            var note = new DraftNote(Ulid.NewUlid(now), draft.CaptureId, sourceEventId, now, x.Type, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null,
-                x.Text, [new SourceSpan(sourceEventId, x.Start, x.End)]);
-            var path = _notes.Write(note);
-            if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId = draft.CaptureId, sourceEventId, chars = x.Text.Length, type = x.Type, topic = x.Topic, spanStart = x.Start, spanEnd = x.End, path }) is null) return "";
-            _services.Index.IndexDraft(note);
-
-            var routing = NoteRouter.Route(x.Text, profiles);
-            var projectAuto = routing.Best is { } b && _services.Registry.ById(b.ProjectId) is { } p ? p.Policy.AutoRouteThreshold ?? auto : auto;
-            if (routing.Best is { } best && best.Confidence >= projectAuto)
-            {
-                var project = _services.Registry.ById(best.ProjectId)!;
-                var existing = Directory.Exists(project.RootPath) ? ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note).ToList() : [];
-                var disputes = DisputeDetector.Find(x.Type, x.Text, existing);
-                var target = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["noteId"] = note.NoteId,
-                    ["projectId"] = project.Id,
-                    ["confidence"] = best.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
-                    ["type"] = x.Type,
-                };
-                if (x.Topic is not null) target["topic"] = x.Topic;
-                if (disputes.Count > 0) target["disputedWith"] = string.Join(",", disputes.Select(d => d.Existing.Id));
-                var proposal = new Proposal(Ulid.NewUlid(now), Actions.RouteNote, routing.Summary, target, [sourceEventId],
-                    [$"New {x.Type} note in {project.Slug}"], Risks.ControlledWrite, false, Producers.Router);
-                var (ok, why) = ExecuteAutomatic(proposal, "note:" + draft.CaptureId);
-                if (ok)
-                {
-                    filed++;
-                    foreach (var d in disputes)
-                    {
-                        disputed++;
-                        Append(EventTypes.NoteDisputed, new { noteId = note.NoteId, otherNoteId = d.Existing.Id, projectId = project.Id, reason = d.Reason, similarity = d.Similarity });
-                        ReviewStore.SaveDispute(new DisputeRecord(project.Id, project.Slug, note.NoteId, d.Existing.Id, x.Text, d.Existing.Body, d.Reason, now));
-                    }
-                    continue;
-                }
-                Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = "automatic filing was refused: " + why, candidates = routing.Candidates });
-                ReviewStore.SaveRouting(new RoutingDecisionRecord(note.NoteId, draft.CaptureId, x.Type, x.Text, now, routing.Summary + " — " + why, routing.Candidates));
-                pending++;
-            }
-            else if (routing.Best is { } candidate && candidate.Confidence >= review)
-            {
-                Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = routing.Summary, confidence = candidate.Confidence, candidates = routing.Candidates });
-                ReviewStore.SaveRouting(new RoutingDecisionRecord(note.NoteId, draft.CaptureId, x.Type, x.Text, now, routing.Summary, routing.Candidates));
-                pending++;
-            }
-            else
-            {
-                Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = routing.Summary, confidence = routing.Confidence, candidates = routing.Candidates });
-                unrouted++;
-            }
+            var outcome = FileNote(x.Type, x.Text, x.Topic, draft.CaptureId, sourceEventId, new SourceSpan(sourceEventId, x.Start, x.End), null, "note:" + draft.CaptureId, Producers.Router);
+            if (outcome is null) return "";
+            if (outcome.Filed) filed++;
+            if (outcome.Pending) pending++;
+            if (outcome.Unrouted) unrouted++;
+            disputed += outcome.Disputes;
         }
 
         var parts = new List<string>();
@@ -94,16 +51,107 @@ public sealed partial class SessionCoordinator
         return $"Saved {extracted.Count} note{(extracted.Count == 1 ? "" : "s")} · {string.Join(" · ", parts)}";
     }
 
-    /// <summary>Runs a Tier A proposal outside a command turn (note routing). Denied or failed operations return the reason and change nothing.</summary>
-    private (bool Ok, string? Reason) ExecuteAutomatic(Proposal proposal, string turnId)
+    /// <summary>A remember finding: the judge's restatement is the note; the excerpt is its source; the project hint raises routing confidence.</summary>
+    private void RememberFromFinding(TaskState task, JudgeFinding finding, Excerpt? excerpt)
+    {
+        var type = finding.NoteType is not null && NoteTypes.All.Contains(finding.NoteType) ? finding.NoteType : NoteExtractor.Classify(finding.NoteText!);
+        var span = excerpt is not null ? new SourceSpan(excerpt.ExcerptId, 0, excerpt.Text.Length) : new SourceSpan(task.SourceEventId, 0, finding.NoteText!.Length);
+        var outcome = FileNote(type, finding.NoteText!, finding.Topic, task.CaptureId, task.SourceEventId, span, finding.ProjectHint, task.TaskId, Producers.Judge);
+        if (outcome is null) return; // locked
+        var steps = new List<string> { $"Judge ({task.Why}) kept a {type} note", outcome.Filed ? $"Filed under {outcome.ProjectSlug}" : outcome.Pending ? "Routing needs your decision (Review)" : "No project matched; kept in the inbox" };
+        if (outcome.Disputes > 0) steps.Add($"{outcome.Disputes} earlier decision(s) may conflict (Review)");
+        if (outcome.Error is not null) steps.Add("Filing refused: " + outcome.Error);
+        task.Plan = new TurnPlan(true, outcome.Filed ? $"Filed {type} note under {outcome.ProjectSlug}" : $"Kept {type} note in the inbox", steps, null,
+            excerpt is null ? [] : [new Citation(Search.SearchIndex.ExcerptKind, excerpt.ExcerptId, null, null, Truncate(excerpt.Text, 120), span)], [], Producers.Judge);
+        // The filing already ran through proposal → policy → executor; the task records the outcome without re-proposing.
+        task.Proposals.Add(new ProposalState
+        {
+            Proposal = new Proposal(outcome.NoteId, Actions.RouteNote, "recorded by the remember lane", new Dictionary<string, string> { ["noteId"] = outcome.NoteId }, [task.SourceEventId], [], Risks.StagingWrite, false, Producers.Judge),
+            Decision = new Decision(DecisionOutcome.Allow, Tier.Automatic, [outcome.Filed ? "filed automatically" : "left in the inbox"], new Dictionary<string, string>()),
+            Status = outcome.Filed ? "executed" : outcome.Error is not null ? "denied" : "skipped",
+            Result = outcome.Filed ? ExecutionResult.Ok($"Note {outcome.NoteId} filed under {outcome.ProjectSlug}") : null,
+        });
+        FinishTask(task);
+    }
+
+    /// <summary>
+    /// One note through the filing step: draft in staging, route by confidence, file when confident (Tier A
+    /// proposal through policy and the executor), otherwise leave it for Review. Returns null when the ledger locked.
+    /// </summary>
+    private FilingOutcome? FileNote(string type, string text, string? topic, string captureId, string sourceEventId, SourceSpan span, string? projectHint, string taskId, string producer)
+    {
+        var now = _clock.UtcNow;
+        var note = new DraftNote(Ulid.NewUlid(now), captureId, sourceEventId, now, type, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null, text, [span]);
+        var path = _notes.Write(note);
+        if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId, sourceEventId, chars = text.Length, type, topic, spanSource = span.EventId, spanStart = span.Start, spanEnd = span.End, path, by = producer }) is null) return null;
+        _services.Index.IndexDraft(note);
+
+        var profiles = _services.Registry.Active.Select(ProjectProfile.Build).ToList();
+        var routing = NoteRouter.Route(text, profiles);
+        // A project the judge heard named is strong evidence; it lifts that candidate rather than replacing the router.
+        var best = routing.Best;
+        if (projectHint is not null && _services.Registry.FindActive(projectHint) is { } hinted)
+        {
+            var hintedCandidate = routing.Candidates.FirstOrDefault(c => c.ProjectId == hinted.Id);
+            var boosted = Math.Min(1.0, Math.Max(hintedCandidate?.Confidence ?? 0, 0.6) + 0.25);
+            if (best is null || best.ProjectId == hinted.Id || boosted > best.Confidence)
+                best = new RoutingCandidate(hinted.Id, hinted.Slug, hinted.Name, boosted, [.. hintedCandidate?.Reasons ?? [], $"named in the conversation ({projectHint})"]);
+        }
+
+        var auto = _settings.Orchestrator.AutoRouteThreshold;
+        var review = _settings.Orchestrator.ReviewThreshold;
+        var projectAuto = best is { } b && _services.Registry.ById(b.ProjectId) is { } p ? p.Policy.AutoRouteThreshold ?? auto : auto;
+        if (best is not null && best.Confidence >= projectAuto)
+        {
+            var project = _services.Registry.ById(best.ProjectId)!;
+            var existing = Directory.Exists(project.RootPath) ? ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note).ToList() : [];
+            var disputes = DisputeDetector.Find(type, text, existing);
+            var target = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["noteId"] = note.NoteId,
+                ["projectId"] = project.Id,
+                ["confidence"] = best.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["type"] = type,
+            };
+            if (topic is not null) target["topic"] = topic;
+            if (disputes.Count > 0) target["disputedWith"] = string.Join(",", disputes.Select(d => d.Existing.Id));
+            var proposal = new Proposal(Ulid.NewUlid(now), Actions.RouteNote, best.Reasons.Count > 0 ? string.Join("; ", best.Reasons) : routing.Summary, target, [sourceEventId],
+                [$"New {type} note in {project.Slug}"], Risks.ControlledWrite, false, producer);
+            var (ok, why) = ExecuteAutomatic(proposal, taskId);
+            if (ok)
+            {
+                foreach (var d in disputes)
+                {
+                    Append(EventTypes.NoteDisputed, new { noteId = note.NoteId, otherNoteId = d.Existing.Id, projectId = project.Id, reason = d.Reason, similarity = d.Similarity });
+                    ReviewStore.SaveDispute(new DisputeRecord(project.Id, project.Slug, note.NoteId, d.Existing.Id, text, d.Existing.Body, d.Reason, now));
+                }
+                return new FilingOutcome(true, false, false, disputes.Count, project.Slug, note.NoteId, null);
+            }
+            Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = "automatic filing was refused: " + why, candidates = routing.Candidates });
+            ReviewStore.SaveRouting(new RoutingDecisionRecord(note.NoteId, captureId, type, text, now, routing.Summary + " — " + why, routing.Candidates));
+            return new FilingOutcome(false, true, false, 0, null, note.NoteId, why);
+        }
+        if (best is not null && best.Confidence >= review)
+        {
+            var candidates = routing.Candidates.Any(c => c.ProjectId == best.ProjectId) ? routing.Candidates : [best, .. routing.Candidates];
+            Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = routing.Summary, confidence = best.Confidence, candidates });
+            ReviewStore.SaveRouting(new RoutingDecisionRecord(note.NoteId, captureId, type, text, now, routing.Summary, candidates));
+            return new FilingOutcome(false, true, false, 0, null, note.NoteId, null);
+        }
+        Append(EventTypes.NoteRoutingDeferred, new { noteId = note.NoteId, reason = routing.Summary, confidence = routing.Confidence, candidates = routing.Candidates });
+        return new FilingOutcome(false, false, true, 0, null, note.NoteId, null);
+    }
+
+    /// <summary>Runs a Tier A proposal outside a planned task (note routing). Denied or failed operations return the reason and change nothing.</summary>
+    private (bool Ok, string? Reason) ExecuteAutomatic(Proposal proposal, string taskId)
     {
         PersistProposal(proposal);
-        Append(EventTypes.ProposalReceived, new { turnId, proposalId = proposal.ProposalId, action = proposal.Action, reason = proposal.Reason, target = proposal.Target, sourceEventIds = proposal.SourceEventIds, proposedBy = proposal.ProposedBy, hash = proposal.Hash() });
+        Append(EventTypes.ProposalReceived, new { taskId, proposalId = proposal.ProposalId, action = proposal.Action, reason = proposal.Reason, target = proposal.Target, sourceEventIds = proposal.SourceEventIds, proposedBy = proposal.ProposedBy, hash = proposal.Hash() });
         var decision = PolicyEngine.Decide(proposal, World);
-        Append(EventTypes.ProposalDecided, new { turnId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = decision.Outcome.ToString(), tier = decision.Tier.ToString(), reasons = decision.Reasons, target = decision.NormalizedTarget });
+        Append(EventTypes.ProposalDecided, new { taskId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = decision.Outcome.ToString(), tier = decision.Tier.ToString(), reasons = decision.Reasons, target = decision.NormalizedTarget });
         if (decision.Outcome != DecisionOutcome.Allow) return (false, string.Join(" ", decision.Reasons));
         var capability = _capabilities.Issue(proposal, _clock.UtcNow);
-        var result = _executor.Execute(proposal, capability, World, turnId, this);
+        var result = _executor.Execute(proposal, capability, World, taskId, this);
         var state = new ProposalState { Proposal = proposal, Decision = decision, Status = result.Status == ExecutionStatus.Completed ? "executed" : "failed", Result = result };
         RefreshIndexAfter(state);
         return result.Status == ExecutionStatus.Completed ? (true, null) : (false, result.Error);

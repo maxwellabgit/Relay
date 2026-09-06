@@ -22,8 +22,8 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
     private const RegexOptions Opts = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
     [GeneratedRegex(@"^(?:please\s+)?(?:create|make|start|add|set\s+up|open)\s+(?:a\s+|the\s+)?(?:new\s+)?project\s+(?:called\s+|named\s+|for\s+)?[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex CreateProject();
-    [GeneratedRegex(@"^(?:please\s+)?(?:permanently\s+)(?:delete|erase|wipe|purge)\s+(?:the\s+)?project\s+(?<name>.+?)$|^(?:please\s+)?(?:delete|erase|wipe|purge)\s+(?:the\s+)?project\s+(?<name2>.+?)\s+(?:permanently|forever|for\s+good)$", Opts)] private static partial Regex HardDelete();
-    [GeneratedRegex(@"^(?:please\s+)?(?:archive|close|retire|delete|remove)\s+(?:the\s+)?project\s+[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex ArchiveProject();
+    [GeneratedRegex(@"^(?:please\s+)?(?:permanently\s+)?(?:delete|erase|wipe|purge)\s+(?:the\s+)?project\s+[""“']?(?<name>.+?)[""”']?(?:\s+(?:permanently|forever|for\s+good))?$", Opts)] private static partial Regex HardDelete();
+    [GeneratedRegex(@"^(?:please\s+)?(?:archive|close|retire|remove)\s+(?:the\s+)?project\s+[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex ArchiveProject();
     [GeneratedRegex(@"^(?:please\s+)?(?:restore|unarchive|reopen|bring\s+back)\s+(?:the\s+)?project\s+[""“']?(?<name>.+?)[""”']?$", Opts)] private static partial Regex RestoreProject();
     [GeneratedRegex(@"^(?:please\s+)?rename\s+(?:the\s+)?project\s+[""“']?(?<old>.+?)[""”']?\s+to\s+[""“']?(?<new>.+?)[""”']?$", Opts)] private static partial Regex RenameProject();
     [GeneratedRegex(@"^(?:please\s+)?(?:list|show|show\s+me|what\s+are)\s+(?:me\s+)?(?:all\s+)?(?:of\s+)?(?:my\s+|the\s+)?(?:active\s+)?projects\??$|^what\s+projects\s+(?:do\s+i\s+have|are\s+there|exist)\??$", Opts)] private static partial Regex ListProjects();
@@ -44,11 +44,14 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
 
         if ((m = HardDelete().Match(text)).Success)
         {
-            var name = m.Groups["name"].Success ? m.Groups["name"].Value : m.Groups["name2"].Value;
-            steps.Add("Permanent deletion is prohibited; proposing it anyway so the denial is on record");
-            return Done(new TurnPlan(true, $"Permanently delete project '{name}'", steps,
-                "Permanent deletion is prohibited. Relay only archives; say \"archive project …\" to move it to the recoverable archive.",
-                [], [Propose(request, Actions.DeleteProject, "User asked for permanent deletion.", new() { ["project"] = name }, ["Nothing: prohibited action"], Risks.Prohibited, true)], Name));
+            var name = Clean(m.Groups["name"].Value);
+            var project = context.Registry.FindActive(name);
+            if (project is null) return Done(Unknown(steps, $"Delete project '{name}'", name, context));
+            if (request.Origin != Tasks.TaskOrigin.Direct) return Done(Answer(steps, $"Delete project '{project.Name}'", "Deletion is only proposed from a direct request, never from something overheard."));
+            steps.Add("Deletion is permanent: propose delete_project (requires approval; archive_project is the recoverable alternative)");
+            return Done(new TurnPlan(true, $"Delete project '{project.Name}'", steps, null, [],
+                [Propose(request, Actions.DeleteProject, "Instruction asked to delete the project. A safety zip is written to the backups folder first; the folder is then removed for good.", new() { ["projectId"] = project.Id, ["confirm"] = "delete" },
+                    [$"Remove {project.RootPath} and every note in it", "Registry status becomes deleted; not restorable"], Risks.ControlledWrite, true)], Name));
         }
         if ((m = CreateProject().Match(text)).Success)
         {
@@ -81,9 +84,9 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
             var name = Clean(m.Groups["name"].Value);
             var project = context.Registry.FindActive(name);
             if (project is null) return Done(Unknown(steps, $"Archive project '{name}'", name, context));
-            steps.Add("Deletion means archiving: propose archive_project (requires approval)");
+            steps.Add("Propose archive_project (requires approval)");
             return Done(new TurnPlan(true, $"Archive project '{project.Name}'", steps, null, [],
-                [Propose(request, Actions.ArchiveProject, "Instruction asked to archive/remove the project. Relay never deletes; it moves the folder to the recoverable archive.", new() { ["projectId"] = project.Id },
+                [Propose(request, Actions.ArchiveProject, "Instruction asked to archive/remove the project; the folder moves to the recoverable archive.", new() { ["projectId"] = project.Id },
                     [$"Move {project.RootPath} into the archive with a manifest of every file hash", "Registry status becomes archived; restorable for 90 days"], Risks.ControlledWrite, true)], Name));
         }
         if ((m = RenameProject().Match(text)).Success)

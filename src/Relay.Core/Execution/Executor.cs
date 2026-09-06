@@ -34,6 +34,19 @@ public interface IWorkerOperations
     ExecutionResult ApplyPatch(Proposal proposal, Decision decision, IExecutionSink sink);
 }
 
+/// <summary>An approved package leaves the machine for a named external model; the runtime resolves references, hashes the package, sends, and stores the artifact.</summary>
+public interface IExternalOperations
+{
+    ExecutionResult Request(Proposal proposal, Decision decision, string taskId, IExecutionSink sink);
+}
+
+/// <summary>Relay's own configuration changes go through change sets; the executor only knows the contract.</summary>
+public interface ISelfChangeOperations
+{
+    ExecutionResult UpdatePreference(Proposal proposal, Decision decision, string taskId, IExecutionSink sink);
+    ExecutionResult UpdatePrompt(Proposal proposal, Decision decision, string taskId, IExecutionSink sink);
+}
+
 public sealed class ExecutionJournalEntry
 {
     [JsonPropertyName("proposalId")] public required string ProposalId { get; init; }
@@ -71,6 +84,8 @@ public sealed class Executor
     }
 
     public IWorkerOperations? Workers { get; set; }
+    public IExternalOperations? External { get; set; }
+    public ISelfChangeOperations? SelfChange { get; set; }
 
     public ExecutionResult Execute(Proposal proposal, Capability capability, PolicyWorld world, string turnId, IExecutionSink sink)
     {
@@ -110,6 +125,11 @@ public sealed class Executor
                 Actions.ExportBackup => ExportBackup(proposal, decision, sink),
                 Actions.LaunchWorker => Workers?.Launch(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Worker runtime is not configured."),
                 Actions.ApplyPatch => Workers?.ApplyPatch(proposal, decision, sink) ?? ExecutionResult.Fail("Worker runtime is not configured."),
+                Actions.MoveNote => MoveNote(proposal, decision, sink),
+                Actions.DeleteProject => DeleteProject(proposal, decision, sink),
+                Actions.ModelRequest => External?.Request(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("No external model runtime is configured."),
+                Actions.UpdatePreference => SelfChange?.UpdatePreference(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Self-change operations are not configured."),
+                Actions.UpdatePrompt => SelfChange?.UpdatePrompt(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Self-change operations are not configured."),
                 _ => ExecutionResult.Fail($"No executor for action '{proposal.Action}'."),
             };
         }
@@ -298,6 +318,50 @@ public sealed class Executor
         return verification.Ok
             ? ExecutionResult.Ok($"Exported and verified backup: {result.Files} files → {result.ZipPath}", new Dictionary<string, string> { ["path"] = result.ZipPath, ["manifestHash"] = result.ManifestHash })
             : ExecutionResult.Fail("Backup written but verification failed: " + string.Join("; ", verification.Problems));
+    }
+
+    private ExecutionResult MoveNote(Proposal p, Decision d, IExecutionSink sink)
+    {
+        var from = _registry.ById(d.NormalizedTarget["projectId"])!;
+        var to = _registry.ById(d.NormalizedTarget["toProjectId"])!;
+        var found = ProjectNoteStore.Find(from.RootPath, d.NormalizedTarget["noteId"]) ?? throw new FileNotFoundException("Note vanished.");
+        var note = found.Note;
+        note.ProjectId = to.Id;
+        var written = ProjectNoteStore.WriteNew(to.RootPath, note);
+
+        // Version history travels with the note; the source keeps a pointer so the move itself is traceable from either side.
+        var fromVersions = Path.Combine(ProjectLayout.VersionsDirectory(from.RootPath), note.Id);
+        if (Directory.Exists(fromVersions))
+        {
+            var toVersions = Path.Combine(ProjectLayout.VersionsDirectory(to.RootPath), note.Id);
+            Directory.CreateDirectory(Path.GetDirectoryName(toVersions)!);
+            if (Directory.Exists(toVersions)) foreach (var f in Directory.EnumerateFiles(fromVersions)) File.Move(f, Path.Combine(toVersions, Path.GetFileName(f)), overwrite: false);
+            else Directory.Move(fromVersions, toVersions);
+        }
+        var movedDir = Path.Combine(ProjectLayout.VersionsDirectory(from.RootPath), note.Id);
+        Directory.CreateDirectory(movedDir);
+        AtomicFile.WriteAllText(Path.Combine(movedDir, "moved.md"), File.ReadAllText(found.Path));
+        AtomicFile.WriteAllText(Path.Combine(movedDir, "moved-to.txt"), $"{to.Slug}\n{written.Path}\n{_clock.UtcNow:O}\n");
+        File.Delete(found.Path);
+        sink.Record(EventTypes.NoteMoved, new { noteId = note.Id, fromProjectId = from.Id, toProjectId = to.Id, fromPath = found.Path, toPath = written.Path, sha256 = written.Sha256, proposalId = p.ProposalId });
+        return ExecutionResult.Ok($"Moved note {note.Id} from {from.Slug} to {to.Slug}; a copy of the last version stays under {from.Slug}/.orchestrator", new Dictionary<string, string> { ["path"] = written.Path, ["projectId"] = to.Id, ["fromProjectId"] = from.Id });
+    }
+
+    private ExecutionResult DeleteProject(Proposal p, Decision d, IExecutionSink sink)
+    {
+        var project = _registry.ById(d.NormalizedTarget["projectId"])!;
+        var now = _clock.UtcNow;
+        Directory.CreateDirectory(_root.BackupsDirectory);
+        var safety = Path.Combine(_root.BackupsDirectory, $"deleted-{project.Slug}-{now:yyyyMMdd'T'HHmmss'Z'}.zip");
+        var files = Directory.EnumerateFiles(project.RootPath, "*", SearchOption.AllDirectories).Count();
+        System.IO.Compression.ZipFile.CreateFromDirectory(project.RootPath, safety, System.IO.Compression.CompressionLevel.Optimal, includeBaseDirectory: true);
+        Directory.Delete(project.RootPath, recursive: true);
+        project.Status = ProjectRecord.DeletedStatus;
+        project.ArchivedAt = now;
+        project.ArchivedPath = null;
+        _registry.Update(project);
+        sink.Record(EventTypes.ProjectDeleted, new { projectId = project.Id, slug = project.Slug, path = project.RootPath, files, safetyBackup = safety, proposalId = p.ProposalId, by = p.ProposedBy });
+        return ExecutionResult.Ok($"Deleted project '{project.Name}' ({files} files). A safety zip is at {safety}; nothing else remains.", new Dictionary<string, string> { ["safetyBackup"] = safety });
     }
 
     // ----------------------------------------------------------------------------------------

@@ -10,6 +10,7 @@ using Relay.Core.Recovery;
 using Relay.Core.Sessions;
 using Relay.Core.State;
 using Relay.Core.Storage;
+using Relay.Core.Tasks;
 using Relay.Core.Time;
 
 namespace Relay.Core.Session;
@@ -90,7 +91,12 @@ public sealed partial class SessionCoordinator
     {
         _root = root;
         _services = services;
-        _executor = new Execution.Executor(root, services.Registry, services.Roots, notes, clock, _capabilities) { Workers = services.Workers };
+        _executor = new Execution.Executor(root, services.Registry, services.Roots, notes, clock, _capabilities)
+        {
+            Workers = services.Workers,
+            External = services.External,
+        };
+        _executor.SelfChange = new SelfChange.SelfChangeRuntime(root, PreferenceStore, ChangeSets, () => clock.UtcNow);
         _ledger = ledger;
         _drafts = drafts;
         _notes = notes;
@@ -217,6 +223,7 @@ public sealed partial class SessionCoordinator
         }
 
         DetectInterruptedWork();
+        DetectInterruptedStream();
 
         if (_state == RelayState.Locked)
         {
@@ -300,7 +307,6 @@ public sealed partial class SessionCoordinator
         _receiptTimer?.Dispose();
         _receipt = null;
         _notice = null;
-        _lastTurn = null;
         _awaitTimedOut = false;
         _awaitExtensions = 0;
         _stabilizationPending = false;
@@ -318,6 +324,15 @@ public sealed partial class SessionCoordinator
             PreviousForegroundProcess = SafeForegroundProcess(),
         };
 
+        if (mode == CaptureMode.Note && ListeningEnabled)
+        {
+            // Listening: no capture record with text, no draft file. The stream's own records carry ids and sizes only.
+            BeginStream(_draft);
+            _host.PrepareCaptureSurface();
+            _surfaceFocused = true;
+            return;
+        }
+
         if (Append(EventTypes.CaptureStarted, new
         {
             captureId = _draft.CaptureId,
@@ -333,7 +348,14 @@ public sealed partial class SessionCoordinator
     private void RequestStop()
     {
         if (_draft is null) return;
-        if (Append(EventTypes.CaptureStopRequested, new { captureId = _draft.CaptureId, chars = _draft.Text.Length }) is null) return;
+        if (Append(EventTypes.CaptureStopRequested, new { captureId = _draft.CaptureId, chars = _draft.Text.Length, listening = IsStreaming(_draft) }) is null) return;
+        if (IsStreaming(_draft))
+        {
+            // Listening has no transcript to wait for: whatever Flow still delivers in the next moment is segmented, then the stream closes.
+            StartAwaitingTimers(restartTimeout: true);
+            if (_draft.Text.Length == 0) OnTranscriptStable(_awaitGeneration);
+            return;
+        }
         StartAwaitingTimers(restartTimeout: true);
     }
 
@@ -360,7 +382,7 @@ public sealed partial class SessionCoordinator
     {
         _stabilizationTimer = null;
         _stabilizationPending = false;
-        if (generation != _awaitGeneration || _state != RelayState.AwaitingTranscript || _draft is null || _draft.Text.Length == 0) return;
+        if (generation != _awaitGeneration || _state != RelayState.AwaitingTranscript || _draft is null || (_draft.Text.Length == 0 && !IsStreaming(_draft))) return;
         if (Append(EventTypes.CaptureTranscriptStable, new { captureId = _draft.CaptureId, chars = _draft.Text.Length }) is null) { Notify(); return; }
         StopAwaitingTimers();
         if (Apply(Trigger.TranscriptStable).Accepted) Organize();
@@ -371,7 +393,7 @@ public sealed partial class SessionCoordinator
     {
         _timeoutTimer = null;
         if (generation != _awaitGeneration || _state != RelayState.AwaitingTranscript || _draft is null) return;
-        if (_draft.Text.Length > 0)
+        if (_draft.Text.Length > 0 || IsStreaming(_draft))
         {
             // Text is present but never went quiet; treat the timeout as the stability boundary.
             OnTranscriptStable(generation);
@@ -405,13 +427,21 @@ public sealed partial class SessionCoordinator
 
         _draft.Text = text;
         _draft.UpdatedAt = _clock.UtcNow;
-        _draftDirty = true;
-        _draftPersistTimer ??= _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.DraftPersistDebounceMs), () =>
+        if (_stream is { } stream && stream.StreamId == _draft.CaptureId)
         {
-            _draftPersistTimer = null;
-            if (_draftDirty) PersistDraftNow();
-            Notify();
-        });
+            // Listening: the words go to the segmenter and the rolling window, never to a draft file.
+            StreamTextChanged(stream, text);
+        }
+        else
+        {
+            _draftDirty = true;
+            _draftPersistTimer ??= _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.DraftPersistDebounceMs), () =>
+            {
+                _draftPersistTimer = null;
+                if (_draftDirty) PersistDraftNow();
+                Notify();
+            });
+        }
 
         if (_state == RelayState.AwaitingTranscript)
         {
@@ -439,7 +469,7 @@ public sealed partial class SessionCoordinator
 
     public void Cancel()
     {
-        if (_state.IsTurnActive()) { CancelTurn(); Notify(); return; }
+        if (_state.IsTurnActive()) { CancelForegroundTask(); Notify(); return; }
         if (_draft is null || !_state.CanCancelFrom()) { _notice = TransitionTable.Next(_state, Trigger.Cancel).Message; Notify(); return; }
         var stateAtCancel = _state;
         var transition = Apply(Trigger.Cancel);
@@ -453,6 +483,16 @@ public sealed partial class SessionCoordinator
         _draft = null;
         _draftCommittedEventId = null;
         _awaitTimedOut = false;
+
+        if (_stream is { } stream && stream.StreamId == draft.CaptureId)
+        {
+            // Listening cancelled: the window is dropped; excerpts and tasks already raised stand on their own.
+            Append(EventTypes.CaptureCancelled, new { captureId = draft.CaptureId, mode = draft.ModeWire, chars = draft.Text.Length, stateAtCancel = stateAtCancel.Label(), listening = true });
+            CompleteStream(stream, "cancelled");
+            _cancelledDraft = null;
+            Notify();
+            return;
+        }
 
         Append(EventTypes.CaptureCancelled, new
         {
@@ -503,6 +543,13 @@ public sealed partial class SessionCoordinator
     {
         if (_state != RelayState.Organizing || _draft is null) return;
         var draft = _draft;
+
+        if (_stream is { } stream && stream.StreamId == draft.CaptureId)
+        {
+            // Listening ends with a last judge pass over what is still pending; the stream closes when it returns.
+            FinishStream(stream);
+            return;
+        }
 
         try
         {
@@ -555,7 +602,7 @@ public sealed partial class SessionCoordinator
             _draftCommittedEventId = null;
             if (startTurn)
             {
-                StartCommandTurn(draft, sourceEventId);
+                StartCommandTask(draft, sourceEventId);
                 return;
             }
             if (Apply(Trigger.OrganizeSucceeded).Accepted) ShowReceipt(receipt);
@@ -731,18 +778,27 @@ public sealed partial class SessionCoordinator
         Append(EventTypes.AppFailed, new { where, exceptionType = exception.GetType().FullName, message = exception.Message, incidentPath });
         if (_state is RelayState.Locked) { Notify(); return; }
 
-        if (_turn is { } turn && _state.IsTurnActive())
+        foreach (var task in _tasks.Where(t => t.IsLive).ToList())
         {
-            turn.Timeout?.Dispose();
-            turn.Outcome = "failed";
-            Append(EventTypes.TurnFailed, new { turnId = turn.TurnId, kind = "app_failed", error = exception.Message, pendingOperation = turn.PendingOperation?.Proposal.ProposalId });
-            RequestWorkerStop?.Invoke(turn.PendingOperation?.Proposal.ProposalId);
-            ClearTurnFile(turn);
-            _turn = null;
-            turn.Cts.Cancel();
+            task.Timeout?.Dispose();
+            task.Timeout = null;
+            RequestWorkerStop?.Invoke(task.PendingOperation?.Proposal.ProposalId);
+            _services.External?.Stop(task.PendingOperation?.Proposal.ProposalId, "app failed");
+            task.Outcome = "failed";
+            task.Status = Tasks.TaskStatus.Failed;
+            task.CompletedAt = _clock.UtcNow;
+            Append(EventTypes.TaskFailed, new { taskId = task.TaskId, origin = task.Origin.Wire(), kind = task.Kind.Wire(), failure = "app_failed", error = exception.Message, pendingOperation = task.PendingOperation?.Proposal.ProposalId });
+            WriteDiagnostics(task);
+            task.Cts.Cancel();
         }
 
-        if (_draft is not null && _state.IsCapturing())
+        if (_stream is { } stream)
+        {
+            if (stream.WindowDirty) PersistWindow(stream);
+            CompleteStream(stream, "failed");
+            if (_draft is not null && _draft.CaptureId == stream.StreamId) { _draft = null; _draftCommittedEventId = null; }
+        }
+        else if (_draft is not null && _state.IsCapturing())
         {
             StopAwaitingTimers();
             if (_draftDirty) PersistDraftNow();
@@ -763,17 +819,27 @@ public sealed partial class SessionCoordinator
         _receiptTimer?.Dispose();
         _draftPersistTimer?.Dispose();
 
-        if (_draft is not null && _state.IsCapturing() && _draftDirty) PersistDraftNow();
-
-        if (_turn is { } turn && _state.IsTurnActive())
+        if (_stream is { } stream)
         {
-            // A clean exit mid-turn is a cancellation, recorded as such so startup does not report a crash.
-            turn.Timeout?.Dispose();
-            RequestWorkerStop?.Invoke(turn.PendingOperation?.Proposal.ProposalId);
-            Append(EventTypes.TurnCancelled, new { turnId = turn.TurnId, stage = _state.Label().ToLowerInvariant(), reason = "shutdown:" + reason });
-            ClearTurnFile(turn);
-            _turn = null;
-            turn.Cts.Cancel();
+            // A clean exit while listening closes the stream; the window is dropped, not kept.
+            CompleteStream(stream, "shutdown:" + reason);
+        }
+        else if (_draft is not null && _state.IsCapturing() && _draftDirty) PersistDraftNow();
+
+        foreach (var task in _tasks.Where(t => t.IsLive).ToList())
+        {
+            // A clean exit mid-task is a cancellation, recorded as such so startup does not report a crash.
+            task.Timeout?.Dispose();
+            task.Timeout = null;
+            RequestWorkerStop?.Invoke(task.PendingOperation?.Proposal.ProposalId);
+            _services.External?.Stop(task.PendingOperation?.Proposal.ProposalId, "shutdown");
+            var stage = task.Status.Wire();
+            task.Status = Tasks.TaskStatus.Cancelled;
+            task.Outcome = "cancelled";
+            task.CompletedAt = _clock.UtcNow;
+            Append(EventTypes.TaskCancelled, new { taskId = task.TaskId, stage, reason = "shutdown:" + reason });
+            WriteDiagnostics(task);
+            task.Cts.Cancel();
         }
 
         Append(EventTypes.SessionEnded, new
@@ -840,7 +906,7 @@ public sealed partial class SessionCoordinator
         _incident = new IncidentInfo(kind, summary, detail + "\n\nThe ledger could not be written, so this incident was recorded only in the incidents folder. "
             + "Unlock retries the ledger; if the disk or permissions problem persists Relay stays locked. Any active capture remains in staging\\drafts\\current.json.",
             _clock.UtcNow, path);
-        if (_draft is not null && _draftDirty)
+        if (_draft is not null && _draftDirty && !IsStreaming(_draft))
         {
             try { _drafts.Write(_draft); _draftDirty = false; } catch (IOException) { }
         }
@@ -965,7 +1031,16 @@ public sealed partial class SessionCoordinator
                 _settings.Model.Enabled,
                 _settings.Model.Enabled ? _settings.Model.Endpoint : null,
                 _settings.Model.Enabled ? _settings.Model.Model : null,
-                ModelKeyStored);
+                ModelKeyStored,
+                TaskViews(),
+                Arbiter.Items,
+                ListeningView(),
+                ListeningEnabled,
+                _settings.Judge.Mode,
+                _services.Judge.Name,
+                Preferences,
+                ChangeSetViews(),
+                _services.External?.ProfileNames ?? []);
         }
     }
 }

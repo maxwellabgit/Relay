@@ -9,10 +9,11 @@ using Relay.Core.Model;
 namespace Relay.Gateway;
 
 /// <summary>
-/// Chat-completions client for one allow-listed endpoint. It sends the request Relay built and
+/// Chat-completions client for one allow-listed endpoint: https anywhere, or plain http strictly on
+/// loopback (the local llama.cpp server that hosts RELAY0). It sends the request Relay built and
 /// nothing more: no telemetry, no retries that could duplicate side effects, no redirects, and the
 /// key is read from the secret store per call so it is never held in settings or long-lived state.
-/// Errors are returned as data; nothing here throws for network conditions.
+/// A loopback server needs no key. Errors are returned as data; nothing here throws for network conditions.
 /// </summary>
 public sealed class OpenAiCompatibleClient : IModelClient, IDisposable
 {
@@ -23,8 +24,8 @@ public sealed class OpenAiCompatibleClient : IModelClient, IDisposable
 
     public OpenAiCompatibleClient(ModelSettings settings, ISecretStore secrets, HttpMessageHandler? handler = null)
     {
-        if (!Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.Scheme != Uri.UriSchemeHttps)
-            throw new ArgumentException("The model endpoint must be an absolute https URL.", nameof(settings));
+        if (!ModelSettings.IsAllowedEndpoint(settings.Endpoint, out var why) || !Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint))
+            throw new ArgumentException("The model endpoint " + why, nameof(settings));
         _endpoint = endpoint;
         _secrets = secrets;
         _secretName = settings.SecretName;
@@ -33,17 +34,18 @@ public sealed class OpenAiCompatibleClient : IModelClient, IDisposable
         {
             Timeout = TimeSpan.FromMilliseconds(settings.TimeoutMs),
         };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Relay/0.1");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Relay/0.2");
     }
 
     public string Host => _endpoint.Host;
     public string Model { get; }
+    public bool IsLoopback => _endpoint.IsLoopback;
 
     public async Task<ModelResponse> CompleteAsync(ModelRequest request, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
         var key = _secrets.Get(_secretName);
-        if (string.IsNullOrWhiteSpace(key)) return ModelResponse.Failed($"No API key stored under secret '{_secretName}'.", watch.ElapsedMilliseconds);
+        if (string.IsNullOrWhiteSpace(key) && !IsLoopback) return ModelResponse.Failed($"No API key stored under secret '{_secretName}'.", watch.ElapsedMilliseconds);
 
         var body = new JsonObject
         {
@@ -52,10 +54,18 @@ public sealed class OpenAiCompatibleClient : IModelClient, IDisposable
             ["max_tokens"] = request.MaxOutputTokens,
             ["temperature"] = 0,
         };
-        if (request.JsonObject) body["response_format"] = new JsonObject { ["type"] = "json_object" };
+        if (request.JsonSchema is not null)
+        {
+            JsonNode? schema = null;
+            try { schema = JsonNode.Parse(request.JsonSchema); } catch (JsonException) { }
+            if (schema is not null)
+                body["response_format"] = new JsonObject { ["type"] = "json_schema", ["json_schema"] = new JsonObject { ["name"] = request.SchemaName, ["strict"] = true, ["schema"] = schema } };
+            else if (request.JsonObject) body["response_format"] = new JsonObject { ["type"] = "json_object" };
+        }
+        else if (request.JsonObject) body["response_format"] = new JsonObject { ["type"] = "json_object" };
 
         using var message = new HttpRequestMessage(HttpMethod.Post, _endpoint);
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        if (!string.IsNullOrWhiteSpace(key)) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         message.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
 
         try

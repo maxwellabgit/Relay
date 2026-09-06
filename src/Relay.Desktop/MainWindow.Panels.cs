@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         ResponseCard.Visibility = Vis(r is not null);
         if (r is null) { _responseSignature = ""; return; }
 
-        var signature = $"{r.TurnId}|{r.Outcome}|{r.Live}|{r.Steps.Count}|{r.Summary}|{r.Answer?.Length}|{string.Join(",", r.Proposals.Select(p => p.ProposalId + p.Status))}|{s.State}";
+        var signature = $"{r.TaskId}|{r.Outcome}|{r.Live}|{r.Steps.Count}|{r.Summary}|{r.Answer?.Length}|{string.Join(",", r.Proposals.Select(p => p.ProposalId + p.Status))}|{s.State}";
         if (signature == _responseSignature) return;
         _responseSignature = signature;
 

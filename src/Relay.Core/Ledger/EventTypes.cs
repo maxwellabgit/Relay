@@ -110,4 +110,50 @@ public static class EventTypes
     public const string SettingsChanged = "settings.changed";
     /// <summary>A protected secret was stored or removed; carries the secret's name only, never its value.</summary>
     public const string SecretChanged = "settings.secret_changed";
+
+    // Streams (listening): metadata only, never text
+    public const string StreamStarted = "stream.started";
+    public const string StreamSegment = "stream.segment";
+    public const string StreamStopped = "stream.stopped";
+    /// <summary>A buffer window file survived a crash; it is discarded (it expired with the buffer) and only its size is recorded.</summary>
+    public const string StreamInterruptedFound = "stream.interrupted_found";
+    /// <summary>A judge pass that found nothing: segment ids, hashes, tokens, latency. No words.</summary>
+    public const string ObserveChecked = "observe.checked";
+    /// <summary>A judge pass that found something; the findings become tasks and excerpts.</summary>
+    public const string ObserveFound = "observe.found";
+    public const string ObserveFailed = "observe.failed";
+    /// <summary>An excerpt was persisted: ids, seconds, chars, whether the guard shrank it.</summary>
+    public const string ExcerptStored = "stream.excerpt_stored";
+    /// <summary>The user asked something directly; the instruction text is kept (it is intent, not conversation).</summary>
+    public const string AskRecorded = "ask.recorded";
+
+    // Tasks (one pipeline, several origins)
+    public const string TaskCreated = "task.created";
+    public const string TaskPlanned = "task.planned";
+    public const string TaskPresented = "task.presented";
+    public const string TaskMerged = "task.merged";
+    public const string TaskCompleted = "task.completed";
+    public const string TaskFailed = "task.failed";
+    public const string TaskCancelled = "task.cancelled";
+    public const string TaskUserResponse = "task.user_response";
+    public const string TaskInterruptedFound = "task.interrupted_found";
+    public const string GrantApplied = "approval.standing_grant";
+
+    // Transformations
+    public const string NoteMoved = "note.moved";
+    public const string ProjectDeleted = "project.deleted";
+
+    // Self-change
+    public const string ChangeSetApplied = "changeset.applied";
+    public const string ChangeSetReverted = "changeset.reverted";
+
+    // External work
+    public const string ExternalPackaged = "external.packaged";
+    public const string ExternalResponded = "external.responded";
+    public const string ArtifactStored = "artifact.stored";
+
+    // Attention
+    public const string AttentionShown = "attention.shown";
+    public const string AttentionSuppressed = "attention.suppressed";
+    public const string AttentionDismissed = "attention.dismissed";
 }

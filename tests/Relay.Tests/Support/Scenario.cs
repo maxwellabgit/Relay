@@ -2,48 +2,63 @@ using System.Text;
 using Relay.Core.Agents;
 using Relay.Core.Config;
 using Relay.Core.Execution;
+using Relay.Core.Judge;
 using Relay.Core.Ledger;
+using Relay.Core.Model;
 using Relay.Core.Orchestration;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Storage;
+using Relay.Core.Tasks;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Tests.Support;
 
 /// <summary>
-/// Prompt-driven scenarios against the real coordinator, stores, policy engine and executor.
-/// Each step drives the same public surface the desktop UI uses (hotkeys, capture text, approve,
-/// reject, edit, cancel) and records a transcript that shows exactly how the orchestrator handled
-/// the instruction: state, plan, tool calls, proposals, decisions, executions, and ledger lines.
+/// Prompt-driven scenarios against the real coordinator, stores, judge, policy engine and executor.
+/// Each step drives the same public surface the desktop UI uses (chords, surface text, the ask box,
+/// approve, reject, edit, cancel, respond) and records a transcript that shows exactly how RELAY0
+/// handled it: state, tasks, plans, tool calls, proposals, decisions, executions, attention, ledger lines.
 /// </summary>
 public sealed class Scenario : IDisposable
 {
     private readonly TempRoot _tmp;
-    private readonly Action<RelaySettings>? _configure;
     private readonly IOrchestrator? _orchestrator;
     private readonly IWorkerHost? _workerHost;
+    private readonly IJudge? _judge;
+    private readonly Func<ExternalModelProfile, IModelClient>? _externalClients;
+    private readonly MemorySecretStore _secrets = new();
     private readonly StringBuilder _transcript = new();
+    private readonly HashSet<string> _seenAttention = new(StringComparer.Ordinal);
     private Harness _h;
     private int _step;
     private long _activityFrom;
+    private string _heard = "";
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, IJudge? judge, Func<ExternalModelProfile, IModelClient>? externalClients)
     {
         _tmp = tmp;
-        _configure = configure;
         _orchestrator = orchestrator;
         _workerHost = workerHost;
-        _h = new Harness(tmp.Root, configure: configure, orchestrator: orchestrator, workerHost: workerHost, clock: clock).Start();
-        Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
+        _judge = judge;
+        _externalClients = externalClients;
+        _h = Open(configure, clock);
+        Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} judge {_h.Snap.JudgeName} ==");
     }
 
-    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null)
-        => new(tmp, configure, orchestrator, workerHost, clock);
+    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
+        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null)
+        => new(tmp, configure, orchestrator, workerHost, clock, judge, externalClients);
+
+    private Harness Open(Action<RelaySettings>? configure, FixedClock? clock)
+        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, judge: _judge, externalClients: _externalClients, secrets: _secrets).Start();
 
     public Harness H => _h;
     public SessionCoordinator C => _h.Coordinator;
     public RelaySnapshot Snap => _h.Snap;
-    public TurnResponse Response => Snap.Response ?? throw new InvalidOperationException("No turn response.");
+    public RelaySettings Settings => _h.SettingsLoad.Settings;
+    /// <summary>The most recent foreground task (command capture, direct ask from idle, or Projects-panel operation).</summary>
+    public TaskView Response => Snap.Response ?? throw new InvalidOperationException("No task response.");
     public string WorkspacePath { get; private set; } = "";
 
     /// <summary>Creates a folder beside the data root and registers it as a workspace root.</summary>
@@ -56,7 +71,20 @@ public sealed class Scenario : IDisposable
         return this;
     }
 
+    /// <summary>Stores an API key under the secret name a model or external profile uses.</summary>
+    public Scenario WithSecret(string name, string value = "test-key")
+    {
+        _secrets.Set(name, value);
+        return this;
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Direct input: the chords and the ask box
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>Note chord with the judge off: a dictated note, organized when it settles.</summary>
     public Scenario Note(string text) => Capture(CaptureMode.Note, text);
+    /// <summary>Command chord: a direct instruction, planned by the orchestrator.</summary>
     public Scenario Command(string text) => Capture(CaptureMode.Command, text);
 
     private Scenario Capture(CaptureMode mode, string text)
@@ -75,6 +103,73 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
+    /// <summary>The ask box: a direct instruction without a chord. Valid from idle and while listening.</summary>
+    public Scenario Ask(string text)
+    {
+        Begin($"Ask \"{text}\"");
+        if (!C.SubmitDirect(text)) Log($"  rejected: {Snap.Notice}");
+        return End();
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Listening: the note chord with the judge on
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>Opens the stream. The judge must be on (configure <c>s.Judge.Mode</c>).</summary>
+    public Scenario StartListening()
+    {
+        Begin("Start listening");
+        _heard = "";
+        C.PressNoteKey();
+        if (Snap.State != RelayState.NoteCapture) Log($"  rejected: {Snap.Notice}");
+        else if (Snap.Listening is null) Log("  WARNING: note capture opened as dictation, not as a stream (judge off?)");
+        return End();
+    }
+
+    /// <summary>
+    /// Words arrive on the surface after <paramref name="after"/> of silence (default 2 s). The text is
+    /// appended to what was heard, as Flow does, and the quiet timer is allowed to cut the segment.
+    /// </summary>
+    public Scenario Hear(string text, TimeSpan? after = null)
+    {
+        Begin($"Hear \"{text}\"" + (after is { } a ? $" after {a.TotalSeconds:0.#}s" : ""));
+        _h.Scheduler.Advance(after ?? TimeSpan.FromSeconds(2));
+        _heard = _heard.Length == 0 ? text : _heard + " " + text;
+        C.TextChanged(_heard);
+        _h.Scheduler.Advance(TimeSpan.FromMilliseconds(Settings.Stream.SegmentQuietMs + 10));
+        return End();
+    }
+
+    /// <summary>Lets one observe interval elapse so the judge sees what is new.</summary>
+    public Scenario Observe()
+    {
+        Begin("Observe (judge pass)");
+        _h.Scheduler.Advance(TimeSpan.FromMilliseconds(Settings.Stream.ObserveIntervalMs + 10));
+        return End();
+    }
+
+    /// <summary>Silence: nothing new arrives for this long (the buffer keeps expiring and the judge keeps checking).</summary>
+    public Scenario Silence(TimeSpan duration)
+    {
+        Begin($"Silence {duration.TotalSeconds:0}s");
+        _h.Scheduler.Advance(duration);
+        return End();
+    }
+
+    /// <summary>Closes the stream: a last judge pass over what is pending, then the receipt.</summary>
+    public Scenario StopListening()
+    {
+        Begin("Stop listening");
+        C.PressNoteKey();
+        _h.Scheduler.Advance(TimeSpan.FromSeconds(2));
+        _heard = "";
+        return End();
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Responding to tasks
+    // ----------------------------------------------------------------------------------------
+
     public Scenario Approve(string? action = null)
     {
         var p = Pending(action);
@@ -83,10 +178,10 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
-    public Scenario ApproveAll()
+    public Scenario ApproveAll(string? taskId = null)
     {
         Begin("Approve all");
-        C.ApproveAll();
+        C.ApproveAll(taskId);
         return End();
     }
 
@@ -108,10 +203,37 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
+    /// <summary>The user answers a presented task in words (a follow-up), which becomes a dialogue task.</summary>
+    public Scenario Respond(string text, string? taskId = null)
+    {
+        var task = taskId is not null
+            ? Snap.Tasks.FirstOrDefault(t => t.TaskId == taskId) ?? throw Fail($"No task {taskId}")
+            : Snap.Tasks.Where(t => t.Presentation != Presentation.None).OrderByDescending(t => t.StartedAt).FirstOrDefault() ?? Response;
+        Begin($"Respond to {task.TaskId[^8..]}: \"{text}\"");
+        C.RecordUserResponse(task.TaskId, text);
+        return End();
+    }
+
+    public Scenario DismissAttention(string? title = null)
+    {
+        var item = Snap.Attention.FirstOrDefault(a => title is null || a.Title.Contains(title, StringComparison.OrdinalIgnoreCase)) ?? throw Fail($"No attention item{(title is null ? "" : " titled like " + title)}");
+        Begin($"Dismiss attention \"{item.Title}\"");
+        C.DismissAttention(item.ItemId);
+        return End();
+    }
+
     public Scenario Cancel()
     {
         Begin("Cancel");
         C.Cancel();
+        return End();
+    }
+
+    public Scenario CancelTask(string? taskId = null)
+    {
+        var id = taskId ?? Snap.LiveTasks.FirstOrDefault()?.TaskId ?? throw Fail("No live task to cancel");
+        Begin($"Cancel task {id[^8..]}");
+        C.CancelTask(id);
         return End();
     }
 
@@ -143,7 +265,7 @@ public sealed class Scenario : IDisposable
         _h.CleanExit();
         Log("== Clean exit ==");
         clock.Advance(TimeSpan.FromSeconds(5));
-        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock).Start();
+        _h = Open(null, clock);
         _activityFrom = 0;
         Log($"== Session restarted ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
         return this;
@@ -156,7 +278,7 @@ public sealed class Scenario : IDisposable
         _h.Crash();
         Log("== CRASH ==");
         clock.Advance(TimeSpan.FromSeconds(5));
-        _h = new Harness(_tmp.Root, configure: null, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock).Start();
+        _h = Open(null, clock);
         _activityFrom = 0;
         Log($"== Session restarted after crash ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} ==");
         return this;
@@ -183,6 +305,14 @@ public sealed class Scenario : IDisposable
     {
         var p = Snap.Response?.Proposals.FirstOrDefault(p => p.Action == action && p.Status == status);
         if (p is null) throw Fail($"Expected a {action} proposal with status {status}; had: {string.Join(", ", Snap.Response?.Proposals.Select(p => $"{p.Action}:{p.Status}") ?? [])}");
+        return this;
+    }
+
+    /// <summary>A proposal with the given action and status on any task (background tasks included).</summary>
+    public Scenario ExpectAnyProposal(string action, string status)
+    {
+        var all = Snap.Tasks.SelectMany(t => t.Proposals).ToList();
+        if (!all.Any(p => p.Action == action && p.Status == status)) throw Fail($"Expected a {action} proposal with status {status} on some task; had: {string.Join(", ", all.Select(p => $"{p.Action}:{p.Status}"))}");
         return this;
     }
 
@@ -226,12 +356,71 @@ public sealed class Scenario : IDisposable
         return this;
     }
 
+    /// <summary>Some task of this kind (and optionally status) exists in the session.</summary>
+    public Scenario ExpectTask(TaskKind kind, TaskStatus? status = null, TaskOrigin? origin = null)
+    {
+        if (FindTask(kind, status, origin) is null)
+            throw Fail($"Expected a {origin?.ToString() ?? "any-origin"} {kind} task{(status is null ? "" : " in status " + status)}; had: {DescribeTasks()}");
+        return this;
+    }
+
+    public Scenario ExpectNoTask(TaskKind kind)
+    {
+        if (Snap.Tasks.Any(t => t.Kind == kind)) throw Fail($"Expected no {kind} task; had: {DescribeTasks()}");
+        return this;
+    }
+
+    public Scenario ExpectTaskCount(int count)
+    {
+        if (Snap.Tasks.Count != count) throw Fail($"Expected {count} task(s); had {Snap.Tasks.Count}: {DescribeTasks()}");
+        return this;
+    }
+
+    public Scenario ExpectAttention(Presentation level, string? titleFragment = null)
+    {
+        var hit = Snap.Attention.FirstOrDefault(a => a.Level == level && (titleFragment is null || a.Title.Contains(titleFragment, StringComparison.OrdinalIgnoreCase) || a.Detail.Contains(titleFragment, StringComparison.OrdinalIgnoreCase)));
+        if (hit is null) throw Fail($"Expected a {level} attention item{(titleFragment is null ? "" : " mentioning \"" + titleFragment + "\"")}; had: {DescribeAttention()}");
+        return this;
+    }
+
+    public Scenario ExpectNoAttention(Presentation? level = null)
+    {
+        if (Snap.Attention.Any(a => level is null || a.Level == level)) throw Fail($"Expected no {level?.ToString() ?? ""} attention items; had: {DescribeAttention()}");
+        return this;
+    }
+
+    public Scenario ExpectListening(bool listening = true)
+    {
+        if ((Snap.Listening is not null) != listening) throw Fail(listening ? "Expected to be listening" : "Expected not to be listening");
+        return this;
+    }
+
+    public Scenario ExpectExcerpts(int count)
+    {
+        var n = _h.Excerpts.All().Count;
+        if (n != count) throw Fail($"Expected {count} excerpt(s) on disk, found {n}");
+        return this;
+    }
+
+    public Scenario ExpectPreference(string key, string value)
+    {
+        var actual = _h.Preferences.Get(key);
+        if (!string.Equals(actual, value, StringComparison.Ordinal)) throw Fail($"Expected preference {key}={value} but was {actual ?? "(unset)"}");
+        return this;
+    }
+
     public string Transcript() => _transcript.ToString();
 
     public Exception Fail(string message) => new Xunit.Sdk.XunitException(message + "\n\n--- transcript ---\n" + Transcript());
 
+    public TaskView? FindTask(TaskKind kind, TaskStatus? status = null, TaskOrigin? origin = null)
+        => Snap.Tasks.FirstOrDefault(t => t.Kind == kind && (status is null || t.Status == status) && (origin is null || t.Origin == origin));
+
     private ProposalView Pending(string? action)
         => Snap.PendingProposals.FirstOrDefault(p => action is null || p.Action == action) ?? throw Fail($"No pending proposal{(action is null ? "" : " for " + action)}");
+
+    private string DescribeTasks() => string.Join(", ", Snap.Tasks.Select(t => $"{t.Origin}/{t.Kind}:{t.Status}"));
+    private string DescribeAttention() => string.Join(", ", Snap.Attention.Select(a => $"{a.Level} \"{a.Title}\""));
 
     // ----------------------------------------------------------------------------------------
     // Transcript rendering
@@ -248,23 +437,45 @@ public sealed class Scenario : IDisposable
     {
         var s = Snap;
         Log($"  state: {s.State.Label()}" + (s.Notice is null ? "" : $"   notice: {s.Notice}") + (s.Receipt is null ? "" : $"   receipt: {s.Receipt}"));
-        if (s.Response is { } r)
+        if (s.Listening is { } l)
+            Log($"  listening: {l.HeldSegments} held ({l.HeldSeconds:0}s of {l.WindowSeconds:0}s) · {l.TotalSegments} heard · {l.JudgePasses} pass(es) · {l.Findings} finding(s) · {l.Excerpts} excerpt(s) · {l.Tasks} task(s)" + (l.Judging ? " · judging" : "") + (l.LastError is null ? "" : $" · error: {l.LastError}"));
+        foreach (var t in s.Tasks.Where(t => t.Live || t.CompletedAt is null || t.CompletedAt >= _h.Clock.UtcNow - TimeSpan.FromSeconds(60)).OrderBy(t => t.StartedAt))
         {
-            Log($"  turn {r.TurnId[^8..]} ({r.Kind}, {r.Producer}{(r.Live ? ", live" : "")}): {r.Summary}" + (r.Outcome is null ? "" : $" → {r.Outcome}"));
-            foreach (var step in r.Steps) Log($"    - {step}");
-            if (r.Answer is not null) Log("  answer: " + r.Answer.Replace("\n", "\n          "));
-            foreach (var c in r.Citations) Log($"  cite: [{c.Kind} {c.Id[^8..]}{(c.ProjectSlug is null ? "" : " " + c.ProjectSlug)}] {c.Excerpt}" + (c.Span is null ? "" : $" @ {c.Span.EventId[^8..]}:{c.Span.Start}-{c.Span.End}"));
-            foreach (var p in r.Proposals)
-            {
-                Log($"  proposal [{p.Status}] {p.Action} ({p.Tier}) {p.Title}");
-                foreach (var reason in p.Reasons) Log($"      · {reason}");
-                if (p.ResultSummary is not null) Log($"      → {p.ResultSummary}");
-                if (p.Error is not null) Log($"      ✗ {p.Error}");
-            }
+            if (!t.Live && !s.Activity.Any(a => a.Seq > _activityFrom && a.Text.Contains(t.TaskId[^8..], StringComparison.Ordinal)) && s.Response?.TaskId != t.TaskId) continue;
+            RenderTask(t, s.Response?.TaskId == t.TaskId);
+        }
+        foreach (var a in s.Attention)
+        {
+            var mark = _seenAttention.Add(a.ItemId) ? "+" : " ";
+            Log($"  {mark} attention [{a.Level}] {a.Title} — {a.Detail}" + (a.Occurrences > 1 ? $" (x{a.Occurrences})" : "") + (a.Pinned ? " (pinned)" : ""));
         }
         foreach (var item in s.Review) Log($"  review [{item.Kind}] {item.Title}");
         foreach (var a in s.Activity.Where(a => a.Seq > _activityFrom)) Log($"  {a.Timestamp:HH:mm:ss} {a.Type,-28} {a.Text}");
         return this;
+    }
+
+    private void RenderTask(TaskView r, bool isResponse)
+    {
+        var head = isResponse ? "task*" : "task ";
+        Log($"  {head} {r.TaskId[^8..]} [{r.Origin}/{r.Kind}/{r.Lane}] {r.Status} ({r.Producer}{(r.Live ? ", live" : "")}{(r.Foreground ? ", fg" : "")}): {r.Summary}" + (r.Outcome is null ? "" : $" → {r.Outcome}"));
+        if (r.Origin != TaskOrigin.Direct) Log($"    why: {r.Why} (confidence {r.Confidence:0.00}{(r.ExcerptId is null ? "" : ", excerpt " + r.ExcerptId[^8..])})");
+        foreach (var step in r.Steps) Log($"    - {step}");
+        foreach (var call in r.ToolCalls) Log($"    tool {call.Tool}({string.Join(", ", call.Args.Select(a => $"{a.Key}={a.Value}"))}) → {(call.Ok ? "ok" : "FAILED")} {call.Summary}");
+        foreach (var m in r.ModelCalls) Log($"    model {m.Model}@{m.Host} {(m.Ok ? "ok" : "FAILED " + m.Error)} {m.PromptTokens}+{m.CompletionTokens} tok {m.ElapsedMs} ms");
+        if (r.Knowledge.Missing.Count > 0 || r.Knowledge.CapabilityGap) Log($"    knowledge: missing [{string.Join("; ", r.Knowledge.Missing)}]{(r.Knowledge.CapabilityGap ? " capability gap" : "")}");
+        if (r.Consistent is false) Log("    consistency: CONFLICT with stored notes");
+        if (r.Answer is not null) Log("    answer: " + r.Answer.Replace("\n", "\n            "));
+        foreach (var c in r.Citations) Log($"    cite: [{c.Kind} {c.Id[^8..]}{(c.ProjectSlug is null ? "" : " " + c.ProjectSlug)}] {c.Excerpt}" + (c.Span is null ? "" : $" @ {c.Span.EventId[^8..]}:{c.Span.Start}-{c.Span.End}"));
+        foreach (var p in r.Proposals)
+        {
+            Log($"    proposal [{p.Status}] {p.Action} ({p.Tier}) {p.Title}" + (p.DependsOn.Count > 0 ? $" after {string.Join(",", p.DependsOn.Select(d => d[^8..]))}" : "") + (p.GrantedBy is null ? "" : $" granted by {p.GrantedBy}"));
+            foreach (var reason in p.Reasons) Log($"        · {reason}");
+            if (p.ResultSummary is not null) Log($"        → {p.ResultSummary}");
+            if (p.Error is not null) Log($"        ✗ {p.Error}");
+        }
+        if (r.Presentation != Presentation.None || r.PresentationReason is not null) Log($"    presented: {r.Presentation} ({r.PresentationReason})");
+        if (r.UserResponse is not null) Log($"    user said: {r.UserResponse}");
+        if (r.Cost.ModelCalls > 0 || r.Cost.ToolCalls > 0) Log($"    cost: {r.Cost.ModelCalls} model call(s) {r.Cost.TotalTokens} tok · {r.Cost.ToolCalls} tool call(s) · {r.Cost.WallMs} ms");
     }
 
     private void Log(string line) => _transcript.AppendLine(line);
@@ -280,17 +491,24 @@ public sealed class Scenario : IDisposable
 public sealed class CannedOrchestrator : IOrchestrator
 {
     private readonly Dictionary<string, Func<TurnRequest, TurnContext, TurnPlan>> _plans = new(StringComparer.OrdinalIgnoreCase);
+    private Func<TurnRequest, TurnContext, TurnPlan>? _fallback;
 
     public string Name => "canned";
     public List<TurnRequest> Requests { get; } = new();
+    public List<TurnContext> Contexts { get; } = new();
 
     public CannedOrchestrator On(string instruction, Func<TurnRequest, TurnContext, TurnPlan> plan) { _plans[instruction] = plan; return this; }
     public CannedOrchestrator On(string instruction, TurnPlan plan) => On(instruction, (_, _) => plan);
+    /// <summary>Plans anything not matched by instruction (observed tasks carry focused prompts the test may not want to spell out).</summary>
+    public CannedOrchestrator Otherwise(Func<TurnRequest, TurnContext, TurnPlan> plan) { _fallback = plan; return this; }
 
     public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken)
     {
         Requests.Add(request);
-        return Task.FromResult(_plans.TryGetValue(request.Instruction.Trim(), out var plan) ? plan(request, context) : TurnPlan.NotUnderstood(Name, "no canned plan"));
+        Contexts.Add(context);
+        if (_plans.TryGetValue(request.Instruction.Trim(), out var plan)) return Task.FromResult(plan(request, context));
+        if (_fallback is not null) return Task.FromResult(_fallback(request, context));
+        return Task.FromResult(TurnPlan.NotUnderstood(Name, "no canned plan"));
     }
 }
 
@@ -343,4 +561,43 @@ public sealed class ThrowingOrchestrator : IOrchestrator
 {
     public string Name => "throwing";
     public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken) => throw new InvalidOperationException("model exploded");
+}
+
+/// <summary>
+/// A judge driven by the test: findings are keyed by a phrase; a pass returns the findings of every
+/// phrase that appears in a new segment, anchored to that segment. Everything else is "nothing".
+/// Stands in for RELAY0 so listening scenarios are deterministic and say exactly what was heard.
+/// </summary>
+public sealed class ScriptedJudge : IJudge
+{
+    private readonly List<(string Phrase, Func<StreamSegment, JudgeFinding> Finding)> _rules = new();
+    private Func<JudgeRequest, JudgeDecision>? _direct;
+
+    public string Name => "scripted";
+    public List<JudgeRequest> Requests { get; } = new();
+    public int PromptTokens { get; init; } = 120;
+    public int CompletionTokens { get; init; } = 40;
+    public Exception? Throws { get; set; }
+    public TimeSpan? Delay { get; set; }
+
+    /// <summary>When a new segment contains the phrase, the finding is produced for it.</summary>
+    public ScriptedJudge When(string phrase, Func<StreamSegment, JudgeFinding> finding) { _rules.Add((phrase, finding)); return this; }
+
+    public ScriptedJudge When(string phrase, TaskKind kind, string focusedPrompt, double confidence = 0.9, string? topic = null, string? projectHint = null, string? noteText = null, Presentation? presentation = null, string? mergeKey = null)
+        => When(phrase, seg => new JudgeFinding(kind, confidence, $"{kind}: {phrase}", $"heard \"{phrase}\"", focusedPrompt, [seg.SegmentId], topic, projectHint, presentation, noteText, noteText is null ? null : "note", mergeKey));
+
+    public ScriptedJudge OnDirect(Func<JudgeRequest, JudgeDecision> direct) { _direct = direct; return this; }
+
+    public Task<JudgeDecision> JudgeAsync(JudgeRequest request, CancellationToken cancellationToken)
+    {
+        Requests.Add(request);
+        if (Throws is not null) throw Throws;
+        if (request.Origin == TaskOrigin.Direct && _direct is not null) return Task.FromResult(_direct(request));
+        var findings = new List<JudgeFinding>();
+        foreach (var segment in request.Window.Where(s => request.NewSegmentIds.Contains(s.SegmentId)))
+            foreach (var (phrase, finding) in _rules)
+                if (segment.Text.Contains(phrase, StringComparison.OrdinalIgnoreCase)) findings.Add(finding(segment));
+        var decision = new JudgeDecision(findings, Name, PromptTokens, CompletionTokens, (long)(Delay?.TotalMilliseconds ?? 30));
+        return Task.FromResult(decision);
+    }
 }
