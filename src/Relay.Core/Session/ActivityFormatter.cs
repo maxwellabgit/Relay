@@ -120,7 +120,9 @@ public static class ActivityFormatter
             EventTypes.TaskPlanned => r.DataBool("understood") == true
                 ? $"Plan by {r.DataString("producer")}: {r.DataString("summary")} ({r.DataInt64("proposals")} proposal(s), {r.DataInt64("toolCalls")} tool call(s)" + Tokens(r) + ")"
                 : $"{r.DataString("producer")} did not understand the request",
-            EventTypes.TaskPresented => $"Shown as {r.DataString("level")}: {r.DataString("title")}" + (r.DataString("reason") is { } why ? $" ({why})" : ""),
+            EventTypes.TaskPresented => r.DataString("surface") == "response"
+                ? $"Shown in Response as {r.DataString("level")}: {r.DataString("title")}"
+                : $"Shown as {r.DataString("level")}: {r.DataString("title")}" + (r.DataString("reason") is { } why ? $" ({why})" : ""),
             EventTypes.TaskMerged => $"Merged with an earlier card ({r.DataString("key")})",
             EventTypes.TaskCompleted => $"Task {Short(r.DataString("taskId"))} finished: {r.DataString("outcome")} ({r.DataInt64("executed")} executed, {r.DataInt64("denied")} denied, {r.DataInt64("rejected")} rejected" + Tokens(r) + $", {r.DataInt64("wallMs")} ms)",
             EventTypes.TaskFailed => $"Task {Short(r.DataString("taskId"))} failed ({r.DataString("failure")}): {r.DataString("error")}",

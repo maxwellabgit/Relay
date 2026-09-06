@@ -226,7 +226,12 @@ public sealed partial class SessionCoordinator
                 Excerpt? excerpt = null;
                 var sourceEventId = found.Id;
                 var segmentIds = finding.SegmentIds.Count > 0 ? finding.SegmentIds : fresh.TakeLast(1).ToList();
-                if (segmentIds.Any(id => stream.Buffer.Find(id) is not null))
+                if (Excerpts.Existing(segmentIds) is { } shared)
+                {
+                    // The same words already have an excerpt (two findings on one sentence): share it, keep nothing twice.
+                    excerpt = shared;
+                }
+                else if (segmentIds.Any(id => stream.Buffer.Find(id) is not null))
                 {
                     try
                     {

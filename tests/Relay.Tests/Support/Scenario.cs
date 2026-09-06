@@ -78,6 +78,18 @@ public sealed class Scenario : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Turns the judge on through the settings path the UI uses, so the note chord listens from here on.
+    /// The judge instance itself is whatever the scenario was built with (a scripted one, usually).
+    /// </summary>
+    public Scenario WithListening(string mode = JudgeSettings.Heuristic)
+    {
+        var problems = C.UpdateSettings(x => x.Judge.Mode = mode);
+        if (problems.Count > 0) throw Fail("Listening could not be enabled: " + string.Join(" ", problems));
+        Log($"-- judge mode {mode}: the note chord now listens");
+        return this;
+    }
+
     // ----------------------------------------------------------------------------------------
     // Direct input: the chords and the ask box
     // ----------------------------------------------------------------------------------------
@@ -570,7 +582,7 @@ public sealed class ThrowingOrchestrator : IOrchestrator
 /// </summary>
 public sealed class ScriptedJudge : IJudge
 {
-    private readonly List<(string Phrase, Func<StreamSegment, JudgeFinding> Finding)> _rules = new();
+    private readonly List<(string Phrase, Func<StreamSegment, IReadOnlyList<StreamSegment>, JudgeFinding> Finding)> _rules = new();
     private Func<JudgeRequest, JudgeDecision>? _direct;
 
     public string Name => "scripted";
@@ -581,7 +593,10 @@ public sealed class ScriptedJudge : IJudge
     public TimeSpan? Delay { get; set; }
 
     /// <summary>When a new segment contains the phrase, the finding is produced for it.</summary>
-    public ScriptedJudge When(string phrase, Func<StreamSegment, JudgeFinding> finding) { _rules.Add((phrase, finding)); return this; }
+    public ScriptedJudge When(string phrase, Func<StreamSegment, JudgeFinding> finding) { _rules.Add((phrase, (seg, _) => finding(seg))); return this; }
+
+    /// <summary>Like <see cref="When(string, Func{StreamSegment, JudgeFinding})"/> but the rule also sees the whole window, so a finding can name several segments.</summary>
+    public ScriptedJudge When(string phrase, Func<StreamSegment, IReadOnlyList<StreamSegment>, JudgeFinding> finding) { _rules.Add((phrase, finding)); return this; }
 
     public ScriptedJudge When(string phrase, TaskKind kind, string focusedPrompt, double confidence = 0.9, string? topic = null, string? projectHint = null, string? noteText = null, Presentation? presentation = null, string? mergeKey = null)
         => When(phrase, seg => new JudgeFinding(kind, confidence, $"{kind}: {phrase}", $"heard \"{phrase}\"", focusedPrompt, [seg.SegmentId], topic, projectHint, presentation, noteText, noteText is null ? null : "note", mergeKey));
@@ -596,8 +611,24 @@ public sealed class ScriptedJudge : IJudge
         var findings = new List<JudgeFinding>();
         foreach (var segment in request.Window.Where(s => request.NewSegmentIds.Contains(s.SegmentId)))
             foreach (var (phrase, finding) in _rules)
-                if (segment.Text.Contains(phrase, StringComparison.OrdinalIgnoreCase)) findings.Add(finding(segment));
+                if (segment.Text.Contains(phrase, StringComparison.OrdinalIgnoreCase)) findings.Add(finding(segment, request.Window));
         var decision = new JudgeDecision(findings, Name, PromptTokens, CompletionTokens, (long)(Delay?.TotalMilliseconds ?? 30));
         return Task.FromResult(decision);
+    }
+}
+
+/// <summary>A judge that never answers: it honours cancellation and nothing else, for the timeout path.</summary>
+public sealed class HangingJudge : IJudge
+{
+    public string Name => "model:hanging";
+    public int Calls { get; private set; }
+
+    public Task<JudgeDecision> JudgeAsync(JudgeRequest request, CancellationToken cancellationToken)
+    {
+        Calls++;
+        // Continuations run synchronously on the cancelling (test) thread so the coordinator is never touched from elsewhere.
+        var tcs = new TaskCompletionSource<JudgeDecision>();
+        cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+        return tcs.Task;
     }
 }

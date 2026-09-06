@@ -97,6 +97,24 @@ public sealed class ExcerptStore
     public double RetainedSeconds { get; private set; }
     public int Count { get; private set; }
 
+    /// <summary>
+    /// The excerpt of this stream that already holds every one of these segments, if a single one does.
+    /// Two findings on the same sentence (a decision that is also a dated claim) then share one excerpt
+    /// instead of the second being an empty shell of references.
+    /// </summary>
+    public Excerpt? Existing(IReadOnlyList<string> segmentIds)
+    {
+        if (segmentIds.Count == 0) return null;
+        string? owner = null;
+        foreach (var id in segmentIds)
+        {
+            if (!_segmentOwner.TryGetValue(id, out var o)) return null;
+            if (owner is not null && owner != o) return null;
+            owner = o;
+        }
+        return owner is null ? null : Read(owner);
+    }
+
     public Excerpt Build(string streamId, JudgeFinding finding, string judgeName, ConversationBuffer buffer, RetentionGuard guard, double elapsedSeconds, DateTimeOffset now)
     {
         var wanted = finding.SegmentIds.Select(buffer.Find).Where(s => s is not null).Select(s => s!).OrderBy(s => s.At).ToList();

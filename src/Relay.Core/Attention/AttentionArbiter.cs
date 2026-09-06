@@ -65,6 +65,9 @@ public sealed class AttentionArbiter
 
     public IReadOnlyList<AttentionItem> Items => _items.OrderByDescending(i => i.Pinned).ThenByDescending(i => i.Level).ThenByDescending(i => i.LastAt).ToList();
 
+    /// <summary>The level alone, for a task that is already on screen (the foreground task in Response); no card is made.</summary>
+    public (Presentation Level, string Reason) RankOnly(AttentionInput input) => Rank(input, _preferences());
+
     public AttentionDecision Decide(AttentionInput input)
     {
         var prefs = _preferences();

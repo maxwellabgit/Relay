@@ -666,6 +666,15 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var input = new AttentionInput(task.TaskId, task.Origin, task.Kind, title, detail, task.MergeKey, task.Suggested, task.Confidence,
             !string.IsNullOrWhiteSpace(plan?.Answer), plan?.Consistent, plan?.Citations.Count ?? 0, pendingCount,
             task.Proposals.Count(p => p.Status == "executed"), task.Status == TaskStatus.Failed, task.WatchedTerm, _clock.UtcNow);
+        if (task.Foreground)
+        {
+            // The foreground task is already on screen in Response (and its receipt); a card would show it twice.
+            var (level, reason) = Arbiter.RankOnly(input);
+            task.Presentation = level;
+            task.PresentationReason = reason + " · shown in Response";
+            Append(EventTypes.TaskPresented, new { taskId = task.TaskId, level = level.Wire(), reason, surface = "response", title });
+            return;
+        }
         var decision = Arbiter.Decide(input);
         task.Presentation = decision.Level;
         task.PresentationReason = decision.Reason;
