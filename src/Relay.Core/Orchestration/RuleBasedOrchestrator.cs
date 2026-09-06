@@ -42,6 +42,8 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
         var steps = new List<string> { "Interpret the instruction with the built-in grammar" };
         Match m;
 
+        // A follow-up about a stored external result is summarised deterministically, whatever its wording.
+        if (request.ArtifactId is not null && request.Origin == Tasks.TaskOrigin.Dialogue) return Done(SummarizeArtifact(request, context, steps));
         if ((m = HardDelete().Match(text)).Success)
         {
             var name = Clean(m.Groups["name"].Value);
@@ -150,6 +152,7 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
             return Done(new TurnPlan(true, $"File {chosen.Count} draft note(s) under '{project.Name}'", steps, null, [], proposals, Name));
         }
         if (TryOrganize(text, request, context, steps) is { } organized) return Done(organized);
+        if (TryResearch(text, request, context, steps) is { } research) return Done(research);
         if ((m = Remember().Match(text)).Success)
         {
             var body = Clean(m.Groups["text"].Value);

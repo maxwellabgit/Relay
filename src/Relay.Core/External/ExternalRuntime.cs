@@ -50,10 +50,11 @@ public sealed class ExternalRuntime : IExternalOperations
         Directory.CreateDirectory(_root.ExternalArtifactsDirectory);
     }
 
-    /// <summary>Set by the composition root: (proposalId, result) â†’ coordinator.CompletePendingOperation. Invoked on the coordinator thread.</summary>
+    /// <summary>Set by the composition root: (proposalId, result) -> coordinator.CompletePendingOperation. Invoked on the coordinator thread.</summary>
     public Action<string, ExecutionResult>? Completed { get; set; }
 
     public IReadOnlyList<string> ProfileNames => _profiles.Select(p => p.Name).ToList();
+    public IReadOnlyList<string> SearchProfileNames => _profiles.Where(p => p.SupportsSearch).Select(p => p.Name).ToList();
 
     public string? ReadArtifact(string artifactId)
     {
@@ -182,7 +183,7 @@ public sealed class ExternalRuntime : IExternalOperations
         foreach (var id in refs.Distinct(StringComparer.Ordinal))
         {
             var text = Resolve(tools, id, out var kind);
-            if (text is not null) sources.Add(new PackagedSource(id, kind, text.Length > 20_000 ? text[..20_000] + "â€¦(truncated)" : text));
+            if (text is not null) sources.Add(new PackagedSource(id, kind, text.Length > 20_000 ? text[..20_000] + " ...(truncated)" : text));
         }
         var chars = objective.Length + sources.Sum(s => s.Text.Length);
         var digest = Sha(objective + "\n" + string.Join("\n", sources.Select(s => s.Id + ":" + s.Text)));

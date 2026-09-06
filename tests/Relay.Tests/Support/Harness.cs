@@ -148,6 +148,7 @@ public sealed class Harness : IDisposable
             Settings = SettingsLoad.Settings.Orchestrator,
             Preferences = Preferences.Compiled(),
             ExternalProfiles = External?.ProfileNames ?? [],
+            SearchProfiles = External?.SearchProfileNames ?? [],
             PromptFragment = SelfChange.PromptFragment("planner"),
         };
     }

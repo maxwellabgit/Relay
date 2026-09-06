@@ -138,6 +138,8 @@ public sealed class AttentionArbiter
         }
 
         if (x.Kind == TaskKind.Remember) return (Presentation.Ambient, x.ExecutedOperations > 0 ? "note filed; subtle indicator only" : "note kept in the inbox; subtle indicator only");
+        // Findings from an approved external task (a dialogue follow-up) are what the user asked for; the draft note filed beside them is a side effect.
+        if (x.Kind == TaskKind.Research) return (x.HasAnswer ? Presentation.Findings : Presentation.None, x.HasAnswer ? "findings ready" : "nothing learned");
 
         // Something ran (approved by the user or covered by a standing grant), or the user declined the proposal card:
         // a subtle confirmation at most, never a second alert about a finding that was already handled.
@@ -157,8 +159,6 @@ public sealed class AttentionArbiter
             case TaskKind.Resolve:
                 if (x.WatchedTerm is not null) return (Presentation.Result, $"'{x.WatchedTerm}' is a watched term; pinned definition refreshed");
                 return (x.HasAnswer ? Presentation.Result : Presentation.None, x.HasAnswer ? "definition found" : "no definition found; nothing to show");
-            case TaskKind.Research:
-                return (x.HasAnswer ? Presentation.Findings : Presentation.None, x.HasAnswer ? "findings ready" : "nothing learned");
             case TaskKind.Organize:
             case TaskKind.Improve:
                 return (Presentation.None, "nothing to propose");

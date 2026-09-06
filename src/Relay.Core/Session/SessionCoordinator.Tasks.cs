@@ -76,6 +76,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public required DateTimeOffset StartedAt { get; init; }
         public bool Foreground { get; init; }
         public string? ExcerptId { get; init; }
+        /// <summary>For a follow-up that summarises an external result: the stored artifact it is about.</summary>
+        public string? ArtifactId { get; init; }
         public string? ParentTaskId { get; init; }
         public string? MergeKey { get; init; }
         public string? Topic { get; init; }
@@ -141,6 +143,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         WorkersEnabled = _settings.Workers.Enabled && _services.Workers is not null,
         AgentRunHasOutput = _services.Workers is null ? null : runId => Directory.Exists(Path.Combine(_root.AgentsDirectory, runId, "out")),
         ExternalProfiles = _services.External?.ProfileNames ?? [],
+        OnlineSearchGranted = Preferences.AllowOnlineSearch,
         ReferenceExists = ReferenceExists,
         PromptFragments = SelfChangeRuntime.PromptNames,
         Origin = task?.Origin,
@@ -247,9 +250,9 @@ public sealed partial class SessionCoordinator : IExecutionSink
     }
 
     /// <summary>A follow-up inherits the parent's origin scope but is its own task with its own record.</summary>
-    private void StartFollowUpTask(TaskState parent, TaskKind kind, string instruction, string title, string sourceEventId)
+    private void StartFollowUpTask(TaskState parent, TaskKind kind, string instruction, string title, string sourceEventId, string? artifactId = null)
     {
-        var task = NewTask(TaskOrigin.Dialogue, kind, "dialogue", parent.CaptureId, sourceEventId, instruction, foreground: false, parentTaskId: parent.TaskId, title: title, mergeKey: parent.MergeKey, topic: parent.Topic, projectHint: parent.ProjectHint);
+        var task = NewTask(TaskOrigin.Dialogue, kind, "dialogue", parent.CaptureId, sourceEventId, instruction, foreground: false, parentTaskId: parent.TaskId, title: title, mergeKey: parent.MergeKey, topic: parent.Topic, projectHint: parent.ProjectHint, artifactId: artifactId);
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: instruction.Length)) is null) return;
         PersistTask(task);
         BeginPlanning(task);
@@ -257,7 +260,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
 
     private TaskState NewTask(TaskOrigin origin, TaskKind kind, string lane, string captureId, string sourceEventId, string instruction, bool foreground,
         string? excerptId = null, string? parentTaskId = null, string? mergeKey = null, string? topic = null, string? projectHint = null, string? title = null,
-        string? why = null, double confidence = 1, Presentation? suggested = null, string? watchedTerm = null)
+        string? why = null, double confidence = 1, Presentation? suggested = null, string? watchedTerm = null, string? artifactId = null)
     {
         var task = new TaskState
         {
@@ -271,6 +274,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             StartedAt = _clock.UtcNow,
             Foreground = foreground,
             ExcerptId = excerptId,
+            ArtifactId = artifactId,
             ParentTaskId = parentTaskId,
             MergeKey = mergeKey,
             Topic = topic,
@@ -332,7 +336,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             Notify();
         });
 
-        var request = new TurnRequest(task.TaskId, task.CaptureId, task.SourceEventId, task.Instruction, task.StartedAt, task.Origin, task.Kind, task.ExcerptId);
+        var request = new TurnRequest(task.TaskId, task.CaptureId, task.SourceEventId, task.Instruction, task.StartedAt, task.Origin, task.Kind, task.ExcerptId, task.ArtifactId);
         var sink = new TaskSink(this, task);
         var context = new TurnContext
         {
@@ -345,6 +349,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             CompletedRuns = projectId => Agents.AgentRunStatus.All(_root).Where(s => s.ProjectId == projectId && s.State == "completed" && !s.Applied).ToList(),
             Preferences = Preferences,
             ExternalProfiles = _services.External?.ProfileNames ?? [],
+            SearchProfiles = _services.External?.SearchProfileNames ?? [],
             PromptFragment = SelfChange?.PromptFragment("planner"),
         };
 
@@ -534,7 +539,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             var record = Append(EventTypes.TaskUserResponse, new { taskId = task.TaskId, proposalId, response = "external_returned", artifactId });
             StartFollowUpTask(task, TaskKind.Research,
                 $"An external model ({result.Outputs.GetValueOrDefault("profile")}) returned artifact {artifactId} for this objective: \"{objective}\". Read the artifact (read_artifact), summarize what it established in the user's preferred style, cite the artifact, and name anything it could not determine.",
-                "External result: " + Truncate(objective, 60), record?.Id ?? task.SourceEventId);
+                "External result: " + Truncate(objective, 60), record?.Id ?? task.SourceEventId, artifactId);
         }
         if (task.Status == TaskStatus.Executing) RunExecutionQueue(task);
         Notify();

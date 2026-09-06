@@ -202,6 +202,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         sb.Append("Task origin: ").Append(request.Origin.Wire()).Append(" · kind: ").Append(request.Kind.Wire()).Append('\n');
         if (request.Origin == TaskOrigin.Observed) sb.Append("This task was raised by the judge from something overheard, not asked. Read the excerpt first (read_excerpt) if you need the exact words. Do not propose deletions, preference changes, or external requests.\n");
         if (request.ExcerptId is not null) sb.Append("Excerpt id: ").Append(request.ExcerptId).Append('\n');
+        if (request.ArtifactId is not null) sb.Append("Artifact id: ").Append(request.ArtifactId).Append(" (read it with read_artifact; cite it; propose create_draft_note for findings worth keeping)\n");
         if (request.CaptureId.Length > 0) sb.Append("Current capture id: ").Append(request.CaptureId).Append('\n');
         sb.Append(request.Origin == TaskOrigin.Direct ? "Instruction from the user:\n" : "Focused prompt:\n").Append(request.Instruction);
         return sb.ToString();

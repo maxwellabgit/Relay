@@ -37,12 +37,26 @@ public sealed partial class RuleBasedOrchestrator
     [GeneratedRegex(@"^(?:please\s+)?(?:stop\s+filing|don'?t\s+file|ask\s+(?:me\s+)?(?:first\s+)?before\s+filing)\s+(?:the\s+|all\s+|new\s+|every\s+|any\s+)?" + TypeWords + @"\s+(?:under|in|into|for|to)\s+(?:the\s+)?(?:project\s+)?[""“']?(?<project>.+?)[""”']?(?:\s+" + Automatically + @")?$", Opts)]
     private static partial Regex RevokeFilingB();
 
+    [GeneratedRegex(@"^(?:please\s+)?(?:(?<allow>allow|enable|permit|turn\s+on|you\s+(?:may|can))|(?<deny>disallow|disable|forbid|turn\s+off|stop|never|don'?t|do\s+not|you\s+may\s+not))\s+(?:use\s+|using\s+|do\s+|doing\s+)?(?:the\s+)?(?:online|web|internet)\s+search(?:es|ing)?(?:\s+(?:for\s+external\s+tasks|from\s+now\s+on|any\s?more))?$|^(?:please\s+)?(?<deny2>stop|never|don'?t|do\s+not)\s+search(?:ing)?\s+(?:the\s+)?(?:online|web|internet)(?:\s+any\s?more)?$", Opts)]
+    private static partial Regex OnlineSearch();
+
     /// <summary>Tries the self-shaping grammar. Null when the instruction is not about Relay's own behaviour.</summary>
     private static TurnPlan? TryShape(string text, TurnRequest request, TurnContext context, List<string> steps)
     {
         Match m;
         if (request.Origin != Tasks.TaskOrigin.Direct) return null;   // preferences change only on a direct request; policy enforces the same
 
+        if ((m = OnlineSearch().Match(text)).Success)
+        {
+            var allow = m.Groups["allow"].Success;
+            var current = context.Preferences?.AllowOnlineSearch ?? false;
+            if (allow == current) return Answer(steps, allow ? "Allow online search" : "Disallow online search", allow ? "Online search is already allowed for external tasks." : "Online search is already off; each external task that needs it asks you.");
+            steps.Add($"Propose sources.allowOnlineSearch = {(allow ? "true" : "false")} (requires approval; revertible)");
+            return new TurnPlan(true, allow ? "Allow online search" : "Disallow online search", steps, null, [],
+                [Propose(request, Actions.UpdatePreference, allow ? "Instruction allowed external tasks to search online." : "Instruction withdrew the standing permission to search online.",
+                    new() { ["key"] = "sources.allowOnlineSearch", ["value"] = allow ? "true" : "false" },
+                    [allow ? "External tasks approved with search on no longer need a per-task note; each still shows what leaves the machine" : "Every external task that wants to search online says so in its proposal and needs your approval for that task"], Risks.ControlledWrite, true)], "rules");
+        }
         if ((m = ResponseStyle().Match(text)).Success)
         {
             var verbosity = StyleOf(m.Groups["style"].Value);

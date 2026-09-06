@@ -21,7 +21,9 @@ public sealed record TurnRequest(
     DateTimeOffset At,
     TaskOrigin Origin = TaskOrigin.Direct,
     TaskKind Kind = TaskKind.Answer,
-    string? ExcerptId = null);
+    string? ExcerptId = null,
+    /// <summary>For a follow-up about an external result: the stored artifact to summarise.</summary>
+    string? ArtifactId = null);
 
 /// <summary>A pointer from an answer back to the words that support it.</summary>
 public sealed record Citation(string Kind, string Id, string? ProjectId, string? ProjectSlug, string Excerpt, SourceSpan? Span);
@@ -72,6 +74,8 @@ public sealed class TurnContext
     public CompiledPreferences? Preferences { get; init; }
     /// <summary>Names of configured external model profiles the planner may propose sending a package to.</summary>
     public IReadOnlyList<string> ExternalProfiles { get; init; } = [];
+    /// <summary>The subset of <see cref="ExternalProfiles"/> whose host can search online when a request is approved with allowSearch.</summary>
+    public IReadOnlyList<string> SearchProfiles { get; init; } = [];
     /// <summary>Extra prompt text approved through change sets (the 'planner' fragment).</summary>
     public string? PromptFragment { get; init; }
 }

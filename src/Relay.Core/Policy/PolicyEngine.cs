@@ -17,6 +17,8 @@ public sealed class PolicyWorld
     public Func<string, bool>? AgentRunHasOutput { get; init; }
     /// <summary>Names of configured external model profiles; a model.request proposal must name one.</summary>
     public IReadOnlyList<string> ExternalProfiles { get; init; } = [];
+    /// <summary>Whether the sources preference grants online search in general; without it, each search-enabled request is a per-task approval.</summary>
+    public bool OnlineSearchGranted { get; init; }
     /// <summary>Whether a reference (note id, excerpt id, capture id) resolves to something Relay holds; external packages may only carry these.</summary>
     public Func<string, bool>? ReferenceExists { get; init; }
     /// <summary>Prompt fragment names that may be changed through change sets.</summary>
@@ -99,6 +101,12 @@ public static class PolicyEngine
         var outcome = tier == Tier.Automatic ? DecisionOutcome.Allow : DecisionOutcome.NeedsApproval;
         if (reasons.Count == 0) reasons.Add(tier == Tier.Automatic ? "Automatically allowed: staging or additive write only." : "Controlled write: requires your approval.");
         if (target.ContainsKey("toProjectPlanned")) reasons.Add($"Destination '{target["toProjectSlug"]}' does not exist yet: a prerequisite in this task creates it, and the move is checked again when it runs.");
+        if (p.Action == Actions.ModelRequest)
+        {
+            reasons.Add(target["allowSearch"] == "true"
+                ? w.OnlineSearchGranted ? "Online search is allowed by your sources preference." : "Online search is not granted by preference; approving this request allows it for this task only."
+                : "No online search: the model sees only the package and its own general knowledge.");
+        }
         return new Decision(outcome, tier, reasons, target);
     }
 
