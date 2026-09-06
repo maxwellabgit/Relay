@@ -91,6 +91,8 @@ public static class EventTypes
     public const string ProposalEdited = "proposal.edited";
     public const string ApprovalGranted = "approval.granted";
     public const string ApprovalRejected = "approval.rejected";
+    /// <summary>An approval the user attempted was refused because a prerequisite proposal will not run.</summary>
+    public const string ApprovalRefused = "approval.refused";
     public const string ExecutionStarted = "execution.started";
     public const string ExecutionCompleted = "execution.completed";
     public const string ExecutionFailed = "execution.failed";

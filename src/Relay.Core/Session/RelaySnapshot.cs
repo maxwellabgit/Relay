@@ -62,7 +62,9 @@ public sealed record ProposalView(
     string ProposedBy,
     string Reason,
     IReadOnlyList<string> DependsOn,
-    string? GrantedBy);
+    string? GrantedBy,
+    /// <summary>Set while the proposal is pending but cannot be approved because a prerequisite was rejected, denied, or failed.</summary>
+    string? BlockedBy = null);
 
 /// <summary>Tokens and time one task cost. Shown in the diagnostics drawer and summed for the session.</summary>
 public sealed record TaskCost(int PromptTokens, int CompletionTokens, int ModelCalls, int ToolCalls, long WallMs)

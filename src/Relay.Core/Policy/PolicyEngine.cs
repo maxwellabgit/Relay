@@ -23,6 +23,12 @@ public sealed class PolicyWorld
     public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge"];
     /// <summary>Origin of the task the proposal belongs to. Some actions may only be proposed from a direct request; null means unknown and is treated as direct.</summary>
     public Tasks.TaskOrigin? Origin { get; init; }
+    /// <summary>
+    /// Slugs of projects that a prerequisite proposal in the same task would create. A dependent proposal may
+    /// name one as its destination at decision time; the check is repeated against the real registry when it runs.
+    /// Empty at execution time, so nothing runs against a project that does not exist.
+    /// </summary>
+    public IReadOnlyList<string> PlannedProjects { get; init; } = [];
 }
 
 /// <summary>
@@ -92,6 +98,7 @@ public static class PolicyEngine
 
         var outcome = tier == Tier.Automatic ? DecisionOutcome.Allow : DecisionOutcome.NeedsApproval;
         if (reasons.Count == 0) reasons.Add(tier == Tier.Automatic ? "Automatically allowed: staging or additive write only." : "Controlled write: requires your approval.");
+        if (target.ContainsKey("toProjectPlanned")) reasons.Add($"Destination '{target["toProjectSlug"]}' does not exist yet: a prerequisite in this task creates it, and the move is checked again when it runs.");
         return new Decision(outcome, tier, reasons, target);
     }
 
@@ -297,7 +304,13 @@ public static class PolicyEngine
         var toKey = t.GetValueOrDefault("toProjectId") ?? t.GetValueOrDefault("toProject");
         if (string.IsNullOrWhiteSpace(toKey)) { problems.Add("target.toProjectId is required."); return problems; }
         var to = w.Registry.FindActive(toKey);
-        if (to is null) problems.Add($"No active project matches '{toKey}'.");
+        if (to is null)
+        {
+            // The destination may be a project a prerequisite in the same task creates; the real check happens when the move runs.
+            var planned = w.PlannedProjects.FirstOrDefault(s => string.Equals(s, Slug.From(toKey), StringComparison.OrdinalIgnoreCase));
+            if (planned is null) problems.Add($"No active project matches '{toKey}'.");
+            else { t["toProjectSlug"] = planned; t["toProjectPlanned"] = "true"; t.Remove("toProjectId"); t["toProject"] = toKey; }
+        }
         else
         {
             if (from is not null && to.Id == from.Id) problems.Add("The note is already in that project.");

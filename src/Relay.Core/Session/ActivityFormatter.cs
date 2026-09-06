@@ -62,6 +62,7 @@ public static class ActivityFormatter
             EventTypes.ProposalEdited => $"Edited proposal {Short(r.DataString("fromProposalId"))} → {Short(r.DataString("toProposalId"))}",
             EventTypes.ApprovalGranted => $"Approved {r.DataString("action")} ({Short(r.DataString("proposalId"))})" + (r.DataBool("implicitViaUi") == true ? " by direct request" : ""),
             EventTypes.ApprovalRejected => $"Rejected {r.DataString("action")} ({Short(r.DataString("proposalId"))}): {r.DataString("reason")}",
+            EventTypes.ApprovalRefused => $"Could not approve {r.DataString("action")} ({Short(r.DataString("proposalId"))}): {r.DataString("reason")}",
             EventTypes.ExecutionStarted => $"Executing {r.DataString("action")} ({Short(r.DataString("proposalId"))})",
             EventTypes.ExecutionCompleted => $"Done: {r.DataString("summary")}",
             EventTypes.ExecutionFailed => $"Execution of {r.DataString("action")} failed at {r.DataString("stage")}: {r.DataString("error")}",

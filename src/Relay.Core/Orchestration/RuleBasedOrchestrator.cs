@@ -149,6 +149,7 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
                 new() { ["noteId"] = d.NoteId, ["projectId"] = project.Id, ["confidence"] = "1" }, [$"New note file in {project.Slug}/notes; staging copy marked routed"], Risks.ControlledWrite, false)).ToList();
             return Done(new TurnPlan(true, $"File {chosen.Count} draft note(s) under '{project.Name}'", steps, null, [], proposals, Name));
         }
+        if (TryOrganize(text, request, context, steps) is { } organized) return Done(organized);
         if ((m = Remember().Match(text)).Success)
         {
             var body = Clean(m.Groups["text"].Value);

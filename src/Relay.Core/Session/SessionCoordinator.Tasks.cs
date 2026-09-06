@@ -126,8 +126,13 @@ public sealed partial class SessionCoordinator : IExecutionSink
 
     LedgerRecord? IExecutionSink.Record(string type, object data) => Append(type, data);
 
-    private PolicyWorld WorldFor(TaskState? task) => new()
+    private PolicyWorld WorldFor(TaskState? task, bool forExecution = false) => new()
     {
+        PlannedProjects = task is null || forExecution ? [] : task.Proposals
+            .Where(p => p.Proposal.Action == Actions.CreateProject && p.Status is "pending" or "allowed" or "approved" or "executing")
+            .Select(p => p.Proposal.Target.GetValueOrDefault("slug") ?? Slug.From(p.Proposal.Target.GetValueOrDefault("name") ?? ""))
+            .Where(s => s.Length > 0)
+            .ToList(),
         Registry = _services.Registry,
         Roots = _services.Roots,
         DataRoot = _root,
@@ -396,7 +401,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
             };
         }
 
-        foreach (var proposal in plan.Proposals) ReceiveProposal(task, proposal);
+        // Prerequisites are decided before their dependents so a dependent can name a project its prerequisite creates.
+        foreach (var proposal in plan.Proposals.OrderBy(p => p.Dependencies.Count)) ReceiveProposal(task, proposal);
         AdvanceTask(task);
         Notify();
     }
@@ -436,6 +442,15 @@ public sealed partial class SessionCoordinator : IExecutionSink
 
     private static bool DependenciesDead(TaskState task, ProposalState ps)
         => ps.Proposal.Dependencies.Any(id => task.Proposals.FirstOrDefault(p => p.Proposal.ProposalId == id) is null or { Status: "rejected" or "denied" or "failed" or "skipped" or "edited" or "stopped" });
+
+    /// <summary>Why a pending proposal cannot be approved: the prerequisite that will not run, by name and fate.</summary>
+    private static string BlockedReason(TaskState task, ProposalState ps)
+    {
+        var dead = ps.Proposal.Dependencies.Select(id => task.Proposals.FirstOrDefault(p => p.Proposal.ProposalId == id))
+            .Where(p => p is null or { Status: "rejected" or "denied" or "failed" or "skipped" or "edited" or "stopped" }).ToList();
+        var names = dead.Select(p => p is null ? "a missing prerequisite" : $"{ProposalText.Describe(p.Proposal, p.Decision).Title} ({p.Status})");
+        return $"This depends on {string.Join(" and ", names)}. Approve the prerequisite first, or reject this one.";
+    }
 
     /// <summary>Moves the task to approval, execution, or completion depending on what the proposals need.</summary>
     private void AdvanceTask(TaskState task)
@@ -485,7 +500,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             }
             next.Status = "executing";
             next.Capability ??= _capabilities.Issue(next.Proposal, _clock.UtcNow);
-            var result = _executor.Execute(next.Proposal, next.Capability, WorldFor(task), task.TaskId, this);
+            var result = _executor.Execute(next.Proposal, next.Capability, WorldFor(task, forExecution: true), task.TaskId, this);
             next.Result = result;
             if (result.Status == ExecutionStatus.Pending)
             {
@@ -739,7 +754,13 @@ public sealed partial class SessionCoordinator : IExecutionSink
     public void Approve(string proposalId)
     {
         if (FindPending(proposalId) is not var (task, ps)) { _notice = "That proposal is not awaiting approval."; Notify(); return; }
-        if (DependenciesDead(task, ps)) { _notice = "A prerequisite of that proposal was not approved; approve it first or reject this one."; Notify(); return; }
+        if (DependenciesDead(task, ps))
+        {
+            _notice = BlockedReason(task, ps);
+            Append(EventTypes.ApprovalRefused, new { taskId = task.TaskId, proposalId, action = ps.Proposal.Action, reason = _notice, dependsOn = ps.Proposal.Dependencies });
+            Notify();
+            return;
+        }
         var hash = ps.Proposal.Hash();
         if (Append(EventTypes.ApprovalGranted, new { taskId = task.TaskId, proposalId, action = ps.Proposal.Action, proposalHash = hash, by = "user", target = ps.Decision.NormalizedTarget }) is null) { Notify(); return; }
         ps.Status = "approved";
@@ -777,8 +798,34 @@ public sealed partial class SessionCoordinator : IExecutionSink
         }
         task.UserResponse ??= "edited";
         ReceiveProposal(task, replacement);
+        RetargetDependents(task, ps.Proposal, replacement);
         AdvanceTask(task);
         Notify();
+    }
+
+    /// <summary>
+    /// When the user renames a project inside an edited <c>create_project</c>, the pending moves that were
+    /// heading for the old name follow it to the new one and are decided again; otherwise they would fail
+    /// at run time against a project that was never created.
+    /// </summary>
+    private void RetargetDependents(TaskState task, Proposal edited, Proposal replacement)
+    {
+        if (edited.Action != Actions.CreateProject) return;
+        var oldName = edited.Target.GetValueOrDefault("name") ?? "";
+        var oldSlug = edited.Target.GetValueOrDefault("slug") ?? Slug.From(oldName);
+        var newName = replacement.Target.GetValueOrDefault("name") ?? oldName;
+        if (string.Equals(Slug.From(newName), oldSlug, StringComparison.OrdinalIgnoreCase)) return;
+        foreach (var dep in task.Proposals.Where(d => d.Status == "pending" && d.Proposal.Action == Actions.MoveNote && d.Proposal.Dependencies.Contains(replacement.ProposalId)))
+        {
+            var to = dep.Proposal.Target.GetValueOrDefault("toProject");
+            if (to is null || !(string.Equals(to, oldName, StringComparison.OrdinalIgnoreCase) || string.Equals(Slug.From(to), oldSlug, StringComparison.OrdinalIgnoreCase))) continue;
+            var target = new Dictionary<string, string>(dep.Proposal.Target, StringComparer.Ordinal) { ["toProject"] = newName };
+            dep.Proposal = dep.Proposal with { Target = target };
+            dep.Decision = PolicyEngine.Decide(dep.Proposal, WorldFor(task));
+            if (dep.Decision.Outcome == DecisionOutcome.Deny) dep.Status = "denied";
+            PersistProposal(dep.Proposal);
+            Append(EventTypes.ProposalDecided, new { taskId = task.TaskId, proposalId = dep.Proposal.ProposalId, action = dep.Proposal.Action, outcome = dep.Decision.Outcome.ToString(), tier = dep.Decision.Tier.ToString(), reasons = dep.Decision.Reasons, target = dep.Decision.NormalizedTarget, retargetedFrom = oldName, retargetedTo = newName });
+        }
     }
 
     public void ApproveAll(string? taskId = null)
@@ -1172,9 +1219,10 @@ public sealed partial class SessionCoordinator : IExecutionSink
                     }
                     break;
                 case Actions.MoveNote:
-                    foreach (var key in new[] { "projectId", "toProjectId" })
+                    // The destination may have been created by a prerequisite after this proposal was decided; the executor reports where the note went.
+                    foreach (var side in new[] { target.GetValueOrDefault("projectId"), target.GetValueOrDefault("toProjectId") ?? ps.Result.Outputs.GetValueOrDefault("projectId") })
                     {
-                        if (_services.Registry.ById(target.GetValueOrDefault(key) ?? "") is { } moved && Directory.Exists(moved.RootPath))
+                        if (_services.Registry.ById(side ?? "") is { } moved && Directory.Exists(moved.RootPath))
                         {
                             _services.Index.RemoveProject(moved.Id);
                             foreach (var (note, _) in ProjectNoteStore.ReadAll(moved.RootPath).Notes) _services.Index.IndexNote(note, moved);
@@ -1221,7 +1269,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             var (title, detail) = ProposalText.Describe(p.Proposal, p.Decision);
             return new ProposalView(p.Proposal.ProposalId, p.Proposal.Action, title, detail, p.Decision.NormalizedTarget.Count > 0 ? p.Decision.NormalizedTarget : p.Proposal.Target,
                 p.Decision.Tier, p.Status, p.Decision.Reasons, p.Result?.Summary, p.Result?.Error, p.Status == "pending" && ProposalText.EditableKeys(p.Proposal.Action).Count > 0, p.Proposal.ProposedBy, p.Proposal.Reason,
-                p.Proposal.Dependencies, p.GrantedBy);
+                p.Proposal.Dependencies, p.GrantedBy, p.Status == "pending" && DependenciesDead(task, p) ? BlockedReason(task, p) : null);
         }).ToList();
         var externalPending = task.PendingOperation?.Proposal.Action == Actions.ModelRequest;
         return new TaskView(task.TaskId, task.Origin, task.Kind, task.Status, TaskLanes.Tag(task.Kind, task.Status, externalPending), task.Lane, task.Instruction,

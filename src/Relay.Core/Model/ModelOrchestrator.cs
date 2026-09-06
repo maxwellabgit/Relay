@@ -175,7 +175,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         sb.Append("\nActions you may propose (policy decides; the user approves anything that changes a project or Relay itself):\n");
         sb.Append("- create_project {name, slug?}\n- archive_project {projectId}\n- restore_project {projectId}\n- rename_project {projectId, newName}\n- delete_project {projectId, confirm:\"delete\"} only when the user explicitly asked to delete\n");
         sb.Append("- route_note {noteId, projectId, type?, confidence}\n- create_draft_note {text, type}\n- modify_note {projectId, noteId, body?, status?, type?}\n");
-        sb.Append("- supersede_note {projectId, noteId, newText, type?, sourceExcerptId?} replaces a stored decision with new text in one step (or {projectId, noteId, supersededBy} to link two existing notes)\n- move_note {projectId, noteId, toProjectId}\n");
+        sb.Append("- supersede_note {projectId, noteId, newText, type?, sourceExcerptId?} replaces a stored decision with new text in one step (or {projectId, noteId, supersededBy} to link two existing notes)\n- move_note {projectId, noteId, toProjectId} (or toProject:\"<name>\" when the destination is a create_project proposal in this same plan that the move depends_on)\n");
         sb.Append("- launch_worker {projectId, task:\"summarize\", objective}\n- apply_patch {projectId, runId, output, destination}\n- export_backup {path?}\n");
         sb.Append("- model.request {profile, objective, refs:\"<comma-separated ids returned by tools>\", budgetTokens, allowSearch} to delegate bounded work to a named external model");
         if (context is { ExternalProfiles.Count: > 0 }) sb.Append(" (profiles: ").Append(string.Join(", ", context.ExternalProfiles)).Append(')');
