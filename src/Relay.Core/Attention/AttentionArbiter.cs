@@ -41,7 +41,9 @@ public sealed record AttentionInput(
     int ExecutedOperations,
     bool Failed,
     string? WatchedTerm,
-    DateTimeOffset At);
+    DateTimeOffset At,
+    /// <summary>Proposals the user rejected or edited: the card was seen and answered, so the finding must not come back as an alert.</summary>
+    int RejectedProposals = 0);
 
 public sealed record AttentionDecision(Presentation Level, string Reason, AttentionItem? Item, bool Merged);
 
@@ -134,6 +136,10 @@ public sealed class AttentionArbiter
             if (x.Kind == TaskKind.Research && x.HasAnswer) return (Presentation.Findings, "direct research task with findings");
             return (Presentation.Result, "a direct ask is always answered");
         }
+
+        // The user already answered this finding's proposal card (approved or rejected): a subtle confirmation, never a second alert.
+        if (x.ExecutedOperations > 0) return (Presentation.Ambient, $"{x.ExecutedOperations} approved operation(s) ran; subtle confirmation only");
+        if (x.RejectedProposals > 0) return (Presentation.None, "the proposal was declined; nothing more to show");
 
         switch (x.Kind)
         {

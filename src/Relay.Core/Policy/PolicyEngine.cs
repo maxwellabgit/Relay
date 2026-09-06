@@ -163,9 +163,21 @@ public static class PolicyEngine
             problems.Add("modify_note needs target.body or target.status.");
         if (action == Actions.SupersedeNote)
         {
+            // Either an existing replacement note, or the replacement's text, from which one new note is created in the same operation.
             var newId = t.GetValueOrDefault("supersededBy");
-            if (string.IsNullOrWhiteSpace(newId)) problems.Add("target.supersededBy is required.");
-            else if (project is not null && !w.ProjectNoteExists(project.Id, newId)) problems.Add($"Note {newId} does not exist in project {project.Slug}.");
+            var newText = t.GetValueOrDefault("newText")?.Trim();
+            if (string.IsNullOrWhiteSpace(newId) && string.IsNullOrWhiteSpace(newText)) problems.Add("supersede_note needs target.supersededBy (an existing note) or target.newText (the replacement).");
+            if (!string.IsNullOrWhiteSpace(newId) && !string.IsNullOrWhiteSpace(newText)) problems.Add("supersede_note takes either target.supersededBy or target.newText, not both.");
+            if (!string.IsNullOrWhiteSpace(newId) && project is not null && !w.ProjectNoteExists(project.Id, newId)) problems.Add($"Note {newId} does not exist in project {project.Slug}.");
+            if (!string.IsNullOrWhiteSpace(newText))
+            {
+                if (newText.Length > 2000) problems.Add("target.newText is longer than 2000 characters.");
+                if (newText == noteId) problems.Add("target.newText must be the replacement text, not an id.");
+                t["newText"] = newText;
+                if (t.TryGetValue("type", out var type) && !NoteTypes.All.Contains(type)) problems.Add($"target.type '{type}' is not a note type.");
+                if (t.TryGetValue("sourceExcerptId", out var excerptId) && !string.IsNullOrWhiteSpace(excerptId) && w.ReferenceExists is not null && !w.ReferenceExists(excerptId))
+                    problems.Add($"target.sourceExcerptId {excerptId} does not name a stored excerpt or note.");
+            }
         }
         if (t.TryGetValue("status", out var status) && status is not (NoteStatus.Active or NoteStatus.Disputed or NoteStatus.Superseded or NoteStatus.Archived or NoteStatus.Draft))
             problems.Add("target.status is not a known note status.");

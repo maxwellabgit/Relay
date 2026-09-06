@@ -152,6 +152,9 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
+    /// <summary>Hear one utterance and let the judge see it: <see cref="Hear"/> followed by <see cref="Observe"/>.</summary>
+    public Scenario Listen(string text) => Hear(text).Observe();
+
     /// <summary>Lets one observe interval elapse so the judge sees what is new.</summary>
     public Scenario Observe()
     {

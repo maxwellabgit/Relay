@@ -174,14 +174,15 @@ public sealed class ModelOrchestrator : IOrchestrator
         foreach (var d in ToolBroker.Descriptors) sb.Append("- ").Append(d.Name).Append('(').Append(string.Join(", ", d.Arguments)).Append("): ").Append(d.Description).Append('\n');
         sb.Append("\nActions you may propose (policy decides; the user approves anything that changes a project or Relay itself):\n");
         sb.Append("- create_project {name, slug?}\n- archive_project {projectId}\n- restore_project {projectId}\n- rename_project {projectId, newName}\n- delete_project {projectId, confirm:\"delete\"} only when the user explicitly asked to delete\n");
-        sb.Append("- route_note {noteId, projectId, type?, confidence}\n- create_draft_note {text, type}\n- modify_note {projectId, noteId, body?, status?, type?}\n- supersede_note {projectId, noteId, supersededBy}\n- move_note {projectId, noteId, toProjectId}\n");
+        sb.Append("- route_note {noteId, projectId, type?, confidence}\n- create_draft_note {text, type}\n- modify_note {projectId, noteId, body?, status?, type?}\n");
+        sb.Append("- supersede_note {projectId, noteId, newText, type?, sourceExcerptId?} replaces a stored decision with new text in one step (or {projectId, noteId, supersededBy} to link two existing notes)\n- move_note {projectId, noteId, toProjectId}\n");
         sb.Append("- launch_worker {projectId, task:\"summarize\", objective}\n- apply_patch {projectId, runId, output, destination}\n- export_backup {path?}\n");
         sb.Append("- model.request {profile, objective, refs:\"<comma-separated ids returned by tools>\", budgetTokens, allowSearch} to delegate bounded work to a named external model");
         if (context is { ExternalProfiles.Count: > 0 }) sb.Append(" (profiles: ").Append(string.Join(", ", context.ExternalProfiles)).Append(')');
         sb.Append("\n- update_preference {key, value} for response.verbosity | display.alwaysShow | display.stopShowing | filing.grant | filing.revoke | response.promptLine | sources.allowOnlineSearch | retention.bufferSeconds\n");
         sb.Append("- update_prompt {name:\"planner\"|\"judge\", content}\n\n");
         sb.Append("Rules: cite only ids that a tool returned in this task; never invent ids, paths, or facts; prefer tool results over guessing; ");
-        sb.Append("for a check task, search first, set consistent, and when the stated fact conflicts with a stored decision propose supersede_note or modify_note with both sources cited; ");
+        sb.Append("for a check task, search first, set consistent, cite both the stored note and the excerpt, and when the stated fact conflicts with a stored decision propose supersede_note with newText (the corrected decision in one sentence) so the user can update the record with one approval; ");
         sb.Append("state the knowledge gap honestly: 'missing' is what has no local source, 'capability_gap' is true only when you cannot do the work even with the sources; propose model.request only when capability_gap is true and the user's request needs it; ");
         sb.Append("when several operations belong together give each an id and use depends_on so a prerequisite can be approved before its dependents; ");
         sb.Append("when the request is ambiguous say so in the answer and propose nothing; keep summary and steps short and factual.");

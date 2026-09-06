@@ -246,7 +246,40 @@ public sealed class Executor
     {
         var project = _registry.ById(d.NormalizedTarget["projectId"])!;
         var old = ProjectNoteStore.Find(project.RootPath, d.NormalizedTarget["noteId"]) ?? throw new FileNotFoundException("Note vanished.");
-        var replacement = ProjectNoteStore.Find(project.RootPath, d.NormalizedTarget["supersededBy"]) ?? throw new FileNotFoundException("Replacement note vanished.");
+        (NoteDocument Note, string Path) replacement;
+        var created = false;
+        if (d.NormalizedTarget.TryGetValue("newText", out var newText) && !string.IsNullOrWhiteSpace(newText))
+        {
+            // The replacement is written here, in the same journaled operation: one approval updates the record.
+            var now = _clock.UtcNow;
+            var spans = new List<SourceSpan>();
+            if (d.NormalizedTarget.TryGetValue("sourceExcerptId", out var excerptId) && !string.IsNullOrWhiteSpace(excerptId))
+            {
+                var start = int.TryParse(d.NormalizedTarget.GetValueOrDefault("spanStart"), out var ss) && ss >= 0 ? ss : 0;
+                var end = int.TryParse(d.NormalizedTarget.GetValueOrDefault("spanEnd"), out var se) && se > start ? se : start;
+                spans.Add(new SourceSpan(excerptId, start, end));
+            }
+            var fresh = new NoteDocument
+            {
+                Id = Ulid.NewUlid(now),
+                ProjectId = project.Id,
+                Type = d.NormalizedTarget.TryGetValue("type", out var type) && NoteTypes.All.Contains(type) ? type : old.Note.Type,
+                Status = NoteStatus.Active,
+                Created = now,
+                CaptureId = d.NormalizedTarget.GetValueOrDefault("captureId"),
+                Topic = d.NormalizedTarget.GetValueOrDefault("topic") ?? old.Note.Topic,
+                Spans = spans,
+                Body = newText,
+            };
+            var written = ProjectNoteStore.WriteNew(project.RootPath, fresh);
+            sink.Record(EventTypes.NoteWritten, new { noteId = fresh.Id, projectId = project.Id, path = written.Path, sha256 = written.Sha256, version = written.Version, type = fresh.Type, replaces = old.Note.Id, proposalId = p.ProposalId });
+            replacement = (fresh, written.Path);
+            created = true;
+        }
+        else
+        {
+            replacement = ProjectNoteStore.Find(project.RootPath, d.NormalizedTarget["supersededBy"]) ?? throw new FileNotFoundException("Replacement note vanished.");
+        }
         old.Note.Status = NoteStatus.Superseded;
         old.Note.DisputedWith.Remove(replacement.Note.Id);
         if (!replacement.Note.Supersedes.Contains(old.Note.Id)) replacement.Note.Supersedes.Add(old.Note.Id);
@@ -254,8 +287,11 @@ public sealed class Executor
         if (replacement.Note.Status == NoteStatus.Disputed && replacement.Note.DisputedWith.Count == 0) replacement.Note.Status = NoteStatus.Active;
         var w1 = ProjectNoteStore.WriteVersion(project.RootPath, old.Note);
         var w2 = ProjectNoteStore.WriteVersion(project.RootPath, replacement.Note);
-        sink.Record(EventTypes.NoteSuperseded, new { oldNoteId = old.Note.Id, newNoteId = replacement.Note.Id, projectId = project.Id, oldVersionPath = w1.PreviousVersionPath, newVersionPath = w2.PreviousVersionPath, proposalId = p.ProposalId });
-        return ExecutionResult.Ok($"Marked {old.Note.Id} superseded by {replacement.Note.Id}; both earlier versions kept", new Dictionary<string, string> { ["oldPath"] = w1.Path, ["newPath"] = w2.Path });
+        sink.Record(EventTypes.NoteSuperseded, new { oldNoteId = old.Note.Id, newNoteId = replacement.Note.Id, projectId = project.Id, oldVersionPath = w1.PreviousVersionPath, newVersionPath = w2.PreviousVersionPath, createdReplacement = created, proposalId = p.ProposalId });
+        var outputs = new Dictionary<string, string> { ["oldPath"] = w1.Path, ["newPath"] = w2.Path, ["newNoteId"] = replacement.Note.Id, ["projectId"] = project.Id };
+        return ExecutionResult.Ok(created
+            ? $"Recorded the new {replacement.Note.Type} as {replacement.Note.Id} and marked {old.Note.Id} superseded; the earlier text is kept"
+            : $"Marked {old.Note.Id} superseded by {replacement.Note.Id}; both earlier versions kept", outputs);
     }
 
     private ExecutionResult RenameProject(Proposal p, Decision d, IExecutionSink sink)

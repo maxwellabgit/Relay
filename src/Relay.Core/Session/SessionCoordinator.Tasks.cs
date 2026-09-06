@@ -665,7 +665,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var (title, detail) = TaskCardText(task);
         var input = new AttentionInput(task.TaskId, task.Origin, task.Kind, title, detail, task.MergeKey, task.Suggested, task.Confidence,
             !string.IsNullOrWhiteSpace(plan?.Answer), plan?.Consistent, plan?.Citations.Count ?? 0, pendingCount,
-            task.Proposals.Count(p => p.Status == "executed"), task.Status == TaskStatus.Failed, task.WatchedTerm, _clock.UtcNow);
+            task.Proposals.Count(p => p.Status == "executed"), task.Status == TaskStatus.Failed, task.WatchedTerm, _clock.UtcNow,
+            task.Proposals.Count(p => p.Status is "rejected" or "edited"));
         if (task.Foreground)
         {
             // The foreground task is already on screen in Response (and its receipt); a card would show it twice.

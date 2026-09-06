@@ -18,7 +18,9 @@ public static class ProposalText
             Actions.RouteNote => ($"File note {Short(Get("noteId"))} under '{slug}'", $"Adds a new note file to {slug}/{Notes.NoteTypes.Folder(Get("type", "idea"))}. Confidence {Get("confidence", "n/a")}. Modifies nothing existing."),
             Actions.CreateDraftNote => ("Save a draft note", $"Text ({Get("text").Length} chars): {Truncate(Get("text"), 200)}"),
             Actions.ModifyNote => ($"Modify note {Short(Get("noteId"))} in '{slug}'", (t.ContainsKey("status") ? $"Status → {Get("status")}\n" : "") + (t.ContainsKey("body") ? $"New text: {Truncate(Get("body"), 300)}\n" : "") + "The previous version is kept under .orchestrator/versions."),
-            Actions.SupersedeNote => ($"Mark note {Short(Get("noteId"))} superseded by {Short(Get("supersededBy"))}", "The older note keeps its text with status 'superseded'; the newer one records what it replaces."),
+            Actions.SupersedeNote => t.ContainsKey("newText")
+                ? ($"Update the {Get("type", "decision")} in '{slug}'", $"New text: {Truncate(Get("newText"), 300)}\nThe earlier note {Short(Get("noteId"))} keeps its text with status 'superseded'; the new note records what it replaces." + (t.ContainsKey("sourceExcerptId") ? $"\nSource: excerpt {Short(Get("sourceExcerptId"))}" : ""))
+                : ($"Mark note {Short(Get("noteId"))} superseded by {Short(Get("supersededBy"))}", "The older note keeps its text with status 'superseded'; the newer one records what it replaces."),
             Actions.LaunchWorker => ($"Run a sandboxed worker: {Get("task")} '{slug}'", $"Objective: {Get("objective")}\nNetwork: {Get("network", "false")}\nThe worker reads project notes through the broker and writes only to its staging out folder. Applying its output is a separate approval."),
             Actions.ApplyPatch => ($"Apply worker output to '{slug}/{Get("destination")}'", $"From run {Short(Get("runId"))} file {Get("output")}. Existing files are versioned before being replaced."),
             Actions.ExportBackup => ("Export a verified backup", $"Zip: {Get("path", "(backups folder)")}\nContains the data root and every active project with a hashed manifest; verified after writing."),
@@ -41,6 +43,7 @@ public static class ProposalText
         Actions.ApplyPatch => ["destination"],
         Actions.ExportBackup => ["path"],
         Actions.ModifyNote => ["body", "status"],
+        Actions.SupersedeNote => ["newText", "type"],
         Actions.MoveNote => ["toProjectId"],
         Actions.ModelRequest => ["objective", "profile", "budgetTokens", "allowSearch"],
         Actions.UpdatePreference => ["value"],
