@@ -75,6 +75,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public required string Instruction { get; init; }
         public required DateTimeOffset StartedAt { get; init; }
         public bool Foreground { get; init; }
+        /// <summary>True when the task's words came from listening rather than from something the user typed: observed tasks and their follow-ups. Governs what the ledger may quote.</summary>
+        public bool Overheard { get; init; }
         public string? ExcerptId { get; init; }
         /// <summary>For a follow-up that summarises an external result: the stored artifact it is about.</summary>
         public string? ArtifactId { get; init; }
@@ -274,6 +276,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             Instruction = instruction,
             StartedAt = _clock.UtcNow,
             Foreground = foreground,
+            Overheard = origin == TaskOrigin.Observed || (parentTaskId is not null && _tasks.FirstOrDefault(t => t.TaskId == parentTaskId)?.Overheard == true),
             ExcerptId = excerptId,
             ArtifactId = artifactId,
             ParentTaskId = parentTaskId,
@@ -298,18 +301,39 @@ public sealed partial class SessionCoordinator : IExecutionSink
         kind = task.Kind.Wire(),
         lane = task.Lane,
         foreground = task.Foreground,
+        overheard = task.Overheard,
         captureId = task.CaptureId.Length > 0 ? task.CaptureId : null,
         sourceEventId = task.SourceEventId.Length > 0 ? task.SourceEventId : null,
         excerptId = task.ExcerptId,
         parentTaskId = task.ParentTaskId,
-        title = task.Title,
+        title = Guarded(task, task.Title),
         why = task.Why,
         confidence = task.Confidence,
-        mergeKey = task.MergeKey,
+        mergeKey = Guarded(task, task.MergeKey),
         chars,
         judge,
         planner = _services.Orchestrator.Name,
     };
+
+    // ----------------------------------------------------------------------------------------
+    // What the ledger may say about words that were only overheard
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The ledger never carries the words of the room. Segments enter it as hashes and excerpts as ids; but what a
+    /// judge or planner writes about an overheard task (its title, summary, answer, tool arguments, raw model output)
+    /// can quote those words, so for such tasks the ledger records a fingerprint (length and a SHA-256 prefix) and the
+    /// task record under tasks\ keeps the text, under the same retention as the excerpt it cites. Tasks that began
+    /// from something the user typed are recorded in full: those words are the user's own instruction.
+    /// </summary>
+    private static string? Guarded(TaskState task, string? text) => text is null || !task.Overheard ? text : Fingerprint(text);
+
+    private static string Fingerprint(string text) => $"withheld: {text.Length} chars, sha256 {Sha256Hex(text)[..16]}";
+
+    private static IReadOnlyList<string> Guarded(TaskState task, IReadOnlyList<string> texts) => task.Overheard ? texts.Select(Fingerprint).ToList() : texts;
+
+    private static IReadOnlyDictionary<string, string> Guarded(TaskState task, IReadOnlyDictionary<string, string> map)
+        => task.Overheard ? map.ToDictionary(kv => kv.Key, kv => Fingerprint(kv.Value), StringComparer.Ordinal) : map;
 
     private TaskKind ClassifyDirect(string text)
     {
@@ -382,18 +406,20 @@ public sealed partial class SessionCoordinator : IExecutionSink
             taskId = task.TaskId,
             producer = plan.Producer,
             understood = plan.Understood,
-            summary = plan.Summary,
-            steps = plan.Steps,
-            answer = plan.Answer,
+            summary = Guarded(task, plan.Summary),
+            steps = Guarded(task, plan.Steps),
+            answer = Guarded(task, plan.Answer),
             citations = plan.Citations.Select(c => new { c.Kind, c.Id, c.ProjectSlug, span = c.Span }),
             consistent = plan.Consistent,
-            knowledge = plan.Knowledge,
+            knowledge = task.Overheard && plan.Knowledge is { } k
+                ? new { known = k.Known.Count, missing = k.Missing.Count, capabilityGap = k.CapabilityGap, summary = Guarded(task, k.Summary) }
+                : (object?)plan.Knowledge,
             proposals = plan.Proposals.Count,
             toolCalls = task.ToolCalls.Count,
             modelCalls = task.ModelCalls.Count,
             promptTokens = task.PromptTokens,
             completionTokens = task.CompletionTokens,
-            raw = plan.Raw,
+            raw = Guarded(task, plan.Raw),
         }) is null) return;
 
         if (!plan.Understood)
@@ -694,7 +720,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             var (level, reason) = Arbiter.RankOnly(input);
             task.Presentation = level;
             task.PresentationReason = reason + " · shown in Response";
-            Append(EventTypes.TaskPresented, new { taskId = task.TaskId, level = level.Wire(), reason, surface = "response", title });
+            Append(EventTypes.TaskPresented, new { taskId = task.TaskId, level = level.Wire(), reason, surface = "response", title = Guarded(task, title) });
             return;
         }
         var decision = Arbiter.Decide(input);
@@ -705,8 +731,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
             Append(EventTypes.AttentionSuppressed, new { taskId = task.TaskId, level = decision.Level.Wire(), reason = decision.Reason });
             return;
         }
-        if (decision.Merged) Append(EventTypes.TaskMerged, new { taskId = task.TaskId, itemId = decision.Item.ItemId, key = decision.Item.Key, occurrences = decision.Item.Occurrences, into = decision.Item.TaskIds.FirstOrDefault() });
-        Append(interim ? EventTypes.TaskPresented : EventTypes.AttentionShown, new { taskId = task.TaskId, itemId = decision.Item.ItemId, level = decision.Level.Wire(), reason = decision.Reason, merged = decision.Merged, title });
+        if (decision.Merged) Append(EventTypes.TaskMerged, new { taskId = task.TaskId, itemId = decision.Item.ItemId, key = Guarded(task, decision.Item.Key), occurrences = decision.Item.Occurrences, into = decision.Item.TaskIds.FirstOrDefault() });
+        Append(interim ? EventTypes.TaskPresented : EventTypes.AttentionShown, new { taskId = task.TaskId, itemId = decision.Item.ItemId, level = decision.Level.Wire(), reason = decision.Reason, merged = decision.Merged, title = Guarded(task, title) });
     }
 
     private (string Title, string Detail) TaskCardText(TaskState task)
@@ -1320,10 +1346,11 @@ public sealed partial class SessionCoordinator : IExecutionSink
             _owner.Notify();
         });
 
-        public void Progress(string text) => Record(EventTypes.TurnProgress, new { taskId = _task.TaskId, text });
-        public void ToolCalled(string tool, IReadOnlyDictionary<string, string> args) => Record(EventTypes.ToolCalled, new { taskId = _task.TaskId, tool, args },
+        // Tool arguments and summaries of an overheard task quote the room (a search for the words just heard); the ledger gets fingerprints, the task record the text.
+        public void Progress(string text) => Record(EventTypes.TurnProgress, new { taskId = _task.TaskId, text = Guarded(_task, text) });
+        public void ToolCalled(string tool, IReadOnlyDictionary<string, string> args) => Record(EventTypes.ToolCalled, new { taskId = _task.TaskId, tool, args = Guarded(_task, args) },
             () => _task.ToolCalls.Add(new ToolCallRecord(tool, new Dictionary<string, string>(args, StringComparer.Ordinal), false, "…", 0, _owner._clock.UtcNow)));
-        public void ToolReturned(string tool, bool ok, string summary, int items) => Record(EventTypes.ToolReturned, new { taskId = _task.TaskId, tool, ok, summary, items },
+        public void ToolReturned(string tool, bool ok, string summary, int items) => Record(EventTypes.ToolReturned, new { taskId = _task.TaskId, tool, ok, summary = Guarded(_task, summary), items },
             () =>
             {
                 var i = _task.ToolCalls.FindLastIndex(c => c.Tool == tool && c.Summary == "…");

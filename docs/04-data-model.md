@@ -74,7 +74,7 @@ No capture text appears in any of these except where marked; prompts sent to a m
 | `project.created` | `projectId, slug, name, rootPath, by, proposalId` | folder layout + `project.toml` + `.orchestrator\` |
 | `project.renamed` / `project.archived` / `project.restored` | `projectId, slug, …, by, proposalId` | archive = move to `archive\` with manifest; nothing is deleted |
 | `note.extracted` | `captureId, sourceEventId, count, types` | note mode, orchestrator on |
-| `note.draft_created` | `noteId, captureId, sourceEventId, chars, type, topic, spanStart, spanEnd, path` | one per extracted note |
+| `note.draft_created` | `noteId, captureId, sourceEventId, chars, type, spanSource, spanStart, spanEnd, path, by` | one per extracted note; the topic label rides on the draft file, not in the ledger |
 | `note.routed` | `noteId, projectId, projectSlug, path, confidence, by, proposalId, stagingPath, status, type` | Tier A when confident; otherwise a Review decision |
 | `note.routing_deferred` | `noteId, reason, confidence, candidates` | Review or unrouted |
 | `note.written` / `note.modified` / `note.superseded` | `projectId, noteId, path, previousVersionPath, …` | every canonical write is versioned first |

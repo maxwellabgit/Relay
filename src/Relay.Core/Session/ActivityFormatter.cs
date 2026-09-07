@@ -110,13 +110,14 @@ public static class ActivityFormatter
             EventTypes.ObserveChecked => $"{r.DataString("judge")} checked {Count(r, "segments")} new segment(s): nothing significant" + Tokens(r),
             EventTypes.ObserveFound => $"{r.DataString("judge")} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
             EventTypes.ObserveFailed => $"Judge {r.DataString("judge")} failed: {r.DataString("error")}",
-            EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}): {r.DataString("reason")}",
+            EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}) for a {r.DataString("kind") ?? "finding"} finding: {r.DataString("why") ?? r.DataString("reason")}",
             EventTypes.AskRecorded => $"You asked ({r.DataInt64("chars")} chars)" + (r.DataBool("whileListening") == true ? " while listening" : ""),
 
             // Tasks
             EventTypes.TaskCreated => r.DataString("lane") == "user_operation" ? $"You requested: {r.DataString("title")}"
-                : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("title")} ({FormatDouble(r, "confidence")})"
-                : r.DataString("origin") == "dialogue" ? $"Follow-up → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("title")}"
+                // Overheard tasks: the title would quote the room, so the ledger holds a fingerprint; the line names the cue instead.
+                : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("why") ?? "finding"} ({FormatDouble(r, "confidence")})"
+                : r.DataString("origin") == "dialogue" ? $"Follow-up → {r.DataString("kind")} task {Short(r.DataString("taskId"))}" + (r.DataBool("overheard") == true ? "" : $": {r.DataString("title")}")
                 : $"{Capitalize(r.DataString("kind"))} task {Short(r.DataString("taskId"))} started with {r.DataString("planner")}",
             EventTypes.TaskPlanned => r.DataBool("understood") == true
                 ? $"Plan by {r.DataString("producer")}: {r.DataString("summary")} ({r.DataInt64("proposals")} proposal(s), {r.DataInt64("toolCalls")} tool call(s)" + Tokens(r) + ")"

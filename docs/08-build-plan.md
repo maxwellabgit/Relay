@@ -52,11 +52,29 @@ Built: `NoteExtractor` (many typed notes per capture, each with narrow spans), `
 
 Exit met in tests: every filed note's span reproduces its exact characters from `capture.committed`; superseded notes stay on disk, stay indexed, and rank below current conclusions.
 
-## Desktop UI 🟡
+## Reformalization — RELAY0 as a continuous judge ✅
 
-Built: status with orchestrator/model chips; capture with keyboard-only path (Type an instruction / Type a note); Response panel (summary, reasoning steps, answer, sources with ledger spans, proposals with tier/status/policy reasons, Approve/Edit/Reject/Approve all/Stop); Review for every decision kind (proposals, routing, disputes, interrupted turns/executions, incidents, settings); Projects (create/rename/archive/restore/open), Workspaces (register with folder picker/remove), Staging (file a draft under a project); Settings dialog (orchestrator mode, model endpoint/model/API key via DPAPI, workers, thresholds) applied on the next turn; Diagnostics.
+The product was re-cut around one pipeline (judge → task → planner → policy → executor → arbiter → diagnostics) in nine slices, each landing with its scenario tests before the next began:
 
-Owed: a scripted UI Automation pass over the new regions (the phase-1 pass exists for capture flows), and screenshots for the README.
+| Slice | Built |
+| --- | --- |
+| 0 | Task model (origin, kind, lane, focused prompt, excerpt), task ledger events (`task.created/planned/completed/failed/cancelled/presented/merged/user_response`), per-task diagnostics record under `tasks\`, change sets with a stored *before* and revert, the test profile |
+| 1 | `IJudge` contract with heuristic, model, null and scripted judges; loopback `http` allowed for the local gateway; Ministral profile; JSON-schema-constrained judge decisions |
+| 2 | Stream buffer (90 s, continuous expiry), trigger-anchored excerpts, overlap by reference, metadata-only "nothing significant" checks, the density guard |
+| 3 | The Atlas workflow end to end, direct and observed, through the real executor with diagnostics; a conflicting claim becomes a `supersede_note` proposal |
+| 4 | Attention arbitration (rank, merge, cool-down, per-session budgets), presentation levels, pinned definitions refreshed in place, direct asks while streaming |
+| 5 | Typed preferences compiled into prompt fragment, generation limits, display rules and standing grants; the "concise" scenario |
+| 6 | Operation graphs with dependencies, partial approval that respects them, deletion as an approved action; the Backyard scenario |
+| 7 | Knowledge state (two-axis gap), source ladder, external package bound to the proposal, artifact + concise summary; the Lightshift scenario |
+| 8 | Improvement tasks under a proposal contract (benefit, permissions, scope, acceptance), change sets under approval, the evaluation harness with recorded, authored and held-out sets |
+
+Ledger rule established in this pass: no words from listening reach the ledger. Segments are hashed, excerpts referenced by id, and for overheard tasks (observed origin and their follow-ups) the judge's title, plan summary and answer, tool arguments and raw model output are recorded as fingerprints (`withheld: N chars, sha256 …`); the task record keeps the text. Verified by the heuristic-judge retention test and by the live smoke test.
+
+## Desktop UI ✅
+
+Built: status chips (state, judge, planner, model, the two chords) with the live process tags of every running task; the capture surface doubling as the listening view (buffer meter, segments, judge passes, findings, excerpts, last judge error) with an ask box that submits a background task without stopping the stream; Response (the foreground task with tags, knowledge state, sources, proposals with dependencies and grants, Approve/Edit/Reject/Approve all/Cancel/Stop); Attention (the arbiter's cards at their levels with sources, per-card decisions, Dismiss / Not needed, and an ambient line for silent work); Review; Inbox; Tasks (every task with lane, origin, cost and outcome); Projects; Relay (compiled preferences, pinned terms, standing grants with Revoke, change sets with Revert); a per-task diagnostics drawer (focused prompt, why it started, planner, steps, answer, sources, knowledge state, tool calls, model calls, proposals, presentation decision, your response, cost, timing) that reads live tasks from the session and finished ones from disk; Settings (judge mode and threshold, orchestrator mode, local endpoint, external profiles, workers).
+
+Live verification: `tools\ui-smoke.ps1` launches the real window against a throwaway data root and drives it through UI Automation — project creation and approval, listening with a filed decision and an inbox errand, an ask answered mid-stream as a result card, recall, the diagnostics drawer, clean shutdown — then checks the ledger (including that no overheard words reached it) and writes screenshots and the UIA tree next to the report. Owed: a run against real Wispr Flow, and packaging.
 
 ## Phase 7 — Additional integrations ⬜
 
@@ -72,4 +90,5 @@ One at a time, each with its own threat model and explicit enablement in setting
 - The `TransitionTable` stays pure and exhaustively tested; states are added, never overloaded.
 - `Relay.Core` keeps zero UI, network, or P/Invoke dependencies (`Relay.Gateway` is the only project that opens a connection).
 - No feature may hide work behind a spinner: if it takes time, it emits events.
-- No permanent delete anywhere, ever, in this product line.
+- No words from listening in the ledger: any text an overheard task produces is fingerprinted there and kept in the task record.
+- Deletion only as an explicitly approved action, preceded by a verified backup; archiving is the default and nothing is ever removed silently.

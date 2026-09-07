@@ -13,8 +13,10 @@ using Relay.Core.Ledger;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Storage;
+using Relay.Core.Tasks;
 using Relay.Windows;
 using Windows.UI;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 using VirtualKey = Windows.System.VirtualKey;
 
 namespace Relay.Desktop;
@@ -28,8 +30,9 @@ public sealed class ActivityRow
 
 /// <summary>
 /// The single window. It renders the coordinator's snapshot and forwards user decisions; it holds
-/// no state of its own beyond render caches. Every region maps to a contract region: status,
-/// capture, response, review, projects, activity, diagnostics.
+/// no state of its own beyond render caches and which task the diagnostics drawer is open on.
+/// Regions: status (with process tags), capture or listening (with the ask box), response,
+/// attention, review, inbox, tasks, projects, relay (preferences and change sets), activity, diagnostics.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
@@ -44,6 +47,12 @@ public sealed partial class MainWindow : Window
     private string _responseSignature = "";
     private string _inboxSignature = "";
     private string _projectsSignature = "";
+    private string _attentionSignature = "";
+    private string _tasksSignature = "";
+    private string _relaySignature = "";
+    private string _processSignature = "";
+    private string _taskDiagnosticsSignature = "";
+    private string? _diagnosticsTaskId;
     private RelaySnapshot? _snapshot;
     private KeyChord? _noteChord;
     private KeyChord? _commandChord;
@@ -69,7 +78,7 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.ButtonPressedBackgroundColor = Color.FromArgb(40, 255, 255, 255);
 
         var scale = WindowMetrics.ScaleFor(_hwnd);
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)(660 * scale), (int)(940 * scale)));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)(680 * scale), (int)(980 * scale)));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.PreferredMinimumWidth = (int)(560 * scale);
@@ -81,7 +90,13 @@ public sealed partial class MainWindow : Window
 
         _tick = DispatcherQueue.CreateTimer();
         _tick.Interval = TimeSpan.FromMilliseconds(500);
-        _tick.Tick += (_, _) => { if (_snapshot is not null) RenderStatus(_snapshot); if (DiagnosticsExpander.IsExpanded) RenderDiagnostics(); };
+        _tick.Tick += (_, _) =>
+        {
+            if (_snapshot is null) return;
+            RenderStatus(_snapshot);
+            RenderListening(_snapshot);
+            if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
+        };
     }
 
     public ICaptureHost CaptureHost { get; }
@@ -177,43 +192,98 @@ public sealed partial class MainWindow : Window
 
         RenderStatus(s);
         RenderCapture(s);
+        RenderListening(s);
         RenderResponse(s);
+        RenderAttention(s);
         RenderReview(s);
         RenderInbox(s);
+        RenderTasks(s);
         RenderProjects(s);
+        RenderRelay(s);
         RenderActivity(s);
         if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
 
-        if (s.State.IsCapturing() || s.State is RelayState.Planning or RelayState.Executing) { if (!_tick.IsRunning) _tick.Start(); }
+        // The half-second tick keeps clocks, the buffer meter and live costs moving while anything is in flight.
+        var moving = s.State.IsCapturing() || s.State is RelayState.Planning or RelayState.Executing || s.Listening is not null || s.LiveTasks.Any();
+        if (moving) { if (!_tick.IsRunning) _tick.Start(); }
         else if (_tick.IsRunning && !DiagnosticsExpander.IsExpanded) _tick.Stop();
     }
 
     private void RenderStatus(RelaySnapshot s)
     {
-        StateLabel.Text = s.State.Label();
+        StateLabel.Text = s.State == RelayState.NoteCapture && s.Listening is not null ? "LISTENING" : s.State.Label();
         StateDot.Fill = new SolidColorBrush(StateColor(s.State));
-        ModeLabel.Text = s.Mode is { } m ? (m == CaptureMode.Note ? "silent note" : "instruction") : "";
+        ModeLabel.Text = s.Mode is { } m ? (m == CaptureMode.Note ? (s.Listening is not null ? "stream" : "silent note") : "instruction") : "";
         StateDetail.Text = StateDetailText(s);
 
-        NoteKeyChip.Text = $"{s.NoteKey.Chord}  NOTE";
+        NoteKeyChip.Text = $"{s.NoteKey.Chord}  {(s.ListeningEnabled ? "LISTEN" : "NOTE")}";
         NoteKeyDot.Fill = new SolidColorBrush(s.NoteKey.Registered ? Palette.Good : Palette.Bad);
-        CommandKeyChip.Text = $"{s.CommandKey.Chord}  COMMAND";
+        CommandKeyChip.Text = $"{s.CommandKey.Chord}  ASK";
         CommandKeyDot.Fill = new SolidColorBrush(s.CommandKey.Registered ? Palette.Good : Palette.Bad);
         ScopeChip.Text = s.NoteKey.WindowScoped ? "this window only" : "system-wide";
         LedgerChip.Text = s.LedgerHealth == LedgerHealth.IntegrityFailure ? $"Ledger broken · {s.LedgerRecords}" : $"Ledger {s.LedgerRecords}";
         LedgerDot.Fill = new SolidColorBrush(s.LedgerHealth == LedgerHealth.Ok ? Palette.Good : s.LedgerHealth == LedgerHealth.TornTail ? Palette.Warn : Palette.Bad);
 
-        var modelReady = s.ModelEnabled && s.ModelKeyStored;
+        var modelReady = s.ModelEnabled && (s.ModelKeyStored || IsLoopback(s.ModelEndpoint));
         OrchestratorChip.Text = s.OrchestratorMode switch
         {
-            OrchestratorSettings.Off => "Orchestrator off",
+            OrchestratorSettings.Off => "Planner off",
             OrchestratorSettings.Rules => "Rules only · no model",
-            _ => s.ModelEnabled ? $"Rules + {s.ModelName}" + (s.ModelKeyStored ? "" : " · NO KEY") : "Rules + model (model disabled)",
+            _ => s.ModelEnabled ? $"Rules + {s.ModelName}" + (modelReady ? "" : " · NO KEY") : "Rules + model (model disabled)",
         };
         OrchestratorDot.Fill = new SolidColorBrush(s.OrchestratorMode == OrchestratorSettings.Off ? Palette.Neutral
             : s.OrchestratorMode == OrchestratorSettings.Rules || modelReady ? Palette.Good : Palette.Warn);
+
+        JudgeChip.Text = s.JudgeMode switch
+        {
+            JudgeSettings.Off => "Judge off · Ctrl+Alt dictates a note",
+            JudgeSettings.Heuristic => "Judge heuristic",
+            _ => s.ModelEnabled ? $"Judge {s.JudgeName}" : "Judge heuristic (model disabled)",
+        };
+        JudgeDot.Fill = new SolidColorBrush(s.JudgeMode == JudgeSettings.Off ? Palette.Neutral : s.JudgeMode == JudgeSettings.Model && !(s.ModelEnabled && modelReady) ? Palette.Warn : Palette.Good);
+
         TitleSubtitle.Text = $"session {Short(s.SessionId)} · pid {s.ProcessId} · v{s.AppVersion}";
+        RenderProcessTags(s);
     }
+
+    /// <summary>One chip per lane that is active right now. Each tag names the only permissions that lane may use; nothing else is running.</summary>
+    private void RenderProcessTags(RelaySnapshot s)
+    {
+        var live = s.LiveTasks.OrderByDescending(t => t.Foreground).ThenBy(t => t.StartedAt).ToList();
+        var signature = (s.Listening is null ? "" : "L") + string.Join("|", live.Select(t => $"{t.TaskId}:{t.Tag}"));
+        ProcessPanel.Visibility = Vis(s.Listening is not null || live.Count > 0);
+        if (signature == _processSignature) return;
+        _processSignature = signature;
+
+        ProcessTags.Children.Clear();
+        if (s.Listening is not null) ProcessTags.Children.Add(ProcessChip("Listening", "judge reads the buffer · no writes", Palette.Note));
+        foreach (var t in live)
+        {
+            var color = t.Status switch { TaskStatus.AwaitingApproval => Palette.Warn, TaskStatus.Executing => Palette.Good, _ => Palette.Command };
+            var who = t.Origin == TaskOrigin.Direct ? (t.Foreground ? "your instruction" : "your ask") : t.Origin == TaskOrigin.Observed ? "observed" : "follow-up";
+            ProcessTags.Children.Add(ProcessChip(t.Tag, $"{t.Kind.Wire()} · {who} · {Trim(t.Title ?? t.Instruction, 40)}", color, () => ShowTaskDiagnostics(t.TaskId)));
+        }
+    }
+
+    private Border ProcessChip(string tag, string detail, Color color, Action? open = null)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        row.Children.Add(Dot(color));
+        var text = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = tag, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + detail, Foreground = Secondary() });
+        row.Children.Add(text);
+        var chip = new Border { Style = (Style)RootGrid.Resources["Chip"], Child = row };
+        if (open is not null)
+        {
+            ToolTipService.SetToolTip(chip, "Open in Diagnostics");
+            chip.Tapped += (_, _) => open();
+        }
+        return chip;
+    }
+
+    private static bool IsLoopback(string? endpoint)
+        => endpoint is not null && Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) && (uri.IsLoopback || uri.Host is "localhost");
 
     private string StateDetailText(RelaySnapshot s)
     {
@@ -221,12 +291,18 @@ public sealed partial class MainWindow : Window
         var clock = $"{(int)elapsed.TotalMinutes:00}:{elapsed.Seconds:00}";
         var focus = s.CaptureSurfaceFocused ? "surface focused" : "SURFACE NOT FOCUSED";
         var pending = s.PendingProposals.Count();
+        var background = s.LiveTasks.Count(t => !t.Foreground);
+        var beside = background > 0 ? $" {background} task(s) running in the background." : "";
         return s.State switch
         {
             RelayState.Starting => "Verifying the ledger and checking for interrupted work…",
             RelayState.Idle => (s.NoteKey.Registered || s.CommandKey.Registered)
-                ? $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
+                ? (s.ListeningEnabled
+                    ? $"Press {s.NoteKey.Chord} to listen or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
+                    : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording.") + beside
                 : "The chords are not active. See Review for the reason and fix hotkeys in settings.json, then restart Relay.",
+            RelayState.NoteCapture when s.Listening is { } l =>
+                $"Listening · {clock} · {l.HeldSegments} segment(s) held of {l.TotalSegments} heard · {l.JudgePasses} check(s) · {l.Findings} finding(s) · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. The buffer expires continuously; only excerpts are kept." + beside,
             RelayState.NoteCapture => $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply.",
             RelayState.CommandCapture => $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels.",
             RelayState.AwaitingTranscript => s.Awaiting?.TimedOut == true
@@ -235,12 +311,12 @@ public sealed partial class MainWindow : Window
                     ? $"Text is arriving ({s.CaptureChars} chars). Submitting once it stops changing…"
                     : $"Stop requested at {s.CaptureChars} chars. Waiting for Flow to insert the transcript…",
             RelayState.Organizing => s.Mode == CaptureMode.Note
-                ? "Storing the capture, extracting notes and routing them to projects. Confident matches are filed; uncertain ones go to Review."
+                ? (s.Listening is { Finishing: true } ? "Final check of what was heard, then the stream closes. Excerpts that were kept stay; the buffer is dropped." : "Storing the capture, extracting notes and routing them to projects. Confident matches are filed; uncertain ones go to Review.")
                 : "Storing the instruction verbatim before anything interprets it.",
-            RelayState.Planning => $"{s.OrchestratorName} is interpreting the instruction with read-only tools. Nothing changes until you approve. Esc cancels.",
-            RelayState.AwaitingApproval => $"{pending} proposal(s) need your decision below. Nothing has changed yet.",
-            RelayState.Executing => "Executing approved operation(s) with single-use capabilities. Each write is journaled and versioned.",
-            RelayState.Completed => s.Receipt ?? "Stored.",
+            RelayState.Planning => $"{s.OrchestratorName} is interpreting the instruction with read-only tools. Nothing changes until you approve. Esc cancels." + beside,
+            RelayState.AwaitingApproval => $"{pending} proposal(s) need your decision below. Nothing has changed yet." + beside,
+            RelayState.Executing => "Executing approved operation(s) with single-use capabilities. Each write is journaled and versioned." + beside,
+            RelayState.Completed => (s.Receipt ?? "Stored.") + beside,
             RelayState.Failed => s.Incident?.Summary ?? "Work stopped without completing.",
             RelayState.Locked => s.Incident?.Summary ?? "Integrity protection stopped the system.",
             _ => "",
@@ -250,15 +326,18 @@ public sealed partial class MainWindow : Window
     private void RenderCapture(RelaySnapshot s)
     {
         var editable = s.SurfaceEditable;
+        var listening = s.State == RelayState.NoteCapture && s.Listening is not null;
         CaptureBox.IsReadOnly = !editable;
+        CaptureHeader.Text = listening ? "LISTENING" : "CAPTURE";
         CaptureBox.PlaceholderText = s.State switch
         {
+            RelayState.NoteCapture when listening => "Talk with Flow or type. Words land here, are cut into segments and judged; the buffer forgets them within the window.",
             RelayState.NoteCapture => "Dictate with Flow or type. Text arrives here and nowhere else.",
             RelayState.CommandCapture => "State your instruction. Relay records it exactly, then plans; nothing runs without approval.",
             RelayState.AwaitingTranscript => "Waiting for the transcript to be inserted…",
             RelayState.Locked => "Locked. Inspect the incident in Review, then unlock.",
             RelayState.Failed => "Stopped. Inspect the failure in Review.",
-            _ => $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction.",
+            _ => s.ListeningEnabled ? $"Press {s.NoteKey.Chord} to listen or {s.CommandKey.Chord} to give an instruction." : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction.",
         };
 
         if (!s.State.IsCapturing() && s.State != RelayState.Organizing && CaptureBox.Text.Length > 0 && s.State is RelayState.Idle or RelayState.Completed or RelayState.Locked)
@@ -270,10 +349,10 @@ public sealed partial class MainWindow : Window
 
         ReadyGreeting.Visibility = s.Mode == CaptureMode.Command && s.State is RelayState.CommandCapture or RelayState.AwaitingTranscript ? Visibility.Visible : Visibility.Collapsed;
         FocusBar.IsOpen = s.State.IsCapturing() && !s.CaptureSurfaceFocused;
-        CaptureMeta.Text = s.CaptureId is null ? "" : $"capture {Short(s.CaptureId)} · {s.CaptureChars} chars";
+        CaptureMeta.Text = s.CaptureId is null ? "" : listening ? $"stream {Short(s.CaptureId)}" : $"capture {Short(s.CaptureId)} · {s.CaptureChars} chars";
 
         CancelButton.Visibility = Vis(s.CanCancel);
-        CancelButton.Content = s.State == RelayState.Executing ? "Stop  (Esc)" : "Cancel  (Esc)";
+        CancelButton.Content = s.State == RelayState.Executing ? "Stop  (Esc)" : listening ? "Discard stream  (Esc)" : "Cancel  (Esc)";
         SubmitNowButton.Visibility = Vis(s.State == RelayState.AwaitingTranscript);
         SubmitNowButton.IsEnabled = s.CanSubmitNow;
         RetryWaitButton.Visibility = Vis(s.CanRetryWait);
@@ -284,6 +363,32 @@ public sealed partial class MainWindow : Window
         // The receipt for a completed capture is shown once, in the status line (StateDetailText).
         NoticeText.Text = s.Notice ?? "";
         NoticeText.Visibility = Vis(!string.IsNullOrEmpty(s.Notice));
+
+        var canAsk = s.CanAsk && s.OrchestratorMode != OrchestratorSettings.Off;
+        AskPanel.Visibility = Vis(s.State is not (RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Locked or RelayState.Failed or RelayState.Starting));
+        AskBox.IsEnabled = canAsk;
+        AskButton.IsEnabled = canAsk;
+        AskHint.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "The planner is off; enable it in Settings to ask."
+            : listening ? "Ask without stopping the stream: the question runs beside it and the answer arrives as a card in Attention."
+            : s.State is RelayState.Idle or RelayState.Completed ? "A direct question or instruction, answered in Response. Nothing runs without approval."
+            : "Asked now, the question runs in the background and answers in Attention.";
+    }
+
+    /// <summary>The buffer meter and counts while listening: sizes and timings only, never the words.</summary>
+    private void RenderListening(RelaySnapshot s)
+    {
+        var l = s.Listening;
+        ListeningPanel.Visibility = Vis(l is not null);
+        if (l is null) return;
+        BufferBar.Maximum = Math.Max(1, l.WindowSeconds);
+        BufferBar.Value = Math.Min(l.HeldSeconds, l.WindowSeconds);
+        BufferBar.ShowPaused = l.Finishing;
+        BufferText.Text = $"{l.HeldSeconds:0}s of {l.WindowSeconds:0}s held";
+        var last = l.LastCheckAt is { } at ? $"last check {(DateTimeOffset.UtcNow - at).TotalSeconds:0}s ago" : "no check yet";
+        ListeningText.Text = $"{l.Judge}{(l.Judging ? " is checking now" : $" · {last}")} · {l.JudgePasses} pass(es) · {l.Findings} finding(s) · {l.Excerpts} excerpt(s) kept ({l.RetainedSeconds:0}s retained) · {l.Tasks} task(s) raised"
+            + (l.Finishing ? " · finishing" : "");
+        ListeningError.Visibility = Vis(l.LastError is not null);
+        ListeningError.Text = l.LastError is null ? "" : $"Last check failed: {l.LastError} — the heuristic judge took that pass.";
     }
 
     private void RenderActivity(RelaySnapshot s)
@@ -311,34 +416,47 @@ public sealed partial class MainWindow : Window
         var s = _snapshot;
         var settings = _coordinator.CurrentSettings;
         var flow = ProcessIdentity.FindProcess(settings.Diagnostics.FlowProcessNames);
+        var cost = s.SessionCost;
+        DiagnosticsMeta.Text = $"{s.Tasks.Count} task(s) · {cost.TotalTokens} tokens · {cost.ModelCalls} model call(s) · {cost.ToolCalls} tool call(s)";
+        RenderTaskDiagnostics(s);
+
         var rows = new (string Label, string Value, string? OpenPath)[]
         {
             ("Data root", s.DataRootPath, s.DataRootPath),
             ("Ledger", $"{s.LedgerPath}\n{s.LedgerRecords} records · health {s.LedgerHealth} · tail {s.LedgerLastHash}", null),
-            ("Session", $"{s.SessionId} · pid {s.ProcessId} · Relay {s.AppVersion}", null),
+            ("Session", $"{s.SessionId} · pid {s.ProcessId} · Relay {s.AppVersion}\n{s.Tasks.Count} task(s) this session · {cost.PromptTokens} prompt + {cost.CompletionTokens} completion tokens · {cost.ModelCalls} model call(s) · {cost.ToolCalls} tool call(s)", _runtime.Root.TasksDirectory),
             ("Settings", $"{_runtime.Root.SettingsPath}\nhash {Short(settings.ComputeHash())}" + (_runtime.Settings.Problems.Count > 0 ? $" · {_runtime.Settings.Problems.Count} problem(s) at startup" : ""), _runtime.Root.SettingsPath),
-            ("Orchestrator", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nplanning timeout {settings.Orchestrator.PlanningTimeoutMs} ms · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
-            ("Model", s.ModelEnabled ? $"{s.ModelName} at {s.ModelEndpoint}\nkey {(s.ModelKeyStored ? "stored (DPAPI, this account)" : "NOT STORED")} · timeout {settings.Model.TimeoutMs} ms · max output {settings.Model.MaxOutputTokens} tokens" : "disabled — no network connection is ever opened", null),
+            ("Planner", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nplanning timeout {settings.Orchestrator.PlanningTimeoutMs} ms · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
+            ("Judge", $"mode {s.JudgeMode} · active {s.JudgeName}\nmin confidence {settings.Judge.MinConfidence:0.00} · timeout {settings.Judge.TimeoutMs} ms · max output {settings.Judge.MaxOutputTokens} tokens", null),
+            ("Stream", $"buffer {s.Preferences.Buffer.TotalSeconds:0}s (settings {settings.Stream.BufferSeconds}s) · segment quiet {settings.Stream.SegmentQuietMs} ms · check every {settings.Stream.ObserveIntervalMs} ms\nexcerpt ≤ {s.Preferences.ExcerptMaxSeconds:0}s · retained ≤ {s.Preferences.MaxRetainedFraction:P0} of elapsed · window file only in staging\\stream", _runtime.Root.ExcerptsDirectory),
+            ("Model", s.ModelEnabled ? $"{s.ModelName} at {s.ModelEndpoint}\nkey {(s.ModelKeyStored ? "stored (DPAPI, this account)" : IsLoopback(s.ModelEndpoint) ? "none (loopback)" : "NOT STORED")} · timeout {settings.Model.TimeoutMs} ms · max output {settings.Model.MaxOutputTokens} tokens" : "disabled — no network connection is ever opened", null),
+            ("External profiles", s.ExternalProfiles.Count == 0 ? "none — research tasks state the knowledge gap and stop" : string.Join("\n", settings.ExternalModels.Select(p => $"{p.Name}: {p.Model} at {p.Endpoint}{(p.SupportsSearch ? " · search" : "")}")), _runtime.Root.ExternalArtifactsDirectory),
             ("Workers", settings.Workers.Enabled ? $"enabled · {settings.Workers.WallClockSeconds}s wall clock · {settings.Workers.MemoryMb} MB · {settings.Workers.MaxToolCalls} tool calls · job object sandbox" : "disabled (launch_worker is denied by policy)", _runtime.Root.AgentsDirectory),
-            ("Hotkeys", $"NOTE_KEY {s.NoteKey.Chord}: {(s.NoteKey.Registered ? "registered" : "FAILED — " + s.NoteKey.Error)}\nCOMMAND_KEY {s.CommandKey.Chord}: {(s.CommandKey.Registered ? "registered" : "FAILED — " + s.CommandKey.Error)}\nscope {(s.NoteKey.WindowScoped ? "this window only" : "system-wide")} · Relay never synthesizes input; start and stop Flow with its own shortcut", null),
+            ("Hotkeys", $"{s.NoteKey.Name} {s.NoteKey.Chord}: {(s.NoteKey.Registered ? "registered" : "FAILED — " + s.NoteKey.Error)}\n{s.CommandKey.Name} {s.CommandKey.Chord}: {(s.CommandKey.Registered ? "registered" : "FAILED — " + s.CommandKey.Error)}\nscope {(s.NoteKey.WindowScoped ? "this window only" : "system-wide")} · Relay never synthesizes input; start and stop Flow with its own shortcut", null),
             ("Project folders", s.Workspaces.Count == 0 ? "none yet — New project… registers the folder you pick" : string.Join("\n", s.Workspaces.Select(w => w.Path + (w.Present ? "" : "  (missing)"))), _runtime.Root.WorkspacesPath),
+            ("Change sets", $"{s.ChangeSets.Count} recent · {s.ChangeSets.Count(c => c.Reverted)} reverted", _runtime.Root.ChangeSetsDirectory),
             ("Flow process", flow.Found ? $"detected: {flow.Name} (pid {flow.ProcessId})" : $"not detected (looking for {string.Join(", ", settings.Diagnostics.FlowProcessNames)})", null),
             ("Foreground", $"{ForegroundWindows.ForegroundProcessName() ?? "?"} · Relay is foreground: {ForegroundWindows.IsForeground(_hwnd)} · capture surface focused: {s.CaptureSurfaceFocused}", null),
             ("Timeouts", $"transcript {settings.Capture.TranscriptTimeoutMs} ms · quiet {settings.Capture.StabilizationMs} ms · draft debounce {settings.Capture.DraftPersistDebounceMs} ms", null),
             ("Window", $"hwnd 0x{_hwnd.ToInt64():X} · scale {WindowMetrics.ScaleFor(_hwnd):0.00}", null),
         };
 
-        DiagnosticsGrid.Children.Clear();
-        DiagnosticsGrid.RowDefinitions.Clear();
-        for (var i = 0; i < rows.Length; i++)
+        FillRows(DiagnosticsGrid, rows);
+    }
+
+    private void FillRows(Grid grid, IReadOnlyList<(string Label, string Value, string? OpenPath)> rows)
+    {
+        grid.Children.Clear();
+        grid.RowDefinitions.Clear();
+        for (var i = 0; i < rows.Count; i++)
         {
-            DiagnosticsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var label = new TextBlock { Text = rows[i].Label, FontSize = 12, Foreground = Secondary(), VerticalAlignment = VerticalAlignment.Top };
             Grid.SetRow(label, i);
-            DiagnosticsGrid.Children.Add(label);
+            grid.Children.Add(label);
 
             var valuePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            valuePanel.Children.Add(new TextBlock { Text = rows[i].Value, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, MaxWidth = 400 });
+            valuePanel.Children.Add(new TextBlock { Text = rows[i].Value, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, MaxWidth = 420 });
             if (rows[i].OpenPath is { } path)
             {
                 var open = Button("Open", () => OpenInExplorer(path));
@@ -348,7 +466,7 @@ public sealed partial class MainWindow : Window
             }
             Grid.SetRow(valuePanel, i);
             Grid.SetColumn(valuePanel, 1);
-            DiagnosticsGrid.Children.Add(valuePanel);
+            grid.Children.Add(valuePanel);
         }
     }
 
@@ -367,10 +485,34 @@ public sealed partial class MainWindow : Window
 
     private void CaptureBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == global::Windows.System.VirtualKey.Escape && _snapshot?.CanCancel == true)
+        if (e.Key == VirtualKey.Escape && _snapshot?.CanCancel == true)
         {
             e.Handled = true;
             _coordinator?.Cancel();
+        }
+    }
+
+    private void AskBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            SubmitAsk();
+        }
+    }
+
+    private void Ask_Click(object sender, RoutedEventArgs e) => SubmitAsk();
+
+    /// <summary>The ask box submits a direct task. While listening it runs beside the stream; the capture surface keeps the focus it had.</summary>
+    private void SubmitAsk()
+    {
+        if (_coordinator is null) return;
+        var text = AskBox.Text.Trim();
+        if (text.Length == 0) return;
+        if (_coordinator.SubmitDirect(text))
+        {
+            AskBox.Text = "";
+            if (_snapshot?.State == RelayState.NoteCapture) CaptureBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -411,11 +553,38 @@ public sealed partial class MainWindow : Window
         if (!_tick.IsRunning) _tick.Start();
     }
 
+    private void CloseTaskDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        _diagnosticsTaskId = null;
+        _taskDiagnosticsSignature = "";
+        TaskDiagnosticsPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void OpenTaskFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runtime is null || _diagnosticsTaskId is null) return;
+        var path = Path.Combine(_runtime.Root.TasksDirectory, _diagnosticsTaskId + ".json");
+        OpenInExplorer(File.Exists(path) ? path : _runtime.Root.TasksDirectory);
+    }
+
+    /// <summary>Opens the diagnostics drawer on one task and scrolls it into view.</summary>
+    private void ShowTaskDiagnostics(string taskId)
+    {
+        _diagnosticsTaskId = taskId;
+        _taskDiagnosticsSignature = "";
+        DiagnosticsExpander.IsExpanded = true;
+        RenderDiagnostics();
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => DiagnosticsExpander.StartBringIntoView());
+    }
+
     // ------------------------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------------------------
 
     private static Visibility Vis(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
+
+    private static Microsoft.UI.Xaml.Shapes.Ellipse Dot(Color color, double size = 6)
+        => new() { Width = size, Height = size, Fill = new SolidColorBrush(color), VerticalAlignment = VerticalAlignment.Center };
 
     /// <summary>Focus check that does not depend on XamlRoot, which is not yet available during the first activation.</summary>
     private bool CaptureBoxHasFocus() => CaptureBox.FocusState != FocusState.Unfocused;

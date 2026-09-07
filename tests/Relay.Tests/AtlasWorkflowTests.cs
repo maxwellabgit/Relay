@@ -146,9 +146,13 @@ public class AtlasWorkflowTests : IDisposable
         Assert.Equal(2, diagnostics.GetProperty("toolCalls").GetArrayLength());
         Assert.Equal("ambient", diagnostics.GetProperty("presentation").GetString());   // final presentation: the approved update ran
         Assert.Equal("approved", diagnostics.GetProperty("userResponse").GetString());
-        // The retained excerpt's words appear in the ledger exactly once: quoted in the answer the user asked for.
-        Assert.Single(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && (r.DataString("answer") ?? "").Contains("Marketing wants", StringComparison.Ordinal));
-        Assert.DoesNotContain(s.H.Records(), r => r.Type.StartsWith("stream.", StringComparison.Ordinal) && r.Data.GetRawText().Contains("Marketing", StringComparison.Ordinal));
+        // The words of the room never reach the ledger: the check task's plan (which quoted the excerpt) is recorded as
+        // a fingerprint, and the answer to the direct ask cites the corrected decision, whose text was approved — the
+        // excerpt it came from is not repeated beside it.
+        Assert.DoesNotContain(s.H.Records(), r => r.Data.GetRawText().Contains("Marketing wants", StringComparison.Ordinal));
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && r.DataString("taskId") == check.TaskId && (r.DataString("answer") ?? "").StartsWith("withheld: ", StringComparison.Ordinal));
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && r.DataString("taskId") == answer.TaskId && (r.DataString("answer") ?? "").Contains("October 21", StringComparison.Ordinal));
+        Assert.DoesNotContain(answer.Citations, c => c.Id == check.ExcerptId);          // the note cites the excerpt as its source; the passage is not listed twice
     }
 
     [Fact]

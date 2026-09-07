@@ -195,7 +195,7 @@ public sealed class Executor
             Created = draft.CreatedAt,
             Confidence = confidence,
             CaptureId = draft.CaptureId,
-            Topic = d.NormalizedTarget.GetValueOrDefault("topic"),
+            Topic = d.NormalizedTarget.GetValueOrDefault("topic") ?? draft.Topic ?? Relay.Core.Memory.NoteExtractor.Topic(draft.Text),
             Spans = draft.Spans.ToList(),
             DisputedWith = disputedWith,
             Body = draft.Text,

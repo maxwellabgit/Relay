@@ -77,7 +77,7 @@
         <ScrollViewer x:Name="MainScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,0,18,18">
             <StackPanel Spacing="10">
 
-                <!-- 1. STATUS -->
+                <!-- 1. STATUS: state, the chords, the engines, and the process tags of everything running -->
                 <Border Style="{StaticResource Card}" Padding="18,16">
                     <StackPanel Spacing="10">
                         <Grid ColumnSpacing="16">
@@ -93,47 +93,54 @@
                             <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource SmallButton}" Content="Settings" Click="Settings_Click" VerticalAlignment="Center" />
                         </Grid>
                         <TextBlock x:Name="StateDetail" TextWrapping="Wrap" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <StackPanel Spacing="6">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="NoteKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="NoteKeyChip" Style="{StaticResource ChipText}" Text="NOTE" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="CommandKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="CommandKeyChip" Style="{StaticResource ChipText}" Text="COMMAND" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Chip}">
-                                    <TextBlock x:Name="ScopeChip" Style="{StaticResource ChipText}" Text="this window only" />
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="OrchestratorDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="OrchestratorChip" Style="{StaticResource ChipText}" Text="Orchestrator" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Chip}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Ellipse x:Name="LedgerDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="LedgerChip" Style="{StaticResource ChipText}" Text="Ledger" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
+                        <local:WrapPanel HorizontalSpacing="6" VerticalSpacing="6">
+                            <Border Style="{StaticResource Chip}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="NoteKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="NoteKeyChip" Style="{StaticResource ChipText}" Text="LISTEN" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Chip}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="CommandKeyDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="CommandKeyChip" Style="{StaticResource ChipText}" Text="ASK" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Chip}">
+                                <TextBlock x:Name="ScopeChip" Style="{StaticResource ChipText}" Text="this window only" />
+                            </Border>
+                            <Border Style="{StaticResource Chip}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="OrchestratorDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="OrchestratorChip" Style="{StaticResource ChipText}" Text="Planner" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Chip}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="JudgeDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="JudgeChip" Style="{StaticResource ChipText}" Text="Judge" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Chip}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse x:Name="LedgerDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="LedgerChip" Style="{StaticResource ChipText}" Text="Ledger" />
+                                </StackPanel>
+                            </Border>
+                        </local:WrapPanel>
+                        <!-- Process tags: one per lane that is active right now; each names the only permissions that lane may use. -->
+                        <StackPanel x:Name="ProcessPanel" Spacing="6" Visibility="Collapsed">
+                            <TextBlock Text="PROCESS" Style="{StaticResource RegionHeader}" />
+                            <local:WrapPanel x:Name="ProcessTags" HorizontalSpacing="6" VerticalSpacing="6" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- 2. CAPTURE -->
+                <!-- 2. CAPTURE / LISTENING -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
-                            <TextBlock Text="CAPTURE" Style="{StaticResource RegionHeader}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="CaptureHeader" Text="CAPTURE" Style="{StaticResource RegionHeader}" VerticalAlignment="Center" />
                             <TextBlock x:Name="CaptureMeta" Style="{StaticResource Mono}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                         </Grid>
                         <TextBlock x:Name="ReadyGreeting" Text="Ready" FontSize="20" FontWeight="SemiBold" Visibility="Collapsed" />
@@ -144,13 +151,26 @@
                                 <Button Content="Refocus" Click="Refocus_Click" />
                             </InfoBar.ActionButton>
                         </InfoBar>
+                        <!-- The rolling buffer while listening: how much of the window is held, what the judge has done, never the words. -->
+                        <StackPanel x:Name="ListeningPanel" Spacing="6" Visibility="Collapsed">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ProgressBar x:Name="BufferBar" Minimum="0" Maximum="90" Value="0" VerticalAlignment="Center" />
+                                <TextBlock x:Name="BufferText" Grid.Column="1" Style="{StaticResource Mono}" VerticalAlignment="Center" />
+                            </Grid>
+                            <TextBlock x:Name="ListeningText" Style="{StaticResource Secondary}" />
+                            <TextBlock x:Name="ListeningError" Style="{StaticResource Secondary}" Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
+                        </StackPanel>
                         <TextBox x:Name="CaptureBox"
                                  AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110" MaxHeight="300"
                                  FontSize="15" IsReadOnly="True" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
                                  BorderThickness="0" CornerRadius="8" Padding="14,10"
                                  Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PlaceholderText="Press Ctrl+Alt to start a silent note or Ctrl+X to give an instruction."
+                                 PlaceholderText="Press Ctrl+Alt to listen or Ctrl+X to give an instruction."
                                  TextChanged="CaptureBox_TextChanged" GotFocus="CaptureBox_GotFocus" LostFocus="CaptureBox_LostFocus" KeyDown="CaptureBox_KeyDown" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button x:Name="CancelButton" Content="Cancel  (Esc)" Click="Cancel_Click" Visibility="Collapsed" />
@@ -161,29 +181,57 @@
                             <Button x:Name="UnlockButton" Content="Unlock" Click="Unlock_Click" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}" />
                         </StackPanel>
                         <TextBlock x:Name="NoticeText" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
+                        <!-- The ask box: a direct question at any settled moment, including while listening. -->
+                        <Grid x:Name="AskPanel" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="AskBox" AutomationProperties.Name="Ask box" PlaceholderText="Ask Relay… (Enter)" FontSize="13" IsSpellCheckEnabled="False"
+                                     BorderThickness="0" CornerRadius="8" Padding="12,8"
+                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                     KeyDown="AskBox_KeyDown" />
+                            <Button x:Name="AskButton" Grid.Column="1" Content="Ask" Click="Ask_Click" VerticalAlignment="Center" Style="{ThemeResource AccentButtonStyle}" />
+                        </Grid>
+                        <TextBlock x:Name="AskHint" Style="{StaticResource Secondary}" FontSize="11" Text="A direct question is answered in Response; while listening it runs beside the stream and its answer arrives as a card." />
                     </StackPanel>
                 </Border>
 
-                <!-- 3. RESPONSE: what the orchestrator did with the last instruction -->
+                <!-- 3. RESPONSE: what the planner did with the foreground instruction -->
                 <Border x:Name="ResponseCard" Style="{StaticResource Card}" Visibility="Collapsed">
                     <StackPanel Spacing="10">
                         <Grid>
                             <TextBlock Text="RESPONSE" Style="{StaticResource RegionHeader}" />
                             <TextBlock x:Name="ResponseMeta" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
                         </Grid>
+                        <local:WrapPanel x:Name="ResponseTags" HorizontalSpacing="6" VerticalSpacing="6" />
                         <TextBlock x:Name="ResponseInstruction" Style="{StaticResource Secondary}" FontStyle="Italic" />
                         <TextBlock x:Name="ResponseSummary" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <StackPanel x:Name="ResponseSteps" Spacing="2" />
                         <Border x:Name="ResponseAnswerBorder" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Visibility="Collapsed">
                             <TextBlock x:Name="ResponseAnswer" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontSize="13" LineHeight="20" />
                         </Border>
+                        <TextBlock x:Name="ResponseKnowledge" Style="{StaticResource Secondary}" Visibility="Collapsed" IsTextSelectionEnabled="True" />
                         <StackPanel x:Name="ResponseCitations" Spacing="4" />
                         <StackPanel x:Name="ResponseProposals" Spacing="8" />
                         <StackPanel x:Name="ResponseButtons" Orientation="Horizontal" Spacing="8" />
                     </StackPanel>
                 </Border>
 
-                <!-- 4. REVIEW -->
+                <!-- 4. ATTENTION: what RELAY0 decided you should see, at the level the arbiter chose -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="ATTENTION" Style="{StaticResource RegionHeader}" />
+                            <TextBlock x:Name="AttentionCount" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock x:Name="AttentionEmpty" Style="{StaticResource Secondary}" Text="Nothing needs your attention. Observed findings appear here as results, alerts, or proposals; direct asks while listening answer here." />
+                        <StackPanel x:Name="AttentionItems" Spacing="8" />
+                        <StackPanel x:Name="AmbientItems" Spacing="2" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 5. REVIEW -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -195,7 +243,7 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 5. INBOX: unrouted notes, each with the router's candidates when it asked -->
+                <!-- 6. INBOX: unrouted notes, each with the router's candidates when it asked -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -207,7 +255,19 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 6. PROJECTS -->
+                <!-- 7. TASKS: every task of this session with its process tag, producer, presentation and cost -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="TASKS" Style="{StaticResource RegionHeader}" />
+                            <TextBlock x:Name="TasksCount" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock x:Name="TasksEmpty" Style="{StaticResource Secondary}" Text="No tasks yet. Direct asks, observed findings and follow-ups all appear here with the lane they run in." />
+                        <StackPanel x:Name="TaskItems" Spacing="6" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 8. PROJECTS -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -223,7 +283,31 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 7. ACTIVITY -->
+                <!-- 9. RELAY: the typed preferences as compiled, standing grants, and every self-change with its revert -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="RELAY" Style="{StaticResource RegionHeader}" />
+                            <TextBlock x:Name="RelayMeta" Style="{StaticResource Mono}" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock x:Name="PreferencesText" Style="{StaticResource Secondary}" IsTextSelectionEnabled="True" />
+                        <StackPanel x:Name="PinnedPanel" Spacing="6" Visibility="Collapsed">
+                            <TextBlock Text="ALWAYS SHOWN" Style="{StaticResource RegionHeader}" />
+                            <local:WrapPanel x:Name="PinnedTerms" HorizontalSpacing="6" VerticalSpacing="6" />
+                        </StackPanel>
+                        <StackPanel x:Name="GrantsPanel" Spacing="6" Visibility="Collapsed">
+                            <TextBlock Text="STANDING GRANTS" Style="{StaticResource RegionHeader}" />
+                            <StackPanel x:Name="GrantItems" Spacing="4" />
+                        </StackPanel>
+                        <StackPanel x:Name="ChangeSetsPanel" Spacing="6" Visibility="Collapsed">
+                            <TextBlock Text="CHANGE SETS" Style="{StaticResource RegionHeader}" />
+                            <StackPanel x:Name="ChangeSetItems" Spacing="4" />
+                        </StackPanel>
+                        <TextBlock x:Name="RelayHint" Style="{StaticResource Secondary}" FontSize="11" Text="Shape Relay by asking: “keep responses concise”, “always show what CAD means”, “file Atlas decisions without asking”. Each is a change set you approve and can revert here." />
+                    </StackPanel>
+                </Border>
+
+                <!-- 10. ACTIVITY -->
                 <Border Style="{StaticResource Card}" Padding="18,14,18,8">
                     <StackPanel Spacing="8">
                         <Grid>
@@ -258,17 +342,38 @@
                     </StackPanel>
                 </Border>
 
-                <!-- DIAGNOSTICS -->
+                <!-- DIAGNOSTICS: the drawer for one task (prompt, tools, model calls, decisions, presentation, your response) and the system rows -->
                 <Expander x:Name="DiagnosticsExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Expanding="Diagnostics_Expanding">
                     <Expander.Header>
-                        <TextBlock Text="DIAGNOSTICS" Style="{StaticResource RegionHeader}" />
+                        <Grid>
+                            <TextBlock Text="DIAGNOSTICS" Style="{StaticResource RegionHeader}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="DiagnosticsMeta" Style="{StaticResource Mono}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        </Grid>
                     </Expander.Header>
-                    <Grid x:Name="DiagnosticsGrid" ColumnSpacing="16" RowSpacing="4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="150" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                    </Grid>
+                    <StackPanel Spacing="12">
+                        <StackPanel x:Name="TaskDiagnosticsPanel" Spacing="8" Visibility="Collapsed">
+                            <Grid>
+                                <TextBlock x:Name="TaskDiagnosticsTitle" Text="TASK" Style="{StaticResource RegionHeader}" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                    <Button x:Name="OpenTaskFileButton" Style="{StaticResource SmallButton}" Content="Open record" Click="OpenTaskFile_Click" />
+                                    <Button Style="{StaticResource SmallButton}" Content="Close" Click="CloseTaskDiagnostics_Click" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid x:Name="TaskDiagnosticsGrid" ColumnSpacing="16" RowSpacing="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                            </Grid>
+                        </StackPanel>
+                        <TextBlock Text="SYSTEM" Style="{StaticResource RegionHeader}" />
+                        <Grid x:Name="DiagnosticsGrid" ColumnSpacing="16" RowSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                    </StackPanel>
                 </Expander>
 
             </StackPanel>

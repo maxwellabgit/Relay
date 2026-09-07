@@ -217,7 +217,12 @@ public sealed partial class SessionCoordinator
             var found = Append(EventTypes.ObserveFound, new
             {
                 streamId = stream.StreamId, judge = decision.Producer, segments = fresh, hashes, held = window.Count, promptTokens = decision.PromptTokens, completionTokens = decision.CompletionTokens, elapsedMs = decision.ElapsedMs, belowThreshold = below,
-                findings = accepted.Select(f => new { kind = f.Kind.Wire(), f.Confidence, f.Summary, f.Why, segments = f.SegmentIds, f.Topic, f.ProjectHint, presentation = f.Presentation?.Wire(), f.MergeKey }),
+                // A finding's summary, topic and merge key are the judge's words about the room and often quote it; the ledger keeps fingerprints (the task record keeps the text).
+                findings = accepted.Select(f => new
+                {
+                    kind = f.Kind.Wire(), confidence = f.Confidence, why = f.Why, segments = f.SegmentIds, projectHint = f.ProjectHint, presentation = f.Presentation?.Wire(),
+                    summary = Fingerprint(f.Summary), topic = f.Topic is null ? null : Fingerprint(f.Topic), mergeKey = f.MergeKey is null ? null : Fingerprint(f.MergeKey), noteChars = f.NoteText?.Length, noteType = f.NoteType,
+                }),
             });
             if (found is null) return;
             var elapsed = (_clock.UtcNow - stream.StartedAt).TotalSeconds;
@@ -240,7 +245,7 @@ public sealed partial class SessionCoordinator
                         var path = Excerpts.Persist(excerpt);
                         stream.Excerpts++;
                         _services.Index.IndexExcerpt(excerpt);
-                        var stored = Append(EventTypes.ExcerptStored, new { streamId = stream.StreamId, excerptId = excerpt.ExcerptId, triggerSegmentId = excerpt.TriggerSegmentId, segments = excerpt.Segments.Count, referenced = excerpt.References.Sum(r => r.SegmentIds.Count), seconds = excerpt.Seconds, chars = excerpt.Text.Length, shrunkByGuard = excerpt.ShrunkByGuard, retainedSeconds = Excerpts.RetainedSeconds, elapsedSeconds = elapsed, reason = finding.Summary, path });
+                        var stored = Append(EventTypes.ExcerptStored, new { streamId = stream.StreamId, excerptId = excerpt.ExcerptId, triggerSegmentId = excerpt.TriggerSegmentId, segments = excerpt.Segments.Count, referenced = excerpt.References.Sum(r => r.SegmentIds.Count), seconds = excerpt.Seconds, chars = excerpt.Text.Length, shrunkByGuard = excerpt.ShrunkByGuard, retainedSeconds = Excerpts.RetainedSeconds, elapsedSeconds = elapsed, kind = finding.Kind.Wire(), why = finding.Why, path });
                         if (stored is not null) sourceEventId = stored.Id;
                     }
                     catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)

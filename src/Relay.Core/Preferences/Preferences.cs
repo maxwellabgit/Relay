@@ -113,7 +113,9 @@ public sealed record CompiledPreferences(
     TimeSpan Buffer,
     double ExcerptMaxSeconds,
     double MaxRetainedFraction,
-    bool AllowOnlineSearch);
+    bool AllowOnlineSearch,
+    /// <summary>The response style the limits were compiled from (minimalist, concise, normal); shown in the UI, never read by consumers.</summary>
+    string Verbosity = ResponsePreferences.Concise);
 
 public static class PreferenceCompiler
 {
@@ -139,7 +141,8 @@ public static class PreferenceCompiler
             TimeSpan.FromSeconds(p.Retention.BufferSeconds),
             p.Retention.ExcerptMaxSeconds,
             p.Retention.MaxRetainedFraction,
-            p.Sources.AllowOnlineSearch);
+            p.Sources.AllowOnlineSearch,
+            p.Response.Verbosity);
     }
 }
 

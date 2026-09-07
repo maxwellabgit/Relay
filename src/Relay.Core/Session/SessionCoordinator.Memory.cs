@@ -81,9 +81,10 @@ public sealed partial class SessionCoordinator
     private FilingOutcome? FileNote(string type, string text, string? topic, string captureId, string sourceEventId, SourceSpan span, string? projectHint, string taskId, string producer)
     {
         var now = _clock.UtcNow;
-        var note = new DraftNote(Ulid.NewUlid(now), captureId, sourceEventId, now, type, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null, text, [span]);
+        // The topic rides on the draft, not in the ledger: a note heard in the room must leave no words there.
+        var note = new DraftNote(Ulid.NewUlid(now), captureId, sourceEventId, now, type, DraftNote.DraftStatus, null, DraftNote.UnroutedRouting, null, text, [span], topic);
         var path = _notes.Write(note);
-        if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId, sourceEventId, chars = text.Length, type, topic, spanSource = span.EventId, spanStart = span.Start, spanEnd = span.End, path, by = producer }) is null) return null;
+        if (Append(EventTypes.NoteDraftCreated, new { noteId = note.NoteId, captureId, sourceEventId, chars = text.Length, type, spanSource = span.EventId, spanStart = span.Start, spanEnd = span.End, path, by = producer }) is null) return null;
         _services.Index.IndexDraft(note);
 
         var profiles = _services.Registry.Active.Select(ProjectProfile.Build).ToList();
@@ -121,7 +122,6 @@ public sealed partial class SessionCoordinator
                 ["confidence"] = best.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
                 ["type"] = type,
             };
-            if (topic is not null) target["topic"] = topic;
             if (disputes.Count > 0) target["disputedWith"] = string.Join(",", disputes.Select(d => d.Existing.Id));
             var proposal = new Proposal(Ulid.NewUlid(now), Actions.RouteNote, best.Reasons.Count > 0 ? string.Join("; ", best.Reasons) : routing.Summary, target, [sourceEventId],
                 [$"New {type} note in {project.Slug}"], Risks.ControlledWrite, false, producer);

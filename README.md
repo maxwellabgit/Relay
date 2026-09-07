@@ -31,7 +31,7 @@ Ctrl+Alt starts and stops **listening** (Wispr Flow or typing supplies the words
 
 When the judge finds something significant, Relay persists an **excerpt**: the trigger sentence and the sentences that substantiate it (bounded, default 30 s), anchored to the decision that selected it. Overlapping excerpts reference the earlier one instead of copying text. A "nothing significant" check records metadata only (segment ids, hashes, tokens, latency) — never text. A **density guard** stops trigger-anchored excerpts from reconstructing the conversation: when retained excerpt time exceeds 25% of elapsed time, excerpts shrink to the trigger sentence.
 
-Direct asks are different: an instruction is your intent and is kept verbatim.
+The ledger follows the same rule. Segments enter it as hashes and excerpts as ids, and for any task that began from listening — and for its follow-ups — the judge's title, the plan summary and answer, tool arguments, and raw model output are recorded as fingerprints (length and a SHA-256 prefix), because each of them can quote the room. The words live in the task record under `tasks\`, beside the excerpt they cite, under the same retention. Direct asks are different: an instruction is your intent and is kept verbatim, and so is the answer you were given.
 
 A direct question is available while listening. The ask box (or Ctrl+X) submits a direct task without interrupting the stream.
 
@@ -104,14 +104,20 @@ dotnet test tests/Relay.Tests/Relay.Tests.csproj
 dotnet run --project src/Relay.Desktop/Relay.Desktop.csproj
 ```
 
-The executable is `src\Relay.Desktop\bin\x64\Debug\net10.0-windows10.0.26100.0\Relay.exe` with `Relay.Worker.dll` beside it. One instance per data root; a second launch brings the first forward. Override the data root with `RELAY_DATA_ROOT`. `tools\ui-smoke.ps1` drives the real window through UI Automation and takes screenshots.
+The executable is `Relay.exe` under `src\Relay.Desktop\bin\Debug\net10.0-windows10.0.26100.0\` (`bin\x64\Debug\…` when built through `dotnet run`) with `Relay.Worker.dll` beside it. One instance per data root; a second launch brings the first forward. Override the data root with `RELAY_DATA_ROOT`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\ui-smoke.ps1      # add -NoBuild to reuse the last build
+```
+
+The smoke test launches the real window against a throwaway data root and drives it the way you would — the chords, typing, the ask box, the Approve and Details buttons through UI Automation — and checks the ledger and the rendered text after every step: create and approve a project, listen while a decision is filed and an errand lands in the Inbox, ask a question mid-stream and see the result card, recall the decision, open the diagnostics drawer, close cleanly, and confirm that no overheard words reached the ledger. Screenshots, the UI Automation tree, and the ledger copy are written to `%TEMP%\relay-ui-smoke\<timestamp>`. It needs an interactive desktop for about a minute.
 
 ## Using it
 
 1. **Point RELAY0 at a model** — *Settings → Model*: endpoint `http://127.0.0.1:8080/v1/chat/completions`, model name, no key needed for loopback. Choose *Judge: model*.
 2. **Create a project** — *New project…* picks the folder; or say `create project Atlas` (Ctrl+X) and approve.
 3. **Listen** — Ctrl+Alt. Talk. RELAY0 files decisions and tasks it hears under the project they belong to (ambient), pins definitions you asked for (result), and raises a compact alert when a stated fact contradicts a stored decision — with both sources and an editable proposal to update the record. Ctrl+Alt again stops; a brief consolidation reconciles what was selected.
-4. **Ask while listening** — type into the ask box or press Ctrl+X: `what did we decide about the Atlas beta date?` The answer cites the note and the excerpt.
+4. **Ask while listening** — type into the ask box or press Ctrl+X: `what did we decide about the Atlas beta date?` The answer arrives as a result card and cites the note; the note cites the excerpt it came from, so the same passage is never listed twice.
 5. **Delegate** — `research Lightshift's competitors and give me an implementation plan` produces a knowledge-state statement, then an external-task proposal that shows exactly what would leave the machine. Approve, and the findings come back concise with limits, plus separate proposals for notes.
 6. **Shape Relay** — `always show what CAD means`, `file Atlas decisions without asking`, `keep responses concise`. Each is a reversible change set you approve.
 
@@ -172,7 +178,7 @@ using var s = Scenario.New(tmp, judge: judge).WithWorkspace()
     .ExpectAnswerContains("21");
 ```
 
-Failures print the transcript: segments, judge decisions, task lifecycle, tool calls, proposals, executions, presentation decisions, and ledger lines. Retention tests assert that the ledger holds no stream text and that retained excerpt time stays under the guard. Improvement tests apply a change set and revert it. A live evaluation runner (`RELAY_LIVE_MODEL`) scores a real model against the same cases.
+Failures print the transcript: segments, judge decisions, task lifecycle, tool calls, proposals, executions, presentation decisions, and ledger lines. Retention tests assert that the ledger holds no words from the stream — with the scripted judge and with the real heuristic one — and that retained excerpt time stays under the guard. Improvement tests apply a change set and revert it. A live evaluation runner (`RELAY_LIVE_MODEL`) scores a real model against the same cases.
 
 ## Repository layout
 

@@ -313,7 +313,9 @@ public class AttentionTests : IDisposable
         Assert.Equal(2, card.TaskIds.Count);
         Assert.Equal(2, s.Snap.Tasks.Count(t => t.Kind == TaskKind.Check));                                 // both tasks exist and are diagnosed
         var merged = s.H.Last(EventTypes.TaskMerged)!;
-        Assert.Equal("check:atlas:date", merged.DataString("key"));
+        // A merge key is the judge's words about the room, so the ledger holds its fingerprint — the same one on every task that shares it.
+        Assert.StartsWith("withheld: ", merged.DataString("key"));
+        Assert.All(s.H.Records().Where(r => r.Type == EventTypes.TaskCreated && r.DataString("kind") == "check"), r => Assert.Equal(merged.DataString("key"), r.DataString("mergeKey")));
         Assert.Equal(card.TaskIds[0], merged.DataString("into"));
 
         s.DismissAttention("Conflict")

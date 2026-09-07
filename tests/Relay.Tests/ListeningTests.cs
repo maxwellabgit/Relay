@@ -243,6 +243,48 @@ public class ListeningTests : IDisposable
         Assert.Empty(s.Snap.Attention);
     }
 
+    /// <summary>
+    /// The desktop smoke scenario with the real heuristic judge: a decision about a known project is filed, a task
+    /// with no project waits in the inbox, and not one word of either sentence reaches the ledger — the judge's
+    /// titles, the routing records and the tool calls carry fingerprints; the task records carry the text.
+    /// </summary>
+    [Fact]
+    public void TheHeuristicJudgeLeavesNoWordsOfWhatItHeardInTheLedger()
+    {
+        const string Errand = "Remember to buy compost for the garden this weekend.";
+        using var s = Scenario.New(_tmp, judge: new HeuristicJudge()).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .WithListening().StartListening()
+            .Hear(Decision).Observe()
+            .Hear(Errand).Observe()
+            .ExpectEvent(EventTypes.NoteRouted)                                       // the decision named Atlas
+            .ExpectEvent(EventTypes.NoteRoutingDeferred)                              // the errand named nothing
+            .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
+            .StopListening().ExpectState(RelayState.Completed);
+
+        var ledger = s.H.LedgerText();
+        foreach (var words in new[] { Decision, Errand, "October 14", "compost", "garden", "beta ships" })
+            Assert.DoesNotContain(words, ledger, StringComparison.OrdinalIgnoreCase);
+
+        var created = s.H.Records().Where(r => r.Type == EventTypes.TaskCreated && r.DataString("origin") == "observed").ToList();
+        Assert.NotEmpty(created);
+        Assert.All(created, r =>
+        {
+            Assert.Equal(true, r.DataBool("overheard"));
+            Assert.StartsWith("withheld: ", r.DataString("title"));                   // length and hash, never the words
+            Assert.NotNull(r.DataString("why"));                                       // the cue is a fixed vocabulary and stays readable
+        });
+        Assert.All(s.H.Records().Where(r => r.Type == EventTypes.ObserveFound), r => Assert.DoesNotContain("Remember to", r.Data.GetRawText()));
+
+        // The words live where the diagnostics drawer reads them: the task record and the excerpt, both under retention.
+        var errand = s.Snap.Tasks.Single(t => t.Kind == TaskKind.Remember && t.Title!.Contains("compost"));
+        Assert.Contains("compost", File.ReadAllText(Path.Combine(s.H.Root.TasksDirectory, errand.TaskId + ".json")));
+        Assert.Equal(Errand, s.H.Excerpts.Read(errand.ExcerptId!)!.Text);
+        Assert.Contains(s.Snap.Inbox, i => i.Text.Contains("compost"));
+        // A typed instruction is the user's own words and stays in the ledger verbatim.
+        Assert.Contains("create project Atlas", ledger);
+    }
+
     /// <summary>A check finding that conflicts with two stored decisions is the one thing that earns an alert.</summary>
     [Fact]
     public void AConflictingClaimKeepsAnExcerptRaisesAnObservedTaskAndAlerts()

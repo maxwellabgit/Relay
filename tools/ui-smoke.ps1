@@ -4,19 +4,24 @@
 
 .DESCRIPTION
   Builds the solution, launches Relay.exe against a throwaway data root, drives it exactly the way a
-  user does (the window-scoped chords, typing into the capture surface, clicking Approve), and checks
-  both the ledger and the rendered UI after every step:
+  user does (the window-scoped chords, typing into the capture surface, the ask box, clicking Approve),
+  and checks both the ledger and the rendered UI after every step:
 
-    1. idle                      window up, both chords registered for this window
+    1. idle                      window up, both chords registered for this window, judge and planner chips
     2. Ctrl+X "create project"   plan -> proposal awaiting approval, nothing written yet
-    3. Approve (UI Automation)   project folder created, turn completed
-    4. Ctrl+Alt note             one sentence filed under the project, the other lands in the Inbox
-    5. Ctrl+X recall             answer cites the filed note
-    6. close the window          clean shutdown recorded, no incidents
+    3. Approve (UI Automation)   project folder created, task completed
+    4. Ctrl+Alt listen           the stream opens; a decision about Atlas is filed (ambient), a task without a
+                                 project lands in the Inbox; the ask box answers while listening (a Result card)
+    5. Ctrl+X recall             the answer cites the filed note
+    6. Details                   the diagnostics drawer opens on a task
+    7. close the window          clean shutdown recorded, no incidents, no stream text in the ledger
 
   Screenshots and the ledger are written to the output folder. Exit code 0 means every check passed.
   Requires an interactive desktop session (the chords are real key presses) and nothing else stealing
-  focus while it runs (about 40 seconds).
+  focus while it runs (about 60 seconds). No model is needed: the heuristic judge and the grammar do it all.
+  Caps Lock is left alone; typed text is case-compensated so it arrives exactly as written here.
+  This file is deliberately ASCII-only: Windows PowerShell reads a BOM-less script as ANSI, so a non-ASCII
+  character in a check string would silently never match the UI.
 
 .PARAMETER NoBuild
   Skip `dotnet build`; use the existing Debug output.
@@ -88,12 +93,13 @@ $env:DOTNET_ROOT = $dotnetDir   # the framework-dependent Relay.exe needs this w
 Log "dotnet: $dotnetDir"
 
 if (-not $NoBuild) {
-    Log "building Relay.slnx (Debug)…"
+    Log "building Relay.slnx (Debug)..."
     & dotnet build (Join-Path $repo "Relay.slnx") -nologo -v q 2>&1 | Where-Object { $_ -match "error|Build succeeded" } | ForEach-Object { Log "  $_" }
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
 }
 $exe = Get-ChildItem (Join-Path $repo "src\Relay.Desktop\bin\Debug") -Recurse -Filter Relay.exe | Where-Object { $_.FullName -notmatch "\\x64\\" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $exe) { throw "Relay.exe not found under src\Relay.Desktop\bin\Debug" }
+if (-not $exe) { $exe = Get-ChildItem (Join-Path $repo "src\Relay.Desktop\bin") -Recurse -Filter Relay.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+if (-not $exe) { throw "Relay.exe not found under src\Relay.Desktop\bin" }
 Log "exe: $($exe.FullName)  ($($exe.LastWriteTime))"
 
 # ---------------------------------------------------------------------------------------------------
@@ -137,7 +143,11 @@ function Wait-Event($type, $timeoutSeconds = 15, $where = $null) {
     return $null
 }
 
-function Count-Event($type) { return @(Read-Ledger | Where-Object { $_.type -eq $type }).Count }
+function Count-Event($type, $where = $null) {
+    $hits = @(Read-Ledger | Where-Object { $_.type -eq $type })
+    if ($where) { $hits = @($hits | Where-Object $where) }
+    return $hits.Count
+}
 
 function Wait-Until($condition, $timeoutSeconds = 15) {
     $deadline = (Get-Date).AddSeconds($timeoutSeconds)
@@ -160,6 +170,10 @@ function Shot($name) {
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
     Log "  screenshot $path"
+    # Every UI Automation name next to the screenshot, so a failed text check can be diagnosed from the artifacts.
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($e in Ui-All) { if ($e.Current.Name) { $names.Add(("[{0}] {1}" -f $e.Current.ControlType.ProgrammaticName.Replace("ControlType.", ""), $e.Current.Name)) } }
+    Set-Content -Path (Join-Path $OutDir "$name.uia.txt") -Value $names -Encoding UTF8
 }
 
 function Focus-Relay {
@@ -169,33 +183,91 @@ function Focus-Relay {
 }
 
 function Ui-Root { return [System.Windows.Automation.AutomationElement]::FromHandle($hwnd) }
+function Ui-All { return (Ui-Root).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) }
 
 function Ui-FindText($fragment) {
-    $all = (Ui-Root).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($e in $all) { if ($e.Current.Name -and $e.Current.Name.Contains($fragment)) { return $e.Current.Name } }
+    foreach ($e in Ui-All) { if ($e.Current.Name -and $e.Current.Name.Contains($fragment)) { return $e.Current.Name } }
     return $null
 }
 
-function Ui-Invoke($buttonName) {
+# Regex form, for text the UI joins with non-ASCII separators (see the note on encoding above).
+function Ui-FindMatch($pattern) {
+    foreach ($e in Ui-All) { if ($e.Current.Name -and $e.Current.Name -match $pattern) { return $e.Current.Name } }
+    return $null
+}
+
+function Ui-WaitText($fragment, $timeoutSeconds = 10) {
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $hit = Ui-FindText $fragment
+        if ($hit) { return $hit }
+        Start-Sleep -Milliseconds 300
+    }
+    return $null
+}
+
+function Ui-WaitMatch($pattern, $timeoutSeconds = 10) {
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $hit = Ui-FindMatch $pattern
+        if ($hit) { return $hit }
+        Start-Sleep -Milliseconds 300
+    }
+    return $null
+}
+
+function Ui-Button($buttonName) {
     $cond = New-Object System.Windows.Automation.AndCondition(
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)),
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $buttonName)))
+    return (Ui-Root).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+}
+
+function Ui-Invoke($buttonName) {
     $deadline = (Get-Date).AddSeconds(10)
     while ((Get-Date) -lt $deadline) {
-        $btn = (Ui-Root).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        $btn = Ui-Button $buttonName
         if ($btn) { $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return $true }
         Start-Sleep -Milliseconds 250
     }
     return $false
 }
 
-function Type-Text($text) { [System.Windows.Forms.SendKeys]::SendWait($text); Start-Sleep -Milliseconds 300 }
+function Ui-SetValue($name, $text) {
+    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name)
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $box = (Ui-Root).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        if ($box) { $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($text); return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    return $false
+}
+
+function CapsLock-On { return [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock) }
+
+# SendKeys types through the live keyboard state, so with Caps Lock on every letter arrives in the
+# opposite case ("create project Atlas" becomes "CREATE PROJECT aTLAS"). Rather than touch the user's
+# lock state, pre-invert the letters so the app receives exactly the text written here.
+function Type-Text($text) {
+    if (CapsLock-On) {
+        $chars = $text.ToCharArray()
+        for ($i = 0; $i -lt $chars.Length; $i++) {
+            $c = $chars[$i]
+            if ([char]::IsUpper($c)) { $chars[$i] = [char]::ToLowerInvariant($c) } elseif ([char]::IsLower($c)) { $chars[$i] = [char]::ToUpperInvariant($c) }
+        }
+        $text = -join $chars
+    }
+    [System.Windows.Forms.SendKeys]::SendWait($text); Start-Sleep -Milliseconds 300
+}
 function Press-CommandKey { [System.Windows.Forms.SendKeys]::SendWait("^x"); Start-Sleep -Milliseconds 500 }
 function Press-NoteKey { [SmokeWin32]::CtrlAlt(); Start-Sleep -Milliseconds 500 }
 
 # ---------------------------------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------------------------------
+if (CapsLock-On) { Log "caps lock is on: typed text is case-compensated" }
+
 $env:RELAY_DATA_ROOT = $dataRoot
 $proc = Start-Process -FilePath $exe.FullName -PassThru
 Remove-Item Env:RELAY_DATA_ROOT
@@ -219,7 +291,9 @@ try {
     Check "NOTE_KEY registered for this window" ($noteKey -and $noteKey.data.scope -eq "window") "$($noteKey.data.chord)"
     Check "COMMAND_KEY registered for this window" ($commandKey -and $commandKey.data.scope -eq "window") "$($commandKey.data.chord)"
     Check "state IDLE" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "IDLE" }))
-    Check "UI shows the chords" ($null -ne (Ui-FindText "NOTE"))
+    Check "UI shows the listen chord" ($null -ne (Ui-FindText "LISTEN"))
+    Check "UI shows the judge chip (heuristic without a model)" ($null -ne (Ui-FindText "Judge heuristic"))
+    Check "UI shows the ask box" ($null -ne (Ui-Button "Ask"))
     Shot "1-idle"
 
     Log ""; Log "== 2. Ctrl+X: create project Atlas =="
@@ -229,10 +303,11 @@ try {
     Type-Text "create project Atlas"
     Press-CommandKey
     Check "AWAITING_APPROVAL reached" ($null -ne (Wait-Event "state.changed" 15 { $_.data.to -eq "AWAITING_APPROVAL" }))
-    Check "capture committed verbatim" ($null -ne (Wait-Event "capture.committed" 5 { $_.data.text -eq "create project Atlas" }))
+    Check "capture committed verbatim" ($null -ne (Wait-Event "capture.committed" 5 { $_.data.text -ceq "create project Atlas" }))
     Check "create_project proposed by rules" ($null -ne (Wait-Event "proposal.received" 5 { $_.data.action -eq "create_project" }))
     Check "nothing executed before approval" ((Count-Event "execution.started") -eq 0)
-    Check "UI shows the proposal" ($null -ne (Ui-FindText "create_project"))
+    Check "UI shows the proposal" ($null -ne (Ui-WaitText "create_project" 5))
+    Check "UI shows the process tag" ($null -ne (Ui-FindText "Awaiting Approval"))
     Shot "2-awaiting-approval"
 
     Log ""; Log "== 3. Approve =="
@@ -240,29 +315,50 @@ try {
     Check "approval recorded by user" ($null -ne (Wait-Event "approval.granted" 10 { $_.data.by -eq "user" }))
     $created = Wait-Event "project.created" 15
     Check "project.created" ($null -ne $created)
-    Check "turn completed (executed)" ($null -ne (Wait-Event "turn.completed" 10))
+    Check "task completed (executed)" ($null -ne (Wait-Event "task.completed" 10 { $_.data.outcome -eq "executed" -and $_.data.lane -eq "command" }))
     $atlas = Join-Path $projects "atlas"
     Check "project folder exists inside the registered folder" (Test-Path $atlas) $atlas
     Check "COMPLETED reached" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "COMPLETED" }))
-    Start-Sleep -Milliseconds 800
-    Check "UI lists the project as active" ($null -ne (Ui-FindText "atlas · active"))
+    Check "UI lists the project as active" ($null -ne (Ui-WaitMatch "^Atlas\s+atlas \S active$" 5))
+    Check "UI lists the task" ($null -ne (Ui-FindText "1 finished"))
     Shot "3-executed"
     Start-Sleep -Seconds 5   # let the COMPLETED receipt return to IDLE
 
-    Log ""; Log "== 4. Ctrl+Alt: silent note (one filed, one to the Inbox) =="
+    Log ""; Log "== 4. Ctrl+Alt: listen (one decision filed, one task to the Inbox, one ask answered while listening) =="
     Focus-Relay | Out-Null
     Press-NoteKey
     Check "NOTE_CAPTURE entered" ($null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "NOTE_CAPTURE" }))
-    Type-Text "We decided the Atlas beta ships on October 14. Buy compost for the garden this weekend."
+    Check "stream started (listening, not recording)" ($null -ne (Wait-Event "stream.started" 5))
+    Check "UI shows LISTENING" ($null -ne (Ui-WaitText "LISTENING" 5))
+    Check "UI shows the Listening process tag" ($null -ne (Ui-FindText "Listening"))
+    Type-Text "We decided the Atlas beta ships on October 14. Remember to buy compost for the garden this weekend."
+    Check "judge found something" ($null -ne (Wait-Event "observe.found" 15))
+    Check "decision filed under atlas (remember lane)" ($null -ne (Wait-Event "note.routed" 15 { $_.data.projectSlug -eq "atlas" }))
+    Check "task without a project left unrouted" ($null -ne (Wait-Event "note.routing_deferred" 10))
+    Check "excerpt kept for the finding" ($null -ne (Wait-Event "stream.excerpt_stored" 5))
+    Check "no command turn started by listening" ((Count-Event "command.recorded") -eq 1)
+    Shot "4a-listening"
+
+    Check "ask box accepts a question while listening" (Ui-SetValue "Ask box" "what did we decide about the atlas beta")
+    Check "Ask button invoked" (Ui-Invoke "Ask")
+    $ask = Wait-Event "ask.recorded" 5 { $_.data.whileListening -eq $true }
+    Check "ask recorded while listening (background)" ($null -ne $ask -and $ask.data.foreground -eq $false)
+    Check "still NOTE_CAPTURE (the stream was not interrupted)" ((Count-Event "state.changed" { $_.data.to -eq "COMMAND_CAPTURE" }) -eq 1)
+    Check "ask task completed" ($null -ne (Wait-Event "task.completed" 15 { $_.data.lane -eq "ask" }))
+    $shown = Wait-Event "attention.shown" 5 { $_.data.level -eq "result" }
+    Check "answer surfaced as a result card" ($null -ne $shown)
+    Check "UI Attention shows the answer" ($null -ne (Ui-WaitText "October 14" 5))
+    Check "UI Attention shows the level" ($null -ne (Ui-FindText "RESULT"))
+    Shot "4b-ask-while-listening"
+
     Press-NoteKey
-    Check "note routed to atlas" ($null -ne (Wait-Event "note.routed" 15))
-    Check "second sentence left unrouted" ($null -ne (Wait-Event "note.routing_deferred" 10))
-    Check "no command turn started by a note" ((Count-Event "command.recorded") -eq 1)
-    Start-Sleep -Milliseconds 800
-    Check "UI Inbox shows the unrouted note" ($null -ne (Ui-FindText "compost"))
+    Check "stream stopped" ($null -ne (Wait-Event "stream.stopped" 15 { $_.data.reason -eq "stopped" }))
+    Check "COMPLETED after listening" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "COMPLETED" -and $_.data.from -ne "EXECUTING" }))
+    Check "UI Inbox shows the unrouted task" ($null -ne (Ui-WaitText "compost" 5))
     Check "UI Inbox counts exactly one unrouted note" ($null -ne (Ui-FindText "1 unrouted"))
     Check "Review stays empty (routing is not a Review item)" ($null -ne (Ui-FindText "Nothing awaiting your decision."))
-    Shot "4-inbox"
+    Check "ambient indicator for the filed note" ($null -ne (Ui-FindText "Note filed"))
+    Shot "4c-after-listening"
     Start-Sleep -Seconds 5
 
     Log ""; Log "== 5. Ctrl+X: recall =="
@@ -270,13 +366,20 @@ try {
     Press-CommandKey
     Type-Text "what did I decide about the atlas beta"
     Press-CommandKey
-    Check "recall turn completed" (Wait-Until { (Count-Event "turn.completed") -ge 2 } 15)
+    Check "recall task completed" (Wait-Until { (Count-Event "task.completed" { $_.data.lane -eq "command" }) -ge 2 } 15)
     Check "search tool was called" ($null -ne (Wait-Event "tool.called" 5))
-    Start-Sleep -Milliseconds 800
-    Check "UI answer cites the filed decision" ($null -ne (Ui-FindText "October 14"))
+    Check "UI answer cites the filed decision" ($null -ne (Ui-WaitText "October 14" 5))
+    Check "UI shows sources" ($null -ne (Ui-FindText "SOURCES"))
     Shot "5-recall"
 
-    Log ""; Log "== 6. close =="
+    Log ""; Log "== 6. Details: the diagnostics drawer =="
+    Check "Details button invoked" (Ui-Invoke "Details")
+    Check "drawer shows the focused prompt" ($null -ne (Ui-WaitText "Focused prompt" 5))
+    Check "drawer shows tool calls" ($null -ne (Ui-FindText "Tool calls"))
+    Check "drawer shows the presentation decision" ($null -ne (Ui-FindText "Presentation"))
+    Shot "6-diagnostics"
+
+    Log ""; Log "== 7. close =="
     $closed = $proc.CloseMainWindow()
     $exited = $proc.WaitForExit(15000)
     Check "window closed cleanly" ($closed -and $exited)
@@ -285,8 +388,12 @@ try {
     Check "last ledger record is session.ended" ($last.type -eq "session.ended") "reason $($last.data.reason), final state $($last.data.finalState)"
     Check "no app.failed records" ((@($records | Where-Object { $_.type -eq "app.failed" })).Count -eq 0)
     Check "no relay events (Relay never synthesizes input)" ((@($records | Where-Object { $_.type -like "flow.*" })).Count -eq 0)
+    $ledgerText = Get-Content $ledgerPath -Raw
+    Check "ledger holds no stream text" (-not $ledgerText.Contains("buy compost"))
     Check "no incidents written" (-not (Test-Path (Join-Path $dataRoot "incidents")) -or (@(Get-ChildItem (Join-Path $dataRoot "incidents") -File -ErrorAction SilentlyContinue)).Count -eq 0)
     Check "staging draft cleared" (-not (Test-Path (Join-Path $dataRoot "staging\drafts\current.json")))
+    Check "stream window file cleared" (-not (Test-Path (Join-Path $dataRoot "staging\stream\current.json")))
+    Check "task records written" ((@(Get-ChildItem (Join-Path $dataRoot "tasks") -Filter "*.json" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.live.json" })).Count -ge 4)
 }
 catch {
     $failures++

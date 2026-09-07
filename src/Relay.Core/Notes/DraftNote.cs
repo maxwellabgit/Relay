@@ -20,7 +20,9 @@ public sealed record DraftNote(
     [property: JsonPropertyName("routing")] string Routing,
     [property: JsonPropertyName("confidence")] double? Confidence,
     [property: JsonPropertyName("text")] string Text,
-    [property: JsonPropertyName("spans")] IReadOnlyList<SourceSpan> Spans)
+    [property: JsonPropertyName("spans")] IReadOnlyList<SourceSpan> Spans,
+    /// <summary>The label the extractor or judge gave the note; travels with the draft so the ledger's routing records need not repeat words from it.</summary>
+    [property: JsonPropertyName("topic")] string? Topic = null)
 {
     public const string RawCaptureType = "raw-capture";
     public const string DraftStatus = "draft";

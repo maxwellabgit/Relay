@@ -122,6 +122,10 @@ public sealed class SearchIndex
             var span = doc.EventId is null ? null : new SourceSpan(doc.EventId, doc.SpanOffset + start, doc.SpanOffset + end);
             hits.Add(new SearchHit(doc.Kind, doc.Id, doc.ProjectId, doc.ProjectSlug, doc.Type, excerpt, score, span, doc.At, doc.Text, doc.Status));
         }
+        // A note filed from an excerpt or a capture cites it as its source span; listing the source beside the note would
+        // be the same passage twice. The note is the curated form, so the raw source yields to it.
+        var sources = new HashSet<string>(hits.Where(h => h.Kind is NoteKind or DraftKind && h.Span?.EventId is not null).Select(h => h.Span!.EventId), StringComparer.Ordinal);
+        if (sources.Count > 0) hits.RemoveAll(h => h.Kind is ExcerptKind or CaptureKind && (sources.Contains(h.Id) || (h.Span?.EventId is { } source && sources.Contains(source))));
         return hits.OrderByDescending(h => h.Score).ThenByDescending(h => h.At).Take(limit).ToList();
     }
 

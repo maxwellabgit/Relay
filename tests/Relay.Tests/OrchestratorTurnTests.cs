@@ -474,7 +474,7 @@ public class OrchestratorTurnTests : IDisposable
             .Command("list projects").ExpectAnswerContains("atlas")
             .Command("what did I say about Q4").ExpectAnswerContains("ships in Q4");
         Assert.Contains(s.Response.Citations, c => c.Kind == "note" && c.ProjectSlug == "atlas");
-        Assert.Contains(s.Response.Citations, c => c.Kind == "capture");
+        Assert.DoesNotContain(s.Response.Citations, c => c.Kind == "capture");        // the note cites its capture as the source span; the passage is not listed twice
         _output.WriteLine(s.Transcript()); // the reviewable artifact: how the orchestrator handled each prompt
     }
 
