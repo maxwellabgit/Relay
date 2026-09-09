@@ -73,6 +73,7 @@ public sealed class TaskLoop
     private readonly List<string> _feed = new();
     private int _failures;
     private int _consecutiveSays;
+    private string? _lastSay;
     private bool _stepping;
 
     public TaskLoop(string taskId, string origin, IMind mind, ILoopHost host, MindContext context, Decider decider, LoopBudget? budget = null, IClock? clock = null)
@@ -174,7 +175,13 @@ public sealed class TaskLoop
                     if (say.Done) { Answer = say.Text; return End(LoopStatus.Done, "answered", null); }
                     if (WaitingFor is not null) return Pause();
                     _consecutiveSays++;
-                    if (_consecutiveSays >= _budget.MaxConsecutiveSays)
+                    // The same sentence twice with done=false is a stall, not narration: the mind is told what it is doing and what would end the task.
+                    var repeated = _lastSay is not null && string.Equals(_lastSay.Trim(), say.Text.Trim(), StringComparison.OrdinalIgnoreCase);
+                    _lastSay = say.Text;
+                    if (repeated)
+                        _transcript.Add(new SystemObserved(now, "You said exactly that already; saying it again does nothing and spends a step. " +
+                            "If that sentence is your answer, say it with done=true. If you need something from the user, use ask_user. Otherwise take a different move."));
+                    else if (_consecutiveSays >= _budget.MaxConsecutiveSays)
                         _transcript.Add(new SystemObserved(now, "You have narrated without acting. Take a move now, or finish with say and done=true."));
                     continue;
                 }
@@ -222,7 +229,12 @@ public sealed class TaskLoop
             case UseToolMove tool:
             {
                 if (ToolCalls >= _budget.MaxToolCalls) return MoveOutcome.Of(new SystemObserved(now, $"The tool budget of {_budget.MaxToolCalls} calls is spent. Finish with what you have."));
-                if (!_context.Tools.Any(t => t.Name == tool.Tool)) return MoveOutcome.Of(new SystemObserved(now, $"There is no tool named '{tool.Tool}'. Tools: {string.Join(", ", _context.Tools.Select(t => t.Name))}."));
+                if (!_context.Tools.Any(t => t.Name == tool.Tool))
+                {
+                    var nearest = _context.Tools.FirstOrDefault(t => tool.Tool.Contains(t.Name, StringComparison.Ordinal) || t.Name.Contains(tool.Tool, StringComparison.Ordinal));
+                    var hint = nearest is null ? "" : $" Did you mean {nearest.Name}({string.Join(", ", nearest.Arguments)})? Use exactly that name.";
+                    return MoveOutcome.Of(new SystemObserved(now, $"There is no tool named '{tool.Tool}'. Tools: {string.Join(", ", _context.Tools.Select(t => t.Name))}.{hint}"));
+                }
                 // The same call again would return the same thing: the loop observes the repetition instead of spending a call on it.
                 var earlier = _transcript.OfType<ToolObserved>().LastOrDefault(t => t.Tool == tool.Tool && SameArgs(t.Args, tool.Args));
                 if (earlier is not null)
@@ -235,7 +247,12 @@ public sealed class TaskLoop
             case ProposeMove propose:
             {
                 if (!_context.Actions.Any(a => a.Action == propose.Action))
-                    return MoveOutcome.Of(new SystemObserved(now, $"'{propose.Action}' is not an action you may propose here. Actions: {string.Join(", ", _context.Actions.Select(a => a.Action))}."));
+                {
+                    // A proposal named like a tool, with inputs and outputs, is a build that took the wrong move; say so rather than only listing the actions.
+                    var meantBuild = _context.CanBuild && (LastRead?.Has(MindRead.NeedNewTool) == true || propose.Target.ContainsKey("inputs") || propose.Target.ContainsKey("outputs") || propose.Target.ContainsKey("tool_name"));
+                    var hint = meantBuild ? $" A new tool is not proposed, it is built: use the build move with name={propose.Target.GetValueOrDefault("tool_name") ?? propose.Action} and args inputs/outputs." : "";
+                    return MoveOutcome.Of(new SystemObserved(now, $"'{propose.Action}' is not an action you may propose here. Actions: {string.Join(", ", _context.Actions.Select(a => a.Action))}.{hint}"));
+                }
                 var selfChange = IsSelfChange(propose.Action);
                 var selfDirected = Origin != InputObserved.Ask;
                 var fof = selfChange || selfDirected ? _decider.FofFor(LastRead, Move.Propose, propose.Action, selfDirected) : null;

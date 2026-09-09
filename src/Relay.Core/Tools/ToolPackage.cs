@@ -63,7 +63,7 @@ public sealed partial class ToolPackage
     [JsonIgnore] public string SourceSha256 => Sha(Source);
     [JsonIgnore] public bool Tested => TestedSha256 is not null && string.Equals(TestedSha256, SourceSha256, StringComparison.Ordinal);
 
-    public ToolDescriptor Descriptor => new(Name, Description, Arguments.Select(a => a.Required ? a.Name : a.Name + "?").ToList());
+    [JsonIgnore] public ToolDescriptor Descriptor => new(Name, Description, Arguments.Select(a => a.Required ? a.Name : a.Name + "?").ToList());
 
     public string ToJson() => JsonSerializer.Serialize(this, RelayJson.Indented);
 
@@ -138,7 +138,13 @@ public sealed partial class ToolPackage
             catch (JsonException) { return "the result is not valid JSON"; }
             if (node is not JsonObject obj) return "the result is not an object, so it cannot have keys";
             var missing = keys.Where(k => !obj.ContainsKey(k)).ToList();
-            if (missing.Count > 0) return $"the result lacks key(s) {string.Join(", ", missing)}; it has {string.Join(", ", obj.Select(kv => kv.Key))}";
+            if (missing.Count > 0)
+            {
+                // A key that exists one level down is the usual cause (the source returned a host function's whole object): say where it is.
+                var nested = missing.Select(k => (Key: k, Under: obj.FirstOrDefault(kv => kv.Value is JsonObject inner && inner.ContainsKey(k)).Key))
+                    .Where(x => x.Under is not null).Select(x => $"'{x.Key}' is nested under '{x.Under}': build the result object yourself, e.g. var r = relay.…; return {{ {x.Key}: r.{x.Under}.{x.Key}, … }}").ToList();
+                return $"the result lacks key(s) {string.Join(", ", missing)} at the top level; it has {string.Join(", ", obj.Select(kv => kv.Key))}" + (nested.Count > 0 ? ". " + string.Join("; ", nested) : "");
+            }
         }
         if (!string.IsNullOrEmpty(test.Contains) && !resultJson.Contains(test.Contains, StringComparison.Ordinal))
             return $"the result does not contain \"{test.Contains}\"";

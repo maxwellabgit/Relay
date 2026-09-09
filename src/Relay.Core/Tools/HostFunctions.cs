@@ -32,21 +32,25 @@ public sealed class HostFunctions
 
     public HostFunctions(Func<DateTimeOffset>? clock = null) => _clock = clock ?? (() => DateTimeOffset.UtcNow);
 
-    /// <summary>Runs one host function. Returns ok=false with a message for an unknown function or bad argument; never throws on tool input.</summary>
-    public (bool Ok, string Result) Invoke(string function, string argument)
+    /// <summary>
+    /// Runs one host function. Returns ok=false with a message for an unknown function or bad argument; never throws on
+    /// tool input. <paramref name="at"/> pins the present: a build's tests run against a fixed instant so that they can
+    /// check exact values; a promoted tool's calls run against the real clock.
+    /// </summary>
+    public (bool Ok, string Result) Invoke(string function, string argument, DateTimeOffset? at = null)
     {
         try
         {
             switch (function)
             {
                 case TimeNow:
-                    return (true, _clock().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
+                    return (true, (at ?? _clock()).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
                 case TimeZone:
                 {
                     var id = (argument ?? "").Trim();
                     if (id.Length is 0 or > 64) return (false, "time.zone needs an IANA zone id such as \"Europe/London\"");
                     if (!TryFindZone(id, out var zone)) return (false, $"unknown time zone '{id}'; use an IANA id such as \"Europe/London\" or \"Asia/Tokyo\"");
-                    var now = _clock();
+                    var now = at ?? _clock();
                     var offset = zone.GetUtcOffset(now);
                     var local = now.ToOffset(offset);
                     var payload = new
@@ -89,7 +93,27 @@ public sealed class HostFunctions
         return false;
     }
 
-    /// <summary>The functions named, as the build prompt lists them.</summary>
+    /// <summary>The functions named, as the build prompt lists them: the manifest name, how the source calls it, what it returns.</summary>
     public static string Describe(IEnumerable<string> names)
-        => string.Join("\n", names.Where(Catalog.ContainsKey).Select(n => $"- {Catalog[n].Signature} — {Catalog[n].Description}"));
+        => string.Join("\n", names.Where(Catalog.ContainsKey).Select(n => $"- \"{n}\" in hostFunctions; called as {Catalog[n].Signature} (relay.{n}(...) also works) — {Catalog[n].Description}"));
+
+    /// <summary>
+    /// What the host functions return at a pinned instant, for the build prompt: with the clock fixed, a draft's tests can
+    /// name exact values ("Asia/Tokyo is 21:00"), which is what catches a source that returns the wrong time while passing
+    /// every shape check. Computed here, from the same code that answers the tool, so the anchors are never wrong.
+    /// </summary>
+    public string Anchors(DateTimeOffset at, params string[] zones)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("relay.now() returns \"").Append(Invoke(TimeNow, "", at).Result).Append("\"; relay.zone(...) gives, for example:");
+        foreach (var zone in zones)
+        {
+            var (ok, result) = Invoke(TimeZone, zone, at);
+            if (!ok) continue;
+            using var doc = JsonDocument.Parse(result);
+            var local = doc.RootElement.GetProperty("local");
+            sb.Append($"\n  {zone}: time \"{local.GetProperty("time").GetString()}\", date \"{local.GetProperty("date").GetString()}\", weekday \"{local.GetProperty("weekday").GetString()}\", offset \"{doc.RootElement.GetProperty("offset").GetString()}\"");
+        }
+        return sb.ToString();
+    }
 }

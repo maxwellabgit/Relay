@@ -28,7 +28,8 @@ public static class MindPrompt
         "4) If it needs something no tool can produce, the need is new_tool. 5) If the user asks you to research, look up, or find out about the world and a delegate profile exists, delegate " +
         "with a complete prompt — do not answer a research request by filing a note or guessing. " +
         "You know facts, not the present: use world knowledge you are sure of, but you never know the current time anywhere, today's weather, prices, news, or what changed after your training; " +
-        "the present needs a tool, and when no tool can give it the need is new_tool. Say plainly what you do not know or cannot do. " +
+        "the present needs a tool, and when no tool can give it the need is new_tool. An answer about the present repeats what a tool returned in this task; " +
+        "with no such result, say you could not get it — never estimate. Say plainly what you do not know or cannot do. " +
         "Ask the user only when the request cannot be settled otherwise. Keep answers short and concrete. For an overheard window, act only on what clearly matters " +
         "(a decision, a commitment, a question left open, a fact worth keeping) and otherwise wait.";
 
@@ -57,7 +58,9 @@ public static class MindPrompt
         else
             sb.Append("- delegate: unavailable (no external profile is configured). Do not use it; answer locally and name what is missing.\n");
         if (context.CanBuild)
-            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks Relay to build a new tool when the request needs a capability no tool has (needs: new_tool) — make this move at once, without searching notes first; you see the build result.\n");
+            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks Relay to build a new tool when the request needs a capability no tool has (needs: new_tool) — make this move at once, without searching notes first; you see the build result. " +
+                      "A built tool computes and reads the clock; it cannot search the web, read pages or know facts, so research is never a build — it is a delegate. " +
+                      "Name the tool for what it does and make whatever varies between such requests an input, so the tool serves the next request too.\n");
         else
             sb.Append("- build: not available in this build. When the request needs a capability no tool has, set needs to include new_tool, name the tool that would be needed in your answer, and answer what you can.\n");
         sb.Append("- ask_user: text=one question, args={\"options\":\"a|b|c\"} optional. The reply arrives as an observation.\n");

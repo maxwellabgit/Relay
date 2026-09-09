@@ -60,6 +60,23 @@ public class ToolBuildingTests : IDisposable
     }
 
     [Fact]
+    public async Task TheBridgeAnswersToTheCatalogNameAsAPathToo()
+    {
+        // A drafting model that read "time.zone" in hostFunctions writes relay.time.zone(...) as readily as relay.zone(...); both are the same brokered call.
+        var package = Package("function run(args) { var z = relay.time.zone(args.zone); return { zone: z.zone, time: z.local.time, utc: relay.time.now() }; }", ["time.zone", "time.now"]);
+        var run = await Runner().RunAsync(package, Args(("zone", "Asia/Tokyo")), "probe", null, CancellationToken.None);
+        Assert.True(run.Ok, run.Error);
+        Assert.Equal(2, run.HostCalls);
+        Assert.Contains("\"time\":\"21:00\"", run.ResultJson);
+        Assert.Contains("2026-09-04T12:00:00.000Z", run.ResultJson);
+
+        var frozen = Package("function run(args) { 'use strict'; try { relay.time.zone = function () { return 1; }; return { changed: true }; } catch (e) { return { error: e.name }; } }");
+        run = await Runner().RunAsync(frozen, Args(), "probe", null, CancellationToken.None);
+        Assert.True(run.Ok, run.Error);
+        Assert.Contains("TypeError", run.ResultJson);
+    }
+
+    [Fact]
     public async Task AnUndeclaredHostFunctionIsDeniedByTheBrokerAndTheScriptSeesACatchableError()
     {
         var uncaught = Package("function run(args) { return { now: relay.now() }; }");
@@ -105,7 +122,7 @@ public class ToolBuildingTests : IDisposable
         Assert.StartsWith("error: ReferenceError", result.GetProperty("clr").GetString());
         Assert.StartsWith("error: ReferenceError", result.GetProperty("eval_process").GetString());
         Assert.True(result.GetProperty("relayFrozen").GetBoolean()); // strict mode: writing to the frozen bridge throws
-        Assert.Equal("now,zone,log", result.GetProperty("relayKeys").GetString());
+        Assert.Equal("now,zone,time,log", result.GetProperty("relayKeys").GetString());
         Assert.Equal(0, run.HostCalls);
     }
 
@@ -114,7 +131,7 @@ public class ToolBuildingTests : IDisposable
     {
         var runner = Runner();
 
-        var endless = await runner.RunAsync(Package("function run(args) { while (true) {} }"), Args(), "probe", null, timeoutSeconds: 2, CancellationToken.None);
+        var endless = await runner.RunAsync(Package("function run(args) { while (true) {} }"), Args(), "probe", null, timeoutSeconds: 2, at: null, CancellationToken.None);
         Assert.False(endless.Ok);
         Assert.Contains("Tool failed", endless.Error);
         Assert.True(endless.Error!.Contains("statements") || endless.Error.Contains("did not finish"), endless.Error);
@@ -124,7 +141,7 @@ public class ToolBuildingTests : IDisposable
         Assert.Contains("recursion", recursion.Error);
 
         // Each iteration allocates a fresh ~200 KB string (slice, not a lazy concatenation), so the 64 MB allocation cap ends it within a few hundred iterations.
-        var memory = await runner.RunAsync(Package("function run(args) { var a = []; var chunk = 'x'.repeat(100000); for (;;) { a.push(chunk.slice(1 + (a.length % 5))); } }"), Args(), "probe", null, timeoutSeconds: 3, CancellationToken.None);
+        var memory = await runner.RunAsync(Package("function run(args) { var a = []; var chunk = 'x'.repeat(100000); for (;;) { a.push(chunk.slice(1 + (a.length % 5))); } }"), Args(), "probe", null, timeoutSeconds: 3, at: null, CancellationToken.None);
         Assert.False(memory.Ok);
         Assert.Contains("Tool failed", memory.Error);
 
@@ -190,6 +207,10 @@ public class ToolBuildingTests : IDisposable
 
         Assert.Null(ToolPackage.Check(new ToolTest(new Dictionary<string, string>(), Keys: ["a"], Contains: "\"a\":1", Matches: "\\d"), "{\"a\":1}"));
         Assert.Contains("lacks key(s) b", ToolPackage.Check(new ToolTest(new Dictionary<string, string>(), Keys: ["b"]), "{\"a\":1}"));
+        // The live run's failure: the source returned relay.zone's whole object and the test wanted `time` at the top; the check says where the key is.
+        var nested = ToolPackage.Check(new ToolTest(new Dictionary<string, string>(), Keys: ["time"]), "{\"zone\":\"Asia/Tokyo\",\"local\":{\"time\":\"21:00\"}}");
+        Assert.Contains("lacks key(s) time at the top level", nested);
+        Assert.Contains("'time' is nested under 'local': build the result object yourself, e.g. var r = relay.…; return { time: r.local.time, … }", nested);
         Assert.Contains("not an object", ToolPackage.Check(new ToolTest(new Dictionary<string, string>(), Keys: ["b"]), "42"));
         Assert.Contains("does not contain", ToolPackage.Check(new ToolTest(new Dictionary<string, string>(), Contains: "zzz"), "{\"a\":1}"));
     }
@@ -237,6 +258,34 @@ public class ToolBuildingTests : IDisposable
         Assert.Equal(new[] { "time.zone" }, draft.HostFunctionNames);
         Assert.False(store.IsPromoted("world_clock"));
         Assert.Equal(2, _host.Started.Count(s => s.Task == "tool")); // one test per draft, two drafts; nothing was promoted or run otherwise
+    }
+
+    [Fact]
+    public void TheRetryQuotesTheLineThatFailedAndNamesAnErrorTheSourceThrewItself()
+    {
+        // Live run 2 of the world clock: Ministral guarded the zone id with a wrong regex, threw its own error for every valid test input, and
+        // repeated the same guard on the retry when only the message and the whole source were fed back. The feedback now points at the line.
+        const string source = "function run(args) {\n  const { zone } = args;\n  if (!/^[A-Z]{1,3}\\/[A-Z]{2}$/.test(zone)) {\n    throw new Error('Invalid time zone identifier');\n  }\n  return relay.zone(zone);\n}";
+        var outcomes = new[]
+        {
+            new ToolTestOutcome(1, false, "Tool failed: Invalid time zone identifier (line 4)", "r1", 3),
+            new ToolTestOutcome(2, false, "Tool failed: Invalid time zone identifier (line 4)", "r2", 3),
+        };
+        var where = ToolBuilder.WhereItFailed(source, outcomes);
+        Assert.Contains("Test 1 failed at line 4 of your source, in an error your own code throws.", where);
+        Assert.Contains("the check that led to this throw is wrong: remove it or loosen it.", where);
+        Assert.Contains("  3:   if (!/^[A-Z]{1,3}\\/[A-Z]{2}$/.test(zone)) {", where);
+        Assert.Contains("  4:     throw new Error('Invalid time zone identifier');", where);
+        Assert.DoesNotContain("Test 2", where); // the same line is quoted once
+
+        // An error from the bridge (a denied or unknown zone) is located but not blamed on the source's own throw.
+        var host = ToolBuilder.WhereItFailed(source, [new ToolTestOutcome(1, false, "Tool failed: unknown time zone 'Mars/Olympus' (line 6)", "r3", 3)]);
+        Assert.Contains("Test 1 failed at line 6 of your source.\n", host);
+        Assert.Contains("  6:   return relay.zone(zone);", host);
+        Assert.DoesNotContain("your own code throws", host);
+
+        // No line, nothing to quote.
+        Assert.Equal("", ToolBuilder.WhereItFailed(source, [new ToolTestOutcome(1, false, "the result lacks key(s) time", "r4", 3)]));
     }
 
     [Fact]
@@ -304,6 +353,54 @@ public class ToolBuildingTests : IDisposable
         Assert.False(store.IsPromoted("world_clock"));
         Assert.Empty(store.Descriptors());
         Assert.False(File.Exists(store.PromotedPath("world_clock")));
+    }
+
+    /// <summary>
+    /// The slice 6 acceptance with a real model in the drafter's seat: given the mind's build move for a world clock, does
+    /// the model write a package that validates, passes its own tests in the real sandbox and then answers the Tokyo
+    /// question? Runs only with RELAY_LIVE_MODEL_KEY (tools\live-eval.ps1 -Filter FullyQualifiedName~ToolBuildingTests.LiveModel);
+    /// the package, every stage and the Tokyo run are written to RELAY_LIVE_REPORT_DIR so a failure can be read.
+    /// </summary>
+    [Fact]
+    public async Task LiveModelDraftsAWorldClockThatPassesItsOwnTestsInTheSandbox()
+    {
+        var live = LiveModel.FromEnvironment();
+        if (live is null) return;
+        using var client = live.Client();
+        var store = Store();
+        var builder = new ToolBuilder(store, Runner(), () => client, () => _clock.UtcNow);
+        var move = new BuildMove("world_clock", "The user asks for the time in other cities and no tool gives the present time anywhere.", "an IANA time zone id such as Asia/Tokyo", "the current local time, date and weekday in that zone");
+
+        var stages = new List<BuildProgress>();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var outcome = await builder.BuildAsync(move, "What time is it in Tokyo right now?", "live-build", p => { stages.Add(p); return Task.CompletedTask; }, new CancellationTokenSource(TimeSpan.FromMinutes(10)).Token);
+        var elapsed = watch.Elapsed;
+
+        var report = new System.Text.StringBuilder();
+        report.AppendLine($"model: {live.Model} at {live.Endpoint}");
+        report.AppendLine($"outcome: {(outcome.Ok ? "tested draft" : "failed")} after {outcome.Attempts} attempt(s) in {elapsed.TotalSeconds:N1} s; prompt tokens {outcome.PromptTokens}, completion tokens {outcome.CompletionTokens}");
+        report.AppendLine($"summary: {outcome.Summary}");
+        foreach (var s in stages) report.AppendLine($"  [{s.Attempt}/{s.Attempts}] {s.Stage}: {s.Detail}");
+        var draft = store.Draft("world_clock");
+        if (draft is not null)
+        {
+            report.AppendLine().AppendLine("package:").AppendLine(draft.ToJson());
+            // The argument's name is the model's choice; the mind reads it from the descriptor, and so does this test.
+            var zoneArg = draft.Arguments.FirstOrDefault(a => a.Required)?.Name ?? draft.Arguments.FirstOrDefault()?.Name ?? "zone";
+            var tokyo = await Runner().RunAsync(draft, Args((zoneArg, "Asia/Tokyo")), "live tokyo", "live-build", CancellationToken.None);
+            report.AppendLine().AppendLine($"run world_clock({zoneArg}=Asia/Tokyo): ok={tokyo.Ok} hostCalls={tokyo.HostCalls} denied={tokyo.Denied} {tokyo.ElapsedMs} ms");
+            report.AppendLine(tokyo.Ok ? tokyo.ResultJson : tokyo.Error);
+            live.Write("build-live.txt", report.ToString());
+            // T0 is 2026-09-04 12:00Z, so Tokyo is 21:00 on the 4th; the model's own key names are its choice, the values are not.
+            Assert.True(tokyo.Ok, "The tested draft failed on the Tokyo call: " + tokyo.Error + "\n" + report);
+            Assert.Contains("21:00", tokyo.ResultJson);
+        }
+        else live.Write("build-live.txt", report.ToString());
+
+        Assert.True(outcome.Ok, report.ToString());
+        Assert.True(draft!.Tested);
+        Assert.Contains("time.zone", draft.HostFunctionNames);
+        Assert.NotEmpty(draft.Arguments);
     }
 
     public void Dispose() => _tmp.Dispose();

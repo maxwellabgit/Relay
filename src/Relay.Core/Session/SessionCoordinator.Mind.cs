@@ -124,7 +124,20 @@ public sealed partial class SessionCoordinator
         {
             task.Timeout?.Dispose();
             task.Timeout = null;
-            if (task.PendingOutcomes.Count > 0) ResumeMind(task, task.PendingOutcomes.Dequeue());
+            if (task.PendingOutcomes.Count > 0)
+            {
+                // Everything that happened while the mind was mid-step, in one resume: delivered one per step, the mind would
+                // reason over a stale stage ("wait for the test") when the build had already ended (the live run of docs/09, slice 6).
+                var observations = new List<Observation>();
+                string? waitFor = null;
+                while (task.PendingOutcomes.Count > 0)
+                {
+                    var queued = task.PendingOutcomes.Dequeue();
+                    observations.AddRange(queued.Observations);
+                    waitFor = queued.WaitFor;
+                }
+                ResumeMind(task, new MoveOutcome(observations, waitFor));
+            }
             else if (task.Host?.DeferredPartial is { } partial && task.Loop.WaitingFor == Waits.Delegate && task.PendingOperation is not null)
             {
                 // A partial that streamed in while the mind was mid-step: shown now, so slow steps do not blind the mind to the stream.

@@ -42,6 +42,12 @@ public sealed partial class SessionCoordinator
             return MoveOutcome.Wait(Waits.Build, new BuildObserved(now, move.Name, BuildObserved.Failed, $"A build of '{running.Name}' is already running in this task; wait for it or stop it."));
         if (tools.Store.IsPromoted(move.Name) || Orchestration.ToolBroker.Descriptors.Any(d => d.Name == move.Name))
             return MoveOutcome.Of(new BuildObserved(now, move.Name, BuildObserved.Failed, $"A tool named '{move.Name}' already exists; call it with use_tool instead of building it."));
+        // The drafter is deterministic: the same contract fails the same way. A second build in the same task must change the contract
+        // (name, inputs or outputs); otherwise the mind is told to answer what it can or ask the user (docs/09: delegation of a failed build is slice 5).
+        if (task.Build is { Finished: true, Package: null or { Tested: false } } failed && SameContract(failed.Move, move))
+            return MoveOutcome.Of(new BuildObserved(now, move.Name, BuildObserved.Failed,
+                $"A build of '{failed.Name}' with this same contract already failed in this task ({failed.Attempts} attempt(s)); the drafter would produce the same result. " +
+                "Do not build it again: answer what you can, say which tool would be needed, or ask the user. A different contract (clear inputs and outputs, a general tool with the varying part as an argument) may be built."));
 
         var build = new BuildState { Name = move.Name, Move = move, StartedAt = now };
         task.Build = build;
@@ -57,6 +63,11 @@ public sealed partial class SessionCoordinator
         return MoveOutcome.Wait(Waits.Build, new BuildObserved(now, move.Name, BuildObserved.Started,
             $"Drafting with {tools.Builder.DrafterName}; the draft's tests then run in the sandbox, and the user is asked once before it is promoted. Each stage arrives as an observation: wait for them, or stop the build."));
     }
+
+    private static bool SameContract(BuildMove a, BuildMove b)
+        => string.Equals(a.Name, b.Name, StringComparison.Ordinal)
+           && string.Equals(a.Inputs.Trim(), b.Inputs.Trim(), StringComparison.OrdinalIgnoreCase)
+           && string.Equals(a.Outputs.Trim(), b.Outputs.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Off the coordinator thread: the model drafts, the sandbox tests. Every stage is posted back; the loop hears each one.</summary>
     private async Task RunBuildAsync(TaskState task, BuildState build, ToolRuntime tools, CancellationToken cancellationToken)

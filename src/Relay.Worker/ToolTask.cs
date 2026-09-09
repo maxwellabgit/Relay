@@ -28,11 +28,19 @@ public static class ToolTask
     public const int MaxResultChars = 20_000;
     public const int MaxHostCalls = 50;
 
-    /// <summary>The bridge the script sees. Each function is one broker call; the broker answers with a string or denies, and a denial is a catchable Error.</summary>
+    /// <summary>
+    /// The bridge the script sees. Each function is one broker call; the broker answers with a string or denies, and a
+    /// denial is a catchable Error. Every host function is reachable under its short name (<c>relay.zone</c>) and under
+    /// its catalog name as a path (<c>relay.time.zone</c>): a drafting model that read "time.zone" in the manifest writes
+    /// the latter as readily as the former, and both mean the same brokered call.
+    /// </summary>
     private const string Prelude = """
+        var __now = function () { return __host("time.now", ""); };
+        var __zone = function (zoneId) { return JSON.parse(__host("time.zone", String(zoneId))); };
         var relay = Object.freeze({
-          now: function () { return __host("time.now", ""); },
-          zone: function (zoneId) { return JSON.parse(__host("time.zone", String(zoneId))); },
+          now: __now,
+          zone: __zone,
+          time: Object.freeze({ now: __now, zone: __zone }),
           log: function (text) { __host("log", String(text)); return undefined; }
         });
         var console = Object.freeze({

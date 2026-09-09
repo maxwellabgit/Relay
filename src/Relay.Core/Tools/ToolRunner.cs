@@ -51,11 +51,13 @@ public sealed class ToolRunner
     }
 
     public IWorkerHost Host => _host;
+    public HostFunctions Functions => _functions;
 
     public Task<ToolRunResult> RunAsync(ToolPackage tool, IReadOnlyDictionary<string, string> args, string purpose, string? taskId, CancellationToken cancellationToken)
-        => RunAsync(tool, args, purpose, taskId, DefaultCallTimeoutSeconds, cancellationToken);
+        => RunAsync(tool, args, purpose, taskId, DefaultCallTimeoutSeconds, null, cancellationToken);
 
-    public async Task<ToolRunResult> RunAsync(ToolPackage tool, IReadOnlyDictionary<string, string> args, string purpose, string? taskId, int timeoutSeconds, CancellationToken cancellationToken)
+    /// <param name="at">When set, the present the tool's host functions see (a build's tests run against a fixed instant); null is the real clock.</param>
+    public async Task<ToolRunResult> RunAsync(ToolPackage tool, IReadOnlyDictionary<string, string> args, string purpose, string? taskId, int timeoutSeconds, DateTimeOffset? at, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
         var now = _clock();
@@ -68,7 +70,7 @@ public sealed class ToolRunner
             return new ToolRunResult(false, null, "Could not stage the tool run: " + ex.Message, runId, 0, 0, watch.ElapsedMilliseconds, [], []);
         }
 
-        var broker = new WorkerBroker(spec) { HostCall = (fn, arg) => _functions.Invoke(fn, arg) };
+        var broker = new WorkerBroker(spec) { HostCall = (fn, arg) => _functions.Invoke(fn, arg, at) };
         var logs = new List<string>();
         IWorkerProcess process;
         try { process = _host.Start(spec); }

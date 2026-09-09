@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Relay.Core.Mind;
@@ -9,13 +10,25 @@ namespace Relay.Core.Tools;
 /// <summary>One draft from the model: the package when it parsed and validated, otherwise what was wrong (fed back on the retry).</summary>
 public sealed record ToolDraftResult(bool Ok, ToolPackage? Package, string? Error, string? Raw, int PromptChars, int PromptTokens, int CompletionTokens, long ElapsedMs);
 
-public sealed record ToolTestOutcome(int Index, bool Passed, string Detail, string RunId, long ElapsedMs);
+/// <summary>
+/// One test's outcome. <see cref="Detail"/> is what everyone may see (the mind, the ledger, the panel) and never
+/// quotes what the tool returned; <see cref="Result"/> is the clipped result JSON for the drafter alone. Tests run
+/// against a pinned clock, so a result is a value from that fixed instant, and a mind that read one in its
+/// transcript would take it for the present.
+/// </summary>
+public sealed record ToolTestOutcome(int Index, bool Passed, string Detail, string RunId, long ElapsedMs, string? Result = null);
 
 public sealed record ToolTestReport(bool Passed, IReadOnlyList<ToolTestOutcome> Outcomes, ToolPackage Package)
 {
+    /// <summary>The report as the mind and the ledger see it: which tests passed and what was wrong, without results.</summary>
     public string Summary => Passed
         ? $"{Outcomes.Count} of {Outcomes.Count} test(s) passed in the sandbox"
         : $"{Outcomes.Count(o => o.Passed)} of {Outcomes.Count} test(s) passed; " + string.Join("; ", Outcomes.Where(o => !o.Passed).Select(o => $"test {o.Index}: {o.Detail}"));
+
+    /// <summary>The report as the drafter sees it on a retry: the same, with each failing test's actual result quoted.</summary>
+    public string ForDrafter => Passed ? Summary
+        : $"{Outcomes.Count(o => o.Passed)} of {Outcomes.Count} test(s) passed with the clock pinned at {ToolBuilder.TestInstant:yyyy-MM-dd'T'HH:mm:ss'Z'}; "
+          + string.Join("; ", Outcomes.Where(o => !o.Passed).Select(o => $"test {o.Index}: {o.Detail}" + (o.Result is null ? "" : $" (result: {o.Result})")));
 }
 
 /// <summary>A stage of a build as it happens: drafted (the package exists), tested (all tests passed), failed (this attempt did not; a retry may follow).</summary>
@@ -30,10 +43,19 @@ public sealed record BuildOutcome(bool Ok, ToolPackage? Package, string Summary,
 /// failure back verbatim. Nothing here promotes anything: the tested draft waits in staging for the
 /// user's one approval (<c>add_tool</c>), and the loop observes each stage as it happens.
 /// </summary>
-public sealed class ToolBuilder
+public sealed partial class ToolBuilder
 {
     public const int MaxAttempts = 2;
     public const int MaxOutputTokens = 2_500;
+
+    /// <summary>
+    /// The present a draft's tests run against: fixed, so the prompt can state what the host functions return then and
+    /// the model can write tests with exact values — the check that catches a source returning the wrong time while
+    /// passing every shape test. A Friday noon UTC in September: London on summer time, New York on daylight time,
+    /// Tokyo without either, Kolkata on a half-hour offset.
+    /// </summary>
+    public static readonly DateTimeOffset TestInstant = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+    public static readonly string[] AnchorZones = ["UTC", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Tokyo", "Australia/Sydney"];
 
     private readonly ToolStore _store;
     private readonly ToolRunner _runner;
@@ -87,7 +109,7 @@ public sealed class ToolBuilder
                 await progress(new BuildProgress(BuildObserved.Tested, report.Summary, report.Package, attempt, MaxAttempts)).ConfigureAwait(false);
                 return new BuildOutcome(true, report.Package, report.Summary, attempt, promptTokens, completionTokens, report.Outcomes);
             }
-            failure = report.Summary + "\n\nThe source that failed:\n" + package.Source;
+            failure = report.ForDrafter + WhereItFailed(package.Source, report.Outcomes) + "\n\nThe source that failed:\n" + package.Source;
             await progress(new BuildProgress(BuildObserved.Failed, $"attempt {attempt}: {report.Summary}", package, attempt, MaxAttempts)).ConfigureAwait(false);
         }
         return new BuildOutcome(false, null, $"The tool could not be built in {MaxAttempts} attempts. Last failure: {Clip(failure ?? "unknown", 600)}", MaxAttempts, promptTokens, completionTokens, lastTests);
@@ -99,7 +121,7 @@ public sealed class ToolBuilder
         var drafter = _drafter();
         if (drafter is null) return new ToolDraftResult(false, null, "No model is configured to draft tools.", null, 0, 0, 0, 0);
         var watch = Stopwatch.StartNew();
-        var messages = new List<ModelMessage> { new("system", BuildPrompt.System(_instructions())), new("user", BuildPrompt.User(move, ask, previousFailure)) };
+        var messages = new List<ModelMessage> { new("system", BuildPrompt.System(_instructions(), _runner.Functions.Anchors(TestInstant, AnchorZones))), new("user", BuildPrompt.User(move, ask, previousFailure)) };
         var promptChars = messages.Sum(m => m.Content.Length);
         var response = await drafter.CompleteAsync(new ModelRequest(drafter.Model, messages, MaxOutputTokens, JsonObject: true, JsonSchema: BuildPrompt.Schema, SchemaName: BuildPrompt.SchemaName), cancellationToken).ConfigureAwait(false);
         if (!response.Ok) return new ToolDraftResult(false, null, "The drafting model was unavailable: " + response.Error, null, promptChars, response.PromptTokens, response.CompletionTokens, watch.ElapsedMilliseconds);
@@ -112,7 +134,7 @@ public sealed class ToolBuilder
         return new ToolDraftResult(true, package, null, raw, promptChars, response.PromptTokens, response.CompletionTokens, watch.ElapsedMilliseconds);
     }
 
-    /// <summary>Runs every test in the sandbox. On success the returned package carries the tested hash, which promotion requires.</summary>
+    /// <summary>Runs every test in the sandbox with the clock pinned at <see cref="TestInstant"/>. On success the returned package carries the tested hash, which promotion requires.</summary>
     public async Task<ToolTestReport> TestAsync(ToolPackage package, string? taskId, CancellationToken cancellationToken)
     {
         var outcomes = new List<ToolTestOutcome>();
@@ -120,12 +142,12 @@ public sealed class ToolBuilder
         {
             cancellationToken.ThrowIfCancellationRequested();
             var test = package.Tests[i];
-            var run = await _runner.RunAsync(package, test.Args, $"test {i + 1} of {package.Name}", taskId, cancellationToken).ConfigureAwait(false);
+            var run = await _runner.RunAsync(package, test.Args, $"test {i + 1} of {package.Name}", taskId, ToolRunner.DefaultCallTimeoutSeconds, TestInstant, cancellationToken).ConfigureAwait(false);
             if (!run.Ok) { outcomes.Add(new ToolTestOutcome(i + 1, false, run.Error ?? "failed", run.RunId, run.ElapsedMs)); continue; }
             var problem = ToolPackage.Check(test, run.ResultJson!);
             outcomes.Add(problem is null
-                ? new ToolTestOutcome(i + 1, true, "ok: " + Clip(run.ResultJson!, 200), run.RunId, run.ElapsedMs)
-                : new ToolTestOutcome(i + 1, false, problem + " (result: " + Clip(run.ResultJson!, 200) + ")", run.RunId, run.ElapsedMs));
+                ? new ToolTestOutcome(i + 1, true, "ok", run.RunId, run.ElapsedMs, Clip(run.ResultJson!, 200))
+                : new ToolTestOutcome(i + 1, false, problem, run.RunId, run.ElapsedMs, Clip(run.ResultJson!, 200)));
         }
         var passed = outcomes.Count > 0 && outcomes.All(o => o.Passed);
         var tested = passed ? With(package, p => new ToolPackage
@@ -137,6 +159,31 @@ public sealed class ToolBuilder
     }
 
     private static ToolPackage With(ToolPackage p, Func<ToolPackage, ToolPackage> f) => f(p);
+
+    /// <summary>
+    /// When a failed test's error names a line of the source, that line and the one before it are quoted back, and an
+    /// error the source threw itself is named as such: a small model that reads "Invalid zone (line 5)" tends to
+    /// rewrite the message; shown the check that threw it against a valid test input, it removes the check.
+    /// </summary>
+    public static string WhereItFailed(string source, IReadOnlyList<ToolTestOutcome> outcomes)
+    {
+        var lines = source.Split('\n');
+        var seen = new HashSet<int>();
+        var sb = new StringBuilder();
+        foreach (var o in outcomes.Where(o => !o.Passed))
+        {
+            var m = LinePattern().Match(o.Detail);
+            if (!m.Success || !int.TryParse(m.Groups[1].Value, out var n) || n < 1 || n > lines.Length || !seen.Add(n)) continue;
+            sb.Append($"\n\nTest {o.Index} failed at line {n} of your source");
+            var own = lines[n - 1].Contains("throw", StringComparison.Ordinal);
+            sb.Append(own ? ", in an error your own code throws. The test's arguments are valid, so the check that led to this throw is wrong: remove it or loosen it.\n" : ".\n");
+            for (var i = Math.Max(1, n - 1); i <= n; i++) sb.Append($"  {i}: {lines[i - 1].TrimEnd('\r')}\n");
+        }
+        return sb.ToString();
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\(line (\d+)\)")]
+    private static partial System.Text.RegularExpressions.Regex LinePattern();
 
     private ToolPackage Parse(BuildMove move, string raw, string? taskId, string drafter)
     {
@@ -167,8 +214,9 @@ public sealed class ToolBuilder
         var source = Str(root["source"]);
         if (source.Trim().Length == 0) throw new FormatException("the package has no source");
         // Host functions the source calls but the draft did not declare are declared for it: the declaration exists to bound the run, and the source is what runs.
+        // Both spellings the bridge accepts count: relay.zone(...) and relay.time.zone(...).
         foreach (var fn in HostFunctions.Catalog.Values)
-            if (!hostFunctions.Contains(fn.Name) && source.Contains("relay." + fn.JsName + "(", StringComparison.Ordinal)) hostFunctions.Add(fn.Name);
+            if (!hostFunctions.Contains(fn.Name) && (source.Contains("relay." + fn.JsName + "(", StringComparison.Ordinal) || source.Contains("relay." + fn.Name + "(", StringComparison.Ordinal))) hostFunctions.Add(fn.Name);
         return new ToolPackage
         {
             Name = move.Name,

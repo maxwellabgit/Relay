@@ -61,6 +61,14 @@ public static partial class MoveSchema
         return new MindStep(read, move, feed, raw, promptChars, promptTokens, completionTokens, elapsedMs, null);
     }
 
+    /// <summary>A tool is named as listed; a model that copies the listing ("world_clock(zone)"), the case or a hyphen is still understood.</summary>
+    public static string ToolName(string name)
+    {
+        var paren = name.IndexOf('(');
+        if (paren > 0) name = name[..paren];
+        return name.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
+    }
+
     public static Move ParseMove(JsonObject m)
     {
         var type = Str(m["type"]).Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
@@ -77,7 +85,7 @@ public static partial class MoveSchema
                 return new SayMove(text, done);
             case Move.UseTool:
                 if (name.Length == 0) throw new FormatException("a use_tool move needs the tool's name in 'name'");
-                return new UseToolMove(name, args);
+                return new UseToolMove(ToolName(name), args);
             case Move.Propose:
                 if (name.Length == 0) throw new FormatException("a propose move needs the action in 'name'");
                 return new ProposeMove(name, args, text.Length == 0 ? "Proposed by the mind." : text);
