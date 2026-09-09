@@ -59,13 +59,55 @@ public sealed class Expectation
     [JsonPropertyName("findingKind")] public string? FindingKind { get; init; }
     /// <summary>Judge stage: no finding may be of any of these kinds.</summary>
     [JsonPropertyName("forbiddenFindingKinds")] public IReadOnlyList<string>? ForbiddenFindingKinds { get; init; }
+    /// <summary>Judge stage: a finding (of <see cref="FindingKind"/> when set) must name this project, by name or slug (case-insensitive).</summary>
+    [JsonPropertyName("findingProject")] public string? FindingProject { get; init; }
+    /// <summary>Judge stage: no finding may name a project (the words concern nothing that is listed; a name must not be invented).</summary>
+    [JsonPropertyName("findingNoProject")] public bool? FindingNoProject { get; init; }
+    /// <summary>Judge stage: 1-based positions in the window of the segments a finding (of <see cref="FindingKind"/> when set) must cite; grounding.</summary>
+    [JsonPropertyName("findingSegments")] public IReadOnlyList<int>? FindingSegments { get; init; }
+    /// <summary>Judge stage: at least this many findings (several things happened in the window).</summary>
+    [JsonPropertyName("minFindings")] public int? MinFindings { get; init; }
+    /// <summary>Judge stage: at most this many findings; selectivity, so one sentence does not become three tasks.</summary>
+    [JsonPropertyName("maxFindings")] public int? MaxFindings { get; init; }
+    /// <summary>Judge stage: case-insensitive fragments the focused prompt of a finding (of <see cref="FindingKind"/> when set) must contain.</summary>
+    [JsonPropertyName("promptContains")] public IReadOnlyList<string>? PromptContains { get; init; }
+    /// <summary>Judge stage: case-insensitive fragments the note text of a remember finding must contain (the judge's restatement is what gets filed).</summary>
+    [JsonPropertyName("noteContains")] public IReadOnlyList<string>? NoteContains { get; init; }
+
+    // Mind stage (docs/09): the case runs the loop until it ends or first needs the user; the moves are what is scored.
+    // A move is written "type" or "type:name" — use_tool:list_projects, propose:create_project, delegate:research, build:world_clock, say, ask_user.
+    /// <summary>Mind stage: the very first move must match.</summary>
+    [JsonPropertyName("firstMove")] public string? FirstMove { get; init; }
+    /// <summary>Mind stage: these moves must occur in this order (not necessarily adjacent).</summary>
+    [JsonPropertyName("moves")] public IReadOnlyList<string>? Moves { get; init; }
+    /// <summary>Mind stage: none of these moves may occur.</summary>
+    [JsonPropertyName("forbiddenMoves")] public IReadOnlyList<string>? ForbiddenMoves { get; init; }
+    /// <summary>Mind stage: needs the first read must include (local_notes, world_knowledge, new_tool, external_reasoning, user_input, none).</summary>
+    [JsonPropertyName("needs")] public IReadOnlyList<string>? Needs { get; init; }
+    /// <summary>Mind stage: the route decision the first read must produce (local, offer_delegate, offer_build, ask_user).</summary>
+    [JsonPropertyName("route")] public string? Route { get; init; }
+    /// <summary>Mind stage: how the loop must end — answered, or the wait it reached: approval, user, build, delegate.</summary>
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+    /// <summary>Mind stage: at most this many steps before the loop ends or waits.</summary>
+    [JsonPropertyName("maxSteps")] public int? MaxSteps { get; init; }
+
+    /// <summary>True when at least one judge-stage property is set.</summary>
+    [JsonIgnore]
+    public bool ChecksJudge =>
+        Significant is not null || FindingKind is not null || ForbiddenFindingKinds is { Count: > 0 } || FindingProject is not null || FindingNoProject is not null
+        || FindingSegments is { Count: > 0 } || MinFindings is not null || MaxFindings is not null || PromptContains is { Count: > 0 } || NoteContains is { Count: > 0 };
+
+    /// <summary>True when at least one mind-stage property is set.</summary>
+    [JsonIgnore]
+    public bool ChecksMind =>
+        FirstMove is not null || Moves is { Count: > 0 } || ForbiddenMoves is { Count: > 0 } || Needs is { Count: > 0 } || Route is not null || Outcome is not null || MaxSteps is not null;
 
     /// <summary>True when at least one property is set; an expectation that checks nothing is not a case.</summary>
     [JsonIgnore]
     public bool ChecksSomething =>
         Understood is not null || Actions is not null || ForbiddenActions is { Count: > 0 } || AnswerContains is { Count: > 0 } || AnswerAvoids is { Count: > 0 }
         || MaxAnswerChars is not null || KnowledgeGap is not null || CapabilityGap is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null
-        || Significant is not null || FindingKind is not null || ForbiddenFindingKinds is { Count: > 0 };
+        || ChecksJudge || ChecksMind;
 }
 
 /// <summary>
@@ -84,6 +126,17 @@ public sealed class EvaluationCase
     [JsonPropertyName("instruction")] public string Instruction { get; init; } = "";
     /// <summary>When set, the case evaluates the judge: these are the segments heard, in order.</summary>
     [JsonPropertyName("segments")] public IReadOnlyList<string>? Segments { get; init; }
+    /// <summary>
+    /// Judge cases: 1-based positions of the segments that are NEW (not yet judged); the others are context the judge
+    /// has already seen and must not raise again. Null means every segment is new.
+    /// </summary>
+    [JsonPropertyName("newSegments")] public IReadOnlyList<int>? NewSegments { get; init; }
+    /// <summary>
+    /// Observed plan cases: the overheard words the judge kept. The runner hands the planner an excerpt holding exactly these
+    /// words (its id is <see cref="EvaluationRunner.ExcerptIdFor"/>), so the planner reads them with read_excerpt as it does
+    /// in the application instead of finding them pasted into the instruction.
+    /// </summary>
+    [JsonPropertyName("heard")] public string? Heard { get; init; }
     [JsonPropertyName("expect")] public required Expectation Expect { get; init; }
     [JsonPropertyName("tags")] public IReadOnlyList<string> Tags { get; init; } = [];
     /// <summary>Why the case exists. Required for failure cases: the mistake it guards against.</summary>
@@ -92,6 +145,8 @@ public sealed class EvaluationCase
     [JsonPropertyName("recordedTaskId")] public string? RecordedTaskId { get; init; }
 
     [JsonIgnore] public bool IsJudgeCase => Segments is { Count: > 0 };
+    /// <summary>A case scored on the mind's moves (docs/09) rather than on a plan.</summary>
+    [JsonIgnore] public bool IsMindCase => !IsJudgeCase && Expect.ChecksMind;
 
     public TaskOrigin ParsedOrigin => Origin.Trim().ToLowerInvariant() switch
     {
@@ -185,8 +240,30 @@ public sealed class EvaluationSet
             if (!c.Expect.ChecksSomething) problems.Add($"Case '{c.Id}': the expectation checks nothing.");
             if (c.IsJudgeCase && (c.Expect.Actions is not null || c.Expect.AnswerContains is not null || c.Expect.Understood is not null))
                 problems.Add($"Case '{c.Id}': a judge case (segments) cannot expect planner output (actions, answer, understood).");
-            if (!c.IsJudgeCase && (c.Expect.Significant is not null || c.Expect.FindingKind is not null))
+            if (!c.IsJudgeCase && c.Expect.ChecksJudge)
                 problems.Add($"Case '{c.Id}': a planner case cannot expect judge findings; give it segments.");
+            if (c.IsJudgeCase && c.Expect.ChecksMind)
+                problems.Add($"Case '{c.Id}': a judge case (segments) cannot expect mind moves.");
+            if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Consistent is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
+                problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids); it cannot also expect plan output.");
+            foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
+                if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move (say, use_tool, propose, delegate, build, ask_user, wait, stop).");
+            foreach (var need in c.Expect.Needs ?? [])
+                if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
+            if (!c.IsJudgeCase && c.NewSegments is not null)
+                problems.Add($"Case '{c.Id}': newSegments needs segments.");
+            if (c.Heard is not null && (c.IsJudgeCase || c.ParsedOrigin != TaskOrigin.Observed || string.IsNullOrWhiteSpace(c.Heard)))
+                problems.Add($"Case '{c.Id}': heard is the excerpt of an observed plan case; it needs origin=observed, an instruction, and words.");
+            if (c.IsJudgeCase)
+            {
+                var count = c.Segments!.Count;
+                foreach (var position in (c.NewSegments ?? []).Concat(c.Expect.FindingSegments ?? []).Where(p => p < 1 || p > count).Distinct())
+                    problems.Add($"Case '{c.Id}': segment position {position} is outside the window (1..{count}).");
+                if (c.NewSegments is { Count: 0 }) problems.Add($"Case '{c.Id}': newSegments is empty; a judge pass with nothing new is not a case.");
+                if (c.Expect.FindingProject is not null && c.Expect.FindingNoProject == true) problems.Add($"Case '{c.Id}': findingProject and findingNoProject contradict each other.");
+                if (c.Expect.MinFindings is { } min && c.Expect.MaxFindings is { } max && min > max) problems.Add($"Case '{c.Id}': minFindings exceeds maxFindings.");
+                if (c.Expect.Significant == false && (c.Expect.FindingKind is not null || c.Expect.MinFindings > 0)) problems.Add($"Case '{c.Id}': significant=false contradicts an expected finding.");
+            }
             if (string.Equals(c.Source, CaseSources.Failure, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(c.Why))
                 problems.Add($"Case '{c.Id}': a failure case must say which mistake it guards against (why).");
             foreach (var action in (c.Expect.Actions ?? []).Concat(c.Expect.ForbiddenActions ?? []))

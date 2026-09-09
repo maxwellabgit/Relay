@@ -130,9 +130,9 @@ The smoke test launches the real window against a throwaway data root and drives
   "schemaVersion": 2,
   "hotkeys": { "scope": "window", "noteKey": "Ctrl+Alt", "commandKey": "Ctrl+X" },
   "capture": { "transcriptTimeoutMs": 10000, "stabilizationMs": 600, "completedReceiptMs": 4000, "draftPersistDebounceMs": 200 },
-  "stream": { "bufferSeconds": 90, "segmentQuietMs": 1200, "observeIntervalMs": 4000, "excerptMaxSeconds": 30, "maxRetainedFraction": 0.25 },
+  "stream": { "bufferSeconds": 0, "segmentQuietMs": 1200, "observeIntervalMs": 12000, "minIngestChars": 240, "minIngestSeconds": 20, "excerptMaxSeconds": 30, "maxRetainedFraction": 0.25 },
   "judge": { "mode": "model", "minConfidence": 0.55, "timeoutMs": 8000 },
-  "orchestrator": { "mode": "rules+model", "planningTimeoutMs": 60000, "maxToolCalls": 8, "autoRouteThreshold": 0.75, "reviewThreshold": 0.35 },
+  "orchestrator": { "mode": "rules+model", "maxSteps": 12, "planningTimeoutMs": 60000, "maxToolCalls": 8, "autoRouteThreshold": 0.75, "reviewThreshold": 0.35 },
   "model": { "enabled": true, "endpoint": "http://127.0.0.1:8080/v1/chat/completions", "model": "ministral-8b-instruct", "secretName": "model-gateway", "timeoutMs": 30000, "maxOutputTokens": 800 },
   "externalModels": [ { "name": "research", "endpoint": "https://api.openai.com/v1/chat/completions", "model": "gpt-5-nano", "secretName": "external-research", "maxOutputTokens": 4000 } ],
   "workers": { "enabled": true, "wallClockSeconds": 120, "memoryMb": 512, "maxToolCalls": 400, "maxReadBytes": 8388608, "maxWriteBytes": 2097152 }

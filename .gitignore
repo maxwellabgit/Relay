@@ -20,3 +20,6 @@ Generated Files/
 # %LOCALAPPDATA%\Relay, not in the repository.
 /data/
 /.relay-data/
+
+# Run outputs of tools/live-eval.ps1 and tools/acceptance-run.ps1 (reports, transcripts, ledgers of a run)
+/artifacts/

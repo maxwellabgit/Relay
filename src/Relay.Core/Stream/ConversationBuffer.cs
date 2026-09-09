@@ -79,17 +79,21 @@ public sealed partial class StreamSegmenter
 }
 
 /// <summary>
-/// The rolling window. Segments older than the window are dropped whenever the buffer is touched,
-/// so the buffer never accumulates a session; at any moment it holds at most the last window of talk.
+/// What is held while listening. With a window, segments older than it are dropped whenever the buffer is
+/// touched, so it holds at most the last window of talk. With <see cref="TimeSpan.Zero"/> it holds the whole
+/// conversation until the stream stops and the buffer is cleared: nothing is removed before it is clear what
+/// can be removed easily. Either way the words live here and in excerpts only, never in the ledger.
 /// </summary>
 public sealed class ConversationBuffer
 {
     private readonly List<StreamSegment> _segments = new();
     private readonly HashSet<string> _judged = new(StringComparer.Ordinal);
 
-    public ConversationBuffer(TimeSpan window) => Window = window;
+    public ConversationBuffer(TimeSpan window) => Window = window < TimeSpan.Zero ? TimeSpan.Zero : window;
 
+    /// <summary>The rolling window, or zero when the whole conversation is held.</summary>
     public TimeSpan Window { get; }
+    public bool HoldsWholeConversation => Window == TimeSpan.Zero;
     public int TotalSegments { get; private set; }
     public int TotalChars { get; private set; }
     public int ExpiredSegments { get; private set; }
@@ -108,9 +112,10 @@ public sealed class ConversationBuffer
         Expire(now);
     }
 
-    /// <summary>Drops everything older than the window. Returns how many segments were dropped by this call.</summary>
+    /// <summary>Drops everything older than the window (nothing when the whole conversation is held). Returns how many segments were dropped by this call.</summary>
     public int Expire(DateTimeOffset now)
     {
+        if (HoldsWholeConversation) return 0;
         var cutoff = now - Window;
         var dropped = 0;
         while (_segments.Count > 0 && _segments[0].At < cutoff)
@@ -124,6 +129,20 @@ public sealed class ConversationBuffer
     }
 
     public IReadOnlyList<string> UnjudgedIds() => _segments.Where(s => !_judged.Contains(s.SegmentId)).Select(s => s.SegmentId).ToList();
+
+    /// <summary>How much unjudged talk is waiting: its characters, and the age of the oldest unjudged segment.</summary>
+    public (int Chars, TimeSpan Age) Unjudged(DateTimeOffset now)
+    {
+        var chars = 0;
+        DateTimeOffset? oldest = null;
+        foreach (var s in _segments)
+        {
+            if (_judged.Contains(s.SegmentId)) continue;
+            chars += s.Text.Length;
+            if (oldest is null || s.At < oldest) oldest = s.At;
+        }
+        return (chars, oldest is null ? TimeSpan.Zero : now - oldest.Value);
+    }
 
     public void MarkJudged(IEnumerable<string> ids)
     {

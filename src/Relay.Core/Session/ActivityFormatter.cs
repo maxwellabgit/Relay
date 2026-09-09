@@ -103,7 +103,7 @@ public static class ActivityFormatter
             EventTypes.LockReleased => "Unlocked by user",
 
             // Listening (ids, sizes and timings only)
-            EventTypes.StreamStarted => $"Listening started ({r.DataInt64("bufferSeconds")}s buffer, judge {r.DataString("judge")})",
+            EventTypes.StreamStarted => $"Listening started ({(r.DataInt64("bufferSeconds") is > 0 and var b ? $"{b}s buffer" : "whole conversation held")}, judge {r.DataString("judge")})",
             EventTypes.StreamSegment => $"Heard a segment ({r.DataInt64("chars")} chars, {r.DataInt64("held")} held)",
             EventTypes.StreamStopped => $"Listening {r.DataString("reason")} after {Seconds(r)}: {r.DataInt64("segments")} segment(s), {r.DataInt64("passes")} check(s), {r.DataInt64("findings")} finding(s), {r.DataInt64("excerpts")} excerpt(s) kept",
             EventTypes.StreamInterruptedFound => $"A buffer window from a previous session was found and discarded ({r.DataInt64("segments")} segment(s), {r.DataInt64("chars")} chars)",

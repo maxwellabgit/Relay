@@ -53,7 +53,10 @@ public sealed partial class SessionCoordinator
     private void BeginStream(Captures.CaptureDraft draft)
     {
         var now = _clock.UtcNow;
-        var window = TimeSpan.FromSeconds(Math.Max(15, Math.Min(_settings.Stream.BufferSeconds, Preferences.Buffer.TotalSeconds > 0 ? Preferences.Buffer.TotalSeconds : _settings.Stream.BufferSeconds)));
+        // 0 holds the whole conversation until the stream stops; otherwise the shorter of the setting and the user's retention preference, never under 15 s.
+        var window = _settings.Stream.BufferSeconds == StreamSettings.WholeConversation
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(Math.Max(15, Math.Min(_settings.Stream.BufferSeconds, Preferences.Buffer.TotalSeconds > 0 ? Preferences.Buffer.TotalSeconds : _settings.Stream.BufferSeconds)));
         _stream = new StreamState
         {
             StreamId = draft.CaptureId,
@@ -62,8 +65,24 @@ public sealed partial class SessionCoordinator
             Buffer = new ConversationBuffer(window),
         };
         Excerpts.BeginStream();
-        Append(EventTypes.StreamStarted, new { streamId = draft.CaptureId, bufferSeconds = window.TotalSeconds, observeIntervalMs = _settings.Stream.ObserveIntervalMs, judge = _services.Judge.Name, judgeMode = _settings.Judge.Mode, previousForegroundProcess = draft.PreviousForegroundProcess });
+        Append(EventTypes.StreamStarted, new
+        {
+            streamId = draft.CaptureId, bufferSeconds = window.TotalSeconds, wholeConversation = window == TimeSpan.Zero, observeIntervalMs = _settings.Stream.ObserveIntervalMs,
+            minIngestChars = _settings.Stream.MinIngestChars, minIngestSeconds = _settings.Stream.MinIngestSeconds, judge = _services.Judge.Name, judgeMode = _settings.Judge.Mode, previousForegroundProcess = draft.PreviousForegroundProcess,
+        });
         ScheduleObserve();
+    }
+
+    /// <summary>
+    /// The slower ingest: a pass runs only once enough new talk has gathered (<c>minIngestChars</c>) or the oldest of it
+    /// has waited long enough (<c>minIngestSeconds</c>), so the judge reads a stretch of conversation rather than each fragment.
+    /// </summary>
+    private bool EnoughToIngest(StreamState stream, DateTimeOffset now)
+    {
+        var (chars, age) = stream.Buffer.Unjudged(now);
+        if (chars == 0) return false;
+        var s = _settings.Stream;
+        return chars >= s.MinIngestChars || age.TotalSeconds >= s.MinIngestSeconds;
     }
 
     private void ScheduleObserve()
@@ -118,7 +137,7 @@ public sealed partial class SessionCoordinator
             stream.PersistTimer = null;
             if (_stream == stream && stream.WindowDirty) PersistWindow(stream);
         });
-        if (urgent) JudgeNow(stream, final: false);
+        if (urgent) JudgeNow(stream, final: false, urgent: true);
     }
 
     private void PersistWindow(StreamState stream)
@@ -148,7 +167,7 @@ public sealed partial class SessionCoordinator
         return new JudgeContext(_services.Registry.Active.Select(p => $"{p.Name} ({p.Slug})").ToList(), prefs.WatchedTerms, recent, prefs.PromptFragment);
     }
 
-    private void JudgeNow(StreamState stream, bool final)
+    private void JudgeNow(StreamState stream, bool final, bool urgent = false)
     {
         if (stream.Judging) { if (final) stream.Finishing = true; return; }
         var now = _clock.UtcNow;
@@ -159,6 +178,8 @@ public sealed partial class SessionCoordinator
             if (final) CompleteStream(stream, "stopped");
             return;
         }
+        // Not yet: let the conversation run on. The final pass and a watched term never wait.
+        if (!final && !urgent && !EnoughToIngest(stream, now)) return;
         stream.Judging = true;
         stream.Passes++;
         var window = stream.Buffer.Segments.ToList();

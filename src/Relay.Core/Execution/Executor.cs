@@ -87,7 +87,8 @@ public sealed class Executor
     public IExternalOperations? External { get; set; }
     public ISelfChangeOperations? SelfChange { get; set; }
 
-    public ExecutionResult Execute(Proposal proposal, Capability capability, PolicyWorld world, string turnId, IExecutionSink sink)
+    /// <param name="overheard">The task began from something overheard: the target's prose (note text, an objective) is fingerprinted in the ledger; the journal keeps it.</param>
+    public ExecutionResult Execute(Proposal proposal, Capability capability, PolicyWorld world, string turnId, IExecutionSink sink, bool overheard = false)
     {
         var check = _capabilities.Consume(capability, proposal, _clock.UtcNow);
         if (!check.Ok)
@@ -107,7 +108,7 @@ public sealed class Executor
 
         var journal = new ExecutionJournalEntry { ProposalId = proposal.ProposalId, Action = proposal.Action, TurnId = turnId, StartedAt = _clock.UtcNow, Target = decision.NormalizedTarget };
         WriteJournal(journal);
-        sink.Record(EventTypes.ExecutionStarted, new { proposalId = proposal.ProposalId, action = proposal.Action, turnId, target = decision.NormalizedTarget });
+        sink.Record(EventTypes.ExecutionStarted, new { proposalId = proposal.ProposalId, action = proposal.Action, turnId, target = overheard ? Withheld.Target(decision.NormalizedTarget) : decision.NormalizedTarget });
 
         ExecutionResult result;
         try

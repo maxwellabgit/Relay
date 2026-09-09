@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Relay.Core.Config;
@@ -52,6 +53,16 @@ public sealed class ExternalRuntime : IExternalOperations
 
     /// <summary>Set by the composition root: (proposalId, result) -> coordinator.CompletePendingOperation. Invoked on the coordinator thread.</summary>
     public Action<string, ExecutionResult>? Completed { get; set; }
+
+    /// <summary>
+    /// Set by the composition root: (proposalId, taskId, chars so far, tail of the text) while a reply streams in, on the
+    /// coordinator thread, at most every <see cref="ProgressEveryChars"/> characters or <see cref="ProgressEvery"/>. The
+    /// loop decides (the narrate weights) whether a given progress report is worth a step of the mind.
+    /// </summary>
+    public Action<string, string, int, string>? Progress { get; set; }
+    public int ProgressEveryChars { get; set; } = 120;
+    public TimeSpan ProgressEvery { get; set; } = TimeSpan.FromSeconds(1);
+    private const int TailChars = 240;
 
     public IReadOnlyList<string> ProfileNames => _profiles.Select(p => p.Name).ToList();
     public IReadOnlyList<string> SearchProfileNames => _profiles.Where(p => p.SupportsSearch).Select(p => p.Name).ToList();
@@ -116,10 +127,28 @@ public sealed class ExternalRuntime : IExternalOperations
         _inFlight[proposal.ProposalId] = flight;
 
         var request = new ModelRequest(profile.Model, messages, maxTokens, JsonObject: false);
+        var proposalId = proposal.ProposalId;
         Task.Run(async () =>
         {
             ModelResponse response;
-            try { response = await client.CompleteAsync(request, flight.Cts.Token).ConfigureAwait(false); }
+            var streamed = new StringBuilder();
+            var reportedChars = 0;
+            var reportedAt = Stopwatch.StartNew();
+            try
+            {
+                response = await client.StreamAsync(request, (delta, _) =>
+                {
+                    streamed.Append(delta);
+                    if (Progress is null) return Task.CompletedTask;
+                    if (streamed.Length - reportedChars < ProgressEveryChars && reportedAt.Elapsed < ProgressEvery) return Task.CompletedTask;
+                    reportedChars = streamed.Length;
+                    reportedAt.Restart();
+                    var chars = streamed.Length;
+                    var tail = chars <= TailChars ? streamed.ToString() : streamed.ToString(chars - TailChars, TailChars);
+                    _scheduler.Post(() => Progress?.Invoke(proposalId, taskId, chars, tail));
+                    return Task.CompletedTask;
+                }, flight.Cts.Token).ConfigureAwait(false);
+            }
             catch (OperationCanceledException) { response = ModelResponse.Failed("cancelled", 0); }
             finally { (client as IDisposable)?.Dispose(); }
             _scheduler.Post(() => Finish(flight, response));

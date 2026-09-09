@@ -61,6 +61,8 @@ public static class TransitionTable
                 Trigger.CommitInterrupted or Trigger.RecoverDraft when state == RelayState.Idle => Transition.Accept(state, RelayState.Organizing, trigger),
                 // A user-initiated operation (create/archive project, backup…) runs visibly as EXECUTING.
                 Trigger.BeginExecution => Transition.Accept(state, RelayState.Executing, trigger),
+                // A question typed into the ask box (no chord, no capture) plans visibly as PLANNING.
+                Trigger.BeginPlanning => Transition.Accept(state, RelayState.Planning, trigger),
                 _ => Transition.Reject(state, trigger, $"Nothing to {Describe(trigger)} while {state.Label()}."),
             },
 

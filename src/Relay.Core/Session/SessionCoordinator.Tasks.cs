@@ -31,6 +31,12 @@ public sealed class CoordinatorServices
     public required IOrchestrator Orchestrator { get; set; }
     /// <summary>RELAY0 as judge of the stream and of direct asks. Replaced with settings; read per pass.</summary>
     public IJudge Judge { get; set; } = new HeuristicJudge();
+    /// <summary>The mind of the rebuilt orchestrator (docs/09); used for every task when orchestrator.mode is "mind". Replaced with settings.</summary>
+    public Mind.IMind? Mind { get; set; }
+    /// <summary>Weights and thresholds of every decision between paths; loaded from config\decisions.json.</summary>
+    public Decisions.DecisionSet Decisions { get; set; } = Relay.Core.Decisions.DecisionSet.Default();
+    /// <summary>Where finished tasks leave their usage line; null keeps no usage data.</summary>
+    public Usage.UsageRecorder? Usage { get; init; }
     public required SearchIndex Index { get; init; }
     public IWorkerOperations? Workers { get; init; }
     public ExternalRuntime? External { get; init; }
@@ -106,6 +112,16 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public bool IsLive => Status is TaskStatus.Planning or TaskStatus.AwaitingApproval or TaskStatus.Executing;
         public int PromptTokens => ModelCalls.Sum(m => m.PromptTokens);
         public int CompletionTokens => ModelCalls.Sum(m => m.CompletionTokens);
+
+        // Mind mode (docs/09): the loop that runs this task and what the coordinator owes it.
+        public Mind.TaskLoop? Loop { get; set; }
+        public MindHost? Host { get; set; }
+        /// <summary>True from the moment the loop is asked to step until its returned task is observed on the coordinator thread.</summary>
+        public bool LoopBusy { get; set; }
+        /// <summary>Consequences that arrived while the loop was stepping; delivered in order when it returns.</summary>
+        public Queue<Mind.MoveOutcome> PendingOutcomes { get; } = new();
+        /// <summary>Proposal ids whose approval, rejection or automatic allowance the loop has already been told about.</summary>
+        public HashSet<string> ObservedApprovals { get; } = new(StringComparer.Ordinal);
     }
 
     private readonly List<TaskState> _tasks = new();
@@ -204,6 +220,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (text.Length == 0) { _notice = "Type or dictate something to ask."; Notify(); return false; }
         if (_state is RelayState.Locked or RelayState.Starting or RelayState.Failed) { _notice = "Resolve the current incident first."; Notify(); return false; }
         if (!OrchestratorEnabled) { _notice = "The orchestrator is off; enable it in settings to ask."; Notify(); return false; }
+        // Mind mode: a task waiting for the user's answer gets the typed text as its reply, in the same box.
+        if (Foreground is { Loop: not null } waitingTask && waitingTask.Loop.WaitingFor == Mind.Waits.User) return AnswerMind(waitingTask.TaskId, text);
         var now = _clock.UtcNow;
         var foreground = _state is RelayState.Idle or RelayState.Completed;
         if (foreground && Foreground is not null) foreground = false;
@@ -312,7 +330,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         mergeKey = Guarded(task, task.MergeKey),
         chars,
         judge,
-        planner = _services.Orchestrator.Name,
+        planner = PlannerName,
     };
 
     // ----------------------------------------------------------------------------------------
@@ -328,12 +346,16 @@ public sealed partial class SessionCoordinator : IExecutionSink
     /// </summary>
     private static string? Guarded(TaskState task, string? text) => text is null || !task.Overheard ? text : Fingerprint(text);
 
-    private static string Fingerprint(string text) => $"withheld: {text.Length} chars, sha256 {Sha256Hex(text)[..16]}";
+    private static string Fingerprint(string text) => Withheld.Fingerprint(text);
 
     private static IReadOnlyList<string> Guarded(TaskState task, IReadOnlyList<string> texts) => task.Overheard ? texts.Select(Fingerprint).ToList() : texts;
 
     private static IReadOnlyDictionary<string, string> Guarded(TaskState task, IReadOnlyDictionary<string, string> map)
         => task.Overheard ? map.ToDictionary(kv => kv.Key, kv => Fingerprint(kv.Value), StringComparer.Ordinal) : map;
+
+    /// <summary>A proposal target for the ledger: for an overheard task the prose is fingerprinted and the references kept (<see cref="Withheld.Target"/>).</summary>
+    private static IReadOnlyDictionary<string, string> GuardedTarget(TaskState task, IReadOnlyDictionary<string, string> target)
+        => task.Overheard ? Withheld.Target(target) : target;
 
     private TaskKind ClassifyDirect(string text)
     {
@@ -353,6 +375,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
 
     private void BeginPlanning(TaskState task)
     {
+        if (MindMode) { BeginMindLoop(task); return; }
         task.Timeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Orchestrator.PlanningTimeoutMs), () =>
         {
             if (!_tasks.Contains(task) || task.Status != TaskStatus.Planning) return;
@@ -442,9 +465,10 @@ public sealed partial class SessionCoordinator : IExecutionSink
     private void ReceiveProposal(TaskState task, Proposal proposal)
     {
         PersistProposal(proposal);
-        Append(EventTypes.ProposalReceived, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, reason = proposal.Reason, target = proposal.Target, sourceEventIds = proposal.SourceEventIds, expectedEffects = proposal.ExpectedEffects, risk = proposal.Risk, requiresApproval = proposal.RequiresApproval, proposedBy = proposal.ProposedBy, dependsOn = proposal.Dependencies, hash = proposal.Hash() });
+        // A planner's reason and the prose in its target (note text, an objective, a title) can quote the overheard words, so they are guarded like its answer; ids, slugs and flags stay legible.
+        Append(EventTypes.ProposalReceived, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, reason = Guarded(task, proposal.Reason), target = GuardedTarget(task, proposal.Target), sourceEventIds = proposal.SourceEventIds, expectedEffects = Guarded(task, proposal.ExpectedEffects), risk = proposal.Risk, requiresApproval = proposal.RequiresApproval, proposedBy = proposal.ProposedBy, dependsOn = proposal.Dependencies, hash = proposal.Hash() });
         var decision = PolicyEngine.Decide(proposal, WorldFor(task));
-        Append(EventTypes.ProposalDecided, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = decision.Outcome.ToString(), tier = decision.Tier.ToString(), reasons = decision.Reasons, target = decision.NormalizedTarget });
+        Append(EventTypes.ProposalDecided, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = decision.Outcome.ToString(), tier = decision.Tier.ToString(), reasons = decision.Reasons, target = GuardedTarget(task, decision.NormalizedTarget) });
         var status = decision.Outcome switch
         {
             DecisionOutcome.Allow => "allowed",
@@ -487,6 +511,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
     /// <summary>Moves the task to approval, execution, or completion depending on what the proposals need.</summary>
     private void AdvanceTask(TaskState task)
     {
+        if (task.Loop is not null) { AdvanceMindTask(task); return; }
         if (task.Proposals.Any(p => p.Status == "pending"))
         {
             var entering = task.Status != TaskStatus.AwaitingApproval;
@@ -532,7 +557,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             }
             next.Status = "executing";
             next.Capability ??= _capabilities.Issue(next.Proposal, _clock.UtcNow);
-            var result = _executor.Execute(next.Proposal, next.Capability, WorldFor(task, forExecution: true), task.TaskId, this);
+            var result = _executor.Execute(next.Proposal, next.Capability, WorldFor(task, forExecution: true), task.TaskId, this, overheard: task.Overheard);
             next.Result = result;
             if (result.Status == ExecutionStatus.Pending)
             {
@@ -560,6 +585,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         // A worker killed because the user asked for a stop is not a failure of the task; it is the stop working.
         op.Status = result.Status == ExecutionStatus.Completed ? "executed" : task.StopRequested ? "stopped" : "failed";
         if (op.Status == "executed") RefreshIndexAfter(op);
+        if (task.Loop is not null) { OnMindOperationCompleted(task, op, result); Notify(); return; }
         if (op.Status == "executed" && op.Proposal.Action == Actions.ModelRequest && result.Outputs.TryGetValue("artifactId", out var artifactId))
         {
             var objective = op.Proposal.Target.GetValueOrDefault("objective") ?? task.Instruction;
@@ -1306,7 +1332,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var externalPending = task.PendingOperation?.Proposal.Action == Actions.ModelRequest;
         return new TaskView(task.TaskId, task.Origin, task.Kind, task.Status, TaskLanes.Tag(task.Kind, task.Status, externalPending), task.Lane, task.Instruction,
             plan?.Summary ?? (task.Status == TaskStatus.Planning ? "Planning…" : ""), plan?.Steps ?? [], plan?.Answer, plan?.Citations ?? [], proposals,
-            plan?.Producer ?? _services.Orchestrator.Name, task.Outcome, task.StartedAt, task.CompletedAt, task.IsLive, task.Foreground, task.ExcerptId, task.Title, task.Why, task.Confidence,
+            plan?.Producer ?? PlannerName, task.Outcome, task.StartedAt, task.CompletedAt, task.IsLive, task.Foreground, task.ExcerptId, task.Title, task.Why, task.Confidence,
             plan?.Knowledge ?? KnowledgeState.Empty, plan?.Consistent, task.Presentation, task.PresentationReason,
             new TaskCost(task.PromptTokens, task.CompletionTokens, task.ModelCalls.Count, task.ToolCalls.Count, (long)((task.CompletedAt ?? _clock.UtcNow) - task.StartedAt).TotalMilliseconds),
             task.ToolCalls.ToList(), task.ModelCalls.ToList(), task.UserResponse, task.ParentTaskId);

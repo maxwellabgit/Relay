@@ -91,6 +91,9 @@ public class TransitionTableTests
         Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.Planning, Trigger.BeginExecution).To);
         Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.AwaitingApproval, Trigger.BeginExecution).To);
         Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.Idle, Trigger.BeginExecution).To);
+        // The ask box: a direct question from idle (or from a completed receipt) plans in the foreground without a capture.
+        Assert.Equal(RelayState.Planning, TransitionTable.Next(RelayState.Idle, Trigger.BeginPlanning).To);
+        Assert.Equal(RelayState.Planning, TransitionTable.Next(RelayState.Completed, Trigger.BeginPlanning).To);
         Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.Planning, Trigger.PlanReady).To);
         Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.AwaitingApproval, Trigger.AllRejected).To);
         Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.Executing, Trigger.ExecutionSucceeded).To);

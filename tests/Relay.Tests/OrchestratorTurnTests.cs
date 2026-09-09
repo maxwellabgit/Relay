@@ -8,7 +8,9 @@ using Relay.Core.Projects;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Storage;
+using Relay.Core.Tasks;
 using Relay.Tests.Support;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Tests;
 
@@ -292,6 +294,28 @@ public class OrchestratorTurnTests : IDisposable
             .ExpectAnswerContains("Atlas")
             .ExpectAnswerContains("beacon")
             .ExpectNoProposals();
+    }
+
+    [Fact]
+    public void TheAskBoxPlansInTheForegroundFromIdleAndFromACompletedReceipt()
+    {
+        using var s = Scenario.New(_tmp).WithWorkspace()
+            .Command("create project Atlas").Approve()
+            .ExpectState(RelayState.Completed)
+            .Ask("list my projects")                                  // asked from the COMPLETED receipt: the receipt is dismissed and the ask plans
+            .ExpectState(RelayState.Completed)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Completed, TaskOrigin.Direct)
+            .ExpectAnswerContains("Atlas")
+            .ExpectNoProposals();
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.StateChanged && r.DataString("from") == "COMPLETED" && r.DataString("to") == "IDLE");
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.StateChanged && r.DataString("from") == "IDLE" && r.DataString("to") == "PLANNING");
+        s.Dismiss().ExpectState(RelayState.Idle)
+            .Ask("list my projects")                                  // and from IDLE
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("Atlas");
+        Assert.Equal(2, s.H.Records().Count(r => r.Type == EventTypes.AskRecorded));
+        Assert.Equal(2, s.H.Records().Count(r => r.Type == EventTypes.TaskCompleted && r.DataString("lane") == "ask"));
+        Assert.DoesNotContain("Nothing to start planning", s.Snap.Notice ?? "");
     }
 
     [Fact]

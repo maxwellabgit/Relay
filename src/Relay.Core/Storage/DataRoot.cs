@@ -73,6 +73,10 @@ public sealed class DataRoot
     public string PromptsDirectory => Combine("config", "prompts");
     /// <summary>Responses from approved external tasks, kept as source artifacts.</summary>
     public string ExternalArtifactsDirectory => Combine("artifacts", "external");
+    /// <summary>Weights and thresholds of every decision the engine makes between paths.</summary>
+    public string DecisionsPath => Combine("config", "decisions.json");
+    /// <summary>One line per task: route, scores, model metrics, outcome, the user's response. Metadata only, for post-hoc tuning.</summary>
+    public string UsageDirectory => Combine("usage");
 
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
@@ -95,7 +99,7 @@ public sealed class DataRoot
             DraftsDirectory, DiscardedDraftsDirectory, DraftNotesDirectory, IncidentsDirectory, LogsDirectory,
             RegistryDirectory, SecretsDirectory, ArchiveDirectory, BackupsDirectory, ReviewDirectory, TurnsDirectory,
             ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
-            StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory,
+            StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, UsageDirectory,
         })
         {
             Directory.CreateDirectory(dir);

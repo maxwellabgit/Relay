@@ -229,6 +229,7 @@ public sealed partial class MainWindow : Window
         {
             OrchestratorSettings.Off => "Planner off",
             OrchestratorSettings.Rules => "Rules only · no model",
+            OrchestratorSettings.Mind => s.ModelEnabled ? $"Mind · {s.ModelName}" + (modelReady ? "" : " · NO KEY") : "Mind (model disabled — enable it)",
             _ => s.ModelEnabled ? $"Rules + {s.ModelName}" + (modelReady ? "" : " · NO KEY") : "Rules + model (model disabled)",
         };
         OrchestratorDot.Fill = new SolidColorBrush(s.OrchestratorMode == OrchestratorSettings.Off ? Palette.Neutral
@@ -380,10 +381,11 @@ public sealed partial class MainWindow : Window
         var l = s.Listening;
         ListeningPanel.Visibility = Vis(l is not null);
         if (l is null) return;
-        BufferBar.Maximum = Math.Max(1, l.WindowSeconds);
-        BufferBar.Value = Math.Min(l.HeldSeconds, l.WindowSeconds);
+        var whole = l.WindowSeconds <= 0;   // the whole conversation is held until listening stops
+        BufferBar.Maximum = whole ? Math.Max(1, l.HeldSeconds) : Math.Max(1, l.WindowSeconds);
+        BufferBar.Value = whole ? l.HeldSeconds : Math.Min(l.HeldSeconds, l.WindowSeconds);
         BufferBar.ShowPaused = l.Finishing;
-        BufferText.Text = $"{l.HeldSeconds:0}s of {l.WindowSeconds:0}s held";
+        BufferText.Text = whole ? $"{l.HeldSeconds:0}s held (whole conversation)" : $"{l.HeldSeconds:0}s of {l.WindowSeconds:0}s held";
         var last = l.LastCheckAt is { } at ? $"last check {(DateTimeOffset.UtcNow - at).TotalSeconds:0}s ago" : "no check yet";
         ListeningText.Text = $"{l.Judge}{(l.Judging ? " is checking now" : $" · {last}")} · {l.JudgePasses} pass(es) · {l.Findings} finding(s) · {l.Excerpts} excerpt(s) kept ({l.RetainedSeconds:0}s retained) · {l.Tasks} task(s) raised"
             + (l.Finishing ? " · finishing" : "");

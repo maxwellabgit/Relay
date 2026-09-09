@@ -196,6 +196,61 @@ public class ListeningTests : IDisposable
     // Scenarios: the stream end to end
     // ----------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The shipped default while the architecture is built (docs/09): the whole conversation is held until listening
+    /// stops, and the judge reads stretches of it — a pass waits for enough new talk or for the oldest of it to age —
+    /// instead of judging every fragment. Words still never reach the ledger.
+    /// </summary>
+    [Fact]
+    public void WholeConversationIsHeldAndIngestedInStretchesNotFragments()
+    {
+        var judge = new ScriptedJudge().When("launch email", TaskKind.Remember, "Remember the launch email timing.");
+        using var s = Scenario.New(_tmp, cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 240; cfg.Stream.MinIngestSeconds = 20; }, judge: judge)
+            .WithWorkspace().WithListening()
+            .StartListening().ExpectListening()
+            .Hear(Decision).Observe();                                                  // one short sentence, seconds old: held, not judged yet
+        var live = s.Snap.Listening!;
+        Assert.Equal(0, live.WindowSeconds);
+        Assert.Equal(0, live.JudgePasses);
+        Assert.Equal(1, live.HeldSegments);
+        Assert.Empty(judge.Requests);
+
+        s.Silence(TimeSpan.FromSeconds(25));                                             // …until it has waited long enough
+        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
+        Assert.Single(judge.Requests);
+
+        s.Hear(Chatter).Hear(LaunchEmail).Observe();                                     // two more short sentences: under both thresholds again
+        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
+        s.Silence(TimeSpan.FromSeconds(200));                                            // nothing expired, and the stretch was judged as one
+        live = s.Snap.Listening!;
+        Assert.Equal(3, live.HeldSegments);
+        Assert.Equal(2, live.JudgePasses);
+        Assert.Equal(2, judge.Requests[^1].NewSegmentIds.Count);                         // Chatter and LaunchEmail arrived in one pass
+        Assert.Equal(3, judge.Requests[^1].Window.Count);                               // over the whole conversation so far
+        Assert.Equal(1, live.Findings);
+
+        s.StopListening().ExpectListening(false);
+        Assert.False(File.Exists(s.H.Root.CurrentStreamPath));
+        var ledger = s.H.LedgerText();
+        foreach (var sentence in new[] { Decision, Chatter, LaunchEmail }) Assert.DoesNotContain(sentence, ledger);
+        Assert.True(s.H.Last(EventTypes.StreamStarted)!.DataBool("wholeConversation") == true);
+    }
+
+    /// <summary>A watched term does not wait for the slow ingest.</summary>
+    [Fact]
+    public void WatchedTermsAreJudgedAtOnceEvenWithSlowIngest()
+    {
+        var judge = new ScriptedJudge();
+        using var s = Scenario.New(_tmp, cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 5000; cfg.Stream.MinIngestSeconds = 300; }, judge: judge)
+            .WithWorkspace()
+            .Do("Always show Atlas", c => Assert.True(c.UpdatePreference("display.alwaysShow", "Atlas")))
+            .WithListening()
+            .StartListening().Hear(Chatter).Observe();
+        Assert.Equal(0, s.Snap.Listening!.JudgePasses);
+        s.Hear(Decision);
+        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
+    }
+
     /// <summary>The README's retention promise: words live in the buffer, expire on their own, and never reach the ledger.</summary>
     [Fact]
     public void ListeningKeepsNoWordsExpiresTheBufferAndLeavesOnlyMetadataBehind()
@@ -283,6 +338,67 @@ public class ListeningTests : IDisposable
         Assert.Contains(s.Snap.Inbox, i => i.Text.Contains("compost"));
         // A typed instruction is the user's own words and stays in the ledger verbatim.
         Assert.Contains("create project Atlas", ledger);
+    }
+
+    /// <summary>
+    /// Found by the live model run: a model planner quotes the overheard sentence in a proposal's reason and in the note
+    /// text it proposes. Proposal events are ledger events, so for an overheard task the reason, the expected effects and
+    /// the prose in the target are fingerprinted like the plan's answer; ids, slugs, types and confidences stay legible.
+    /// </summary>
+    [Fact]
+    public void APlannerThatQuotesTheOverheardWordsInAProposalLeavesNoWordsInTheLedger()
+    {
+        const string Heard = "Someone needs to find out whether Hull council requires a separate licence for the Lightshift pilot.";
+        // The judge's why is a category, as the model judge is told to write it (it is ledgered); the focused prompt quotes the words.
+        var judge = new ScriptedJudge().When("Hull council", seg => new JudgeFinding(TaskKind.Research, 0.9, "Licence question for the Lightshift pilot", "open question about a licence",
+            "Find out whether Hull council requires a separate licence for the Lightshift pilot.", [seg.SegmentId], "licensing", "Lightshift"));
+        // The grammar builds the world (direct asks); the overheard task is planned by a stand-in for the model that quotes the words everywhere it can.
+        var rules = new Relay.Core.Orchestration.RuleBasedOrchestrator();
+        var planner = new CannedOrchestrator();
+        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace();
+        planner.Otherwise((req, ctx) => req.Origin != TaskOrigin.Observed
+            ? rules.PlanAsync(req, ctx, CancellationToken.None).GetAwaiter().GetResult()
+            : new TurnPlan(true, "Someone must check with Hull council about the Lightshift pilot licence", ["Read the excerpt: " + Heard], "The room said: " + Heard, [],
+                [new Proposal("01PROPOSALHULL000000000000", Actions.CreateDraftNote, "The excerpt says: " + Heard,
+                    new Dictionary<string, string> { ["projectId"] = ctx.Registry.FindActive("lightshift")!.Id, ["type"] = "task", ["confidence"] = "0.9", ["text"] = "Find out whether Hull council requires a separate licence for the Lightshift pilot." },
+                    ["01SOURCE000000000000000000"], ["A task note quoting: " + Heard], Risks.StagingWrite, false, Producers.Model)],
+                "canned"));
+        s.Command("create project Lightshift").Approve();
+        var lightshift = s.H.Registry.FindActive("lightshift")!;
+
+        s.WithListening().StartListening()
+            .Hear(Chatter)
+            .Hear(Heard).Observe()
+            .ExpectTask(TaskKind.Research, TaskStatus.Completed, TaskOrigin.Observed)
+            .ExpectEvent(EventTypes.ProposalReceived);
+
+        var ledger = s.H.LedgerText();
+        foreach (var words in new[] { Heard, "Hull council", "separate licence", "The room said", "The excerpt says", "quoting" })
+            Assert.DoesNotContain(words, ledger, StringComparison.OrdinalIgnoreCase);
+
+        var task = s.FindTask(TaskKind.Research)!;
+        Assert.StartsWith("canned", task.Producer);
+        var received = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ProposalReceived && r.DataString("taskId") == task.TaskId);
+        Assert.StartsWith("withheld: ", received.DataString("reason"));
+        var target = received.Data.GetProperty("target");
+        Assert.Equal(lightshift.Id, target.GetProperty("projectId").GetString());                 // references stay readable for the audit trail
+        Assert.Equal("task", target.GetProperty("type").GetString());
+        Assert.Equal("0.9", target.GetProperty("confidence").GetString());
+        Assert.StartsWith("withheld: ", target.GetProperty("text").GetString());                 // prose does not
+        Assert.All(received.Data.GetProperty("expectedEffects").EnumerateArray(), e => Assert.StartsWith("withheld: ", e.GetString()));
+        var decided = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ProposalDecided && r.DataString("taskId") == task.TaskId);
+        Assert.StartsWith("withheld: ", decided.Data.GetProperty("target").GetProperty("text").GetString());
+        // Tier A executes at once; the execution record names the note by id and fingerprints its text, while the journal keeps the target whole.
+        var started = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ExecutionStarted && r.DataString("turnId") == task.TaskId);
+        Assert.StartsWith("withheld: ", started.Data.GetProperty("target").GetProperty("text").GetString());
+        Assert.Equal(lightshift.Id, started.Data.GetProperty("target").GetProperty("projectId").GetString());
+        s.ExpectEvent(EventTypes.NoteDraftCreated);
+
+        // The proposal itself is intact where it is acted on: the task record and the pending proposal carry the words.
+        Assert.Contains("Hull council", Assert.Single(task.Proposals).Target["text"]);
+        Assert.Contains("Hull council", File.ReadAllText(Path.Combine(s.H.Root.TasksDirectory, task.TaskId + ".json")));
+        // A typed instruction is the user's own words and stays in the ledger verbatim.
+        Assert.Contains("create project Lightshift", ledger);
     }
 
     /// <summary>A check finding that conflicts with two stored decisions is the one thing that earns an alert.</summary>

@@ -1,13 +1,16 @@
 using Relay.Core.Agents;
 using Relay.Core.Captures;
 using Relay.Core.Config;
+using Relay.Core.Decisions;
 using Relay.Core.Execution;
 using Relay.Core.External;
 using Relay.Core.Ids;
 using Relay.Core.Judge;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Model;
 using Relay.Core.Notes;
+using Relay.Core.Usage;
 using Relay.Core.Orchestration;
 using Relay.Core.Preferences;
 using Relay.Core.Projects;
@@ -97,12 +100,17 @@ public sealed class RelayRuntime : IDisposable
             foreach (var (id, text, at) in external.AllArtifacts()) index.IndexArtifact(id, text, at);
         }
 
+        var decisions = DecisionSet.Load(root, out var decisionProblems);
+        indexProblems.AddRange(decisionProblems);
         var services = servicesRef = new CoordinatorServices
         {
             Registry = registry,
             Roots = roots,
             Orchestrator = orchestrator,
             Judge = judge,
+            Mind = BuildMind(settings.Settings, options),
+            Decisions = decisions,
+            Usage = new UsageRecorder(root),
             Index = index,
             Workers = workers,
             External = external,
@@ -117,12 +125,17 @@ public sealed class RelayRuntime : IDisposable
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
             host, clock, scheduler, appVersion, processId, services);
         if (workers is not null) Connect(workers, coordinator);
-        if (external is not null) external.Completed = coordinator.CompletePendingOperation;
-        // Model, judge and orchestrator settings changed in the UI take effect on the next task or judge pass.
+        if (external is not null)
+        {
+            external.Completed = coordinator.CompletePendingOperation;
+            external.Progress = coordinator.ReportDelegateProgress;
+        }
+        // Model, judge, mind and orchestrator settings changed in the UI take effect on the next task or judge pass.
         coordinator.SettingsChanged += changed =>
         {
             services.Orchestrator = BuildOrchestrator(changed, options);
             services.Judge = BuildJudge(changed, options);
+            services.Mind = BuildMind(changed, options);
         };
 
         return new RelayRuntime(root, ledger, coordinator, recovery, settings, services);
@@ -138,6 +151,13 @@ public sealed class RelayRuntime : IDisposable
         if (settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Model.Enabled && options.ModelClientFactory?.Invoke(settings.Model) is { } client)
             return new CompositeOrchestrator(rules, new ModelOrchestrator(client, settings.Model.MaxOutputTokens));
         return rules;
+    }
+
+    /// <summary>The mind of the rebuilt orchestrator (docs/09): RELAY0's model behind the step schema. Null unless mind mode is selected and the model enabled.</summary>
+    public static IMind? BuildMind(RelaySettings settings, RuntimeOptions options)
+    {
+        if (settings.Orchestrator.Mode != OrchestratorSettings.Mind || !settings.Model.Enabled) return null;
+        return options.ModelClientFactory?.Invoke(settings.Model) is { } client ? new ModelMind(client, settings.Model.MaxOutputTokens) : null;
     }
 
     /// <summary>The judge: off, the labeled heuristic, or RELAY0's model (which falls back to the heuristic per pass when unreachable).</summary>

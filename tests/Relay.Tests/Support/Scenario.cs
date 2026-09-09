@@ -27,6 +27,7 @@ public sealed class Scenario : IDisposable
     private readonly IWorkerHost? _workerHost;
     private readonly IJudge? _judge;
     private readonly Func<ExternalModelProfile, IModelClient>? _externalClients;
+    private readonly Relay.Core.Mind.IMind? _mind;
     private readonly bool _inlinePost;
     private readonly MemorySecretStore _secrets = new();
     private readonly StringBuilder _transcript = new();
@@ -36,25 +37,27 @@ public sealed class Scenario : IDisposable
     private long _activityFrom;
     private string _heard = "";
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, IJudge? judge, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, IJudge? judge, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind)
     {
         _tmp = tmp;
         _orchestrator = orchestrator;
         _workerHost = workerHost;
         _judge = judge;
         _externalClients = externalClients;
+        _mind = mind;
         _inlinePost = inlinePost;
         _h = Open(configure, clock);
         Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} judge {_h.Snap.JudgeName} ==");
     }
 
     /// <param name="inlinePost">False when background threads (external requests, real workers) post completions; the test then drains them with <see cref="PumpUntil"/>.</param>
+    /// <param name="mind">The mind for <c>orchestrator.mode = "mind"</c> (docs/09); the mode itself is set through <paramref name="configure"/>.</param>
     public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
-        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true)
-        => new(tmp, configure, orchestrator, workerHost, clock, judge, externalClients, inlinePost);
+        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null)
+        => new(tmp, configure, orchestrator, workerHost, clock, judge, externalClients, inlinePost, mind);
 
     private Harness Open(Action<RelaySettings>? configure, FixedClock? clock)
-        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, judge: _judge, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost).Start();
+        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, judge: _judge, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind).Start();
 
     /// <summary>Drains work posted by background threads on this thread until the condition holds; fails the scenario on timeout.</summary>
     public Scenario PumpUntil(string what, Func<bool> condition, TimeSpan? timeout = null)

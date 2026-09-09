@@ -450,9 +450,15 @@ public sealed partial class MainWindow
         var panel = new StackPanel { Spacing = 12, MinWidth = 460 };
 
         var mode = new ComboBox { Header = "Planner", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var (value, label) in new[] { (OrchestratorSettings.Off, "Off — instructions are recorded only"), (OrchestratorSettings.Rules, "Rules — deterministic command grammar, no model"), (OrchestratorSettings.RulesAndModel, "Rules + model — grammar first, RELAY0's model for the rest") })
+        foreach (var (value, label) in new[]
+        {
+            (OrchestratorSettings.Off, "Off — instructions are recorded only"),
+            (OrchestratorSettings.Rules, "Rules — deterministic command grammar, no model"),
+            (OrchestratorSettings.RulesAndModel, "Rules + model — grammar first, RELAY0's model for the rest"),
+            (OrchestratorSettings.Mind, "Mind — one local model runs every task step by step, observing what each move did (needs the model)"),
+        })
             mode.Items.Add(new ComboBoxItem { Content = label, Tag = value });
-        mode.SelectedIndex = current.Orchestrator.Mode switch { OrchestratorSettings.Off => 0, OrchestratorSettings.Rules => 1, _ => 2 };
+        mode.SelectedIndex = current.Orchestrator.Mode switch { OrchestratorSettings.Off => 0, OrchestratorSettings.Rules => 1, OrchestratorSettings.Mind => 3, _ => 2 };
         panel.Children.Add(mode);
 
         var judge = new ComboBox { Header = "Judge (what Ctrl+Alt does)", HorizontalAlignment = HorizontalAlignment.Stretch };

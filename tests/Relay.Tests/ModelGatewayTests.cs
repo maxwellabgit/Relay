@@ -332,6 +332,86 @@ public sealed class ModelGatewayTests : IDisposable
         Assert.Throws<ArgumentException>(() => new OpenAiCompatibleClient(Settings("not a url"), new MemorySecretStore()));
     }
 
+    private static HttpResponseMessage Sse(params string[] events)
+    {
+        var text = string.Join("", events.Select(e => e.Length == 0 ? "\n" : e.StartsWith(':') ? e + "\n" : "data: " + e + "\n\n"));
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(text, System.Text.Encoding.UTF8, "text/event-stream") };
+    }
+
+    [Fact]
+    public async Task StreamingDeliversEachDeltaAsItArrivesAndAssemblesTheSameReply()
+    {
+        var secrets = new MemorySecretStore();
+        secrets.Set("k", "sk");
+        var handler = new FakeHandler
+        {
+            Respond = _ => Sse(
+                """{"choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}""",
+                """{"choices":[{"delta":{"content":"Nepal "},"finish_reason":null}]}""",
+                ": keep-alive",
+                """{"choices":[{"delta":{"content":"uses UTC+05:45."},"finish_reason":"stop"}]}""",
+                """{"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":9}}""",
+                "[DONE]"),
+        };
+        using var client = new OpenAiCompatibleClient(Settings(), secrets, handler);
+        var deltas = new List<string>();
+
+        var response = await client.StreamAsync(new ModelRequest("m-1", [new("user", "U")], 200, false), (d, _) => { deltas.Add(d); return Task.CompletedTask; }, CancellationToken.None);
+
+        Assert.True(response.Ok);
+        Assert.Equal("Nepal uses UTC+05:45.", response.Content);
+        Assert.Equal(["Nepal ", "uses UTC+05:45."], deltas);
+        Assert.Equal(40, response.PromptTokens);
+        Assert.Equal(9, response.CompletionTokens);
+        var body = JsonNode.Parse(handler.Bodies[0])!.AsObject();
+        Assert.True(body["stream"]!.GetValue<bool>());
+        Assert.True(body["stream_options"]!["include_usage"]!.GetValue<bool>());
+        Assert.Equal("m-1", body["model"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task StreamingHandlesHostsThatAnswerWholeErrorsAndEmptyStreams()
+    {
+        var secrets = new MemorySecretStore();
+        secrets.Set("k", "sk");
+        var request = new ModelRequest("m-1", [new("user", "U")], 200, false);
+
+        // A host that ignores stream=true: the whole reply is one delta and the result is the same as CompleteAsync.
+        var handler = new FakeHandler { Respond = _ => Json(HttpStatusCode.OK, """{"choices":[{"message":{"content":"Whole reply."}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}""") };
+        using var whole = new OpenAiCompatibleClient(Settings(), secrets, handler);
+        var deltas = new List<string>();
+        var response = await whole.StreamAsync(request, (d, _) => { deltas.Add(d); return Task.CompletedTask; }, CancellationToken.None);
+        Assert.True(response.Ok);
+        Assert.Equal(["Whole reply."], deltas);
+        Assert.Equal(5, response.PromptTokens);
+
+        // An HTTP error before any event.
+        handler.Respond = _ => Json(HttpStatusCode.BadGateway, """{"error":{"message":"upstream down"}}""");
+        var failed = await whole.StreamAsync(request, (_, _) => Task.CompletedTask, CancellationToken.None);
+        Assert.False(failed.Ok);
+        Assert.Equal(502, failed.HttpStatus);
+        Assert.Contains("upstream down", failed.Error);
+
+        // An error event mid-stream.
+        handler.Respond = _ => Sse("""{"choices":[{"delta":{"content":"Par"}}]}""", """{"error":{"message":"context length exceeded"}}""");
+        var mid = await whole.StreamAsync(request, (_, _) => Task.CompletedTask, CancellationToken.None);
+        Assert.False(mid.Ok);
+        Assert.Contains("context length exceeded", mid.Error);
+
+        // A stream that closes without content or [DONE].
+        handler.Respond = _ => Sse("""{"choices":[{"delta":{}}]}""");
+        var empty = await whole.StreamAsync(request, (_, _) => Task.CompletedTask, CancellationToken.None);
+        Assert.False(empty.Ok);
+        Assert.Contains("without content", empty.Error);
+
+        // The default streaming implementation of any client: complete, then one delta.
+        var scripted = new ScriptedModelClient().Reply("scripted");
+        var seen = new List<string>();
+        var viaDefault = await ((IModelClient)scripted).StreamAsync(request, (d, _) => { seen.Add(d); return Task.CompletedTask; }, CancellationToken.None);
+        Assert.Equal("scripted", viaDefault.Content);
+        Assert.Equal(["scripted"], seen);
+    }
+
     /// <summary>Runs only when RELAY_LIVE_MODEL_KEY is set (optionally RELAY_LIVE_MODEL_ENDPOINT / RELAY_LIVE_MODEL). Never runs in CI.</summary>
     [Fact]
     public void LiveModelAnswersARecallQuestionWithACitation()

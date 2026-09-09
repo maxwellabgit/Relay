@@ -158,4 +158,18 @@ public static class EventTypes
     public const string AttentionShown = "attention.shown";
     public const string AttentionSuppressed = "attention.suppressed";
     public const string AttentionDismissed = "attention.dismissed";
+
+    // The mind's loop (orchestrator rebuild, slice 1)
+    /// <summary>One step of the mind: move type and name, read scores, feed line (fingerprinted for overheard tasks), tokens, latency.</summary>
+    public const string MindStepped = "mind.stepped";
+    /// <summary>A step that produced no usable move (model unavailable or contract broken) and whether it is retried.</summary>
+    public const string MindFailed = "mind.failed";
+    /// <summary>The loop stopped stepping until the host reports what happened (approval, user reply, delegate, build).</summary>
+    public const string LoopWaiting = "loop.waiting";
+    public const string LoopResumed = "loop.resumed";
+    public const string LoopEnded = "loop.ended";
+    /// <summary>A decision between paths: name, features, weights, score, outcome, rationale.</summary>
+    public const string DecisionMade = "decision.made";
+    /// <summary>A usage line was written (path and task id only).</summary>
+    public const string UsageRecorded = "usage.recorded";
 }

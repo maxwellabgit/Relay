@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Relay.Core.Decisions;
 using Relay.Core.Judge;
+using Relay.Core.Mind;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Storage;
@@ -88,19 +90,26 @@ public sealed class EvaluationRunner
     private readonly Func<EvaluationCase, TurnContext> _context;
     private readonly IJudge? _judge;
     private readonly Func<EvaluationCase, JudgeContext>? _judgeContext;
+    private readonly IMind? _mind;
+    private readonly Func<EvaluationCase, MindContext>? _mindContext;
     private readonly Func<DateTimeOffset> _clock;
 
-    public EvaluationRunner(IOrchestrator planner, Func<EvaluationCase, TurnContext> context, IJudge? judge = null, Func<EvaluationCase, JudgeContext>? judgeContext = null, Func<DateTimeOffset>? clock = null)
+    public EvaluationRunner(IOrchestrator planner, Func<EvaluationCase, TurnContext> context, IJudge? judge = null, Func<EvaluationCase, JudgeContext>? judgeContext = null, Func<DateTimeOffset>? clock = null,
+        IMind? mind = null, Func<EvaluationCase, MindContext>? mindContext = null)
     {
         _planner = planner;
         _context = context;
         _judge = judge;
         _judgeContext = judgeContext;
+        _mind = mind;
+        _mindContext = mindContext;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
     /// <summary>Per-case time limit; a planner that does not answer in time fails the case rather than hanging the run.</summary>
     public TimeSpan CaseTimeout { get; init; } = TimeSpan.FromSeconds(90);
+    /// <summary>Mind cases: the loop's step budget when the case sets none.</summary>
+    public int MindMaxSteps { get; init; } = 8;
 
     public async Task<EvaluationReport> RunAsync(EvaluationSet set, CancellationToken cancellationToken)
     {
@@ -112,16 +121,181 @@ public sealed class EvaluationRunner
         foreach (var c in set.Cases)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(c.IsJudgeCase ? await RunJudgeCaseAsync(c, cancellationToken).ConfigureAwait(false) : await RunPlanCaseAsync(c, cancellationToken).ConfigureAwait(false));
+            results.Add(c.IsJudgeCase ? await RunJudgeCaseAsync(c, cancellationToken).ConfigureAwait(false)
+                : c.IsMindCase ? await RunMindCaseAsync(c, cancellationToken).ConfigureAwait(false)
+                : await RunPlanCaseAsync(c, cancellationToken).ConfigureAwait(false));
         }
         return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Judge = _judge?.Name, Results = results };
     }
+
+    // ----------------------------------------------------------------------------------------
+    // Mind stage: the loop runs against the case's world until it ends or first needs the user
+    // ----------------------------------------------------------------------------------------
+
+    private async Task<CaseResult> RunMindCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
+    {
+        var watch = Stopwatch.StartNew();
+        if (_mind is null || _mindContext is null) return new CaseResult(c.Id, c.Source, "mind", false, ["No mind was given to the runner; the case expects moves."], "(no mind)", "-", 0);
+        var at = _clock();
+        var turn = _context(c);
+        var context = _mindContext(c);
+        var host = new EvaluationHost(turn.Tools, _clock);
+        var source = c.ParsedOrigin switch { TaskOrigin.Observed => InputObserved.Heard, TaskOrigin.Dialogue => InputObserved.FollowUp, _ => InputObserved.Ask };
+        var loop = new TaskLoop("eval-" + c.Id, source, _mind, host, context, new Decider(DecisionSet.Default()), new LoopBudget(c.Expect.MaxSteps ?? MindMaxSteps, turn.Settings.MaxToolCalls), new FixedClock(_clock));
+        loop.Observe(new InputObserved(at, source, c.Instruction, c.Heard is null ? null : ExcerptIdFor(c)));
+        LoopResult? result;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(CaseTimeout);
+            result = await loop.RunAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new CaseResult(c.Id, c.Source, "mind", false, [$"The mind did not finish within {CaseTimeout.TotalSeconds:0}s."], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new CaseResult(c.Id, c.Source, "mind", false, [$"The mind threw {ex.GetType().Name}: {ex.Message}"], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
+        }
+        var failures = Score(c.Expect, loop, result);
+        return new CaseResult(c.Id, c.Source, "mind", failures.Count == 0, failures, Observe(loop, result), _mind.Name, watch.ElapsedMilliseconds);
+    }
+
+    /// <summary>The outcome of a mind case: "answered" (or another end), or the wait it stopped at (approval, user, build, delegate).</summary>
+    public static string OutcomeOf(TaskLoop loop, LoopResult? result) => result is not null ? result.Outcome : loop.WaitingFor ?? "waiting";
+
+    /// <summary>Every way the mind's moves fall short of the expectation.</summary>
+    public static IReadOnlyList<string> Score(Expectation e, TaskLoop loop, LoopResult? result)
+    {
+        var failures = new List<string>();
+        var moves = loop.Transcript.OfType<MoveObserved>().Select(m => m.Move).ToList();
+        var written = moves.Select(Written).ToList();
+        if (result is { Status: LoopStatus.Failed }) failures.Add($"The loop failed: {result.Error ?? result.Outcome}.");
+        if (e.FirstMove is { } first && (moves.Count == 0 || !Matches(moves[0], first)))
+            failures.Add($"Expected the first move to be {first}; it was {(moves.Count == 0 ? "nothing" : written[0])}.");
+        if (e.Moves is { Count: > 0 } wanted)
+        {
+            var i = 0;
+            foreach (var move in moves) { if (i < wanted.Count && Matches(move, wanted[i])) i++; }
+            if (i < wanted.Count) failures.Add($"Expected the moves [{string.Join(", ", wanted)}] in order; missing {wanted[i]} in [{string.Join(", ", written)}].");
+        }
+        foreach (var forbidden in e.ForbiddenMoves ?? [])
+            if (moves.Any(m => Matches(m, forbidden))) failures.Add($"The move {forbidden} must not be made here.");
+        foreach (var need in e.Needs ?? [])
+            if (loop.FirstRead is null || !loop.FirstRead.Has(need)) failures.Add($"Expected the first read to need '{need}'; it needed [{string.Join(", ", loop.FirstRead?.Needs ?? [])}].");
+        if (e.Route is { } route && !string.Equals(loop.Route?.Outcome, route, StringComparison.Ordinal)) failures.Add($"Expected the route '{route}'; the decider chose '{loop.Route?.Outcome ?? "none"}'.");
+        var outcome = OutcomeOf(loop, result);
+        if (e.Outcome is { } wantOutcome && !string.Equals(outcome, wantOutcome, StringComparison.Ordinal)) failures.Add($"Expected the outcome '{wantOutcome}'; it was '{outcome}'.");
+        if (e.MaxSteps is { } max && loop.Steps > max) failures.Add($"Took {loop.Steps} steps; at most {max} were allowed.");
+        var answer = result?.Answer ?? "";
+        foreach (var fragment in e.AnswerContains ?? [])
+            if (!answer.Contains(fragment, StringComparison.OrdinalIgnoreCase)) failures.Add($"The answer does not mention '{fragment}'.");
+        foreach (var fragment in e.AnswerAvoids ?? [])
+            if (answer.Contains(fragment, StringComparison.OrdinalIgnoreCase)) failures.Add($"The answer must not mention '{fragment}'.");
+        if (e.MaxAnswerChars is { } maxChars && answer.Length > maxChars) failures.Add($"The answer is {answer.Length} characters; at most {maxChars} were allowed.");
+        return failures;
+    }
+
+    /// <summary>"type" or "type:name" — the name is the tool, action, profile or tool-to-build; a name of "*" matches any.</summary>
+    private static bool Matches(Move move, string pattern)
+    {
+        var parts = pattern.Split(':', 2);
+        if (!string.Equals(move.Type, parts[0], StringComparison.Ordinal)) return false;
+        if (parts.Length == 1 || parts[1] == "*") return true;
+        var name = move switch { UseToolMove t => t.Tool, ProposeMove p => p.Action, DelegateMove d => d.Profile, BuildMove b => b.Name, _ => null };
+        return string.Equals(name, parts[1], StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Written(Move move) => move switch
+    {
+        UseToolMove t => $"use_tool:{t.Tool}",
+        ProposeMove p => $"propose:{p.Action}",
+        DelegateMove d => $"delegate:{d.Profile}",
+        BuildMove b => $"build:{b.Name}",
+        _ => move.Type,
+    };
+
+    private static string Observe(TaskLoop loop, LoopResult? result)
+    {
+        var sb = new StringBuilder();
+        sb.Append("moves: ").Append(string.Join(" → ", loop.Transcript.OfType<MoveObserved>().Select(m => Written(m.Move))));
+        sb.Append("; outcome: ").Append(OutcomeOf(loop, result));
+        if (loop.FirstRead is { } r) sb.Append("; read: complexity=").Append(r.Complexity.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)).Append(" needs=[").Append(string.Join(",", r.Needs)).Append("] intent=").Append(r.Intent.Length > 100 ? r.Intent[..99] + "…" : r.Intent);
+        if (loop.Route is { } route) sb.Append("; route=").Append(route.Outcome);
+        if (result?.Answer is { } answer) sb.Append("; answer(").Append(answer.Length).Append("): ").Append(answer.Length > 160 ? answer[..159] + "…" : answer);
+        if (loop.Feed.Count > 0) sb.Append("; feed: ").Append(string.Join(" | ", loop.Feed.Take(8).Select(s => s.Length > 120 ? s[..119] + "…" : s)));
+        if (loop.PromptTokens > 0 || loop.CompletionTokens > 0) sb.Append(" · ").Append(loop.PromptTokens).Append('+').Append(loop.CompletionTokens).Append(" tok");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The loop's host in evaluation: read-only tools run for real against the case's world; anything that would need the user
+    /// (a proposal, a delegation, a build, a question) is answered with the observation the engine would give and the loop is left
+    /// waiting there — that first wait is the case's outcome. Nothing is executed.
+    /// </summary>
+    private sealed class EvaluationHost : ILoopHost
+    {
+        private readonly ToolBroker _tools;
+        private readonly Func<DateTimeOffset> _clock;
+
+        public EvaluationHost(ToolBroker tools, Func<DateTimeOffset> clock) { _tools = tools; _clock = clock; }
+
+        public void Stepped(TaskLoop loop, MindStep step) { }
+        public void Said(TaskLoop loop, SayMove move) { }
+        public void Waiting(TaskLoop loop, string waitingFor) { }
+        public void Ended(TaskLoop loop, LoopResult result) { }
+
+        public Task<MoveOutcome> UseToolAsync(TaskLoop loop, UseToolMove move, CancellationToken cancellationToken)
+        {
+            var result = _tools.Call(move.Tool, move.Args);
+            string? data = null;
+            if (result.Ok && result.Data is not null) { try { data = JsonSerializer.Serialize(result.Data, RelayJson.Compact); } catch (NotSupportedException) { } }
+            var ids = result.Hits?.Select(h => h.Id).Distinct(StringComparer.Ordinal).ToList() ?? [];
+            return Task.FromResult(MoveOutcome.Of(new ToolObserved(_clock(), move.Tool, move.Args, result.Ok, result.Ok ? result.Summary : result.Error ?? "failed", data, ids)));
+        }
+
+        public Task<MoveOutcome> ProposeAsync(TaskLoop loop, ProposeMove move, DecisionRecord? fof, CancellationToken cancellationToken)
+        {
+            var tier = PolicyEngine.TierOf(move.Action);
+            var now = _clock();
+            if (tier == Tier.Prohibited) return Task.FromResult(MoveOutcome.Of(new PolicyObserved(now, "eval", move.Action, PolicyObserved.Denied, [$"'{move.Action}' is prohibited."])));
+            return Task.FromResult(MoveOutcome.Wait(Waits.Approval, new PolicyObserved(now, "eval", move.Action, PolicyObserved.NeedsApproval, ["Evaluation: proposals are scored, not executed."])));
+        }
+
+        public Task<MoveOutcome> DelegateAsync(TaskLoop loop, DelegateMove move, CancellationToken cancellationToken)
+            => Task.FromResult(MoveOutcome.Wait(Waits.Approval, new PolicyObserved(_clock(), "eval", Actions.ModelRequest, PolicyObserved.NeedsApproval, ["Evaluation: the package is scored, not sent."])));
+
+        public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken)
+            => Task.FromResult(MoveOutcome.Wait(Waits.Build, new BuildObserved(_clock(), move.Name, BuildObserved.Drafted, "Evaluation: the build request is scored, not built.")));
+
+        public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken)
+            => Task.FromResult(MoveOutcome.Wait(Waits.User));
+
+        public Task<MoveOutcome> StopAsync(TaskLoop loop, StopMove move, string waitingFor, CancellationToken cancellationToken)
+            => Task.FromResult(MoveOutcome.Of(new SystemObserved(_clock(), "Nothing is running in evaluation.")));
+    }
+
+    private sealed class FixedClock : Time.IClock
+    {
+        private readonly Func<DateTimeOffset> _now;
+        public FixedClock(Func<DateTimeOffset> now) => _now = now;
+        public DateTimeOffset UtcNow => _now();
+    }
+
+    /// <summary>
+    /// The excerpt id an observed plan case's <see cref="EvaluationCase.Heard"/> words are stored under. The context factory
+    /// owns the excerpt store, so it persists the words under this id before the planner runs; the runner puts the same id
+    /// on the request. Safe as a file name: everything outside letters, digits, '-' and '_' becomes '-'.
+    /// </summary>
+    public static string ExcerptIdFor(EvaluationCase c) =>
+        "eval-heard-" + new string(c.Id.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-').ToArray());
 
     private async Task<CaseResult> RunPlanCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
         var at = _clock();
-        var request = new TurnRequest("eval-" + c.Id, "eval", "eval:" + c.Id, c.Instruction, at, c.ParsedOrigin, c.ParsedKind);
+        var request = new TurnRequest("eval-" + c.Id, "eval", "eval:" + c.Id, c.Instruction, at, c.ParsedOrigin, c.ParsedKind, ExcerptId: c.Heard is null ? null : ExcerptIdFor(c));
         TurnPlan plan;
         try
         {
@@ -147,7 +321,9 @@ public sealed class EvaluationRunner
         if (_judge is null) return new CaseResult(c.Id, c.Source, "judge", false, ["No judge was given to the runner; the case has segments."], "(no judge)", "-", 0);
         var at = _clock();
         var segments = c.Segments!.Select((text, i) => new StreamSegment($"eval-{c.Id}-s{i + 1}", at.AddSeconds(i * 3), text)).ToList();
-        var request = new JudgeRequest(TaskOrigin.Observed, segments, segments.Select(s => s.SegmentId).ToList(), null, _judgeContext?.Invoke(c) ?? JudgeContext.Empty, at);
+        var ids = segments.Select(s => s.SegmentId).ToList();
+        var fresh = c.NewSegments is null ? ids : c.NewSegments.Where(p => p >= 1 && p <= ids.Count).Select(p => ids[p - 1]).Distinct().ToList();
+        var request = new JudgeRequest(TaskOrigin.Observed, segments, fresh, null, _judgeContext?.Invoke(c) ?? JudgeContext.Empty, at.AddSeconds(segments.Count * 3));
         JudgeDecision decision;
         try
         {
@@ -163,11 +339,25 @@ public sealed class EvaluationRunner
         {
             return new CaseResult(c.Id, c.Source, "judge", false, [$"The judge threw {ex.GetType().Name}: {ex.Message}"], "(exception)", _judge.Name, watch.ElapsedMilliseconds);
         }
-        var failures = Score(c.Expect, decision);
+        var failures = Score(c.Expect, decision, ids);
         var observed = decision.Error is not null ? "error: " + decision.Error
             : decision.Findings.Count == 0 ? "no findings"
-            : string.Join("; ", decision.Findings.Select(f => $"{f.Kind.Wire()} ({f.Confidence:0.00}): {f.Summary}"));
+            : string.Join("; ", decision.Findings.Select(f => Describe(f, ids)));
+        if (decision.PromptTokens > 0 || decision.CompletionTokens > 0) observed += $" · {decision.PromptTokens}+{decision.CompletionTokens} tok · {decision.ElapsedMs} ms";
         return new CaseResult(c.Id, c.Source, "judge", failures.Count == 0, failures, observed, decision.Producer, watch.ElapsedMilliseconds);
+    }
+
+    /// <summary>One finding on one line: kind, confidence, the project it named, the window positions it cited, its summary, and the prompt it wrote for the planner.</summary>
+    private static string Describe(JudgeFinding f, IReadOnlyList<string> ids)
+    {
+        var positions = f.SegmentIds.Select(id => PositionOf(ids, id)).Where(p => p > 0).OrderBy(p => p).Select(p => "s" + p);
+        var sb = new StringBuilder();
+        sb.Append(f.Kind.Wire()).Append(" (").Append(f.Confidence.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)).Append(')');
+        if (f.ProjectHint is not null) sb.Append(" @").Append(f.ProjectHint);
+        sb.Append(" [").Append(string.Join(",", positions)).Append("]: ").Append(f.Summary);
+        if (f.FocusedPrompt.Length > 0 && f.FocusedPrompt != f.Summary) sb.Append(" | prompt: ").Append(f.FocusedPrompt.Length > 160 ? f.FocusedPrompt[..159] + "…" : f.FocusedPrompt);
+        if (f.NoteText is not null) sb.Append(" | note: ").Append(f.NoteText.Length > 120 ? f.NoteText[..119] + "…" : f.NoteText);
+        return sb.ToString();
     }
 
     /// <summary>Every way the plan falls short of the expectation, in plain words.</summary>
@@ -217,24 +407,74 @@ public sealed class EvaluationRunner
         return failures;
     }
 
-    /// <summary>Every way the judge's decision falls short of the expectation.</summary>
-    public static IReadOnlyList<string> Score(Expectation e, JudgeDecision decision)
+    /// <summary>
+    /// Every way the judge's decision falls short of the expectation. <paramref name="windowIds"/> are the window's
+    /// segment ids in order, so 1-based positions in the expectation can be compared with the ids the judge cited.
+    /// Per-finding assertions (project, grounding, prompt, note) are checked against the findings of the expected kind
+    /// when one is named, otherwise against every finding; each must hold for at least one of them.
+    /// </summary>
+    public static IReadOnlyList<string> Score(Expectation e, JudgeDecision decision, IReadOnlyList<string>? windowIds = null)
     {
         var failures = new List<string>();
         if (decision.Error is not null) failures.Add($"The judge failed: {decision.Error}");
+        var findings = decision.Findings;
         if (e.Significant is { } significant && decision.Significant != significant)
-            failures.Add(significant ? "Expected a significant finding; the judge found nothing." : $"Expected nothing significant, but the judge found: {string.Join("; ", decision.Findings.Select(f => f.Kind.Wire() + ": " + f.Summary))}");
+            failures.Add(significant ? "Expected a significant finding; the judge found nothing." : $"Expected nothing significant, but the judge found: {string.Join("; ", findings.Select(f => f.Kind.Wire() + ": " + f.Summary))}");
+        var candidates = findings;
         if (e.FindingKind is { } kind)
         {
             var want = TaskLanes.ParseKind(kind);
-            if (!decision.Findings.Any(f => f.Kind == want)) failures.Add($"Expected a '{want.Wire()}' finding; got [{string.Join(", ", decision.Findings.Select(f => f.Kind.Wire()))}].");
+            candidates = findings.Where(f => f.Kind == want).ToList();
+            if (candidates.Count == 0) failures.Add($"Expected a '{want.Wire()}' finding; got [{string.Join(", ", findings.Select(f => f.Kind.Wire()))}].");
         }
         foreach (var forbidden in e.ForbiddenFindingKinds ?? [])
         {
             var kindValue = TaskLanes.ParseKind(forbidden);
-            if (decision.Findings.Any(f => f.Kind == kindValue)) failures.Add($"A '{kindValue.Wire()}' finding must not be raised here.");
+            if (findings.Any(f => f.Kind == kindValue)) failures.Add($"A '{kindValue.Wire()}' finding must not be raised here.");
         }
+        if (e.MinFindings is { } min && findings.Count < min) failures.Add($"Expected at least {min} finding(s); got {findings.Count}.");
+        if (e.MaxFindings is { } max && findings.Count > max) failures.Add($"Expected at most {max} finding(s); got {findings.Count}: {string.Join("; ", findings.Select(f => f.Kind.Wire() + ": " + f.Summary))}");
+        var scope = e.FindingKind is null ? "finding" : $"'{TaskLanes.ParseKind(e.FindingKind).Wire()}' finding";
+        if (e.FindingProject is { } project && candidates.Count > 0 && !candidates.Any(f => NamesProject(f.ProjectHint, project)))
+            failures.Add($"No {scope} names the project '{project}'; named: [{string.Join(", ", candidates.Select(f => f.ProjectHint ?? "null"))}].");
+        if (e.FindingNoProject == true && findings.Any(f => !string.IsNullOrWhiteSpace(f.ProjectHint)))
+            failures.Add($"No finding may name a project here; named: [{string.Join(", ", findings.Select(f => f.ProjectHint ?? "null"))}].");
+        if (e.FindingSegments is { Count: > 0 } positions && candidates.Count > 0)
+        {
+            if (windowIds is null) failures.Add("findingSegments cannot be checked without the window's segment ids.");
+            else
+            {
+                var wanted = positions.Where(p => p >= 1 && p <= windowIds.Count).Select(p => windowIds[p - 1]).ToList();
+                if (!candidates.Any(f => wanted.All(id => f.SegmentIds.Contains(id, StringComparer.Ordinal))))
+                    failures.Add($"No {scope} cites segment(s) [{string.Join(",", positions.Select(p => "s" + p))}]; cited: [{string.Join(" | ", candidates.Select(f => string.Join(",", f.SegmentIds.Select(id => "s" + PositionOf(windowIds, id)))))}].");
+            }
+        }
+        foreach (var fragment in e.PromptContains ?? [])
+            if (candidates.Count > 0 && !candidates.Any(f => f.FocusedPrompt.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
+                failures.Add($"No {scope} has a focused prompt mentioning '{fragment}'; prompts: [{string.Join(" | ", candidates.Select(f => f.FocusedPrompt))}].");
+        foreach (var fragment in e.NoteContains ?? [])
+            if (candidates.Count > 0 && !candidates.Any(f => (f.NoteText ?? "").Contains(fragment, StringComparison.OrdinalIgnoreCase)))
+                failures.Add($"No {scope} has a note text mentioning '{fragment}'; notes: [{string.Join(" | ", candidates.Select(f => f.NoteText ?? "null"))}].");
         return failures;
+    }
+
+    /// <summary>1-based position of a segment id in the window; 0 when the judge cited an id that is not in it.</summary>
+    private static int PositionOf(IReadOnlyList<string> ids, string id)
+    {
+        for (var i = 0; i < ids.Count; i++) if (string.Equals(ids[i], id, StringComparison.Ordinal)) return i + 1;
+        return 0;
+    }
+
+    /// <summary>The judge names projects as it sees them listed ("Atlas" or "Atlas (atlas)"); the expectation gives a name or a slug.</summary>
+    private static bool NamesProject(string? hint, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(hint)) return false;
+        var h = hint.Trim();
+        if (string.Equals(h, expected, StringComparison.OrdinalIgnoreCase)) return true;
+        var paren = h.IndexOf('(');
+        var name = paren > 0 ? h[..paren].Trim() : h;
+        var slug = paren > 0 ? h[(paren + 1)..].TrimEnd(')').Trim() : h;
+        return string.Equals(name, expected, StringComparison.OrdinalIgnoreCase) || string.Equals(slug, expected, StringComparison.OrdinalIgnoreCase);
     }
 
     private static (string? Action, string? Key, string? Value) ParseTargetAssertion(string assertion)
@@ -257,6 +497,7 @@ public sealed class EvaluationRunner
         if (plan.Answer is not null) sb.Append("; answer(").Append(plan.Answer.Length).Append("): ").Append(plan.Answer.Length > 160 ? plan.Answer[..159] + "…" : plan.Answer);
         if (plan.Knowledge is { IsEmpty: false } k) sb.Append("; knowledge: missing=").Append(k.Missing.Count).Append(" capabilityGap=").Append(k.CapabilityGap.ToString().ToLowerInvariant());
         if (plan.Consistent is { } consistent) sb.Append("; consistent=").Append(consistent.ToString().ToLowerInvariant());
+        if (plan.Steps.Count > 0) sb.Append("; steps: ").Append(string.Join(" | ", plan.Steps.Take(8).Select(s => s.Length > 120 ? s[..119] + "…" : s)));
         return sb.ToString();
     }
 

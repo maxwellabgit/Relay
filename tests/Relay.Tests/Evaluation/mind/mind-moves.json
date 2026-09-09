@@ -1,0 +1,91 @@
+[
+  {
+    "id": "unseen:mind/world-clock",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "What time is it in Tokyo right now?",
+    "expect": {
+      "needs": ["new_tool"],
+      "moves": ["build:*"],
+      "forbiddenMoves": ["propose", "delegate"],
+      "outcome": "build",
+      "maxSteps": 3
+    },
+    "tags": ["mind", "build", "world-clock"],
+    "why": "Relay has no clock tool. The right move is to build one (the world-clock acceptance case of docs/09), not to guess a time, propose a project, or send the question to another AI."
+  },
+  {
+    "id": "unseen:mind/list-projects",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "Which projects do I have?",
+    "expect": {
+      "firstMove": "use_tool:list_projects",
+      "forbiddenMoves": ["propose", "delegate", "build", "ask_user"],
+      "outcome": "answered",
+      "answerContains": ["Atlas", "Home"],
+      "maxSteps": 3
+    },
+    "tags": ["mind", "tool", "answer"]
+  },
+  {
+    "id": "unseen:mind/create-project",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "organize",
+    "instruction": "Start a new project for the garden redesign.",
+    "expect": {
+      "moves": ["propose:create_project"],
+      "forbiddenMoves": ["delegate", "build"],
+      "outcome": "approval",
+      "maxSteps": 3
+    },
+    "tags": ["mind", "propose"]
+  },
+  {
+    "id": "unseen:mind/decision-from-notes",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "When does the Atlas beta ship?",
+    "expect": {
+      "moves": ["use_tool:*", "say"],
+      "forbiddenMoves": ["delegate", "propose", "build"],
+      "outcome": "answered",
+      "answerContains": ["October 14"],
+      "maxSteps": 4
+    },
+    "tags": ["mind", "tool", "notes"]
+  },
+  {
+    "id": "unseen:mind/research-delegation",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "research",
+    "instruction": "Research how UK councils license scheduling software pilots for restaurants and summarise the constraints for Lightshift.",
+    "expect": {
+      "moves": ["delegate:research"],
+      "forbiddenMoves": ["build"],
+      "outcome": "approval",
+      "maxSteps": 4
+    },
+    "tags": ["mind", "delegate"]
+  },
+  {
+    "id": "failure:mind/local-fact-not-delegated",
+    "source": "failure",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "What did we decide about the backyard fence?",
+    "expect": {
+      "forbiddenMoves": ["delegate", "build", "propose"],
+      "outcome": "answered",
+      "answerContains": ["spring"],
+      "maxSteps": 4
+    },
+    "tags": ["mind", "failure", "local-first"],
+    "why": "Local mind first: a fact that is in the notes must be read with a tool and answered locally, never sent to another AI."
+  }
+]

@@ -25,6 +25,19 @@ public interface IModelClient
     string Host { get; }
     string Model { get; }
     Task<ModelResponse> CompleteAsync(ModelRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same completion, streamed: <paramref name="onDelta"/> receives each piece of content as it arrives
+    /// (server-sent events on an OpenAI-compatible host), and the assembled reply is returned at the end
+    /// exactly as <see cref="CompleteAsync"/> would have. Clients without a streaming transport complete
+    /// normally and deliver the whole content as one delta, so callers never depend on the transport.
+    /// </summary>
+    async Task<ModelResponse> StreamAsync(ModelRequest request, Func<string, CancellationToken, Task> onDelta, CancellationToken cancellationToken)
+    {
+        var response = await CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.Ok && !string.IsNullOrEmpty(response.Content)) await onDelta(response.Content, cancellationToken).ConfigureAwait(false);
+        return response;
+    }
 }
 
 /// <summary>Named secrets at rest (API keys). Values never appear in settings, the ledger, or incidents.</summary>
