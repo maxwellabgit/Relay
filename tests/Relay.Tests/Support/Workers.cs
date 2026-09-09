@@ -70,34 +70,52 @@ public sealed class InProcessWorkerHost : IWorkerHost
     }
 
     /// <summary>
-    /// A single-threaded line queue whose pending read completes synchronously on the writer's stack
-    /// (plain TaskCompletionSource semantics), so both ends of a worker conversation stay on the test thread.
+    /// A line queue whose pending read completes synchronously on the writer's stack (plain
+    /// TaskCompletionSource semantics), so both ends of a worker conversation stay on one thread. The lock
+    /// is for the one worker that leaves the test thread: a built tool's script runs on its own thread and
+    /// writes its host calls from there.
     /// </summary>
     private sealed class LinePipe
     {
+        private readonly object _gate = new();
         private readonly Queue<string> _items = new();
         private TaskCompletionSource<string?>? _waiter;
         private bool _closed;
 
         public Task<string?> ReadAsync()
         {
-            if (_items.Count > 0) return Task.FromResult<string?>(_items.Dequeue());
-            if (_closed) return Task.FromResult<string?>(null);
-            _waiter = new TaskCompletionSource<string?>();
-            return _waiter.Task;
+            lock (_gate)
+            {
+                if (_items.Count > 0) return Task.FromResult<string?>(_items.Dequeue());
+                if (_closed) return Task.FromResult<string?>(null);
+                _waiter = new TaskCompletionSource<string?>();
+                return _waiter.Task;
+            }
         }
 
         public void Write(string line)
         {
-            if (_closed) return;
-            if (_waiter is { } w) { _waiter = null; w.TrySetResult(line); }
-            else _items.Enqueue(line);
+            TaskCompletionSource<string?>? w;
+            lock (_gate)
+            {
+                if (_closed) return;
+                w = _waiter;
+                _waiter = null;
+                if (w is null) { _items.Enqueue(line); return; }
+            }
+            w.TrySetResult(line);
         }
 
         public void Close()
         {
-            _closed = true;
-            if (_waiter is { } w) { _waiter = null; w.TrySetResult(null); }
+            TaskCompletionSource<string?>? w;
+            lock (_gate)
+            {
+                _closed = true;
+                w = _waiter;
+                _waiter = null;
+            }
+            w?.TrySetResult(null);
         }
     }
 }

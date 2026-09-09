@@ -139,7 +139,9 @@ public sealed class EvaluationRunner
         var at = _clock();
         var turn = _context(c);
         var context = _mindContext(c);
-        var host = new EvaluationHost(turn.Tools, _clock);
+        var built = c.Tools ?? [];
+        if (built.Count > 0) context.Tools = [.. context.Tools.Where(t => built.All(b => b.Name != t.Name)), .. built.Select(b => new ToolDescriptor(b.Name, b.Description, b.Arguments))];
+        var host = new EvaluationHost(turn.Tools, built, _clock);
         var source = c.ParsedOrigin switch { TaskOrigin.Observed => InputObserved.Heard, TaskOrigin.Dialogue => InputObserved.FollowUp, _ => InputObserved.Ask };
         var loop = new TaskLoop("eval-" + c.Id, source, _mind, host, context, new Decider(DecisionSet.Default()), new LoopBudget(c.Expect.MaxSteps ?? MindMaxSteps, turn.Settings.MaxToolCalls), new FixedClock(_clock));
         loop.Observe(new InputObserved(at, source, c.Instruction, c.Heard is null ? null : ExcerptIdFor(c)));
@@ -249,9 +251,10 @@ public sealed class EvaluationRunner
     private sealed class EvaluationHost : ILoopHost
     {
         private readonly ToolBroker _tools;
+        private readonly IReadOnlyList<EvaluationTool> _built;
         private readonly Func<DateTimeOffset> _clock;
 
-        public EvaluationHost(ToolBroker tools, Func<DateTimeOffset> clock) { _tools = tools; _clock = clock; }
+        public EvaluationHost(ToolBroker tools, IReadOnlyList<EvaluationTool> built, Func<DateTimeOffset> clock) { _tools = tools; _built = built; _clock = clock; }
 
         public void Stepped(TaskLoop loop, MindStep step) { }
         public void Said(TaskLoop loop, SayMove move) { }
@@ -260,6 +263,9 @@ public sealed class EvaluationRunner
 
         public Task<MoveOutcome> UseToolAsync(TaskLoop loop, UseToolMove move, CancellationToken cancellationToken)
         {
+            // A tool the case's world holds as built: the scripted result stands in for the sandbox run.
+            if (_built.FirstOrDefault(b => b.Name == move.Tool) is { } scripted)
+                return Task.FromResult(MoveOutcome.Of(new ToolObserved(_clock(), move.Tool, move.Args, true, "ok · " + Observation.Clip(scripted.Result, 300), scripted.Result, [])));
             var result = _tools.Call(move.Tool, move.Args);
             string? data = null;
             if (result.Ok && result.Data is not null) { try { data = JsonSerializer.Serialize(result.Data, RelayJson.Compact); } catch (NotSupportedException) { } }
@@ -279,7 +285,7 @@ public sealed class EvaluationRunner
             => Task.FromResult(MoveOutcome.Wait(Waits.Approval, new PolicyObserved(_clock(), "eval", Actions.ModelRequest, PolicyObserved.NeedsApproval, ["Evaluation: the package is scored, not sent."])));
 
         public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken)
-            => Task.FromResult(MoveOutcome.Wait(Waits.Build, new BuildObserved(_clock(), move.Name, BuildObserved.Drafted, "Evaluation: the build request is scored, not built.")));
+            => Task.FromResult(MoveOutcome.Wait(Waits.Build, new BuildObserved(_clock(), move.Name, BuildObserved.Started, "Evaluation: the build request is scored, not built.")));
 
         public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken)
             => Task.FromResult(MoveOutcome.Wait(Waits.User));

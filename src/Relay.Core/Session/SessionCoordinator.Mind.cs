@@ -47,11 +47,11 @@ public sealed partial class SessionCoordinator
         var tools = new ToolBroker(ToolSources, sink, int.MaxValue); // the loop's own budget governs; the broker just serves
         var context = new MindContext
         {
-            Tools = ToolBroker.Descriptors,
+            Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors,
             Actions = task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved,
             DelegateProfiles = _services.External?.ProfileNames ?? [],
             SearchProfiles = _services.External?.SearchProfileNames ?? [],
-            CanBuild = false, // slice 6
+            CanBuild = _services.Tools?.CanBuild == true,
             Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList(),
             ResponseStyle = Preferences.PromptFragment,
             MaxAnswerChars = Preferences.MaxAnswerChars,
@@ -67,7 +67,7 @@ public sealed partial class SessionCoordinator
         task.Loop = loop;
         task.Host = host;
         task.Plan = new TurnPlan(true, "Thinking…", [], null, [], [], mind.Name);
-        Append(EventTypes.TurnStarted, new { taskId = task.TaskId, mode = OrchestratorSettings.Mind, mind = mind.Name, recall = context.Recall.Count, profiles = context.DelegateProfiles.Count });
+        Append(EventTypes.TurnStarted, new { taskId = task.TaskId, mode = OrchestratorSettings.Mind, mind = mind.Name, recall = context.Recall.Count, profiles = context.DelegateProfiles.Count, tools = context.Tools.Count, canBuild = context.CanBuild });
         task.LoopBusy = true;
         ArmMindTimeout(task);
         Drive(task, () => loop.RunAsync(task.Cts.Token));
@@ -366,6 +366,7 @@ public sealed partial class SessionCoordinator
     private MoveOutcome MindStop(TaskState task, StopMove move, string waitingFor)
     {
         var now = _clock.UtcNow;
+        if (waitingFor == Waits.Build && task.Build is { Finished: false } build) return StopBuild(task, build, move.Reason);
         var op = task.PendingOperation;
         if (op is null) return MoveOutcome.Of(new SystemObserved(now, "Nothing was running."));
         task.StopRequested = true;
@@ -404,7 +405,9 @@ public sealed partial class SessionCoordinator
         ps.Status = result.Status == ExecutionStatus.Completed ? "executed" : "failed";
         RefreshIndexAfter(ps);
         task.Status = TaskStatus.Planning;
-        return ([new ExecutionObserved(now, id, action, ps.Status == "executed", ps.Status == "executed" ? result.Summary : result.Error ?? "failed", result.Outputs)], null);
+        var executed = new ExecutionObserved(now, id, action, ps.Status == "executed", ps.Status == "executed" ? result.Summary : result.Error ?? "failed", result.Outputs);
+        if (action == Actions.AddTool && ps.Status == "executed") return ([executed, ToolPromoted(task, result.Outputs.GetValueOrDefault("tool") ?? ps.Proposal.Target.GetValueOrDefault("name") ?? "")], null);
+        return ([executed], null);
     }
 
     /// <summary>After Approve / Reject / Edit / ApproveAll: run what was approved, and tell the loop what the user decided.</summary>
@@ -536,11 +539,24 @@ public sealed partial class SessionCoordinator
 
         public void Stepped(TaskLoop loop, MindStep step) => _owner._scheduler.Post(() => _owner.OnMindStepped(_task, loop, step));
         public void Said(TaskLoop loop, SayMove move) => _owner._scheduler.Post(() => _owner.OnMindSaid(_task, move));
-        public Task<MoveOutcome> UseToolAsync(TaskLoop loop, UseToolMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindUseTool(_task, _tools, move));
+
+        /// <summary>Built-in tools answer on the coordinator thread; a promoted tool runs in the worker sandbox first (off the coordinator), then its result is recorded there.</summary>
+        public async Task<MoveOutcome> UseToolAsync(TaskLoop loop, UseToolMove move, CancellationToken cancellationToken)
+        {
+            var tools = _owner._services.Tools;
+            var package = tools?.Store.Promoted(move.Tool);
+            if (tools is null || package is null) return await OnCoordinator(() => _owner.MindUseTool(_task, _tools, move)).ConfigureAwait(false);
+            var missing = package.Arguments.Where(a => a.Required && string.IsNullOrWhiteSpace(move.Args.GetValueOrDefault(a.Name))).Select(a => a.Name).ToList();
+            if (missing.Count > 0)
+                return await OnCoordinator(() => _owner.MindBuiltToolReturned(_task, _sink, move, package, null, $"{move.Tool} needs argument(s) {string.Join(", ", missing)}: {string.Join("; ", package.Arguments.Select(a => $"{a.Name} — {a.Description}"))}")).ConfigureAwait(false);
+            _sink.ToolCalled(move.Tool, move.Args);
+            var run = await tools.Runner.RunAsync(package, move.Args, "task " + _task.TaskId, _task.TaskId, cancellationToken).ConfigureAwait(false);
+            return await OnCoordinator(() => _owner.MindBuiltToolReturned(_task, _sink, move, package, run, null)).ConfigureAwait(false);
+        }
+
         public Task<MoveOutcome> ProposeAsync(TaskLoop loop, ProposeMove move, DecisionRecord? fof, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindPropose(_task, loop, move, fof));
         public Task<MoveOutcome> DelegateAsync(TaskLoop loop, DelegateMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindDelegate(_task, loop, move));
-        public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken)
-            => Task.FromResult(MoveOutcome.Of(new BuildObserved(_owner._clock.UtcNow, move.Name, BuildObserved.Unavailable, "Building tools arrives in a later slice.")));
+        public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindBuild(_task, loop, move, fof));
         public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindAskUser(_task, move));
         public Task<MoveOutcome> StopAsync(TaskLoop loop, StopMove move, string waitingFor, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindStop(_task, move, waitingFor));
         public void Waiting(TaskLoop loop, string waitingFor) => _owner._scheduler.Post(() => _owner.OnMindWaiting(_task, waitingFor));

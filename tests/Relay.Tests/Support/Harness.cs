@@ -47,7 +47,7 @@ public sealed class Harness : IDisposable
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
         IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true,
         IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
-        Relay.Core.Mind.IMind? mind = null)
+        Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
         // inlined; the in-process worker pipes depend on inline continuations to keep a whole run on this thread.
@@ -83,7 +83,12 @@ public sealed class Harness : IDisposable
         Preferences = new PreferenceStore(root, ChangeSets);
         var indexProblems = new List<string>();
         Index = SearchIndex.Build(Recovery.Verification.Records, Notes, Registry, indexProblems, Excerpts);
-        if (workerHost is not null) Workers = new WorkerRuntime(root, Registry, workerHost, Clock, Scheduler, SettingsLoad.Settings.Workers);
+        if (workerHost is not null)
+        {
+            Workers = new WorkerRuntime(root, Registry, workerHost, Clock, Scheduler, SettingsLoad.Settings.Workers);
+            // Built tools share the sandbox; without a drafter the mind can still call promoted tools but cannot build.
+            Tools = new Relay.Core.Tools.ToolRuntime(root, ChangeSets, workerHost, SettingsLoad.Settings.Workers, () => toolDrafter, () => Clock.UtcNow);
+        }
         if (externalClients is not null)
         {
             External = new ExternalRuntime(root, SettingsLoad.Settings.ExternalModels, externalClients,
@@ -102,6 +107,7 @@ public sealed class Harness : IDisposable
             Usage = new Relay.Core.Usage.UsageRecorder(root),
             Index = Index,
             Workers = Workers,
+            Tools = Tools,
             External = External,
             Excerpts = Excerpts,
             ChangeSets = ChangeSets,
@@ -128,6 +134,7 @@ public sealed class Harness : IDisposable
     public ExternalRuntime? External { get; }
     public CoordinatorServices Services { get; }
     public WorkerRuntime? Workers { get; }
+    public Relay.Core.Tools.ToolRuntime? Tools { get; }
     public MemorySecretStore Secrets { get; }
 
     public DataRoot Root { get; }

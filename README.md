@@ -76,6 +76,8 @@ Before delegating, the planner states a two-axis knowledge gap: *what is missing
 
 "Improve" tasks are ordinary tasks with a stricter contract: concrete expected benefit, permissions required, implementation scope, and acceptance criteria. Approved changes to preferences, prompt fragments, or routing are **change sets** with a stored *before*, and can be reverted. Recorded task diagnostics feed an evaluation harness together with authored unseen and failure cases; recorded cases alone are never the whole evaluation set.
 
+In mind mode (`docs/09`) improvement is mostly **tool building**: when a task needs something no tool provides (the time in another zone, say), the mind drafts a small JavaScript tool, the worker runs its tests in a sandbox that sees nothing of the machine except a closed set of host functions, and one approval promotes it as a change set. The tool is then available to every later task and can be reverted from the panel like any other change Relay made to itself.
+
 ## Security model
 
 - The application owns the ledger, memory, project files, and self-changes. The model owns nothing.
@@ -153,6 +155,8 @@ Preferences live separately in `config\preferences.json` and change only through
   config\secrets\*.bin             DPAPI-protected API keys
   config\prompts\*.md              prompt fragments (changed only through change sets)
   changesets\{id}.json             every self-change with its before image (revertible)
+  tools\{name}.json                tools Relay built for itself: manifest, JavaScript source and tests in one file, each promoted by one change set
+  staging\tools\{name}.json        drafts under test; staging\tools\runs\  one folder per sandboxed tool run
   excerpts\{id}.json               selected conversation excerpts, bounded, trigger-anchored
   tasks\{id}.json                  per-task diagnostics: prompt, tools, tokens, decisions, presentation, your response
   staging\stream\current.json      the live buffer window only (crash safety; expires with the buffer)
@@ -188,7 +192,7 @@ Failures print the transcript: segments, judge decisions, task lifecycle, tool c
 src/Relay.Core       pure .NET: stream buffer, judge contract, task engine, arbiter, preferences, change sets, policy, executor, ledger, memory, projects, workers
 src/Relay.Gateway    the OpenAI-compatible HTTP client (loopback http or https, no redirects, no proxy)
 src/Relay.Windows    Win32: window-scoped chords, foreground, ACL, single instance, DPAPI secrets, job-object worker host
-src/Relay.Worker     dependency-free sandboxed worker, JSON lines over stdio
+src/Relay.Worker     sandboxed worker, JSON lines over stdio; runs built tools on Jint with the broker as the only way out
 src/Relay.Desktop    WinUI 3 window, composition root
 tests/Relay.Tests    xUnit: scenario DSL, scripted judge and model, fault injection, workers, evaluation cases
 docs/                specifications

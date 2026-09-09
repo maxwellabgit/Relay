@@ -140,13 +140,15 @@ public sealed record DelegateObserved(DateTimeOffset At, string RequestId, strin
     }
 }
 
-/// <summary>A tool build moved through a stage: drafted, tested, promoted, failed, or unavailable in this build.</summary>
+/// <summary>A tool build moved through a stage: started, drafted, tested, promoted, failed, stopped, or unavailable in this build.</summary>
 public sealed record BuildObserved(DateTimeOffset At, string Tool, string Stage, string Detail) : Observation(At)
 {
+    public const string Started = "started";
     public const string Drafted = "drafted";
     public const string Tested = "tested";
     public const string Promoted = "promoted";
     public const string Failed = "failed";
+    public const string Stopped = "stopped";
     public const string Unavailable = "unavailable";
 
     public override string Kind => "build";

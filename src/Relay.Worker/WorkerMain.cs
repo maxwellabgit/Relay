@@ -29,6 +29,7 @@ public static class WorkerMain
             var (summary, outputs) = spec.Task switch
             {
                 "summarize" => await SummarizeTask.RunAsync(spec, broker).ConfigureAwait(false),
+                "tool" => await ToolTask.RunAsync(spec, broker).ConfigureAwait(false),
                 _ => throw new NotSupportedException($"Unknown task '{spec.Task}'."),
             };
             await broker.DoneAsync(summary, outputs).ConfigureAwait(false);

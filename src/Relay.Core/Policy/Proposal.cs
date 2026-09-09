@@ -24,14 +24,14 @@ public static class Actions
     public const string ModelRequest = "model.request";          // Tier B: an exact package leaves the machine for a named external model
     public const string UpdatePreference = "update_preference";  // Tier B: a change set to preferences
     public const string UpdatePrompt = "update_prompt";          // Tier B: a change set to a prompt fragment
+    public const string AddTool = "add_tool";                    // Tier B: promote a tested draft tool Relay built (docs/09, slice 6); one approval, one change set
     public const string RunShell = "run_shell";                  // Prohibited
     public const string SendMessage = "send_message";            // Prohibited
-    public const string AddTool = "add_tool";                    // Prohibited in this build (tool.build/test/promote is a later slice)
 
-    public static readonly string[] Prohibited = [RunShell, SendMessage, AddTool];
+    public static readonly string[] Prohibited = [RunShell, SendMessage];
 
     /// <summary>Actions a standing grant may never cover: each needs a fresh approval every time.</summary>
-    public static readonly string[] NeverGranted = [DeleteProject, ModelRequest, UpdatePreference, UpdatePrompt, LaunchWorker, ApplyPatch];
+    public static readonly string[] NeverGranted = [DeleteProject, ModelRequest, UpdatePreference, UpdatePrompt, LaunchWorker, ApplyPatch, AddTool];
 
     /// <summary>Actions an observed task may not propose: a destructive or self-modifying step needs the user's own words.</summary>
     public static readonly string[] DirectOnly = [DeleteProject, UpdatePreference, UpdatePrompt, ModelRequest];

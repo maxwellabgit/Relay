@@ -42,6 +42,8 @@ public sealed class AgentRunSpec
     [JsonPropertyName("readAllow")] public IReadOnlyList<string> ReadAllow { get; init; } = [InputsFolder + "/**"];
     [JsonPropertyName("writeAllow")] public IReadOnlyList<string> WriteAllow { get; init; } = [OutFolder + "/**"];
     [JsonPropertyName("toolAllowlist")] public IReadOnlyList<string> ToolAllowlist { get; init; } = DefaultTools;
+    /// <summary>Host functions a tool run may call through the broker's <c>host</c> tool (a built tool's declared <c>hostFunctions</c>); empty for agent runs.</summary>
+    [JsonPropertyName("hostAllow")] public IReadOnlyList<string> HostAllow { get; init; } = [];
     [JsonPropertyName("network")] public bool Network { get; init; }
     [JsonPropertyName("limits")] public required AgentLimits Limits { get; init; }
     [JsonPropertyName("stagingPath")] public required string StagingPath { get; init; }

@@ -22,7 +22,7 @@ public sealed class PolicyWorld
     /// <summary>Whether a reference (note id, excerpt id, capture id) resolves to something Relay holds; external packages may only carry these.</summary>
     public Func<string, bool>? ReferenceExists { get; init; }
     /// <summary>Prompt fragment names that may be changed through change sets.</summary>
-    public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge"];
+    public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge", "mind", "build"];
     /// <summary>Origin of the task the proposal belongs to. Some actions may only be proposed from a direct request; null means unknown and is treated as direct.</summary>
     public Tasks.TaskOrigin? Origin { get; init; }
     /// <summary>Kind of the task the proposal belongs to. An improve task's self-changes must carry the improvement contract.</summary>
@@ -48,7 +48,7 @@ public static class PolicyEngine
         Actions.CreateDraftNote or Actions.RouteNote => Tier.Automatic,
         Actions.CreateProject or Actions.ModifyNote or Actions.SupersedeNote or Actions.MoveNote or Actions.RenameProject
             or Actions.ArchiveProject or Actions.RestoreProject or Actions.DeleteProject or Actions.LaunchWorker or Actions.ApplyPatch or Actions.ExportBackup
-            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt => Tier.RequiresApproval,
+            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt or Actions.AddTool => Tier.RequiresApproval,
         _ => Tier.Prohibited,
     };
 
@@ -92,6 +92,7 @@ public static class PolicyEngine
             Actions.ModelRequest => ValidateModelRequest(target, w),
             Actions.UpdatePreference => ValidateUpdatePreference(target).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.UpdatePrompt => ValidateUpdatePrompt(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
+            Actions.AddTool => ValidateAddTool(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             _ => ["Unhandled action."],
         };
         if (problems.Count > 0)
@@ -434,6 +435,33 @@ public static class PolicyEngine
             }
             if (value.Length > 400) problems.Add($"target.{key} is longer than 400 characters.");
         }
+        return problems;
+    }
+
+    /// <summary>
+    /// Promoting a built tool: the draft must exist in staging, have passed its tests for exactly the source being
+    /// promoted (the target pins the source hash, so what the user approves is what was tested), and take a free name.
+    /// The package's own validation (bounded source, declared host functions from the catalog) is repeated here.
+    /// </summary>
+    private static List<string> ValidateAddTool(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var name = t.GetValueOrDefault("name") ?? "";
+        if (!Tools.ToolPackage.ValidName(name)) { problems.Add("target.name must be a snake_case tool name."); return problems; }
+        var draftPath = Path.Combine(w.DataRoot.ToolDraftsDirectory, name + ".json");
+        var text = AtomicFile.ReadAllTextIfExists(draftPath);
+        var draft = text is null ? null : Tools.ToolPackage.FromJson(text);
+        if (draft is null) { problems.Add($"No draft tool named '{name}' is waiting in staging."); return problems; }
+        if (!draft.Tested) problems.Add($"Draft '{name}' has not passed its tests for its current source.");
+        var pinned = t.GetValueOrDefault("sourceSha256");
+        if (string.IsNullOrWhiteSpace(pinned)) problems.Add("target.sourceSha256 is required: the approval pins the tested source.");
+        else if (!string.Equals(pinned, draft.SourceSha256, StringComparison.OrdinalIgnoreCase)) problems.Add("The draft's source changed after this proposal was made; it must be tested and proposed again.");
+        if (File.Exists(Path.Combine(w.DataRoot.ToolsDirectory, name + ".json"))) problems.Add($"A promoted tool named '{name}' already exists.");
+        var reserved = Orchestration.ToolBroker.Descriptors.Select(d => d.Name).Where(n => n != name); // the draft's own name is not a collision with itself
+        problems.AddRange(draft.Validate(reserved).Where(p => !p.StartsWith("a tool named", StringComparison.Ordinal)));
+        t["description"] = draft.Description;
+        t["hostFunctions"] = string.Join(",", draft.HostFunctionNames);
+        t["tests"] = draft.Tests.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return problems;
     }
 

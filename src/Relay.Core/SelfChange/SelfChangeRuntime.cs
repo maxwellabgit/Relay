@@ -21,7 +21,8 @@ public sealed class SelfChangeRuntime : ISelfChangeOperations
         "filing.grant", "filing.revoke", "retention.bufferSeconds", "retention.excerptMaxSeconds", "sources.allowOnlineSearch",
     ];
 
-    public static readonly IReadOnlyList<string> PromptNames = ["planner", "judge"];
+    /// <summary>Prompt fragments an approved change set may add to: the old planner and judge, the mind's constitution fragment, and the fixed tool-build prompt (docs/09).</summary>
+    public static readonly IReadOnlyList<string> PromptNames = ["planner", "judge", "mind", "build"];
 
     private readonly DataRoot _root;
     private readonly PreferenceStore _preferences;

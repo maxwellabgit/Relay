@@ -30,6 +30,7 @@ public static class ProposalText
             Actions.ModelRequest => ($"Send a package to external model '{Get("profile")}'", $"Objective: {Get("objective")}\nReferences leaving the machine: {(Get("refs", "").Length == 0 ? "none" : Get("refs"))}\nBudget: {Get("budgetTokens")} tokens · online search: {Get("allowSearch", "false")}\nThe exact package is hashed and logged; the response is stored as a source artifact."),
             Actions.UpdatePreference => ($"Change preference {Get("key")}", $"New value: {Get("value")}\nApplied as a reversible change set to config\\preferences.json." + Contract(t)),
             Actions.UpdatePrompt => ($"Change the '{Get("name")}' prompt fragment", $"New text ({Get("content").Length} chars): {Truncate(Get("content"), 300)}\nApplied as a reversible change set; the previous text is kept." + Contract(t)),
+            Actions.AddTool => ($"Add the tool '{Get("name")}'", $"{Get("description", "A tool Relay built for itself.")}\nRuns only in the worker sandbox; reaches the machine through: {(Get("hostFunctions", "").Length == 0 ? "nothing" : Get("hostFunctions"))}.\nTests passed in the sandbox: {Get("tests", "?")} · source {Short(Get("sourceSha256"))}\nOne reversible change set; reverting removes the tool." + Contract(t)),
             _ => (p.Action, string.Join("\n", p.Target.Select(kv => $"{kv.Key}: {kv.Value}"))),
         };
         return (title, detail + (string.IsNullOrWhiteSpace(p.Reason) ? "" : $"\n\nWhy: {p.Reason}"));

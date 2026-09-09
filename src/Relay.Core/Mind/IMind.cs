@@ -12,7 +12,8 @@ public sealed record ActionDescriptor(string Action, string Target, string Note)
 /// </summary>
 public sealed class MindContext
 {
-    public IReadOnlyList<ToolDescriptor> Tools { get; init; } = ToolBroker.Descriptors;
+    /// <summary>The built-in read-only tools and every promoted tool. Settable because a build promoted during the task adds to it.</summary>
+    public IReadOnlyList<ToolDescriptor> Tools { get; set; } = ToolBroker.Descriptors;
     public IReadOnlyList<ActionDescriptor> Actions { get; init; } = ActionCatalog.ForDirect;
     /// <summary>Configured external profiles the mind may delegate to; empty means delegation is unavailable.</summary>
     public IReadOnlyList<string> DelegateProfiles { get; init; } = [];

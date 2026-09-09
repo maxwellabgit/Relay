@@ -605,12 +605,15 @@ public class EvaluationTests : IDisposable
         if (last is ToolObserved tool)
         {
             var text = tool.Data ?? tool.Summary;
-            var answer = ask.Contains("projects", StringComparison.OrdinalIgnoreCase) ? "You have two projects: Atlas and Home."
+            var answer = tool.Tool == "world_clock" ? $"It is {System.Text.Json.JsonDocument.Parse(tool.Data!).RootElement.GetProperty("time").GetString()} in Tokyo."
+                : ask.Contains("projects", StringComparison.OrdinalIgnoreCase) ? "You have two projects: Atlas and Home."
                 : text.Contains("October 14", StringComparison.Ordinal) ? "The Atlas beta ships on October 14."
                 : text.Contains("spring", StringComparison.OrdinalIgnoreCase) ? "The fence gets replaced in spring."
                 : "I found nothing about that in your notes.";
             return MindStep.Of(ScriptedMind.Say(answer), "Answered from your notes", ScriptedMind.Read(0.1, MindRead.NeedLocalNotes));
         }
+        if (ask.Contains("time is it", StringComparison.OrdinalIgnoreCase) && req.Context.Tools.Any(t => t.Name == "world_clock"))
+            return MindStep.Of(ScriptedMind.Tool("world_clock", ("zone", "Asia/Tokyo")), "Asking the world clock", ScriptedMind.Read(0.1));
         if (ask.Contains("time is it", StringComparison.OrdinalIgnoreCase))
             return MindStep.Of(ScriptedMind.Build("world_clock", "No tool tells the time in another zone.", "zone", "local time"), "Relay has no clock; building one", ScriptedMind.Read(0.4, MindRead.NeedNewTool));
         if (ask.Contains("Which projects", StringComparison.OrdinalIgnoreCase))
@@ -656,6 +659,9 @@ public class EvaluationTests : IDisposable
         Assert.Contains("moves: build:world_clock", clock.Observed);
         Assert.Contains("outcome: build", clock.Observed);
         Assert.Contains("needs=[new_tool]", clock.Observed);
+        var built = Assert.Single(report.Results, r => r.Id == "unseen:mind/world-clock-built");
+        Assert.Contains("moves: use_tool:world_clock → say", built.Observed);
+        Assert.Contains("answer(21): It is 21:00 in Tokyo.", built.Observed);
         // Nothing was executed or sent: the world is as it was.
         Assert.Equal(2, s.H.Registry.Active.Count());
         Assert.Null(s.H.Registry.FindActive("garden-redesign"));

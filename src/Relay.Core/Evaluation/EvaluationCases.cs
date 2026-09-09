@@ -137,6 +137,11 @@ public sealed class EvaluationCase
     /// in the application instead of finding them pasted into the instruction.
     /// </summary>
     [JsonPropertyName("heard")] public string? Heard { get; init; }
+    /// <summary>
+    /// Mind cases: tools the case's world already holds as if Relay had built and promoted them (docs/09 slice 6). The mind
+    /// sees them in its tool list; a call returns the scripted <see cref="EvaluationTool.Result"/> instead of running the sandbox.
+    /// </summary>
+    [JsonPropertyName("tools")] public IReadOnlyList<EvaluationTool>? Tools { get; init; }
     [JsonPropertyName("expect")] public required Expectation Expect { get; init; }
     [JsonPropertyName("tags")] public IReadOnlyList<string> Tags { get; init; } = [];
     /// <summary>Why the case exists. Required for failure cases: the mistake it guards against.</summary>
@@ -157,6 +162,13 @@ public sealed class EvaluationCase
 
     public TaskKind ParsedKind => TaskLanes.ParseKind(Kind);
 }
+
+/// <summary>A built tool a mind case's world holds: what the mind is told about it, and the JSON a call returns in evaluation.</summary>
+public sealed record EvaluationTool(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("arguments")] IReadOnlyList<string> Arguments,
+    [property: JsonPropertyName("result")] string Result);
 
 /// <summary>
 /// A named collection of cases with the completeness guard. <see cref="Validate"/> lists every reason
@@ -252,6 +264,17 @@ public sealed class EvaluationSet
                 if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
             if (!c.IsJudgeCase && c.NewSegments is not null)
                 problems.Add($"Case '{c.Id}': newSegments needs segments.");
+            if (c.Tools is { Count: > 0 })
+            {
+                if (!c.IsMindCase) problems.Add($"Case '{c.Id}': tools belong to a mind case (they are the tools the mind may call).");
+                foreach (var tool in c.Tools)
+                {
+                    if (!Tools.ToolPackage.ValidName(tool.Name)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' needs a snake_case name.");
+                    else if (Orchestration.ToolBroker.Descriptors.Any(d => d.Name == tool.Name)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' is a built-in tool.");
+                    if (string.IsNullOrWhiteSpace(tool.Description)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' needs a description.");
+                    if (string.IsNullOrWhiteSpace(tool.Result)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' needs the result a call returns.");
+                }
+            }
             if (c.Heard is not null && (c.IsJudgeCase || c.ParsedOrigin != TaskOrigin.Observed || string.IsNullOrWhiteSpace(c.Heard)))
                 problems.Add($"Case '{c.Id}': heard is the excerpt of an observed plan case; it needs origin=observed, an instruction, and words.");
             if (c.IsJudgeCase)

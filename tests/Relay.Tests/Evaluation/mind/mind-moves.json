@@ -16,6 +16,30 @@
     "why": "Relay has no clock tool. The right move is to build one (the world-clock acceptance case of docs/09), not to guess a time, propose a project, or send the question to another AI."
   },
   {
+    "id": "unseen:mind/world-clock-built",
+    "source": "unseen",
+    "origin": "direct",
+    "kind": "answer",
+    "instruction": "What time is it in Tokyo right now?",
+    "tools": [
+      {
+        "name": "world_clock",
+        "description": "The current local time, date and weekday in an IANA time zone.",
+        "arguments": ["zone"],
+        "result": "{\"zone\":\"Asia/Tokyo\",\"time\":\"21:00\",\"date\":\"2026-09-04\",\"weekday\":\"Friday\",\"offset\":\"+09:00\",\"utc\":\"2026-09-04T12:00:00Z\"}"
+      }
+    ],
+    "expect": {
+      "moves": ["use_tool:world_clock"],
+      "forbiddenMoves": ["build", "propose", "delegate", "ask_user"],
+      "outcome": "answered",
+      "answerContains": ["21:00"],
+      "maxSteps": 3
+    },
+    "tags": ["mind", "tool", "world-clock"],
+    "why": "The same question once the tool exists: Relay calls the tool it built and answers from its result; it does not build a second clock, guess, or delegate."
+  },
+  {
     "id": "unseen:mind/list-projects",
     "source": "unseen",
     "origin": "direct",

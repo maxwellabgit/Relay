@@ -172,4 +172,19 @@ public static class EventTypes
     public const string DecisionMade = "decision.made";
     /// <summary>A usage line was written (path and task id only).</summary>
     public const string UsageRecorded = "usage.recorded";
+
+    // Tools Relay builds for itself (orchestrator rebuild, slice 6)
+    /// <summary>The mind asked for a tool: name, justification, inputs, outputs, the drafting model.</summary>
+    public const string ToolBuildStarted = "tool.build_started";
+    /// <summary>A draft exists in staging: description, arguments, declared host functions, source size and hash, test count, tokens.</summary>
+    public const string ToolBuildDrafted = "tool.build_drafted";
+    /// <summary>The draft's tests ran in the sandbox: pass/fail per test with run ids.</summary>
+    public const string ToolBuildTested = "tool.build_tested";
+    /// <summary>An attempt failed (draft rejected or tests failed) and whether another follows.</summary>
+    public const string ToolBuildFailed = "tool.build_failed";
+    public const string ToolBuildStopped = "tool.build_stopped";
+    /// <summary>A tested draft became a promoted tool (with its change set id); reverting the change set removes it.</summary>
+    public const string ToolPromoted = "tool.promoted";
+    /// <summary>A promoted tool ran in the sandbox for a task: run id, ok, host calls, denials, elapsed.</summary>
+    public const string ToolRan = "tool.ran";
 }

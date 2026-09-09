@@ -38,10 +38,12 @@
     <ProjectReference Include="..\Relay.Worker\Relay.Worker.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
-  <!-- Copy the worker's published files next to Relay.exe after each build. -->
+  <!-- Copy the worker's build output next to Relay.exe after each build: the executable and its whole closure
+       (Jint and its parser, which run the tools Relay builds for itself). The worker has no reference to Relay.Core,
+       so nothing here shadows the app's own assemblies. -->
   <Target Name="CopyWorkerBesideApp" AfterTargets="Build">
     <ItemGroup>
-      <WorkerFiles Include="..\Relay.Worker\bin\$(Configuration)\net10.0\Relay.Worker.*" />
+      <WorkerFiles Include="..\Relay.Worker\bin\$(Configuration)\net10.0\Relay.Worker.*;..\Relay.Worker\bin\$(Configuration)\net10.0\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(WorkerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>

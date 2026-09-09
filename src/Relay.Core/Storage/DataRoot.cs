@@ -77,6 +77,11 @@ public sealed class DataRoot
     public string DecisionsPath => Combine("config", "decisions.json");
     /// <summary>One line per task: route, scores, model metrics, outcome, the user's response. Metadata only, for post-hoc tuning.</summary>
     public string UsageDirectory => Combine("usage");
+    /// <summary>Tools Relay built and the user promoted: one JSON file per tool (manifest, source, tests), each written by a change set.</summary>
+    public string ToolsDirectory => Combine("tools");
+    /// <summary>Tool drafts that have not been promoted (or were rejected), and beneath them the sandbox runs of every test and call.</summary>
+    public string ToolDraftsDirectory => Combine("staging", "tools");
+    public string ToolRunsDirectory => Combine("staging", "tools", "runs");
 
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
@@ -100,6 +105,7 @@ public sealed class DataRoot
             RegistryDirectory, SecretsDirectory, ArchiveDirectory, BackupsDirectory, ReviewDirectory, TurnsDirectory,
             ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
             StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, UsageDirectory,
+            ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

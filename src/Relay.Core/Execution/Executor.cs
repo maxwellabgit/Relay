@@ -47,6 +47,12 @@ public interface ISelfChangeOperations
     ExecutionResult UpdatePrompt(Proposal proposal, Decision decision, string taskId, IExecutionSink sink);
 }
 
+/// <summary>A tested draft tool Relay built becomes a promoted tool as one change set (docs/09, slice 6); the executor only knows the contract.</summary>
+public interface IToolOperations
+{
+    ExecutionResult Promote(Proposal proposal, Decision decision, string taskId, IExecutionSink sink);
+}
+
 public sealed class ExecutionJournalEntry
 {
     [JsonPropertyName("proposalId")] public required string ProposalId { get; init; }
@@ -86,6 +92,7 @@ public sealed class Executor
     public IWorkerOperations? Workers { get; set; }
     public IExternalOperations? External { get; set; }
     public ISelfChangeOperations? SelfChange { get; set; }
+    public IToolOperations? Tools { get; set; }
 
     /// <param name="overheard">The task began from something overheard: the target's prose (note text, an objective) is fingerprinted in the ledger; the journal keeps it.</param>
     public ExecutionResult Execute(Proposal proposal, Capability capability, PolicyWorld world, string turnId, IExecutionSink sink, bool overheard = false)
@@ -131,6 +138,7 @@ public sealed class Executor
                 Actions.ModelRequest => External?.Request(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("No external model runtime is configured."),
                 Actions.UpdatePreference => SelfChange?.UpdatePreference(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Self-change operations are not configured."),
                 Actions.UpdatePrompt => SelfChange?.UpdatePrompt(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Self-change operations are not configured."),
+                Actions.AddTool => Tools?.Promote(proposal, decision, turnId, sink) ?? ExecutionResult.Fail("Tool building is not configured."),
                 _ => ExecutionResult.Fail($"No executor for action '{proposal.Action}'."),
             };
         }

@@ -260,6 +260,175 @@ public class MindModeTests : IDisposable
         Assert.Empty(s.Snap.LiveTasks);
     }
 
+    // ----------------------------------------------------------------------------------------
+    // Capability building (slice 6): the world clock the mind builds for itself
+    // ----------------------------------------------------------------------------------------
+
+    private static string TimeIn(ToolObserved t) => System.Text.Json.JsonDocument.Parse(t.Data!).RootElement.GetProperty("time").GetString()!;
+
+    /// <summary>A mind that builds a world clock when it has none and uses it when it has one; every build stage is narrated.</summary>
+    private static ScriptedMind WorldClockMind(string zone) => new ScriptedMind().Always(req => req.Transcript[^1] switch
+    {
+        InputObserved when req.Context.Tools.Any(t => t.Name == "world_clock") => MindStep.Of(Tool("world_clock", ("zone", zone)), "Asking the world clock", Read(0.2)),
+        InputObserved => MindStep.Of(Build("world_clock", "The user asks for the time in other cities and no tool can tell it.", "an IANA zone id", "local time, date and weekday"), "Building a world clock tool", Read(0.6, MindRead.NeedNewTool)),
+        BuildObserved { Stage: BuildObserved.Drafted } => MindStep.Of(Wait("testing"), "Drafted; testing it in the sandbox"),
+        BuildObserved { Stage: BuildObserved.Failed } b when b.Detail.Contains("retrying", StringComparison.Ordinal) => MindStep.Of(Wait("retry"), "The first draft failed; trying once more"),
+        PolicyObserved { Outcome: PolicyObserved.NeedsApproval } => MindStep.Of(Wait("approval"), "The tool passed its tests; waiting for your approval"),
+        BuildObserved { Stage: BuildObserved.Promoted } => MindStep.Of(Tool("world_clock", ("zone", zone)), "Asking the new tool"),
+        ToolObserved { Tool: "world_clock", Ok: true } t => MindStep.Of(Say($"It is {TimeIn(t)} in {zone}."), "Answered"),
+        ToolObserved { Tool: "world_clock" } t => MindStep.Of(Say("The tool failed: " + t.Summary), "The tool failed"),
+        ApprovalObserved { Granted: false } => MindStep.Of(Say("Understood; the tool was not added."), "Not added"),
+        BuildObserved { Stage: BuildObserved.Failed or BuildObserved.Unavailable } b => MindStep.Of(Say("I could not build it: " + b.Detail), "Gave up"),
+        _ => MindStep.Of(Wait("waiting"), "Waiting"),
+    });
+
+    [Fact]
+    public void TheMindBuildsAWorldClockToolPromotesItWithOneApprovalAndUsesItToAnswer()
+    {
+        var drafter = new ScriptedDrafter().Reply(ScriptedDrafter.WorldClock());
+        var mind = WorldClockMind("Europe/London");
+        var host = new InProcessWorkerHost();
+        using var s = Scenario.New(_tmp, MindMode, workerHost: host, inlinePost: false, mind: mind, toolDrafter: drafter).WithWorkspace()
+            .Ask("what time is it in London?");
+        s.PumpUntil("the draft to be tested and proposed", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.AddTool, "pending")
+            .ExpectEvent(EventTypes.ToolBuildStarted)
+            .ExpectEvent(EventTypes.ToolBuildDrafted)
+            .ExpectEvent(EventTypes.ToolBuildTested)
+            .ExpectNoEvent(EventTypes.ToolPromoted);
+        Assert.Equal(1, drafter.Calls);
+        Assert.False(File.Exists(Path.Combine(_tmp.Root.ToolsDirectory, "world_clock.json")));   // nothing is promoted before the approval
+        Assert.True(File.Exists(Path.Combine(_tmp.Root.ToolDraftsDirectory, "world_clock.json")));
+        var card = Assert.Single(s.Snap.PendingProposals);
+        Assert.Equal("Add the tool 'world_clock'", card.Title);
+        Assert.Contains("time.zone", card.Detail);
+        Assert.Contains("1 of 1 test(s) passed", card.Detail);
+        Assert.Equal("mind:scripted", card.ProposedBy);
+
+        s.Approve(Actions.AddTool)
+            .PumpUntil("the tool to run and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Completed)
+            .ExpectOutcome("executed")                                             // one operation ran (the promotion); the answer is below it
+            .ExpectAnswerContains("It is 13:00 in Europe/London")                  // BST at T0 12:00Z
+            .ExpectProposal(Actions.AddTool, "executed")
+            .ExpectEvent(EventTypes.ChangeSetApplied)
+            .ExpectEvent(EventTypes.ToolPromoted)
+            .ExpectEvent(EventTypes.ToolRan)
+            .ExpectEvent(EventTypes.LoopResumed, atLeast: 3);
+        _output.WriteLine(s.Transcript());
+
+        // The feed narrates every stage; the transcript the mind saw carries them as observations in order.
+        Assert.Equal(new[] { "Building a world clock tool", "Drafted; testing it in the sandbox", "The tool passed its tests; waiting for your approval", "Asking the new tool", "Answered" }, s.Response.Steps);
+        var stages = mind.Requests[^1].Transcript.OfType<BuildObserved>().Select(b => b.Stage).ToList();
+        Assert.Equal(new[] { BuildObserved.Started, BuildObserved.Drafted, BuildObserved.Tested, BuildObserved.Promoted }, stages);
+        // The build move paused the loop on "started"; every later stage bought the mind one step; the approval brought approval, execution and promotion together.
+        var kinds = mind.Requests[^1].Transcript.Select(o => o.Kind).ToList();
+        Assert.Equal(new[] { "input", "move", "system" /* route: offer_build */, "build", "build", "move", "build", "policy", "move", "approval", "executed", "build", "move", "tool" }, kinds);
+        Assert.Contains(mind.Requests[^1].Context.Tools, t => t.Name == "world_clock" && t.Arguments.SequenceEqual(["zone"]));
+
+        // On disk: the promoted package under tools, the draft gone, one change set of kind tool; the promoted tool ran through the sandbox like its test did.
+        Assert.True(File.Exists(Path.Combine(_tmp.Root.ToolsDirectory, "world_clock.json")));
+        Assert.False(File.Exists(Path.Combine(_tmp.Root.ToolDraftsDirectory, "world_clock.json")));
+        var set = Assert.Single(s.H.ChangeSets.All());
+        Assert.Equal(Relay.Core.SelfChange.ChangeKinds.Tool, set.Kind);
+        Assert.Equal(2, host.Started.Count(r => r.Task == "tool"));                                    // the draft's one test, then the one use
+        Assert.All(host.Started, r => Assert.Equal(new[] { "time.zone" }, r.HostAllow));
+        var ran = s.H.Last(EventTypes.ToolRan)!;
+        Assert.Equal("world_clock", ran.DataString("tool"));
+        Assert.Equal(1, ran.DataInt64("hostCalls"));
+        Assert.Equal(true, ran.DataBool("ok"));
+        var call = Assert.Single(s.Response.ToolCalls);
+        Assert.Equal("world_clock", call.Tool);
+        Assert.True(call.Ok);
+
+        // The next task has the tool from the start and needs no build; then a revert takes it away again.
+        s.Ask("what time is it in London now?")
+            .PumpUntil("the second answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("It is 13:00 in Europe/London");
+        Assert.Equal(1, s.H.Records().Count(r => r.Type == EventTypes.ToolBuildStarted));
+        Assert.Equal("Asking the world clock", s.Response.Steps[0]);
+        Assert.Equal(3, host.Started.Count(r => r.Task == "tool"));
+
+        var reverted = s.H.ChangeSets.Revert(set.ChangeSetId, "not wanted", s.H.Clock.UtcNow);
+        Assert.True(reverted.Ok, reverted.Error);
+        Assert.False(File.Exists(Path.Combine(_tmp.Root.ToolsDirectory, "world_clock.json")));
+        Assert.False(s.H.Tools!.Store.IsPromoted("world_clock"));
+    }
+
+    [Fact]
+    public void TheMindCanStopABuildItNoLongerNeeds()
+    {
+        // The first draft is unusable and the retry never answers: the mind hears the failure, stops the build, and hears the stop.
+        var drafter = new ScriptedDrafter().Reply("not a package").Block();
+        var mind = new ScriptedMind()
+            .Step(Build("world_clock", "why", "", ""), "Building a world clock tool", Read(0.6, MindRead.NeedNewTool))
+            .Always(req => req.Transcript[^1] switch
+            {
+                BuildObserved { Stage: BuildObserved.Failed } => MindStep.Of(Stop("Never mind, I will answer without it"), "Stopping the build"),
+                BuildObserved { Stage: BuildObserved.Stopped } => MindStep.Of(Say("I stopped building the tool; the date today is 2026-09-04."), "Answered without the tool"),
+                _ => MindStep.Of(Wait("waiting"), "Waiting"),
+            });
+        using var s = Scenario.New(_tmp, MindMode, workerHost: new InProcessWorkerHost(), inlinePost: false, mind: mind, toolDrafter: drafter)
+            .Ask("what time is it in London?");
+        s.PumpUntil("the loop to end", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("stopped building")
+            .ExpectEvent(EventTypes.ToolBuildStarted)
+            .ExpectEvent(EventTypes.ToolBuildFailed)
+            .ExpectEvent(EventTypes.ToolBuildStopped)
+            .ExpectNoEvent(EventTypes.ToolBuildDrafted)
+            .ExpectNoEvent(EventTypes.ProposalReceived);
+        _output.WriteLine(s.Transcript());
+        Assert.Equal(2, drafter.Calls);
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExecutionStopRequested && r.DataString("by") == "mind" && r.DataString("build") == "world_clock");
+        Assert.Equal(true, s.H.Last(EventTypes.ToolBuildStopped)!.DataBool("byMind"));
+        Assert.Equal(new[] { "Building a world clock tool", "Stopping the build", "Answered without the tool" }, s.Response.Steps);
+        Assert.False(File.Exists(Path.Combine(_tmp.Root.ToolsDirectory, "world_clock.json")));
+    }
+
+    [Fact]
+    public void ARejectedToolStaysADraftAndTheMindHearsTheRefusal()
+    {
+        var drafter = new ScriptedDrafter().Reply(ScriptedDrafter.WorldClock());
+        var mind = WorldClockMind("Europe/London");
+        using var s = Scenario.New(_tmp, MindMode, workerHost: new InProcessWorkerHost(), inlinePost: false, mind: mind, toolDrafter: drafter)
+            .Ask("what time is it in London?");
+        s.PumpUntil("the promotion proposal", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.AwaitingApproval)
+            .Reject(Actions.AddTool, "not this one")
+            .PumpUntil("the loop to end", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("was not added")
+            .ExpectProposal(Actions.AddTool, "rejected")
+            .ExpectNoEvent(EventTypes.ToolPromoted)
+            .ExpectNoEvent(EventTypes.ChangeSetApplied);
+        _output.WriteLine(s.Transcript());
+        Assert.False(File.Exists(Path.Combine(_tmp.Root.ToolsDirectory, "world_clock.json")));
+        Assert.True(File.Exists(Path.Combine(_tmp.Root.ToolDraftsDirectory, "world_clock.json"))); // the tested draft stays in staging; nothing ran as a tool
+        Assert.DoesNotContain(mind.Requests[^1].Context.Tools, t => t.Name == "world_clock");
+    }
+
+    [Fact]
+    public void WithoutASandboxTheBuildMoveIsUnavailableAndTheMindIsToldSo()
+    {
+        var mind = new ScriptedMind()
+            .Step(Build("world_clock", "why", "", ""), "Building a world clock tool", Read(0.6, MindRead.NeedNewTool))
+            .Then(req =>
+            {
+                var build = Assert.IsType<BuildObserved>(req.Transcript[^1]);
+                Assert.Equal(BuildObserved.Unavailable, build.Stage);
+                return MindStep.Of(Say("I would need a world clock tool, which cannot be built here."), "Explained");
+            });
+        using var s = Scenario.New(_tmp, MindMode, mind: mind)
+            .Ask("what time is it in London?")
+            .ExpectState(RelayState.Completed)
+            .ExpectAnswerContains("cannot be built here")
+            .ExpectNoEvent(EventTypes.ToolBuildStarted);
+        Assert.False(mind.Requests[0].Context.CanBuild);
+    }
+
     [Fact]
     public void RulesModeIsUntouchedWhenTheMindIsConfiguredButNotSelected()
     {

@@ -21,6 +21,7 @@ using Relay.Core.Sessions;
 using Relay.Core.Storage;
 using Relay.Core.Stream;
 using Relay.Core.Time;
+using Relay.Core.Tools;
 using Relay.Core.Workspaces;
 
 namespace Relay.Core.Session;
@@ -85,9 +86,14 @@ public sealed class RelayRuntime : IDisposable
         var judge = BuildJudge(settings.Settings, options);
 
         WorkerRuntime? workers = null;
+        ToolRuntime? tools = null;
+        var current = settings.Settings; // the settings the tool drafter reads; replaced when the UI changes them
         if (settings.Settings.Workers.Enabled && options.WorkerHostFactory?.Invoke(settings.Settings) is { } workerHost)
         {
             workers = new WorkerRuntime(root, registry, workerHost, clock, scheduler, settings.Settings.Workers);
+            // Built tools share the worker sandbox; the drafter is RELAY0's model, so building is only possible when the model is on.
+            tools = new ToolRuntime(root, changeSets, workerHost, settings.Settings.Workers,
+                () => current.Model.Enabled ? options.ModelClientFactory?.Invoke(current.Model) : null, () => clock.UtcNow);
         }
 
         ExternalRuntime? external = null;
@@ -113,6 +119,7 @@ public sealed class RelayRuntime : IDisposable
             Usage = new UsageRecorder(root),
             Index = index,
             Workers = workers,
+            Tools = tools,
             External = external,
             Excerpts = excerpts,
             ChangeSets = changeSets,
@@ -120,6 +127,7 @@ public sealed class RelayRuntime : IDisposable
             Secrets = options.Secrets,
             IndexProblems = indexProblems,
         };
+        if (tools is not null) indexProblems.AddRange(tools.Store.Problems());
 
         var coordinator = new SessionCoordinator(
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,
@@ -133,6 +141,7 @@ public sealed class RelayRuntime : IDisposable
         // Model, judge, mind and orchestrator settings changed in the UI take effect on the next task or judge pass.
         coordinator.SettingsChanged += changed =>
         {
+            current = changed;
             services.Orchestrator = BuildOrchestrator(changed, options);
             services.Judge = BuildJudge(changed, options);
             services.Mind = BuildMind(changed, options);

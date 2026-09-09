@@ -39,6 +39,8 @@ public sealed class CoordinatorServices
     public Usage.UsageRecorder? Usage { get; init; }
     public required SearchIndex Index { get; init; }
     public IWorkerOperations? Workers { get; init; }
+    /// <summary>Tools Relay builds for itself (docs/09, slice 6): store, sandbox runner, builder, promotion. Null when there is no worker host.</summary>
+    public Tools.ToolRuntime? Tools { get; init; }
     public ExternalRuntime? External { get; init; }
     public ExcerptStore? Excerpts { get; init; }
     public ChangeSetStore? ChangeSets { get; init; }
@@ -122,6 +124,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public Queue<Mind.MoveOutcome> PendingOutcomes { get; } = new();
         /// <summary>Proposal ids whose approval, rejection or automatic allowance the loop has already been told about.</summary>
         public HashSet<string> ObservedApprovals { get; } = new(StringComparer.Ordinal);
+        /// <summary>The tool build in flight for this task (slice 6), if any.</summary>
+        public BuildState? Build { get; set; }
     }
 
     private readonly List<TaskState> _tasks = new();

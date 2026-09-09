@@ -27,7 +27,11 @@ public sealed class WorkerBroker
         _stagingCanonical = Path.GetFullPath(spec.StagingPath).TrimEnd(Path.DirectorySeparatorChar);
     }
 
+    /// <summary>Answers a <c>host</c> tool call (function, argument) for tool runs; null denies every host call. Set by the tool runner, never by a spec.</summary>
+    public Func<string, string, (bool Ok, string Result)>? HostCall { get; init; }
+
     public int ToolCalls { get; private set; }
+    public int HostCalls { get; private set; }
     public int Denied { get; private set; }
     public bool Done { get; private set; }
     public bool Failed { get; private set; }
@@ -88,6 +92,20 @@ public sealed class WorkerBroker
         if (ToolCalls >= _spec.Limits.MaxToolCalls) return Deny($"tool call limit of {_spec.Limits.MaxToolCalls} reached");
         ToolCalls++;
         if (!_spec.ToolAllowlist.Contains(tool, StringComparer.Ordinal)) return Deny($"tool '{tool}' is not in this run's allowlist");
+
+        if (tool == "host")
+        {
+            // A built tool asking the machine for something (the time in a zone). Only functions the run declares, only through the runner's table.
+            var fn = args["fn"]?.GetValue<string>() ?? "";
+            var argument = args["arg"]?.GetValue<string>() ?? "";
+            if (!_spec.HostAllow.Contains(fn, StringComparer.Ordinal)) return Deny($"host function '{fn}' is not declared by this tool" + (_spec.HostAllow.Count == 0 ? "" : $"; declared: {string.Join(", ", _spec.HostAllow)}"));
+            if (HostCall is null) return Deny("host functions are not available in this run");
+            if (argument.Length > 2_000) return Deny("host function argument is longer than 2000 characters");
+            HostCalls++;
+            var (ok, result) = HostCall(fn, argument);
+            Events.Add(new(Ledger.EventTypes.AgentRunToolCalled, new { runId = _spec.RunId, tool, fn, ok, chars = result.Length }));
+            return Reply(id, ok, ok ? result : null, ok ? null : result);
+        }
 
         var resolved = Resolve(path);
         if (resolved is null) return Deny($"path '{path}' is not a plain relative path inside the staging folder");
