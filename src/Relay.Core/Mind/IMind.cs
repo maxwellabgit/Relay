@@ -34,7 +34,11 @@ public sealed class MindContext
 }
 
 /// <summary>Everything one step is decided from: the task's transcript so far and the context.</summary>
-public sealed record MindRequest(string TaskId, string Origin, IReadOnlyList<Observation> Transcript, MindContext Context, DateTimeOffset At, int StepIndex);
+public sealed record MindRequest(string TaskId, string Origin, IReadOnlyList<Observation> Transcript, MindContext Context, DateTimeOffset At, int StepIndex, int MaxSteps = 0)
+{
+    /// <summary>Steps the loop will still grant after this one; null when the budget is unknown.</summary>
+    public int? StepsLeftAfterThis => MaxSteps > 0 ? Math.Max(0, MaxSteps - StepIndex - 1) : null;
+}
 
 /// <summary>
 /// The decision-maker. One call per step, one <see cref="MindStep"/> back. Implementations: the model

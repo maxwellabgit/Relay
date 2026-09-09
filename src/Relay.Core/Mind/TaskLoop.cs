@@ -130,7 +130,7 @@ public sealed class TaskLoop
                 cancellationToken.ThrowIfCancellationRequested();
                 if (Steps >= _budget.MaxSteps) return End(LoopStatus.Failed, "step_budget", $"The mind did not finish within {_budget.MaxSteps} steps.");
 
-                var request = new MindRequest(TaskId, Origin, _transcript.ToList(), _context, _clock.UtcNow, Steps);
+                var request = new MindRequest(TaskId, Origin, _transcript.ToList(), _context, _clock.UtcNow, Steps, _budget.MaxSteps);
                 var step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
                 PromptTokens += step.PromptTokens;
                 CompletionTokens += step.CompletionTokens;
@@ -220,10 +220,17 @@ public sealed class TaskLoop
         switch (move)
         {
             case UseToolMove tool:
+            {
                 if (ToolCalls >= _budget.MaxToolCalls) return MoveOutcome.Of(new SystemObserved(now, $"The tool budget of {_budget.MaxToolCalls} calls is spent. Finish with what you have."));
                 if (!_context.Tools.Any(t => t.Name == tool.Tool)) return MoveOutcome.Of(new SystemObserved(now, $"There is no tool named '{tool.Tool}'. Tools: {string.Join(", ", _context.Tools.Select(t => t.Name))}."));
+                // The same call again would return the same thing: the loop observes the repetition instead of spending a call on it.
+                var earlier = _transcript.OfType<ToolObserved>().LastOrDefault(t => t.Tool == tool.Tool && SameArgs(t.Args, tool.Args));
+                if (earlier is not null)
+                    return MoveOutcome.Of(new SystemObserved(now, $"You already called {tool.Tool} with these arguments; it returned: {Observation.Clip(earlier.Summary, 200)}. Calling it again changes nothing. " +
+                        "Try different arguments, use another tool, or, if no tool can produce what is needed, say so (needs: new_tool) and finish."));
                 ToolCalls++;
                 return await _host.UseToolAsync(this, tool, cancellationToken).ConfigureAwait(false);
+            }
 
             case ProposeMove propose:
             {
@@ -284,6 +291,14 @@ public sealed class TaskLoop
     }
 
     public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool;
+
+    private static bool SameArgs(IReadOnlyDictionary<string, string> a, IReadOnlyDictionary<string, string> b)
+    {
+        if (a.Count != b.Count) return false;
+        foreach (var (key, value) in a)
+            if (!b.TryGetValue(key, out var other) || !string.Equals(value.Trim(), other.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
 
     private static string RouteHint(DecisionRecord route) => route.Outcome switch
     {

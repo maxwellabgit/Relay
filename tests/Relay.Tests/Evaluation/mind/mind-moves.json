@@ -22,13 +22,13 @@
     "kind": "answer",
     "instruction": "Which projects do I have?",
     "expect": {
-      "firstMove": "use_tool:list_projects",
       "forbiddenMoves": ["propose", "delegate", "build", "ask_user"],
       "outcome": "answered",
       "answerContains": ["Atlas", "Home"],
       "maxSteps": 3
     },
-    "tags": ["mind", "tool", "answer"]
+    "tags": ["mind", "tool", "answer"],
+    "why": "The active projects are in the mind's context; answering from them directly is right, and reading list_projects first is also fine. Nothing may be proposed, delegated, built or asked."
   },
   {
     "id": "unseen:mind/create-project",

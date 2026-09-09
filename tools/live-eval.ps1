@@ -33,6 +33,10 @@
   Model name as the endpoint knows it. Default: hf.co/bartowski/Ministral-8B-Instruct-2410-GGUF:Q4_K_M.
 .PARAMETER Key
   API key for a remote endpoint. Ignored for loopback (the gateway sends none); any value switches the live tests on.
+.PARAMETER ContextTokens
+  Context window for an Ollama model. Ollama serves every model with 2048 tokens of context unless told otherwise and
+  silently drops the middle of a longer prompt - which is the mind's system prompt. The runner derives a model with
+  PARAMETER num_ctx set to this value (once; "relay-<model>:ctx<n>") and runs against that. Default 8192. 0 uses the model as is.
 .PARAMETER OutDir
   Where the reports go. Default: %TEMP%\relay-live-eval\<timestamp>.
 .PARAMETER Filter
@@ -51,6 +55,7 @@ param(
     [string]$Key = "",
     [string]$OutDir = "",
     [string]$Filter = "FullyQualifiedName~EvaluationTests.LiveModel",
+    [int]$ContextTokens = 8192,
     [switch]$SkipBuild
 )
 
@@ -99,6 +104,20 @@ if ($isLoopback -and $uri.Port -eq 11434) {
         Log "Model '$Model' is not pulled yet (have: $($have -join ', ')). Pulling..."
         & $ollamaExe pull $Model
         if ($LASTEXITCODE -ne 0) { throw "ollama pull failed for '$Model'." }
+    }
+    if ($ContextTokens -gt 0) {
+        # Ollama's default context is 2048 tokens and a longer prompt is truncated from the middle without any error.
+        # A derived model carries num_ctx; the base model is untouched.
+        $short = (($Model -replace '^hf\.co/[^/]+/', '') -replace '[^A-Za-z0-9._-]', '-').ToLower()
+        $derived = "relay-" + $short + ":ctx$ContextTokens"
+        if ($have -notcontains $derived) {
+            Log "Deriving '$derived' from '$Model' with num_ctx $ContextTokens..."
+            $modelfile = Join-Path $OutDir "Modelfile"
+            @("FROM $Model", "PARAMETER num_ctx $ContextTokens") | Set-Content -Path $modelfile -Encoding ASCII
+            & $ollamaExe create $derived -f $modelfile
+            if ($LASTEXITCODE -ne 0) { throw "ollama create failed for '$derived'." }
+        }
+        $Model = $derived
     }
     # Load it now so the first case is not charged the model load.
     Log "Loading the model..."

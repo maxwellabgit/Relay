@@ -114,8 +114,19 @@ public sealed class ToolBroker
         }
         var limit = args.TryGetValue("limit", out var l) && int.TryParse(l, out var parsed) ? Math.Clamp(parsed, 1, 25) : 8;
         var hits = _sources.Index.Search(query, projectId, limit, excludeId: args.GetValueOrDefault("exclude"));
+        var summary = $"{hits.Count} hit(s) for \"{query}\"";
+        if (hits.Count == 0 && projectId is not null)
+        {
+            // A project filter that finds nothing is not proof the words are absent: the search widens to every project and says so.
+            var wider = _sources.Index.Search(query, null, limit, excludeId: args.GetValueOrDefault("exclude"));
+            if (wider.Count > 0)
+            {
+                hits = wider;
+                summary = $"0 hit(s) for \"{query}\" in project '{project}'; {wider.Count} hit(s) in other projects ({string.Join(", ", wider.Select(h => h.ProjectSlug).Where(s => !string.IsNullOrEmpty(s)).Distinct())}), listed below";
+            }
+        }
         var data = hits.Select(h => new { kind = h.Kind, id = h.Id, projectSlug = h.ProjectSlug, type = h.Type, status = h.Status, excerpt = h.Excerpt, span = h.Span, at = h.At }).ToList();
-        return new ToolResult(true, $"{hits.Count} hit(s) for \"{query}\"", data, null, hits);
+        return new ToolResult(true, summary, data, null, hits);
     }
 
     private ToolResult ReadNote(IReadOnlyDictionary<string, string> args)

@@ -20,13 +20,13 @@ public abstract record Observation(DateTimeOffset At)
 
     public const int MaxDataChars = 6_000;
 
-    protected static string Clip(string? s, int max)
+    public static string Clip(string? s, int max)
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= max ? s : s[..(max - 1)] + "…";
     }
 
-    protected static string Map(IReadOnlyDictionary<string, string> map, int maxValueChars = 160)
+    public static string Map(IReadOnlyDictionary<string, string> map, int maxValueChars = 160)
     {
         if (map.Count == 0) return "{}";
         var sb = new StringBuilder("{");

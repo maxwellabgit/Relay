@@ -623,6 +623,22 @@ public class EvaluationTests : IDisposable
     });
 
     [Fact]
+    public void ASearchFilteredToTheWrongProjectWidensAndSaysSo()
+    {
+        using var s = MindWorld(_tmp);
+        var tools = s.H.PlannerContext().Tools;
+        var narrow = tools.Call("search", new Dictionary<string, string> { ["query"] = "backyard fence", ["project"] = "atlas" });
+        Assert.True(narrow.Ok);
+        Assert.StartsWith("0 hit(s) for \"backyard fence\" in project 'atlas'; ", narrow.Summary);
+        Assert.Contains("hit(s) in other projects (home), listed below", narrow.Summary);
+        Assert.NotEmpty(narrow.Hits!);
+        Assert.All(narrow.Hits!, h => Assert.Equal("home", h.ProjectSlug));
+        // A filter that finds something, and a query that is nowhere, keep the plain summary.
+        Assert.StartsWith("1 hit(s) for \"October 14\"", tools.Call("search", new Dictionary<string, string> { ["query"] = "October 14", ["project"] = "atlas" }).Summary);
+        Assert.Equal("0 hit(s) for \"zeppelin\"", tools.Call("search", new Dictionary<string, string> { ["query"] = "zeppelin", ["project"] = "atlas" }).Summary);
+    }
+
+    [Fact]
     public async Task MindCasesScoreTheLoopsMovesAndStopAtTheFirstThingThatNeedsTheUser()
     {
         using var s = MindWorld(_tmp);

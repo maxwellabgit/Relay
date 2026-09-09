@@ -327,9 +327,10 @@ public class ListeningTests : IDisposable
         {
             Assert.Equal(true, r.DataBool("overheard"));
             Assert.StartsWith("withheld: ", r.DataString("title"));                   // length and hash, never the words
-            Assert.NotNull(r.DataString("why"));                                       // the cue is a fixed vocabulary and stays readable
+            Assert.StartsWith("withheld: ", r.DataString("why"));                     // the judge's rationale too: a model judge's quotes the room
         });
         Assert.All(s.H.Records().Where(r => r.Type == EventTypes.ObserveFound), r => Assert.DoesNotContain("Remember to", r.Data.GetRawText()));
+        Assert.All(s.H.Records().Where(r => r.Type is EventTypes.ObserveFound or EventTypes.ExcerptStored), r => Assert.DoesNotContain("\"why\":\"" + "d", r.Data.GetRawText()));   // no readable rationale ("decision …") in either event
 
         // The words live where the diagnostics drawer reads them: the task record and the excerpt, both under retention.
         var errand = s.Snap.Tasks.Single(t => t.Kind == TaskKind.Remember && t.Title!.Contains("compost"));

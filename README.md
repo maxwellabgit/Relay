@@ -96,6 +96,8 @@ Before delegating, the planner states a two-axis knowledge gap: *what is missing
 llama-server -m Ministral-8B-Instruct-2410-Q4_K_M.gguf -c 16384 --port 8080 --jinja
 ```
 
+The model needs a context window of at least 8k tokens: the mind's prompt with a task's transcript and tool results runs to 2–5k. Ollama serves every model with 2048 tokens unless told otherwise and silently drops the middle of a longer prompt (the system prompt), which turns a capable model into one that asks the user about everything. `tools\live-eval.ps1` derives an Ollama model with `num_ctx` set for its runs; for Relay itself create one the same way (`FROM <model>` / `PARAMETER num_ctx 8192` in a Modelfile, `ollama create relay-ministral -f Modelfile`) and name it in settings.
+
 ## Build, test, run
 
 ```powershell

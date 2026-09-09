@@ -18,12 +18,25 @@ public static class MindPrompt
         "you see the transcript of one task so far (what the user asked or what was overheard, your own moves, and what each move caused) " +
         "and you reply with exactly one JSON object: your read of the situation, one move, and one feed sentence for the user.\n\n" +
         "You never act directly. Deterministic software performs your move, checks it against policy, asks the user when approval is needed, " +
-        "and shows you the result as the next observation. Read the transcript before every step: if your last move already answered the question, " +
-        "finish with say and done=true; if a tool returned nothing, do not call it again with the same arguments; if a proposal was denied, the reasons say why — " +
-        "take another path or explain. Never invent ids, paths, notes, or facts: use only ids that a tool returned in this task.\n\n" +
-        "Prefer local work: the notes, projects and excerpts on this machine. Use world knowledge you are sure of; say plainly what you do not know or cannot do. " +
+        "and shows you the result as the next observation. Read the whole transcript before every step: if your last move already answered the question, " +
+        "finish with say and done=true; if a tool returned nothing, do not call it again with the same arguments — widen the search, drop the project filter, or conclude; " +
+        "if a proposal was denied, the reasons say why — take another path or explain. Never invent ids, paths, notes, or facts: use only ids that a tool returned in this task.\n\n" +
+        "Work in this order. 1) If the transcript or the context already holds the answer (the project list, a recalled note, a tool result), answer from it with say. " +
+        "2) A name in the request that matches one of the user's projects means that project: read its notes with a tool (search, or project_notes) before answering or asking. " +
+        "Anything the user's notes may hold is read with a tool first; search all projects unless the user named one. " +
+        "3) If the request is about the user's own projects or notes and needs a change, propose the action. " +
+        "4) If it needs something no tool can produce, the need is new_tool. 5) If the user asks you to research, look up, or find out about the world and a delegate profile exists, delegate " +
+        "with a complete prompt — do not answer a research request by filing a note or guessing. " +
+        "You know facts, not the present: use world knowledge you are sure of, but you never know the current time anywhere, today's weather, prices, news, or what changed after your training; " +
+        "the present needs a tool, and when no tool can give it the need is new_tool. Say plainly what you do not know or cannot do. " +
         "Ask the user only when the request cannot be settled otherwise. Keep answers short and concrete. For an overheard window, act only on what clearly matters " +
         "(a decision, a commitment, a question left open, a fact worth keeping) and otherwise wait.";
+
+    /// <summary>What the read-only tools cannot do, so the mind does not search notes for the time of day — and, having no clock, does not compute it either.</summary>
+    private const string ToolLimits =
+        "The tools read this machine only: notes, projects, excerpts, preferences. No tool tells the current time or date anywhere, the weather, prices, news, " +
+        "the contents of the web, or the result of a calculation; searching notes for such things is a wasted step and finds nothing. " +
+        "You have no clock: the transcript shows today's date only. The current time anywhere needs a tool.";
 
     public static string System(MindContext context)
     {
@@ -36,7 +49,7 @@ public static class MindPrompt
         sb.Append("\"move\":{\"type\":\"<move>\",\"text\":\"\",\"name\":\"\",\"args\":{},\"done\":false},\"feed\":\"<one sentence>\"}\n\n");
 
         sb.Append("Moves (exactly one per step; unused fields stay empty):\n");
-        sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer; done=false to narrate while you continue.\n");
+        sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer. done=false only narrates: it does nothing and costs a step, so act instead (the feed sentence already tells the user what you are doing).\n");
         sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only; the result is the next observation.\n");
         sb.Append("- propose: name=the action, args=its target fields, text=the reason in one line. Policy decides; the user may have to approve; you see the decision and then the execution result.\n");
         if (context.DelegateProfiles.Count > 0)
@@ -44,19 +57,24 @@ public static class MindPrompt
         else
             sb.Append("- delegate: unavailable (no external profile is configured). Do not use it; answer locally and name what is missing.\n");
         if (context.CanBuild)
-            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks Relay to build a new tool when the request needs a capability no tool has (needs: new_tool); you see the build result.\n");
+            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks Relay to build a new tool when the request needs a capability no tool has (needs: new_tool) — make this move at once, without searching notes first; you see the build result.\n");
         else
             sb.Append("- build: not available in this build. When the request needs a capability no tool has, set needs to include new_tool, name the tool that would be needed in your answer, and answer what you can.\n");
         sb.Append("- ask_user: text=one question, args={\"options\":\"a|b|c\"} optional. The reply arrives as an observation.\n");
         sb.Append("- wait: nothing to do — an overheard window that meant nothing, or an operation still running. text=why.\n");
         sb.Append("- stop: cancel the running delegate or build. text=why.\n\n");
 
-        sb.Append("read: intent (one line); complexity 0–1 (0 trivial, 1 beyond a local model); needs (what the task requires); significance 0–1 (for overheard talk: worth acting on or keeping?); ");
-        sb.Append("sensitivity 0–1 (personal or secret content); risk 0–1 per axis for your next move: core (changes how Relay itself works), security (secrets, network, files outside projects), loop (could run without end), destructive (deletes or overwrites).\n");
+        sb.Append("read.intent: one line. read.needs, one or more of: none (an overheard window that needs nothing) · local_notes (notes or projects on this machine hold the answer) · ");
+        sb.Append("world_knowledge (general knowledge you are sure of settles it) · new_tool (no listed tool can produce what is needed: the current time or date somewhere, weather, prices, a calculation, a conversion, a file outside the projects) · ");
+        sb.Append("external_reasoning (research or long reasoning that should go to a delegate) · user_input (only the user can settle it).\n");
+        sb.Append("read.complexity: 0.1 answer from context or one lookup · 0.3 a few tool calls · 0.6 needs a new tool or several sources · 0.9 research or reasoning beyond a local model. ");
+        sb.Append("read.significance 0–1 (for overheard talk: worth acting on or keeping?); read.sensitivity 0–1 (personal or secret content); ");
+        sb.Append("read.risk 0–1 per axis for your next move: core (changes how Relay itself works), security (secrets, network, files outside projects), loop (could run without end), destructive (deletes or overwrites).\n");
         sb.Append("feed: one plain sentence, present tense, at most 20 words, about what is happening now, written for the user.\n");
 
         sb.Append("\nTools (read-only):\n");
         foreach (var d in context.Tools) sb.Append("- ").Append(d.Name).Append('(').Append(string.Join(", ", d.Arguments)).Append("): ").Append(d.Description).Append('\n');
+        sb.Append(ToolLimits).Append('\n');
 
         sb.Append("\nActions you may propose (policy decides; the user approves anything that changes a project or Relay itself):\n");
         foreach (var a in context.Actions)
@@ -82,9 +100,14 @@ public static class MindPrompt
     public static string Transcript(MindRequest request)
     {
         var sb = new StringBuilder();
-        sb.Append("Date: ").Append(request.At.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append(" UTC\n");
-        sb.Append("Task ").Append(request.TaskId).Append(" · origin: ").Append(request.Origin).Append(" · step ").Append(request.StepIndex + 1).Append('\n');
-        sb.Append("Projects: ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
+        // The date only: the mind has no clock. Deterministic code stamps every observation; a mind that never sees the time cannot pretend to know it.
+        sb.Append("Date: ").Append(request.At.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(" (UTC)\n");
+        sb.Append("Task ").Append(request.TaskId).Append(" · origin: ").Append(request.Origin).Append(" · step ").Append(request.StepIndex + 1);
+        if (request.MaxSteps > 0) sb.Append(" of ").Append(request.MaxSteps);
+        sb.Append('\n');
+        if (request.StepsLeftAfterThis == 0) sb.Append("This is the last step: finish now with say and done=true, stating what you found and what you could not do.\n");
+        else if (request.StepsLeftAfterThis == 1) sb.Append("One step remains after this one.\n");
+        sb.Append("Projects (the user's active projects; answer from this list without a tool): ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
         if (request.Context.Recall.Count > 0)
         {
             sb.Append("Related on this machine:\n");

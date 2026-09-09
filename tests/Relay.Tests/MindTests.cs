@@ -45,6 +45,9 @@ public class MoveSchemaTests
         Assert.Equal(["n1", "n2"], delegated.Refs);
         Assert.Equal(3000, delegated.BudgetTokens);
         Assert.True(delegated.AllowSearch);
+        // A tiny budget is raised to the floor; a missing one takes the default.
+        Assert.Equal(MoveSchema.MinDelegateBudget, ((DelegateMove)Move("""{"type":"delegate","text":"Summarise.","name":"research","args":{"budget_tokens":"200"},"done":false}""")).BudgetTokens);
+        Assert.Equal(MoveSchema.DefaultDelegateBudget, ((DelegateMove)Move("""{"type":"delegate","text":"Summarise.","name":"research","args":{},"done":false}""")).BudgetTokens);
         var build = Assert.IsType<BuildMove>(Move("""{"type":"build","text":"We need a world clock.","name":"World Clock!","args":{"inputs":"city","outputs":"local time"},"done":false}"""));
         Assert.Equal("world_clock", build.Name);
         Assert.Equal("city", build.Inputs);
@@ -132,9 +135,15 @@ public class MindPromptTests
             new UserObserved(at, UserObserved.Reply, "Atlas"),
             new SystemObserved(at, "Route: local."),
         };
-        var text = MindPrompt.Transcript(new MindRequest("t1", InputObserved.Ask, transcript, new MindContext { Projects = ["Atlas (id 01J, slug atlas)"], Recall = ["note 01K: Kathmandu trip planned for October"] }, at, 3));
-        Assert.Contains("Task t1 · origin: ask · step 4", text);
-        Assert.Contains("Projects: Atlas (id 01J, slug atlas)", text);
+        var context = new MindContext { Projects = ["Atlas (id 01J, slug atlas)"], Recall = ["note 01K: Kathmandu trip planned for October"] };
+        var text = MindPrompt.Transcript(new MindRequest("t1", InputObserved.Ask, transcript, context, at, 3, MaxSteps: 6));
+        Assert.Contains("Task t1 · origin: ask · step 4 of 6", text);
+        Assert.DoesNotContain("last step", text);
+        Assert.Contains("Projects (the user's active projects; answer from this list without a tool): Atlas (id 01J, slug atlas)", text);
+        // The budget is visible: the mind is told when one step remains and when this is the last.
+        Assert.Contains("One step remains after this one.", MindPrompt.Transcript(new MindRequest("t1", InputObserved.Ask, transcript, context, at, 4, MaxSteps: 6)));
+        Assert.Contains("This is the last step: finish now with say and done=true", MindPrompt.Transcript(new MindRequest("t1", InputObserved.Ask, transcript, context, at, 5, MaxSteps: 6)));
+        Assert.DoesNotContain(" of ", MindPrompt.Transcript(new MindRequest("t1", InputObserved.Ask, transcript, context, at, 5)).Split('\n')[1]);   // unknown budget: no count
         Assert.Contains("- note 01K: Kathmandu trip planned for October", text);
         Assert.Contains("[1] ask: \"What time is it in Kathmandu?\"", text);
         Assert.Contains("[2] you → use_tool search {query=Kathmandu} · feed \"Checking notes.\"", text);
@@ -450,14 +459,24 @@ public class TaskLoopTests
     [Fact]
     public async Task BudgetsEndWhatTheMindDoesNot()
     {
-        var looping = new ScriptedMind().Always(_ => MindStep.Of(ScriptedMind.Tool("list_projects"), "Listing."));
+        var looping = new ScriptedMind().Always(r => MindStep.Of(ScriptedMind.Tool("search", ("query", "attempt " + r.StepIndex)), "Searching."));
         var (loop, host, _) = Build(looping, budget: new LoopBudget(MaxSteps: 5, MaxToolCalls: 3));
         var result = await loop.RunAsync(CancellationToken.None);
         Assert.Equal(LoopStatus.Failed, result!.Status);
         Assert.Equal("step_budget", result.Outcome);
         Assert.Equal(3, loop.ToolCalls);
-        Assert.Equal(3, host.Calls.Count(c => c == "tool:list_projects"));
+        Assert.Equal(3, host.Calls.Count(c => c == "tool:search"));
         Assert.Equal(2, loop.Transcript.Count(o => o is SystemObserved s && s.Text.Contains("tool budget", StringComparison.Ordinal)));
+
+        // The same call again is not made: the loop observes the repetition and tells the mind what the call returned the first time.
+        var repeating = new ScriptedMind()
+            .Step(ScriptedMind.Tool("search", ("query", "Kathmandu")), "Searching.")
+            .Step(ScriptedMind.Tool("search", ("query", " kathmandu ")), "Searching again.")
+            .Then(r => { Assert.Contains("You already called search with these arguments", ((SystemObserved)r.Transcript[^1]).Text); return MindStep.Of(ScriptedMind.Say("Nothing about Kathmandu in your notes."), "Answering."); });
+        var (loop4, host4, _) = Build(repeating);
+        Assert.Equal("answered", (await loop4.RunAsync(CancellationToken.None))!.Outcome);
+        Assert.Equal(1, loop4.ToolCalls);
+        Assert.Equal(1, host4.Calls.Count(c => c == "tool:search"));
 
         var chatty = new ScriptedMind()
             .Step(ScriptedMind.Say("Thinking…", done: false), "Thinking.")

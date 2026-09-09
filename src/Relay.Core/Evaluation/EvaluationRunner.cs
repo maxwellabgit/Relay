@@ -226,6 +226,18 @@ public sealed class EvaluationRunner
         if (result?.Answer is { } answer) sb.Append("; answer(").Append(answer.Length).Append("): ").Append(answer.Length > 160 ? answer[..159] + "…" : answer);
         if (loop.Feed.Count > 0) sb.Append("; feed: ").Append(string.Join(" | ", loop.Feed.Take(8).Select(s => s.Length > 120 ? s[..119] + "…" : s)));
         if (loop.PromptTokens > 0 || loop.CompletionTokens > 0) sb.Append(" · ").Append(loop.PromptTokens).Append('+').Append(loop.CompletionTokens).Append(" tok");
+        // The trace: each move with its arguments and what it caused, so a live run can be read without re-running it.
+        var trace = loop.Transcript.Skip(1).Where(o => o is not MoveObserved { Move: SayMove }).Select(o => o switch
+        {
+            MoveObserved m => m.Move.Brief(),
+            ToolObserved t => $"→ {(t.Ok ? "ok" : "error")} · {Observation.Clip(t.Summary, 120)}",
+            SystemObserved s => $"→ system · {Observation.Clip(s.Text, 160)}",
+            PolicyObserved p => $"→ policy {p.Outcome}",
+            BuildObserved b => $"→ build {b.Stage}",
+            DelegateObserved d => $"→ delegate {d.Stage}",
+            _ => $"→ {o.Kind}",
+        }).ToList();
+        if (trace.Count > 0) sb.Append("; trace: ").Append(string.Join(" ", trace));
         return sb.ToString();
     }
 

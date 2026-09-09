@@ -101,6 +101,18 @@ Deleted: `RuleBasedOrchestrator`, `CompositeOrchestrator`, `HeuristicJudge`, the
 | 6 | Capability building | `build` move, `build.md`, Jint worker task, manifest validator with the development flag, lifecycle, world-clock scenario |
 | 7 | Evaluation and tuning | `move` expectations in the harness, live runs, first weight tuning from usage lines |
 
+### Slice 1 live results (Ministral 8B Q4_K_M, the mind set of six cases)
+
+The set (`tests/Relay.Tests/Evaluation/mind/mind-moves.json`) is scored on moves, first read, route and outcome without executing anything; `tools\live-eval.ps1 -Filter FullyQualifiedName~EvaluationTests.LiveModelMind` runs it. Six runs took the model from 2/6 to 6/6; every change was to the contract, the prompt or deterministic code, and each is general rather than case-shaped:
+
+1. **2/6.** Searched notes for the time in Tokyo three times; delegated nothing; filtered a search to a project the user had not named.
+2. **0/6.** A longer prompt fell over Ollama's default 2048-token context: it drops the middle of the prompt (the constitution) without any error, and the model asked the user about everything. The runner now derives a model with `num_ctx` set; the README states the requirement.
+3. **4/6** with 8k context. The repeat guard (the loop refuses an identical tool call and tells the mind what it returned the first time), the step budget in the transcript header ("step 2 of 3", "this is the last step"), `needs` and `complexity` anchors, and the rule that a project named in the request is read with a tool first.
+4. **5/6.** The mind converted the UTC time in the date line to Tokyo time itself — wrongly by an hour in one run, correctly in the next. The mind now has no clock: the transcript carries the date only, and "you know facts, not the present" is in the constitution. It built `world_clock` in the next run.
+5. **6/6.** A `search` filtered to a project that finds nothing now widens to every project and says so in its summary, so the mind does not conclude "no decision" from the wrong drawer. Also from these runs: the delegate token budget has a floor of 800 (the model wrote 200), and `say` with `done=false` is described as a step that does nothing.
+
+What the runs also showed and what waits for slices 5–7: the first read's `needs` is loose (a research ask was labelled `new_tool`), so the route hint is sometimes wrong and the mind ignores it — the usage lines are the material for tuning those weights; the delegate prompt the mind writes is short and needs the `digest.md` and prompt-quality work of slice 5.
+
 ## Decisions taken with the user
 
 JavaScript (Jint) for tools · delegation raised as a proposal after each failed attempt with retry · typing-first input, Flow as one typist · OpenAI-compatible delegates only, bounded multi-turn in the first cut · one approval at promote · the mind names note type and project, filing is an approval under the confidence threshold · hard rules loosened behind `fof.development` while the architecture is built.

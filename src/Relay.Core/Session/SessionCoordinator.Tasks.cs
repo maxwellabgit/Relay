@@ -325,7 +325,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         excerptId = task.ExcerptId,
         parentTaskId = task.ParentTaskId,
         title = Guarded(task, task.Title),
-        why = task.Why,
+        why = Guarded(task, task.Why),
         confidence = task.Confidence,
         mergeKey = Guarded(task, task.MergeKey),
         chars,

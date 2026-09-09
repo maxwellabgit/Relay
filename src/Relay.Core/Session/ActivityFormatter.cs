@@ -110,13 +110,13 @@ public static class ActivityFormatter
             EventTypes.ObserveChecked => $"{r.DataString("judge")} checked {Count(r, "segments")} new segment(s): nothing significant" + Tokens(r),
             EventTypes.ObserveFound => $"{r.DataString("judge")} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
             EventTypes.ObserveFailed => $"Judge {r.DataString("judge")} failed: {r.DataString("error")}",
-            EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}) for a {r.DataString("kind") ?? "finding"} finding: {r.DataString("why") ?? r.DataString("reason")}",
+            EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}) for a {r.DataString("kind") ?? "finding"} finding" + Cue(r),
             EventTypes.AskRecorded => $"You asked ({r.DataInt64("chars")} chars)" + (r.DataBool("whileListening") == true ? " while listening" : ""),
 
             // Tasks
             EventTypes.TaskCreated => r.DataString("lane") == "user_operation" ? $"You requested: {r.DataString("title")}"
-                // Overheard tasks: the title would quote the room, so the ledger holds a fingerprint; the line names the cue instead.
-                : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}: {r.DataString("why") ?? "finding"} ({FormatDouble(r, "confidence")})"
+                // Overheard tasks: the title and the judge's rationale would quote the room, so the ledger holds fingerprints; the line names the kind and confidence.
+                : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}{Cue(r)} ({FormatDouble(r, "confidence")})"
                 : r.DataString("origin") == "dialogue" ? $"Follow-up → {r.DataString("kind")} task {Short(r.DataString("taskId"))}" + (r.DataBool("overheard") == true ? "" : $": {r.DataString("title")}")
                 : $"{Capitalize(r.DataString("kind"))} task {Short(r.DataString("taskId"))} started with {r.DataString("planner")}",
             EventTypes.TaskPlanned => r.DataBool("understood") == true
@@ -158,6 +158,13 @@ public static class ActivityFormatter
     }
 
     private static string Short(string? id) => id is null ? "?" : id.Length > 10 ? id[^8..] : id;
+
+    /// <summary>The judge's cue for a finding, when the ledger still carries it readably (older records); a fingerprint is not shown.</summary>
+    private static string Cue(LedgerRecord r)
+    {
+        var why = r.DataString("why") ?? r.DataString("reason");
+        return string.IsNullOrEmpty(why) || why.StartsWith(Withheld.Prefix, StringComparison.Ordinal) ? "" : $": {why}";
+    }
 
     private static string Capitalize(string? s) => string.IsNullOrEmpty(s) ? "Direct" : char.ToUpperInvariant(s[0]) + s[1..];
 

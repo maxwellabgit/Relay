@@ -17,6 +17,8 @@ public static partial class MoveSchema
     public const string SchemaName = "mind_step";
     public const int MaxFeedChars = 200;
     public const int DefaultDelegateBudget = 2_000;
+    /// <summary>The least a delegate may be given: a small local mind tends to write tiny budgets, and a research reply cut at 200 tokens is worthless.</summary>
+    public const int MinDelegateBudget = 800;
 
     public const string Json = """
         {"type":"object","properties":{
@@ -83,7 +85,7 @@ public static partial class MoveSchema
                 if (name.Length == 0) throw new FormatException("a delegate move needs the profile in 'name'");
                 if (text.Length == 0) throw new FormatException("a delegate move needs the prompt you wrote in 'text'");
                 var refs = (args.GetValueOrDefault("refs") ?? "").Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-                var budget = int.TryParse(args.GetValueOrDefault("budget_tokens") ?? args.GetValueOrDefault("budget"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var b) ? Math.Clamp(b, 200, 32_000) : DefaultDelegateBudget;
+                var budget = int.TryParse(args.GetValueOrDefault("budget_tokens") ?? args.GetValueOrDefault("budget"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var b) ? Math.Clamp(b, MinDelegateBudget, 32_000) : DefaultDelegateBudget;
                 var search = string.Equals(args.GetValueOrDefault("allow_search"), "true", StringComparison.OrdinalIgnoreCase);
                 return new DelegateMove(name, text, refs, budget, search);
             case Move.Build:
