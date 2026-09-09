@@ -60,9 +60,14 @@ public sealed record ProposeMove(string Action, IReadOnlyDictionary<string, stri
 }
 
 /// <summary>Send a prompt the mind wrote, plus selected local references, to a named external profile. Leaves the machine only after approval.</summary>
-public sealed record DelegateMove(string Profile, string Prompt, IReadOnlyList<string> Refs, int BudgetTokens, bool AllowSearch) : Move(Delegate)
+/// <summary>
+/// Hand work to another AI. <see cref="ReplyTo"/> names a delegate request of this task that already returned:
+/// the prompt then goes as the next turn of that conversation, under its approval and within its bounds
+/// (slice 5, bounded multi-turn), rather than as a new package needing approval.
+/// </summary>
+public sealed record DelegateMove(string Profile, string Prompt, IReadOnlyList<string> Refs, int BudgetTokens, bool AllowSearch, string? ReplyTo = null) : Move(Delegate)
 {
-    public override string Brief() => $"delegate {Profile} (refs {Refs.Count}, budget {BudgetTokens}{(AllowSearch ? ", search" : "")}) \"{Clip(Prompt, 120)}\"";
+    public override string Brief() => $"delegate {Profile} ({(ReplyTo is null ? "" : $"reply to {ReplyTo}, ")}refs {Refs.Count}, budget {BudgetTokens}{(AllowSearch ? ", search" : "")}) \"{Clip(Prompt, 120)}\"";
 }
 
 /// <summary>Ask Relay to build a new tool: a name, a one-line justification, and the inputs and outputs it must have.</summary>

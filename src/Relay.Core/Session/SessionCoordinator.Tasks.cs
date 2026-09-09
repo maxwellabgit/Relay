@@ -70,6 +70,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public Capability? Capability { get; set; }
         public ExecutionResult? Result { get; set; }
         public string? GrantedBy { get; set; }
+        /// <summary>What the user said when rejecting (the Reject reason), for the mind to read.</summary>
+        public string? Note { get; set; }
     }
 
     private sealed class TaskState
@@ -838,6 +840,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (FindPending(proposalId) is not var (task, ps)) { _notice = "That proposal is not awaiting approval."; Notify(); return; }
         if (Append(EventTypes.ApprovalRejected, new { taskId = task.TaskId, proposalId, action = ps.Proposal.Action, by = "user", reason = reason ?? "rejected" }) is null) { Notify(); return; }
         ps.Status = "rejected";
+        ps.Note = reason;
         task.UserResponse ??= "rejected";
         if (!task.Proposals.Any(p => p.Status == "pending")) Arbiter.Resolve(task.TaskId, null, "", "", _clock.UtcNow);
         AdvanceTask(task);

@@ -153,6 +153,10 @@ public static class EventTypes
     public const string ExternalPackaged = "external.packaged";
     public const string ExternalResponded = "external.responded";
     public const string ArtifactStored = "artifact.stored";
+    /// <summary>The local model made ≤3 feed lines of a delegate's reply (slice 5, digest.md): artifact id, line count, digester, tokens; the lines are fingerprinted for overheard tasks.</summary>
+    public const string DelegateDigested = "delegate.digested";
+    /// <summary>A follow-up turn in an approved delegate conversation was refused: which bound (turns, refs, state) and what the mind may do instead.</summary>
+    public const string DelegateTurnRefused = "delegate.turn_refused";
 
     // Attention
     public const string AttentionShown = "attention.shown";

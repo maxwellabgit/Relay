@@ -99,6 +99,8 @@ public class TransitionTableTests
         Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.Executing, Trigger.ExecutionSucceeded).To);
         Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Executing, Trigger.ExecutionFailed).To);
         Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Planning, Trigger.PlanFailed).To);
+        // The mind's loop: an operation returned and the next move needs the user (a follow-up delegate request, a question).
+        Assert.Equal(RelayState.AwaitingApproval, TransitionTable.Next(RelayState.Executing, Trigger.ApprovalRequired).To);
 
         // No capture state can jump straight into a turn state.
         foreach (var state in new[] { RelayState.NoteCapture, RelayState.CommandCapture, RelayState.AwaitingTranscript })

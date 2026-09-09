@@ -87,6 +87,8 @@ public sealed class ScriptedMind : IMind
     public static UseToolMove Tool(string name, params (string Key, string Value)[] args) => new(name, args.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal));
     public static ProposeMove Propose(string action, string reason, params (string Key, string Value)[] target) => new(action, target.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), reason);
     public static DelegateMove Delegate(string profile, string prompt, int budget = 2_000, bool search = false, params string[] refs) => new(profile, prompt, refs, budget, search);
+    /// <summary>The next turn of a delegate conversation that returned (slice 5): under the first request's approval, within its bounds.</summary>
+    public static DelegateMove Reply(string requestId, string prompt, params string[] refs) => new("", prompt, refs, MoveSchema.DefaultDelegateBudget, false, requestId);
     public static BuildMove Build(string name, string justification, string inputs = "", string outputs = "") => new(name, justification, inputs, outputs);
     public static AskUserMove Ask(string question, params string[] options) => new(question, options);
     public static WaitMove Wait(string reason = "nothing to do") => new(reason);

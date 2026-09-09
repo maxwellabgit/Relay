@@ -54,7 +54,8 @@ public static class MindPrompt
         sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only; the result is the next observation.\n");
         sb.Append("- propose: name=the action, args=its target fields, text=the reason in one line. Policy decides; the user may have to approve; you see the decision and then the execution result.\n");
         if (context.DelegateProfiles.Count > 0)
-            sb.Append("- delegate: name=a profile, text=the complete prompt you write for that external AI (it cannot see this machine: include every fact it needs), args={\"refs\":\"<ids returned by tools, comma-separated>\",\"budget_tokens\":\"<n>\",\"allow_search\":\"true|false\"}. The package leaves the machine only after the user approves.\n");
+            sb.Append("- delegate: name=a profile, text=the complete prompt you write for that external AI (it cannot see this machine: include every fact it needs), args={\"refs\":\"<ids returned by tools, comma-separated>\",\"budget_tokens\":\"<n>\",\"allow_search\":\"true|false\"}. The package leaves the machine only after the user approves. " +
+                      "When a delegate has returned and turns are left, you may continue that conversation: delegate again with args reply_to=<its request id> and text=your next message (a follow-up question, a correction); the same approval covers it, new refs do not.\n");
         else
             sb.Append("- delegate: unavailable (no external profile is configured). Do not use it; answer locally and name what is missing.\n");
         if (context.CanBuild)
@@ -90,7 +91,9 @@ public static class MindPrompt
         if (context.DelegateProfiles.Count > 0)
         {
             sb.Append("\nDelegate profiles: ").Append(string.Join(", ", context.DelegateProfiles));
-            if (context.SearchProfiles.Count > 0) sb.Append(" (can search online when approved: ").Append(string.Join(", ", context.SearchProfiles)).Append(')');
+            sb.Append(context.SearchProfiles.Count > 0
+                ? " (can search online when approved: " + string.Join(", ", context.SearchProfiles) + ")"
+                : " (none can search online: a delegate answers from the package you send and its own knowledge, so allow_search is never true)");
             sb.Append(". Delegate only when local sources and your own knowledge cannot settle the request; write the prompt yourself.\n");
         }
 

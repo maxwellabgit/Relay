@@ -117,9 +117,12 @@ public sealed record ExecutionObserved(DateTimeOffset At, string ProposalId, str
 
 /// <summary>
 /// A delegate (another AI) is at work. <c>partial</c> observations carry how much has streamed so far and the
-/// tail of it, so the mind can narrate or stop; <c>returned</c> carries the artifact id and the head of the reply.
+/// tail of it, so the mind can narrate or stop; <c>returned</c> carries the artifact id, the digest (≤3 lines the
+/// local model made of the reply, when there is one) and the head of the reply. <see cref="Turn"/> and
+/// <see cref="TurnsLeft"/> describe the bounded conversation: a returned turn with turns left can be answered
+/// with <c>delegate</c> and <c>reply_to</c> under the same approval.
 /// </summary>
-public sealed record DelegateObserved(DateTimeOffset At, string RequestId, string Profile, string Stage, int Chars, string? Text, string? ArtifactId = null) : Observation(At)
+public sealed record DelegateObserved(DateTimeOffset At, string RequestId, string Profile, string Stage, int Chars, string? Text, string? ArtifactId = null, int Turn = 1, int TurnsLeft = 0, IReadOnlyList<string>? Digest = null) : Observation(At)
 {
     public const string Started = "started";
     public const string Partial = "partial";
@@ -133,9 +136,17 @@ public sealed record DelegateObserved(DateTimeOffset At, string RequestId, strin
     {
         var sb = new StringBuilder();
         sb.Append("delegate ").Append(Profile).Append(" (request ").Append(RequestId).Append(") ").Append(Stage);
+        if (Turn > 1 || TurnsLeft > 0) sb.Append(" · turn ").Append(Turn);
         if (Stage is Partial or Returned) sb.Append(" · ").Append(Chars).Append(" chars");
         if (ArtifactId is not null) sb.Append(" · artifact ").Append(ArtifactId);
+        if (Digest is { Count: > 0 }) sb.Append(" · digest: ").Append(Clip(string.Join(" / ", Digest), 500));
         if (!string.IsNullOrEmpty(Text)) sb.Append(Stage == Partial ? " · tail: \"" : " · \"").Append(Clip(Text, Stage == Partial ? 400 : 2_000)).Append('"');
+        if (Stage == Returned)
+            sb.Append(TurnsLeft > 0
+                ? $" · {TurnsLeft} turn(s) left in this conversation: to continue it, delegate with args reply_to={RequestId} (same approval; new refs need a new request)"
+                : " · this conversation has used its turns; anything further is a new delegate request");
+        // The step after a start or a partial is for narrating or stopping; a second request now would only be refused.
+        if (Stage is Started or Partial) sb.Append(" · the reply is on its way: wait for it (move: wait), or stop it (move: stop)");
         return sb.ToString();
     }
 }

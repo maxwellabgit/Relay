@@ -2,6 +2,7 @@ using System.Text.Json;
 using Relay.Core.Config;
 using Relay.Core.Decisions;
 using Relay.Core.Execution;
+using Relay.Core.External;
 using Relay.Core.Ids;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
@@ -287,8 +288,12 @@ public sealed partial class SessionCoordinator
         return MoveOutcome.Of(new ToolObserved(_clock.UtcNow, move.Tool, move.Args, result.Ok, result.Ok ? result.Summary : result.Error ?? "failed", data, ids));
     }
 
-    /// <summary>A proposal from the mind: decided by policy exactly like any other producer's, with the filing and fundamental-operation decisions layered on top.</summary>
-    private MoveOutcome MindPropose(TaskState task, TaskLoop loop, ProposeMove move, DecisionRecord? fof)
+    /// <summary>
+    /// A proposal from the mind: decided by policy exactly like any other producer's, with the filing and fundamental-operation decisions layered
+    /// on top. <paramref name="coveredBy"/> names an earlier approval that covers this proposal (a follow-up turn of an approved delegate
+    /// conversation): policy still validates it, and a "needs approval" verdict is then satisfied by that approval instead of a new card.
+    /// </summary>
+    private MoveOutcome MindPropose(TaskState task, TaskLoop loop, ProposeMove move, DecisionRecord? fof, string? coveredBy = null)
     {
         var now = _clock.UtcNow;
         var tier = PolicyEngine.TierOf(move.Action);
@@ -296,6 +301,13 @@ public sealed partial class SessionCoordinator
         var proposal = new Proposal(Ulid.NewUlid(now), move.Action, Truncate(move.Reason, 400), move.Target, [task.SourceEventId], [], risk, tier != Tier.Automatic, loop.MindName);
         ReceiveProposal(task, proposal);
         var ps = task.Proposals.Last(p => p.Proposal.ProposalId == proposal.ProposalId);
+
+        if (ps.Status == "pending" && coveredBy is not null && move.Action == Actions.ModelRequest)
+        {
+            ps.Status = "allowed";
+            ps.Decision = ps.Decision with { Outcome = DecisionOutcome.Allow, Reasons = [.. ps.Decision.Reasons, "Covered by an earlier approval: " + coveredBy + "."] };
+            Append(EventTypes.ProposalDecided, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = ps.Decision.Outcome.ToString(), tier = ps.Decision.Tier.ToString(), reasons = ps.Decision.Reasons, coveredBy });
+        }
 
         // Filing: the mind names type and project with a confidence; the decision whether to ask is the decider's.
         if (ps.Status == "allowed" && move.Action == Actions.RouteNote)
@@ -321,7 +333,8 @@ public sealed partial class SessionCoordinator
             case "pending":
                 task.Status = TaskStatus.AwaitingApproval;
                 PersistTask(task);
-                if (task.Foreground && _state == RelayState.Planning) Apply(Trigger.ApprovalRequired);
+                // From PLANNING on the first move, from EXECUTING when the mind read an operation's result and needs the user for the next one.
+                if (task.Foreground && _state is RelayState.Planning or RelayState.Executing) Apply(Trigger.ApprovalRequired);
                 if (!task.Foreground) PresentTask(task, interim: true);
                 return MoveOutcome.Wait(Waits.Approval, new PolicyObserved(now, proposal.ProposalId, proposal.Action, PolicyObserved.NeedsApproval, ps.Decision.Reasons));
             default:
@@ -335,9 +348,15 @@ public sealed partial class SessionCoordinator
         }
     }
 
-    /// <summary>Delegation is a <c>model.request</c> proposal whose objective is the prompt the mind wrote; it needs the user's approval like any package that leaves the machine.</summary>
+    /// <summary>
+    /// Delegation is a <c>model.request</c> proposal whose objective is the prompt the mind wrote; it needs the user's approval like any
+    /// package that leaves the machine. A move with <c>reply_to</c> is the next turn of a conversation that already returned: it runs under
+    /// the first request's approval when the runtime's bounds allow (turns left, no new local sources, same task), and otherwise the mind
+    /// is told which bound it met and that a fresh request needs the user.
+    /// </summary>
     private MoveOutcome MindDelegate(TaskState task, TaskLoop loop, DelegateMove move)
     {
+        var now = _clock.UtcNow;
         var target = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["profile"] = move.Profile,
@@ -347,7 +366,54 @@ public sealed partial class SessionCoordinator
             ["allowSearch"] = move.AllowSearch ? "true" : "false",
         };
         var firstLine = move.Prompt.Split('\n').FirstOrDefault(l => l.Trim().Length > 0)?.Trim() ?? "delegated work";
-        return MindPropose(task, loop, new ProposeMove(Actions.ModelRequest, target, "Delegated by the mind: " + Truncate(firstLine, 200)), null);
+        // One delegate request at a time per task: the reply of the one in flight is the next thing to read. Seen live: the step after
+        // "started" produced a second request naming the first as a ref, and the user was asked to approve it while the reply was arriving.
+        // The loop still waiting on a delegate covers both: the request in flight, and one whose reply has arrived but is queued behind this step.
+        if (loop.WaitingFor == Waits.Delegate)
+        {
+            var inFlight = task.PendingOperation?.Proposal.ProposalId ?? task.Proposals.LastOrDefault(p => p.Proposal.Action == Actions.ModelRequest && p.Status is "executing" or "executed")?.Proposal.ProposalId ?? "in flight";
+            return MoveOutcome.Of(new SystemObserved(now, $"Request {inFlight} is still answering; no second request is sent while it is. Wait for its reply (move: wait) or stop it (move: stop), then decide."));
+        }
+        if (move.ReplyTo is null)
+        {
+            // Two corrections the deterministic code makes before the card, each told to the mind: they are facts of configuration and of what
+            // Relay holds, and a card the user approves only to see fail at the runtime, or a denial the mind must reason about, costs more.
+            var corrections = new List<Observation>();
+            if (move.AllowSearch && _services.External is { } external && !external.SearchProfileNames.Contains(move.Profile, StringComparer.Ordinal))
+            {
+                target["allowSearch"] = "false";
+                corrections.Add(new SystemObserved(now, $"Profile '{move.Profile}' cannot search online; the request goes without search, so the package must carry every fact the delegate needs." +
+                    (external.SearchProfileNames.Count > 0 ? $" Profiles that can search: {string.Join(", ", external.SearchProfileNames)}." : " No configured profile can.")));
+            }
+            var unknown = move.Refs.Where(r => !ReferenceExists(r)).ToList();
+            if (unknown.Count > 0)
+            {
+                target["refs"] = string.Join(",", move.Refs.Except(unknown, StringComparer.Ordinal));
+                corrections.Add(new SystemObserved(now, $"Left out of the package: {string.Join(", ", unknown)} — not ids Relay holds. Refs are the ids tools returned in this task (notes, excerpts, artifacts); " +
+                    (target["refs"].Length == 0 ? "the package carries your prompt alone." : $"it carries {target["refs"]}.")));
+            }
+            var outcome = MindPropose(task, loop, new ProposeMove(Actions.ModelRequest, target, "Delegated by the mind: " + Truncate(firstLine, 200)), null);
+            return corrections.Count == 0 ? outcome : new MoveOutcome([.. corrections, .. outcome.Observations], outcome.WaitFor);
+        }
+
+        var earlier = task.Proposals.FirstOrDefault(p => p.Proposal.ProposalId == move.ReplyTo && p.Proposal.Action == Actions.ModelRequest);
+        var conversationId = earlier?.Proposal.Target.GetValueOrDefault("conversation") ?? earlier?.Proposal.ProposalId;
+        var check = earlier is null || conversationId is null
+            ? (Ok: false, Reason: $"Request {move.ReplyTo} is not a delegate request of this task.", Turn: 0, TurnsLeft: 0)
+            : _services.External?.CanContinue(conversationId, task.TaskId, move.Refs) ?? (false, "No external runtime is configured.", 0, 0);
+        if (!check.Ok)
+        {
+            Append(EventTypes.DelegateTurnRefused, new { taskId = task.TaskId, replyTo = move.ReplyTo, conversationId, reason = check.Reason });
+            return MoveOutcome.Of(new SystemObserved(now, check.Reason + " To delegate afresh, use delegate without reply_to; the user will be asked."));
+        }
+        // The conversation's profile and search permission stand, whatever the mind wrote this time; only the words are new.
+        target["profile"] = earlier!.Proposal.Target.GetValueOrDefault("profile") ?? move.Profile;
+        target["allowSearch"] = earlier.Proposal.Target.GetValueOrDefault("allowSearch") ?? "false";
+        target["budgetTokens"] = earlier.Proposal.Target.GetValueOrDefault("budgetTokens") ?? target["budgetTokens"];
+        target["conversation"] = conversationId!;
+        target["turn"] = check.Turn.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return MindPropose(task, loop, new ProposeMove(Actions.ModelRequest, target, $"Turn {check.Turn} in the conversation the user approved: " + Truncate(firstLine, 200)), null,
+            coveredBy: $"request {conversationId} ({check.Reason})");
     }
 
     private MoveOutcome MindAskUser(TaskState task, AskUserMove move)
@@ -356,7 +422,7 @@ public sealed partial class SessionCoordinator
         task.Plan = (task.Plan ?? new TurnPlan(true, "Question", [], null, [], [], task.Loop!.MindName)) with { Answer = move.Question + (move.Options.Count == 0 ? "" : " (" + string.Join(" / ", move.Options) + ")") };
         task.Status = TaskStatus.AwaitingApproval;
         PersistTask(task);
-        if (task.Foreground && _state == RelayState.Planning) Apply(Trigger.ApprovalRequired);
+        if (task.Foreground && _state is RelayState.Planning or RelayState.Executing) Apply(Trigger.ApprovalRequired);
         if (!task.Foreground) PresentTask(task, interim: true);
         Append(EventTypes.TaskUserResponse, new { taskId = task.TaskId, response = "asked", question = Guarded(task, move.Question), options = move.Options.Count });
         return MoveOutcome.Wait(Waits.User);
@@ -411,7 +477,8 @@ public sealed partial class SessionCoordinator
             if (action == Actions.ModelRequest)
             {
                 task.Host!.DelegateStarted(now);
-                return ([new DelegateObserved(now, id, result.Outputs.GetValueOrDefault("profile") ?? ps.Proposal.Target.GetValueOrDefault("profile") ?? "", DelegateObserved.Started, 0, result.Summary)], Waits.Delegate);
+                var turn = int.TryParse(result.Outputs.GetValueOrDefault("turn"), out var t) ? t : 1;
+                return ([new DelegateObserved(now, id, result.Outputs.GetValueOrDefault("profile") ?? ps.Proposal.Target.GetValueOrDefault("profile") ?? "", DelegateObserved.Started, 0, result.Summary, null, turn)], Waits.Delegate);
             }
             return ([new ExecutionObserved(now, id, action, true, "started: " + result.Summary, result.Outputs)], Waits.Execution);
         }
@@ -431,7 +498,9 @@ public sealed partial class SessionCoordinator
         foreach (var p in task.Proposals.Where(p => p.Status is "rejected" or "edited" && !task.ObservedApprovals.Contains(p.Proposal.ProposalId)))
         {
             task.ObservedApprovals.Add(p.Proposal.ProposalId);
-            observations.Add(new ApprovalObserved(now, p.Proposal.ProposalId, p.Proposal.Action, false, p.Status == "edited" ? "edited and re-proposed" : null));
+            // The user's words on a rejection reach the mind: "retry locally", "not that model", "later" each ask for a different next move.
+            var reason = p.Status == "edited" ? "edited and re-proposed" : string.IsNullOrWhiteSpace(p.Note) || p.Note is "rejected by user" or "rejected" or "rejected from the card" ? null : p.Note;
+            observations.Add(new ApprovalObserved(now, p.Proposal.ProposalId, p.Proposal.Action, false, reason));
         }
         while (true)
         {
@@ -476,12 +545,25 @@ public sealed partial class SessionCoordinator
         if (op.Proposal.Action == Actions.ModelRequest)
         {
             var profile = result.Outputs.GetValueOrDefault("profile") ?? op.Proposal.Target.GetValueOrDefault("profile") ?? "";
+            var turn = int.TryParse(result.Outputs.GetValueOrDefault("turn"), out var t) ? t : 1;
+            var turnsLeft = int.TryParse(result.Outputs.GetValueOrDefault("turnsLeft"), out var l) ? l : 0;
             if (op.Status == "executed" && result.Outputs.TryGetValue("artifactId", out var artifactId))
             {
-                var text = _services.External?.ReadArtifact(artifactId) ?? "";
-                observation = new DelegateObserved(now, id, profile, DelegateObserved.Returned, text.Length, text.Length > 2_000 ? text[..2_000] + "…(read the rest with read_artifact)" : text, artifactId);
+                var artifact = _services.External?.ReadArtifactRecord(artifactId);
+                var text = artifact?.Text ?? "";
+                var digest = artifact?.Digest ?? Digest.Plain(text);
+                if (digest.Count > 0)
+                {
+                    // The digest is what the feed shows of the reply: ≤3 lines under the mind's own feed sentence, the artifact behind them.
+                    task.Loop!.Annotate(digest);
+                    if (task.Plan is not null) task.Plan = task.Plan with { Steps = task.Loop.Feed.ToList() };
+                    var digestError = result.Outputs.GetValueOrDefault("digestError");
+                    Append(EventTypes.DelegateDigested, new { taskId = task.TaskId, proposalId = id, artifactId, profile, turn, lines = digest.Select(line => Guarded(task, line)).ToList(), digestBy = artifact?.DigestBy, digestTokens = result.Outputs.GetValueOrDefault("digestTokens"), digestError = string.IsNullOrEmpty(digestError) ? null : digestError });
+                }
+                observation = new DelegateObserved(now, id, profile, DelegateObserved.Returned, text.Length, text.Length > 2_000 ? text[..2_000] + "…(read the rest with read_artifact)" : text, artifactId, turn, turnsLeft, digest);
             }
-            else observation = new DelegateObserved(now, id, profile, op.Status == "stopped" ? DelegateObserved.Stopped : DelegateObserved.Failed, 0, result.Error ?? result.Summary);
+            else observation = new DelegateObserved(now, id, profile, op.Status == "stopped" ? DelegateObserved.Stopped : DelegateObserved.Failed, 0,
+                (result.Error ?? result.Summary) + (op.Status == "stopped" ? "" : " You may delegate again (the user will be asked) or continue without it: answer now with say and done=true, naming what could not be had."), null, turn);
         }
         else observation = new ExecutionObserved(now, id, op.Proposal.Action, op.Status == "executed", op.Status == "executed" ? result.Summary : result.Error ?? op.Status, result.Outputs);
         if (task.Host is not null) task.Host.DeferredPartial = null; // the reply itself supersedes any partial of it

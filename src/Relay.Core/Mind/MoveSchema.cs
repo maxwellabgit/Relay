@@ -42,6 +42,8 @@ public static partial class MoveSchema
         """;
 
     [GeneratedRegex("[^a-z0-9_]+", RegexOptions.CultureInvariant)] private static partial Regex NotIdentifier();
+    /// <summary>A schema placeholder copied into a value ("&lt;ids returned by tools&gt;").</summary>
+    [GeneratedRegex("<[^>]*>", RegexOptions.CultureInvariant)] private static partial Regex Placeholder();
 
     /// <summary>Turns the model's reply into a step. Throws <see cref="FormatException"/> with a message the mind can act on when the contract is broken.</summary>
     public static MindStep Parse(string raw, int promptChars = 0, long elapsedMs = 0, int promptTokens = 0, int completionTokens = 0)
@@ -69,6 +71,14 @@ public static partial class MoveSchema
         return name.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
     }
 
+    /// <summary>A refs token that stands for "no reference": a placeholder copied from the schema, or a word for nothing.</summary>
+    public static bool IsNoRef(string token)
+    {
+        var t = token.Trim().Trim('"', '\'', '[', ']');
+        if (t.Length == 0 || t.Contains('<') || t.Contains('>')) return true;
+        return t.ToLowerInvariant() is "none" or "null" or "nil" or "n/a" or "na" or "no" or "nothing" or "empty" or "-" or "--" or "undefined" or "refs" or "ids" or "id";
+    }
+
     public static Move ParseMove(JsonObject m)
     {
         var type = Str(m["type"]).Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
@@ -90,12 +100,15 @@ public static partial class MoveSchema
                 if (name.Length == 0) throw new FormatException("a propose move needs the action in 'name'");
                 return new ProposeMove(name, args, text.Length == 0 ? "Proposed by the mind." : text);
             case Move.Delegate:
-                if (name.Length == 0) throw new FormatException("a delegate move needs the profile in 'name'");
+                var replyTo = (args.GetValueOrDefault("reply_to") ?? args.GetValueOrDefault("continue") ?? args.GetValueOrDefault("request") ?? "").Trim();
+                if (name.Length == 0 && replyTo.Length == 0) throw new FormatException("a delegate move needs the profile in 'name'");
                 if (text.Length == 0) throw new FormatException("a delegate move needs the prompt you wrote in 'text'");
-                var refs = (args.GetValueOrDefault("refs") ?? "").Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                // Refs are ids returned by tools. Small models write the schema's placeholder or a word for "nothing" ("none", "n/a", "<ids>"): those are no refs at all.
+                var refs = Placeholder().Replace(args.GetValueOrDefault("refs") ?? "", " ").Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(r => !IsNoRef(r)).Distinct(StringComparer.Ordinal).ToList();
                 var budget = int.TryParse(args.GetValueOrDefault("budget_tokens") ?? args.GetValueOrDefault("budget"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var b) ? Math.Clamp(b, MinDelegateBudget, 32_000) : DefaultDelegateBudget;
                 var search = string.Equals(args.GetValueOrDefault("allow_search"), "true", StringComparison.OrdinalIgnoreCase);
-                return new DelegateMove(name, text, refs, budget, search);
+                return new DelegateMove(name, text, refs, budget, search, replyTo.Length == 0 ? null : replyTo);
             case Move.Build:
                 var tool = NotIdentifier().Replace(name.ToLowerInvariant().Replace(' ', '_').Replace('-', '_'), "").Trim('_');
                 if (tool.Length == 0) throw new FormatException("a build move needs a snake_case tool name in 'name'");

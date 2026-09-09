@@ -47,7 +47,7 @@ public sealed class Harness : IDisposable
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
         IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true,
         IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
-        Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null)
+        Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
         // inlined; the in-process worker pipes depend on inline continuations to keep a whole run on this thread.
@@ -93,7 +93,7 @@ public sealed class Harness : IDisposable
         {
             External = new ExternalRuntime(root, SettingsLoad.Settings.ExternalModels, externalClients,
                 () => new ToolSources { Registry = Registry, Drafts = Notes, Index = Index, Excerpts = Excerpts, ReadArtifact = id => External!.ReadArtifact(id), Preferences = () => Preferences.Compiled() },
-                Scheduler, () => Clock.UtcNow);
+                Scheduler, () => Clock.UtcNow) { Digester = () => digester };
             foreach (var (id, text, at) in External.AllArtifacts()) Index.IndexArtifact(id, text, at);
         }
         Services = new CoordinatorServices

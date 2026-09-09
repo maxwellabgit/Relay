@@ -126,6 +126,8 @@ public static class TransitionTable
             {
                 Trigger.ExecutionSucceeded => Transition.Accept(state, RelayState.Completed, trigger),
                 Trigger.ExecutionFailed => Transition.Accept(state, RelayState.Failed, trigger),
+                // The mind's loop (docs/09): an operation returned, the mind read the result, and its next move needs the user first.
+                Trigger.ApprovalRequired => Transition.Accept(state, RelayState.AwaitingApproval, trigger),
                 // "Stop safely": accepted as a self-transition; the executor finishes the current operation and starts nothing further.
                 Trigger.Cancel => Transition.Accept(state, RelayState.Executing, trigger, StopRequested),
                 Trigger.NoteKey or Trigger.CommandKey => Transition.Reject(state, trigger, FinishInstructionFirst),

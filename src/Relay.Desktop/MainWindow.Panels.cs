@@ -135,6 +135,8 @@ public sealed partial class MainWindow
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             buttons.Children.Add(Button("Approve", () => _coordinator!.Approve(p.ProposalId), accent: true, enabled: p.BlockedBy is null));
             if (p.Editable) buttons.Children.Add(Button("Edit…", async () => await ShowEditProposalDialogAsync(p)));
+            // A delegation is offered, not imposed: the user can send the mind back to local means instead (the words reach it as the rejection reason).
+            if (p.Action == Actions.ModelRequest) buttons.Children.Add(Button("Retry locally", () => _coordinator!.Reject(p.ProposalId, "retry locally: try again without an external model")));
             buttons.Children.Add(Button("Reject", () => _coordinator!.Reject(p.ProposalId, "rejected by user")));
             panel.Children.Add(buttons);
         }

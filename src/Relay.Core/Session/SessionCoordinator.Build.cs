@@ -152,7 +152,11 @@ public sealed partial class SessionCoordinator
         if (!outcome.Ok || outcome.Package is null)
         {
             Append(EventTypes.TurnProgress, new { taskId = task.TaskId, text = $"Could not build {build.Name}" });
-            ResumeMind(task, MoveOutcome.Of(new BuildObserved(now, build.Name, BuildObserved.Failed, outcome.Summary + " The draft stays in staging. Answer what you can and say which tool would be needed.")));
+            // The local attempt failed. Delegation is offered as a proposal the user decides (docs/09, slice 5): the mind writes the prompt, the card asks.
+            var offer = _services.External is { ProfileNames.Count: > 0 }
+                ? " If a delegate could settle this, delegate now: the user is asked and can approve it, or reject it with words for you (such as \"retry locally\")."
+                : "";
+            ResumeMind(task, MoveOutcome.Of(new BuildObserved(now, build.Name, BuildObserved.Failed, outcome.Summary + " The draft stays in staging. Answer what you can and say which tool would be needed." + offer)));
             Notify();
             return;
         }

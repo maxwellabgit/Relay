@@ -97,6 +97,15 @@ public sealed class TaskLoop
     public string? WaitingFor { get; private set; }
     public IReadOnlyList<Observation> Transcript => _transcript;
     public IReadOnlyList<string> Feed => _feed;
+
+    /// <summary>
+    /// Deterministic code adds lines of its own to the feed under the mind's sentences: the digest of a delegate's reply, for one.
+    /// Marked with a leading "· " so the feed shows whose words they are.
+    /// </summary>
+    public void Annotate(IEnumerable<string> lines)
+    {
+        foreach (var line in lines) if (!string.IsNullOrWhiteSpace(line)) _feed.Add("· " + line.Trim());
+    }
     public int Steps { get; private set; }
     public int ToolCalls { get; private set; }
     public int Proposals { get; private set; }
@@ -228,7 +237,9 @@ public sealed class TaskLoop
         {
             case UseToolMove tool:
             {
-                if (ToolCalls >= _budget.MaxToolCalls) return MoveOutcome.Of(new SystemObserved(now, $"The tool budget of {_budget.MaxToolCalls} calls is spent. Finish with what you have."));
+                if (ToolCalls >= _budget.MaxToolCalls)
+                    return MoveOutcome.Of(new SystemObserved(now, $"The tool budget of {_budget.MaxToolCalls} calls is spent. Finish with what you have" +
+                        (_context.DelegateProfiles.Count > 0 ? ", or, if a delegate could settle what the tools could not, delegate now: the user is asked and decides." : ".")));
                 if (!_context.Tools.Any(t => t.Name == tool.Tool))
                 {
                     var nearest = _context.Tools.FirstOrDefault(t => tool.Tool.Contains(t.Name, StringComparison.Ordinal) || t.Name.Contains(tool.Tool, StringComparison.Ordinal));
@@ -250,7 +261,13 @@ public sealed class TaskLoop
                 {
                     // A proposal named like a tool, with inputs and outputs, is a build that took the wrong move; say so rather than only listing the actions.
                     var meantBuild = _context.CanBuild && (LastRead?.Has(MindRead.NeedNewTool) == true || propose.Target.ContainsKey("inputs") || propose.Target.ContainsKey("outputs") || propose.Target.ContainsKey("tool_name"));
-                    var hint = meantBuild ? $" A new tool is not proposed, it is built: use the build move with name={propose.Target.GetValueOrDefault("tool_name") ?? propose.Action} and args inputs/outputs." : "";
+                    // "propose research" (seen live) is a delegation that took the wrong move: a profile name, or a research/external need, says so.
+                    var meantDelegate = !meantBuild && _context.DelegateProfiles.Count > 0 && (_context.DelegateProfiles.Contains(propose.Action, StringComparer.OrdinalIgnoreCase)
+                        || propose.Action.ToLowerInvariant() is "research" or "delegate" or "external" or "ask_external" or "model_request" or "model.request"
+                        || LastRead?.Has(MindRead.NeedExternalReasoning) == true);
+                    var hint = meantBuild ? $" A new tool is not proposed, it is built: use the build move with name={propose.Target.GetValueOrDefault("tool_name") ?? propose.Action} and args inputs/outputs."
+                        : meantDelegate ? $" An external AI is not proposed, it is delegated to: use the delegate move with name=one of {string.Join("/", _context.DelegateProfiles)} and text=the complete prompt you write for it."
+                        : "";
                     return MoveOutcome.Of(new SystemObserved(now, $"'{propose.Action}' is not an action you may propose here. Actions: {string.Join(", ", _context.Actions.Select(a => a.Action))}.{hint}"));
                 }
                 var selfChange = IsSelfChange(propose.Action);
@@ -263,8 +280,22 @@ public sealed class TaskLoop
 
             case DelegateMove delegateMove:
                 if (_context.DelegateProfiles.Count == 0) return MoveOutcome.Of(new SystemObserved(now, "No delegate profile is configured; delegation is unavailable. Answer locally and say what is missing."));
-                if (!_context.DelegateProfiles.Contains(delegateMove.Profile, StringComparer.Ordinal))
+                // A follow-up turn names the request it continues; the conversation's profile stands, so the name may be left out.
+                if (delegateMove.ReplyTo is null && !_context.DelegateProfiles.Contains(delegateMove.Profile, StringComparer.Ordinal))
                     return MoveOutcome.Of(new SystemObserved(now, $"There is no delegate profile '{delegateMove.Profile}'. Profiles: {string.Join(", ", _context.DelegateProfiles)}."));
+                // The same prompt again, as a fresh request, after a reply came back is a stall (seen live: the mind re-sent the ask it had just had
+                // answered). The loop points at the reply instead of asking the user to approve the same package twice.
+                if (delegateMove.ReplyTo is null)
+                {
+                    var sent = _transcript.OfType<MoveObserved>().Select(m => m.Move).OfType<DelegateMove>().Where(d => !ReferenceEquals(d, delegateMove))
+                        .LastOrDefault(d => d.ReplyTo is null && string.Equals(d.Prompt.Trim(), delegateMove.Prompt.Trim(), StringComparison.OrdinalIgnoreCase));
+                    var answered = sent is null ? null : _transcript.OfType<DelegateObserved>().LastOrDefault(d => d.Stage == DelegateObserved.Returned);
+                    if (answered is not null)
+                        return MoveOutcome.Of(new SystemObserved(now, $"You already delegated exactly this prompt; request {answered.RequestId} returned" +
+                            (answered.Digest is { Count: > 0 } ? $": {Observation.Clip(string.Join(" / ", answered.Digest), 300)}" : $" ({answered.Chars} chars, artifact {answered.ArtifactId})") +
+                            ". Sending it again would only ask the user to approve the same package twice. Answer from the reply with say and done=true" +
+                            (answered.TurnsLeft > 0 ? $", or ask the delegate a follow-up with reply_to={answered.RequestId}." : ", or write a different prompt.")));
+                }
                 Proposals++;
                 return await _host.DelegateAsync(this, delegateMove, cancellationToken).ConfigureAwait(false);
 

@@ -72,6 +72,8 @@ RELAY0 proposes the transformation that fits — file, move, merge, rename, arch
 
 Before delegating, the planner states a two-axis knowledge gap: *what is missing* (facts Relay has no source for) and *whether the local model can do it* (capability). A local lookup resolves the first without disclosure; the second justifies a bounded external task. An external task is a proposal that binds the exact package (which notes, how many characters, the destination model, the budget, whether search is allowed); Relay stores the response as a source artifact and shows a concise summary with its limits, then extracts notes and proposals separately.
 
+In mind mode (`docs/09`) the mind writes the delegate's prompt itself and the reply comes back **digested**: the local model turns it into at most three feed lines (`digest.md`), shown under the mind's own sentence with the whole reply one tap behind. One approval covers a short conversation — the mind may ask the delegate up to two follow-ups under it, with no new local sources — and a card for a delegation carries **Retry locally** beside Approve and Reject, whose words reach the mind so delegation stays an offer.
+
 ## Improvement
 
 "Improve" tasks are ordinary tasks with a stricter contract: concrete expected benefit, permissions required, implementation scope, and acceptance criteria. Approved changes to preferences, prompt fragments, or routing are **change sets** with a stored *before*, and can be reverted. Recorded task diagnostics feed an evaluation harness together with authored unseen and failure cases; recorded cases alone are never the whole evaluation set.

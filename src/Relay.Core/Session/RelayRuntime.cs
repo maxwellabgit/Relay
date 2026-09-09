@@ -102,7 +102,12 @@ public sealed class RelayRuntime : IDisposable
         {
             external = new ExternalRuntime(root, settings.Settings.ExternalModels, profile => factory(profile.AsModelSettings()) ?? throw new ArgumentException("no client for profile " + profile.Name),
                 () => new ToolSources { Registry = registry, Drafts = notes, Index = servicesRef!.Index, Excerpts = excerpts, ReadArtifact = id => servicesRef!.External!.ReadArtifact(id), Preferences = () => preferences.Compiled() },
-                scheduler, () => clock.UtcNow);
+                scheduler, () => clock.UtcNow)
+            {
+                // Replies are digested into feed lines by RELAY0 (digest.md); with the local model off, the digest is the reply's own first lines.
+                Digester = () => current.Model.Enabled ? factory(current.Model) : null,
+                DigestInstructions = () => AtomicFile.ReadAllTextIfExists(Path.Combine(root.PromptsDirectory, Digest.PromptName + ".md")),
+            };
             foreach (var (id, text, at) in external.AllArtifacts()) index.IndexArtifact(id, text, at);
         }
 
