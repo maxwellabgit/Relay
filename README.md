@@ -1,136 +1,110 @@
 # Relay
 
-Relay is a **local-first Windows desktop orchestrator**. A small local model — **RELAY0** — sits in one loop: it reads what just happened, takes one typed move, and deterministic software owns the consequence. You type, you talk, or the room talks; Relay files notes, answers questions, asks other AIs only with your approval, and builds tools for itself when none exist. Nothing leaves the machine, and nothing changes a project, unless you say so.
+Relay is a **local-first desktop assistant that accumulates personal capabilities under a loop that does not act without recorded permission**.
 
-The model proposes. Software enforces permissions and executes. The ledger is append-only and hash-chained. The model owns nothing.
+It understands enabled conversations, direct requests, and connected workstreams; retrieves relevant context; performs useful work; and turns recurring friction into reusable tools, workflows, and preferences. The user should need to repeat fewer instructions, prepare fewer prompts, and manually coordinate fewer steps over time.
 
-## One mind, one loop
+**RELAY0** is the whole system: a small, replaceable local orchestration model, personal memory, an asynchronous task runtime, approved tools and workflows, and optional external AI workers. Initial personalization lives in memory, preferences, tool code, and workflow definitions. Those assets must survive replacing the local model. Training the model’s weights from collected examples is a later possibility, not part of the essential build.
 
-Every input is an **observation** on the task: a typed ask, a stretch of overheard conversation, a tool result, a policy decision, an approval, a denial, a streamed fragment from another AI, your reply. Each step the mind returns one schema-constrained move — `say`, `use_tool`, `propose`, `delegate`, `build`, `ask_user`, `wait`, `stop` — plus a one-line read of the situation and a one-sentence **feed** line for you.
+This README is the essential target. It is not a status report.
+
+Windows 11 is the first surface. The architecture is not Windows-specific.
+
+## Observe, decide, act, resume
+
+The runtime collects input and delivers it when a decision is needed. Conversation is one origin among equals: the runtime buffers timestamped transcript segments and submits windows on a configured cadence. Window length and evaluation frequency are separate settings. Original passages remain retrievable beyond the current prompt.
+
+The local model interprets meaning: what matters, what the user is trying to accomplish, what information is missing, and which action would help. A window can produce a note, updates to existing tasks, several new task proposals, or no action.
+
+The same action vocabulary applies to direct requests, observed conversation, and dialogue with Relay. Origin affects authorization, urgency, and presentation. It does not prevent Relay from proposing a useful capability.
+
+Each decision is one schema-constrained step: a short read of the situation, one typed move, and a one-line feed sentence. Deterministic software owns scheduling, permissions, execution, task state, and the record of what actually happened. The model proposes; it does not grant permission. Authorization comes from the user’s instructions and recorded grants.
 
 ```
-observation ──► mind (read + move + feed)
+observation ──► local model (read + move + feed)
                  │
-                 ├─ Decider (route, risk, filing…) and PolicyEngine
-                 ├─ the move's consequence (tool, card, package, sandbox…)
-                 └─ what happened, appended ──────────────────────────► next step
+                 ├─ deterministic gates (policy, budgets, grants)
+                 ├─ the move’s consequence (tool, workflow, package, sandbox, card…)
+                 └─ what happened, recorded ──────────────────────────► next decision
+                    (this task, or another that is ready)
 ```
 
-There are no separate roles and no mode you have to pick. Local first: Relay answers from notes, tools, and the model's own knowledge. If that is not enough it **offers** a delegate or a new tool; you decide. The loop never guesses what its last move did — the deterministic code tells it.
+## Asynchronous work
 
-The contract, the feed UI, and the slice plan live in [`docs/09-orchestrator-rebuild.md`](docs/09-orchestrator-rebuild.md). The base that does not change — ledger, fingerprinting, path guard, projects, notes, search, executor, worker sandbox, gateway, change sets, evaluation harness — is described there under *Untouched base*.
+**Tasks wait independently. The local model serves whichever task needs a decision next. Observation continues while work is in flight.**
 
-## What you can do
+When research is delegated, Relay saves the task’s objective, current plan, selected context, permissions, and pending request identifier. The runtime awaits the external response while the local model handles other work. Listening and direct requests do not stop because a delegate is outstanding.
 
-- **Listen** without recording the room. Ctrl+Alt starts a conversation buffer. RELAY0 reads stretches of talk, not every fragment. What is kept is a bounded **excerpt** (trigger plus the sentences that substantiate it). The ledger holds hashes and ids, never the words. A density guard stops excerpts from reconstructing the conversation.
-- **Ask.** The input box is typing first; Wispr Flow (or any Windows dictation) is one more typist. Ctrl+X focuses it. Direct questions are always answered.
-- **File and transform.** Notes go to a named project and type. Moves, merges, archives, and deletes are proposals. Deletion is never an alias for archiving.
-- **Delegate.** The mind writes the prompt. The package that would leave is exact, hashed, and shown to you. Replies stream back and are **digested** into at most three feed lines; the whole artifact sits behind them. One approval covers a short conversation (follow-ups under `reply_to`, no new local sources). **Retry locally** is always on the card.
-- **Build a tool.** When a task needs something no tool provides, the mind names a contract. Relay drafts JavaScript, tests it in a sandbox that sees no files, network, or process (only declared `relay.*` host functions), and asks once at **promote**. The tool is a revertible change set. The acceptance path is a world clock: "What time is it in Tokyo?" ends with a promoted tool and the real local time.
+The essential build can run one local inference at a time while several tools or external requests are in progress. Each inference receives the state and context relevant to its task.
 
-## Privacy and authority
+The runtime serializes changes to each task, records processed events, and checks request and task versions before resuming. Late results cannot silently revive cancelled work or execute an obsolete plan. Task state persists independently of a live model session.
 
-- Observed work may read only approved local sources. Online search and external models need a grant or a per-task approval.
-- API keys live in DPAPI. The ledger records sizes, tokens, timings, and destinations — never keys or prompt text.
-- Approval binds to the proposal hash. Execution consumes a single-use, time-limited capability and re-checks policy against the current world.
-- Workers run in a job object; the broker is their only way out. Built tools inherit that sandbox.
-- Preferences are typed records and revertible change sets, not prose stuffed into a prompt.
+Streaming text can update the feed without a model call for every fragment. Completion, failure, user correction, or a defined progress checkpoint can trigger reconsideration. Waiting alone triggers no inference.
 
-## Requirements
+## A shared continuation contract
 
-- Windows 11 (x64), [.NET SDK 10.0](https://dotnet.microsoft.com/download/dotnet/10.0). Unpackaged WinUI 3, self-contained Windows App SDK. No Visual Studio required.
-- **RELAY0:** any OpenAI-compatible chat endpoint. The reference is [llama.cpp](https://github.com/ggml-org/llama.cpp) or Ollama serving **Ministral 8B Instruct (Q4_K_M)** on loopback. The context window must be at least **8k tokens** (the mind's prompt plus a task's transcript runs to 2–5k). Ollama defaults to 2048 and silently drops the middle of a longer prompt — which is the constitution. `tools\live-eval.ps1` derives a model with `num_ctx` for its runs; for Relay itself:
+Every resumed decision combines:
 
-```powershell
-# llama.cpp
-llama-server -m Ministral-8B-Instruct-2410-Q4_K_M.gguf -c 16384 --port 8080 --jinja
+- Stable orchestration instructions and the available action definitions.
+- The original request, current approved objective, relevant history, and completion criteria.
+- The new result, its sources, unresolved questions, and remaining permissions and budget.
 
-# Ollama (once): FROM <model> / PARAMETER num_ctx 8192 in a Modelfile
-ollama create relay-ministral -f Modelfile
-```
+External replies are normalized by the runtime first (provider payload and errors). The model then interprets the content against the particular task. A convincing summary alone does not establish completion.
 
-Without a model Relay still runs: a labeled heuristic and the older grammar handle what they can, and the UI says so.
+The review instruction is consistent: **identify what the evidence establishes, identify what remains unresolved, compare the result with the objective, and choose the next useful action**. Possible outcomes include answering, retrieving more context, asking a delegate to investigate further, requesting clarification, or proposing a task revision.
 
-## Build, test, run
+## Initial capabilities
 
-```powershell
-dotnet build Relay.slnx
-dotnet test tests/Relay.Tests/Relay.Tests.csproj
-dotnet run --project src/Relay.Desktop/Relay.Desktop.csproj
-```
+| Capability | Purpose |
+| --- | --- |
+| Gather context | Search and read relevant notes, conversations, projects, task history, and tool and workflow descriptions. Preserve source references. |
+| Keep and organize information | Write tentative scratchpad entries; create, connect, file, and revise notes and projects with history. |
+| Use a tool | Run a registered function with validated inputs. |
+| Run a workflow | Run a named, versioned sequence that composes retrieval, tools, delegation, and formatting; it can wait and resume through the task runtime. |
+| Delegate | Assemble a contextual prompt, choose a model and capability profile, request research or specialist work, and continue the exchange when useful. A search prompt must be backed by an actual search integration. |
+| Manage work | Create, resume, split, prioritize, defer, or cancel tasks; propose revisions when context changes the objective. |
+| Communicate | Ask a necessary question, present an approval proposal, report progress, or deliver a checked result. |
+| Improve | Propose a preference change, reusable tool, or workflow; build and evaluate it before activation. |
 
-`Relay.exe` is under `src\Relay.Desktop\bin\Debug\net10.0-windows10.0.26100.0\` (`bin\x64\Debug\…` when launched through `dotnet run`) with `Relay.Worker.dll` beside it. One instance per data root; a second launch brings the first forward. Override the data root with `RELAY_DATA_ROOT`.
+Intent, complexity, missing capabilities, and uncertainty are assessed while selecting an action. A simple lookup may need internet access; a difficult task may be answerable locally. Delegate profiles describe available capabilities as well as model choice.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\ui-smoke.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\live-eval.ps1   # needs RELAY_LIVE_MODEL_KEY (any value on loopback)
-```
+## How Relay becomes personal
 
-`dotnet test` is deterministic: real coordinator, stores, policy, executor, and loop against a fixed clock, a manual scheduler, and scripted minds. Failures print the session transcript. Live tests return immediately unless the key is set.
+Task outcomes, repeated instructions, user corrections, and recurring sequences of work provide evidence of an improvement opportunity. Relay periodically reviews that evidence and can also act on an explicit request for an upgrade.
 
-## Using it
+1. **Identify the friction.** Point to concrete examples and estimate what a change would save or improve.
+2. **Specify the change.** Define when it applies, its inputs and outputs, required access, expected behavior, and how to judge success.
+3. **Build and evaluate.** Create the tool or workflow in isolation and exercise it against representative examples, including failures. Use existing tools when they already meet the need. Simple workflow definitions are enough at first: named, versioned sequences that compose existing capabilities (context retrieval, tool calls, delegation, formatting) and can wait and resume.
+4. **Approve and activate.** Present the working change, evaluation results, and requested permissions. Install an approved version in that user’s workspace.
+5. **Observe actual use.** Compare outcomes with the previous process. Keep useful changes, revise weak ones, and support disabling or reverting them.
 
-1. **Point RELAY0 at a model** — *Settings → Model*: loopback chat-completions URL, model name, no key. Set orchestrator mode to **mind**.
-2. **Create a project** — *New project…*, or type `create project Atlas` and approve.
-3. **Listen** — Ctrl+Alt. Talk. Relay files what it can under the project it belongs to, and raises a card when a stated fact contradicts a stored decision. Ctrl+Alt again stops.
-4. **Ask** — type, or Ctrl+X: `what did we decide about the Atlas beta date?`
-5. **Delegate** — `research Lightshift's competitors and give me an implementation plan`. The card shows exactly what would leave. Approve, or **Retry locally**.
-6. **Shape Relay** — `always show what CAD means`, `file Atlas decisions without asking`, `keep responses concise`. Each is a reversible change set. `What time is it in Tokyo?` is how it grows a tool.
+A shared codebase and replaceable model can therefore support different capabilities for different users. Improvements remain versioned, inspectable, and removable. Record usage examples, corrections, and results now.
 
-## Settings
+## Guiding heuristics
 
-`%LOCALAPPDATA%\Relay\config\settings.json` (also *Settings* in the window):
+1. **Treat Relay as a personal workflow compiler.** Demonstrated, repeatable operations become reusable tools and workflow definitions. Context-dependent judgments remain model decisions.
 
-```json
-{
-  "schemaVersion": 2,
-  "hotkeys": { "scope": "window", "noteKey": "Ctrl+Alt", "commandKey": "Ctrl+X" },
-  "stream": { "bufferSeconds": 0, "observeIntervalMs": 12000, "minIngestChars": 240, "minIngestSeconds": 20, "excerptMaxSeconds": 30, "maxRetainedFraction": 0.25 },
-  "orchestrator": { "mode": "mind", "maxSteps": 12, "planningTimeoutMs": 60000, "maxToolCalls": 8 },
-  "model": { "enabled": true, "endpoint": "http://127.0.0.1:8080/v1/chat/completions", "model": "ministral-8b-instruct", "secretName": "model-gateway", "timeoutMs": 30000, "maxOutputTokens": 800 },
-  "externalModels": [ { "name": "research", "endpoint": "https://api.openai.com/v1/chat/completions", "model": "gpt-5-nano", "secretName": "external-research", "maxOutputTokens": 4000 } ],
-  "workers": { "enabled": true, "wallClockSeconds": 120, "memoryMb": 512 }
-}
-```
+2. **Treat the model as a shared decision-maker with separate case files.** A task’s continuity lives in its recorded objective, evidence, decisions, and pending work. Suspending one task leaves the model available for another. Observation of enabled streams does not wait on any one task.
 
-`orchestrator.mode`: `mind` is the loop above; `rules+model` is the older planner still in the tree while that loop is evaluated. Preferences live in `config\preferences.json` and change only through approved change sets. `stream.bufferSeconds` 0 holds the whole conversation for the session; 15–600 restores a rolling window.
+3. **Treat personalization as accumulated capabilities.** Memory, preferences, tools, and workflows belong to the user. A model upgrade is evaluated against those capabilities and must preserve them.
 
-## What is on disk
+4. **Treat improvement as a measured hypothesis.** Generated code or a workflow is valuable when it reduces effort or improves outcomes in actual use. Track successful completion, user corrections, manual interventions, repeated use, and time saved; proposal count is not the goal.
 
-```
-%LOCALAPPDATA%\Relay\
-  ledger\relay-ledger.jsonl        hash-chained, append-only, no transcript text
-  registry\projects.json           identities, slugs, aliases, roots, per-project policy
-  config\settings.json             settings
-  config\preferences.json          typed preferences (change sets only)
-  config\secrets\*.bin             DPAPI-protected API keys
-  config\prompts\*.md              mind / build / digest fragments (change sets only)
-  config\decisions.json            route, filing, risk weights (change sets only)
-  changesets\{id}.json             every self-change with its before image
-  tools\{name}.json                promoted tools (manifest + source + tests)
-  staging\tools\                   drafts under test
-  excerpts\{id}.json               bounded, trigger-anchored conversation excerpts
-  tasks\{id}.json                  per-task diagnostics
-  artifacts\external\              approved external replies (source artifacts)
-  archive\  backups\  sessions\  incidents\
+5. **Spend attention deliberately.** Preserve useful context quietly. Prioritize direct requests and time-sensitive findings while allowing background work to progress. An observed possibility does not automatically deserve an interruption.
 
-<project folder>\<slug>\
-  project.toml  notes\ decisions\ tasks\ artifacts\
-  .orchestrator\versions\          previous versions of every file Relay rewrote
-```
+6. **Use uncertainty to select the next step.** Missing evidence can call for retrieval, an experiment, or clarification. Confidence in an interpretation, an action, and a factual claim are different judgments; none grants permission.
 
-## Repository
+7. **Preserve intent while adapting the approach.** Relay may change its plan within the approved objective and permissions. A material change to the objective, deliverable, or scope is presented with evidence for approval, and recorded as a task revision without erasing the original request.
 
-```
-src/Relay.Core       ledger, mind, loop, policy, executor, tools, decisions, storage
-src/Relay.Gateway    OpenAI-compatible HTTP client (loopback http or https)
-src/Relay.Windows    chords, single instance, DPAPI, job-object worker host
-src/Relay.Worker     sandboxed worker; Jint for built tools
-src/Relay.Desktop    WinUI 3 window
-tests/Relay.Tests    xUnit: scenario DSL, scripted mind, evaluation cases
-docs/                specifications (09 is the current intent)
-```
+## What the essential build must prove
 
-## Status
+These scenarios run through the desktop with the real local model.
 
-The product intent is [`docs/09-orchestrator-rebuild.md`](docs/09-orchestrator-rebuild.md). Slices 1 (mind + loop), 5 (delegation, digest, bounded multi-turn), and 6 (tool building) have landed and been run live against Ministral 8B. The feed UI, grammar removal, and state-machine collapse are still ahead. Earlier slice status: [`docs/08-build-plan.md`](docs/08-build-plan.md).
+- A messy conversation window produces a useful, source-linked note or task, and later corrections update the same work.
+- A research task retrieves relevant personal context, delegates through working search tools, and returns an evidence-backed answer while direct interaction and observation continue.
+- Repeated workflow friction leads to a tested, approved personal tool or workflow that is successfully reused and can be reverted.
+- A task can wait, fail, resume, or be cancelled without losing its objective, duplicating side effects, or blocking unrelated work.
+
+The first build needs one working local model profile, one research delegate with real search when search is claimed, a small useful tool set, persistent task and source storage, an isolated tool- and workflow-building path, a true multi-task queue (one local inference at a time, many waits in flight), and one feed and composer for results, instructions, and approvals.
+
+The durable base that this target sits on — append-only ledger, policy and capabilities, sandboxed execution, source-linked notes and projects, evaluation harness — is specified in `docs/`. The loop contract (observation types, moves, feed) is in `docs/09-orchestrator-rebuild.md`; the distance between this target and the tree, and the sequence that closes it, is in `docs/10-alpha.md`.
