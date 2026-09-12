@@ -183,7 +183,7 @@ public sealed class Harness : IDisposable
         ResponseStyle = Preferences.Compiled().PromptFragment,
         MaxAnswerChars = Preferences.Compiled().MaxAnswerChars,
         PromptFragment = SelfChange.PromptFragment(Relay.Core.Mind.MindPrompt.PromptName),
-        Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(Root.PromptsDirectory, Relay.Core.Mind.MindPrompt.PromptName + ".md")),
+        Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(Root.PromptsDirectory, Relay.Core.Mind.MindPrompt.ConstitutionName + ".md")),
     };
 
     /// <summary>

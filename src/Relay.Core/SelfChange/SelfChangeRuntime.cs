@@ -21,8 +21,13 @@ public sealed class SelfChangeRuntime : ISelfChangeOperations
         "filing.grant", "filing.revoke", "retention.bufferSeconds", "retention.excerptMaxSeconds", "sources.allowOnlineSearch",
     ];
 
-    /// <summary>Prompt fragments an approved change set may add to: the old planner, the mind's constitution fragment, and the two utility prompts (docs/09): the fixed tool-build prompt and the digest of a delegate's reply.</summary>
-    public static readonly IReadOnlyList<string> PromptNames = ["planner", "mind", "build", "digest"];
+    /// <summary>
+    /// The prompt fragments an approved change set may add to: the mind's own prompt and the two utility
+    /// prompts (docs/09), the fixed tool-build prompt and the digest of a delegate's reply. A fragment is
+    /// added to a prompt, never the whole of one — <see cref="Mind.MindPrompt.ConstitutionName"/> is
+    /// deliberately absent, because the constitution is what judges these proposals in the first place.
+    /// </summary>
+    public static readonly IReadOnlyList<string> PromptNames = [Mind.MindPrompt.PromptName, Tools.BuildPrompt.PromptName, External.Digest.PromptName];
 
     private readonly DataRoot _root;
     private readonly PreferenceStore _preferences;

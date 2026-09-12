@@ -58,7 +58,7 @@ public sealed partial class SessionCoordinator
         ResponseStyle = Preferences.PromptFragment,
         MaxAnswerChars = Preferences.MaxAnswerChars,
         PromptFragment = SelfChange?.PromptFragment(MindPrompt.PromptName),
-        Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(_root.PromptsDirectory, MindPrompt.PromptName + ".md")),
+        Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(_root.PromptsDirectory, MindPrompt.ConstitutionName + ".md")),
         Recall = recall,
     };
 

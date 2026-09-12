@@ -4,14 +4,26 @@ using System.Text;
 namespace Relay.Core.Mind;
 
 /// <summary>
-/// The mind's prompt: a short constitution (replaceable by <c>config\prompts\mind.md</c>), the
-/// contract, and the dynamic sections (tools, actions, delegates, building, style) — as the system
-/// message; the task's transcript as the user message. One prompt for every task and every step;
-/// there are no roles.
+/// The mind's prompt: a short constitution, the contract, and the dynamic sections (tools, actions,
+/// delegates, building, style) — as the system message; the task's transcript as the user message.
+/// One prompt for every task and every step; there are no roles.
 /// </summary>
 public static class MindPrompt
 {
+    /// <summary>
+    /// The fragment an approved <c>update_prompt</c> writes, appended to the prompt as instructions the
+    /// user approved. It adds to the constitution; it cannot be the constitution.
+    /// </summary>
     public const string PromptName = "mind";
+
+    /// <summary>
+    /// Where a replacement constitution is read from, if a human puts one there by hand. Deliberately not
+    /// one of the names a proposal may write: the constitution is what governs every proposal, including
+    /// the ones Relay makes about itself, so nothing Relay can propose may replace it. A self-change is
+    /// meant to be a bounded addition, and an approval that silently rewrote the whole governing prompt
+    /// would make its own stated scope a lie.
+    /// </summary>
+    public const string ConstitutionName = "constitution";
 
     public const string DefaultConstitution =
         "You are the mind of Relay, a local-first personal orchestrator running on the user's own machine. You work in a loop: " +

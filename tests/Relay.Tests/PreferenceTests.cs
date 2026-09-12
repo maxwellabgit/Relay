@@ -4,6 +4,7 @@ using Relay.Core.Mind;
 using Relay.Core.Notes;
 using Relay.Core.Policy;
 using Relay.Core.Preferences;
+using Relay.Core.SelfChange;
 using Relay.Core.State;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
@@ -142,6 +143,39 @@ public class PreferenceTests : IDisposable
         var wordy = Decide(TaskKind.Answer, Producers.Mind, [.. concise, .. Contract(new string('b', 401), "p", "s", "a")]);
         Assert.Equal(DecisionOutcome.Deny, wordy.Outcome);
         Assert.Contains(wordy.Reasons, r => r.Contains("target.benefit is longer than 400 characters", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A self-change's stated scope has to be true. An approved prompt fragment is added to the mind's prompt;
+    /// it can never become the constitution, which is what judges proposals like it in the first place — so no
+    /// name a proposal may write is the name the constitution is read from, and a fragment leaves it standing.
+    /// </summary>
+    [Fact]
+    public void AnApprovedPromptFragmentIsAddedToTheConstitutionAndCanNeverReplaceIt()
+    {
+        Assert.DoesNotContain(MindPrompt.ConstitutionName, SelfChangeRuntime.PromptNames);
+        Assert.Contains(MindPrompt.PromptName, SelfChangeRuntime.PromptNames);
+        Assert.NotEqual(MindPrompt.ConstitutionName, MindPrompt.PromptName);
+
+        var mind = new ScriptedMind()
+            .Step(ScriptedMind.Propose(Actions.UpdatePrompt, "you asked for no bullet lists",
+                [("name", MindPrompt.PromptName), ("content", "Never use bullet lists."), .. Contract("Prose reads faster", "Writes one prompt fragment", "One fragment", "The next answer has no bullets")]),
+                "Proposing the instruction")
+            .Always(_ => MindStep.Of(ScriptedMind.Say("That instruction is in place."), "The fragment is approved."));
+
+        using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
+            .Command("never use bullet lists")
+            .ExpectProposal(Actions.UpdatePrompt, "pending")
+            .Approve()
+            .ExpectEvent(EventTypes.ChangeSetApplied);
+
+        // The fragment is on the record and in the prompt, as an addition the user approved.
+        var prompt = MindPrompt.System(s.H.MindContext());
+        Assert.Contains("Additional instructions approved by the user: Never use bullet lists.", prompt);
+        // And the constitution is untouched: every rule that governs a proposal is still there.
+        Assert.StartsWith(MindPrompt.DefaultConstitution, prompt);
+        Assert.Contains("Never invent ids", prompt);
+        Assert.Contains("You never act directly", prompt);
     }
 
     // ----------------------------------------------------------------------------------------
