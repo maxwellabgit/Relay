@@ -138,6 +138,8 @@ public static class EventTypes
     // Tasks (one pipeline, several origins)
     public const string TaskCreated = "task.created";
     public const string TaskPlanned = "task.planned";
+    /// <summary>The lane a task was filed under turned out to be wrong once the mind said what it was doing.</summary>
+    public const string TaskRelabelled = "task.relabelled";
     public const string TaskPresented = "task.presented";
     public const string TaskMerged = "task.merged";
     public const string TaskCompleted = "task.completed";

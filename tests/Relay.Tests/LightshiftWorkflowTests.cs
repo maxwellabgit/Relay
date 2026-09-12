@@ -140,7 +140,7 @@ public class LightshiftWorkflowTests : IDisposable
         Assert.Equal(mind.Name, task.Producer);
         // Two axes of the same gap: what the notes do not hold, and that settling it is beyond what runs here.
         var stepped = s.H.Records().First(r => r.Type == EventTypes.MindStepped && r.DataString("taskId") == task.TaskId);
-        Assert.Contains(MindRead.NeedExternalReasoning, stepped.Data.GetProperty("read").GetProperty("needs").EnumerateArray().Select(n => n.GetString()));
+        Assert.Contains(stepped.Data.GetProperty("read").GetProperty("needs").EnumerateArray(), need => need.GetString() == MindRead.NeedExternalReasoning);
         var route = s.H.Records().First(r => r.Type == EventTypes.DecisionMade && r.DataString("decision") == Decider.Route);
         Assert.Equal(Decider.OfferDelegate, route.DataString("outcome"));
         Assert.Contains(task.Steps, step => step.Contains("both notes"));

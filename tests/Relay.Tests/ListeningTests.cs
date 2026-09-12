@@ -315,16 +315,16 @@ public class ListeningTests : IDisposable
         Assert.Single(excerpt.Segments);                                              // anchored to the line the raise named
         Assert.Equal("Actually Atlas ships on November 2 now.", excerpt.Text);
         Assert.Equal(excerpt.TriggerSegmentId, excerpt.Segments[0].SegmentId);
-        Assert.Equal("scripted", excerpt.SelectedBy);
+        Assert.Equal("mind:scripted", excerpt.SelectedBy);
         Assert.DoesNotContain(Chatter, s.H.LedgerText());                            // the sentence before it was never kept
 
         var created = s.H.Last(EventTypes.TaskCreated)!;
         Assert.Equal("observed", created.DataString("origin"));
         Assert.Equal("check", created.DataString("kind"));
         Assert.Equal(excerpt.ExcerptId, created.DataString("excerptId"));
-        Assert.Equal("scripted", created.DataString("raisedBy"));
+        Assert.Equal("mind:scripted", created.DataString("raisedBy"));
         var raised = s.H.Last(EventTypes.ObserveRaised)!;
-        Assert.Equal("scripted", raised.DataString("by"));
+        Assert.Equal("mind:scripted", raised.DataString("by"));
         var shown = s.H.Last(EventTypes.AttentionShown)!;
         Assert.Equal("alert", shown.DataString("level"));
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExcerptStored && r.DataString("excerptId") == excerpt.ExcerptId);
@@ -448,7 +448,7 @@ public class ListeningTests : IDisposable
             .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectEvent(EventTypes.NoteDraftCreated);
         Assert.Null(s.Snap.Listening!.LastError);
-        Assert.Equal("scripted", s.H.Last(EventTypes.ObserveRaised)!.DataString("by"));
+        Assert.Equal("mind:scripted", s.H.Last(EventTypes.ObserveRaised)!.DataString("by"));
         Assert.DoesNotContain(Decision, s.H.LedgerText());
     }
 

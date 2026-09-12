@@ -315,6 +315,10 @@ public sealed partial class SessionCoordinator
         var tier = PolicyEngine.TierOf(move.Action);
         var risk = tier switch { Tier.Prohibited => Risks.Prohibited, Tier.Automatic => Risks.StagingWrite, _ => move.Action == Actions.ModelRequest ? Risks.External : Risks.ControlledWrite };
         var proposal = new Proposal(Ulid.NewUlid(now), move.Action, Truncate(move.Reason, 400), move.Target, [task.SourceEventId], [], risk, tier != Tier.Automatic, loop.MindName);
+        // A task is an improvement the moment Relay proposes changing itself, whatever the words that started it
+        // were. The lane follows what is being proposed, and it has to be set before policy decides: the
+        // improvement contract is only owed in an improve task.
+        if (TaskLoop.IsSelfChange(move.Action) && task.Kind != TaskKind.Improve) Relabel(task, TaskKind.Improve);
         ReceiveProposal(task, proposal);
         var ps = task.Proposals.Last(p => p.Proposal.ProposalId == proposal.ProposalId);
 

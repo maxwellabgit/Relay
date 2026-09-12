@@ -132,20 +132,24 @@ public sealed class EvaluationRunner
         var loop = new TaskLoop("eval-" + c.Id, source, _mind, host, context, new Decider(DecisionSet.Default()), new LoopBudget(c.Expect.MaxSteps ?? MaxSteps, turn.Settings.MaxToolCalls), new FixedClock(_clock));
         loop.Observe(new InputObserved(at, source, c.Instruction, c.Heard is null ? null : ExcerptIdFor(c)));
         LoopResult? result;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(CaseTimeout);
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(CaseTimeout);
             result = await loop.RunAsync(timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new CaseResult(c.Id, c.Source, false, [$"The mind did not finish within {CaseTimeout.TotalSeconds:0}s."], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new CaseResult(c.Id, c.Source, false, [$"The mind threw {ex.GetType().Name}: {ex.Message}"], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            result = null;
+        }
+        // The loop absorbs a cancellation into a failed result, so a mind that never answers would otherwise be
+        // reported as a cancelled task. The case's own clock ran out; that is the one thing worth saying about it.
+        if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            return new CaseResult(c.Id, c.Source, false, [$"The mind did not finish within {CaseTimeout.TotalSeconds:0.##}s."], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
         var failures = Score(c.Expect, loop, result);
         return new CaseResult(c.Id, c.Source, failures.Count == 0, failures, Observe(loop, result), _mind.Name, watch.ElapsedMilliseconds);
     }

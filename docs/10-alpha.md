@@ -75,6 +75,8 @@ The fifth commit is the deletion, and what it costs is the evaluation set. There
 
 Nothing in the evaluation is scored by a grammar any more, so the sets are no longer split by *what* scores them. They are split by the world a case needs: the top-level sets run against Atlas and Home, `mind/` adds the tools the mind built for itself, and `model/` adds Lightshift and a configured external profile. A test world is now built through the same calls the Projects and Memory panels make, never by asking the mind to interpret a sentence — that keeps the setup of a test out of what the test is about, and it is why the deletion of the phrase grammar did not take the scenarios with it.
 
+Running the suite found one thing the deletion had quietly broken, and it is the kind of hole worth naming. The improvement contract is only owed *in an improve task*, and it was the grammar that classified "keep responses concise" as one. With the grammar gone every direct ask starts as something to answer, so nothing ever reached the lane where the contract is enforced: Relay could have changed its own preferences without stating a benefit or an acceptance criterion. The lane is not cosmetic — policy asks what kind of task it is deciding in — so it cannot be left to phrasing. A task is now an improvement the moment Relay proposes changing itself, whatever words started it, and the relabel is on the record with what the lane was before.
+
 *Proves:* a messy conversation window produces a useful, source-linked note or task through the loop that has been tuned, and every step below is written once.
 
 ### Step 2 — The runtime the README claims

@@ -1,9 +1,12 @@
 using Relay.Core.Agents;
+using Relay.Core.Config;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Policy;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Tests.Support;
+using static Relay.Core.Mind.ScriptedMind;
 
 namespace Relay.Tests;
 
@@ -12,19 +15,62 @@ public class WorkerTests : IDisposable
 {
     private readonly TempRoot _tmp = new();
 
-    private static Scenario ProjectWithNotes(TempRoot tmp, InProcessWorkerHost host, Action<Relay.Core.Config.RelaySettings>? configure = null)
-        => Scenario.New(tmp, configure: configure, workerHost: host).WithWorkspace()
-            .Command("create project Atlas").Approve()
+    /// <summary>The mind runs every task: a worker only ever starts because the mind proposed one and the user approved it.</summary>
+    private static void Thinking(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+    }
+
+    private static Scenario ProjectWithNotes(TempRoot tmp, InProcessWorkerHost host, IMind mind, Action<RelaySettings>? configure = null)
+        => Scenario.New(tmp, configure: x => { Thinking(x); configure?.Invoke(x); }, workerHost: host, mind: mind).WithWorkspace()
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
             .Note("Need to email the Atlas pilot customers before the beta.")
             .ExpectEvent(EventTypes.NoteRouted, atLeast: 2);
+
+    /// <summary>
+    /// What the mind does about a worker. An instruction to summarize proposes the sandboxed run and then only waits
+    /// and reports what came back: the mind never reaches into the staging folder itself. An instruction to apply
+    /// proposes filing the finished run's summary into the project, which is a proposal of its own and therefore an
+    /// approval of its own — derived content never lands on the strength of the approval that started the worker.
+    /// </summary>
+    /// <param name="run">The run an apply instruction files from: the one the most recent launch reported.</param>
+    private static Func<MindRequest, MindStep> WorkerMoves(Func<string?> run) => request => request.Transcript[^1] switch
+    {
+        // The launch reported an output path: the run is over, and what it wrote is in staging, not in the project.
+        ExecutionObserved { Action: Actions.LaunchWorker, Ok: true, Outputs: var outputs } when outputs.ContainsKey("output")
+            => MindStep.Of(Say($"The worker wrote {outputs["output"]} into its staging folder; filing it into Atlas is a separate decision."),
+                "Reporting what the worker produced."),
+        ExecutionObserved { Action: Actions.ApplyPatch, Ok: true } filed
+            => MindStep.Of(Say("Filed: " + filed.Summary), "Filed the worker's summary as an artifact."),
+        ExecutionObserved { Ok: false } wrong
+            => MindStep.Of(Say("That did not finish: " + wrong.Summary), "Reporting what went wrong."),
+        ExecutionObserved => MindStep.Of(Wait("the worker is running"), "The worker is running."),
+        PolicyObserved { Outcome: PolicyObserved.Denied } denied
+            => MindStep.Of(Say("Refused: " + string.Join(" ", denied.Reasons)), "Reporting what policy refused."),
+        _ when Applying(request)
+            => MindStep.Of(Propose(Actions.ApplyPatch, "The worker's summary is finished in staging; putting it into the project is the user's decision, not a consequence of the run.",
+                    ("projectId", "atlas"), ("runId", run() ?? ""), ("output", "summary.md"), ("destination", "artifacts/summary.md")),
+                "Proposing to file the worker's summary as an Atlas artifact."),
+        _ => MindStep.Of(Propose(Actions.LaunchWorker, "Summarizing a project means reading every note in it; a sandboxed worker does that without the notes leaving the machine.",
+                    ("projectId", "atlas"), ("task", "summarize"), ("objective", "Summarize the Atlas notes into out/summary.md")),
+                "Proposing a sandboxed worker over the Atlas notes.", Read(0.5, MindRead.NeedLocalNotes)),
+    };
+
+    /// <summary>Whether the instruction that started this task is about filing a finished run rather than starting one.</summary>
+    private static bool Applying(MindRequest request)
+        => request.Transcript.OfType<InputObserved>().First().Text.Contains("apply", StringComparison.OrdinalIgnoreCase);
 
     [Fact]
     public void SummaryIsProducedInStagingByAWorkerAndAppliedOnlyAfterASecondApproval()
     {
         var host = new InProcessWorkerHost();
-        using var s = ProjectWithNotes(_tmp, host)
-            .Command("summarize atlas")
+        var mind = new ScriptedMind();
+        using var s = ProjectWithNotes(_tmp, host, mind);
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas")
             .ExpectState(RelayState.AwaitingApproval)
             .ExpectProposal(Actions.LaunchWorker, "pending")
             .Approve(Actions.LaunchWorker)
@@ -40,6 +86,7 @@ public class WorkerTests : IDisposable
             .ExpectEvent(EventTypes.AgentRunCompleted)
             .ExpectNoEvent(EventTypes.AgentRunToolDenied)
             .ExpectNoEvent(EventTypes.PatchApplied);
+        Assert.Equal(mind.Name, s.Response.Producer);
 
         var spec = Assert.Single(host.Started);
         Assert.Equal(2, spec.Inputs.Count);
@@ -74,11 +121,6 @@ public class WorkerTests : IDisposable
         Assert.Equal(summary, File.ReadAllText(artifact));
         Assert.True(AgentRunStatus.Load(spec.StagingPath)!.Applied);
 
-        s.Command("apply the summary to atlas")
-            .ExpectState(RelayState.Completed)
-            .ExpectAnswerContains("No completed worker output is waiting")
-            .ExpectNoProposals();
-
         // Applying again over an existing artifact versions the previous file instead of overwriting it.
         s.Command("summarize atlas").Approve(Actions.LaunchWorker).Advance(TimeSpan.Zero).ExpectState(RelayState.Completed)
          .Command("apply the summary to atlas").Approve(Actions.ApplyPatch).ExpectState(RelayState.Completed);
@@ -91,8 +133,11 @@ public class WorkerTests : IDisposable
     public void HostileWorkerIsDeniedEverywhereAndATamperedRunIsRejected()
     {
         var host = new InProcessWorkerHost { Body = WorkerBodies.Hostile };
-        using var s = ProjectWithNotes(_tmp, host)
-            .Command("summarize atlas").Approve(Actions.LaunchWorker)
+        var mind = new ScriptedMind();
+        using var s = ProjectWithNotes(_tmp, host, mind);
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
             .ExpectState(RelayState.Failed)
             .ExpectEvent(EventTypes.AgentRunToolDenied, atLeast: 9)
@@ -115,17 +160,25 @@ public class WorkerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(spec.StagingPath)!, "escaped.txt")));
         Assert.Equal("terminated", AgentRunStatus.Load(spec.StagingPath)!.State);
 
+        // A terminated run's output can never be applied: the run wrote a summary, and the operation refuses it anyway.
         s.Dismiss().ExpectState(RelayState.Idle)
          .Command("apply the summary to atlas")
-         .ExpectAnswerContains("No completed worker output is waiting"); // a terminated run's output can never be applied
+         .Approve(Actions.ApplyPatch)
+         .ExpectState(RelayState.Failed)
+         .ExpectProposal(Actions.ApplyPatch, "failed")
+         .ExpectNoEvent(EventTypes.PatchApplied);
+        Assert.Contains("did not complete", Assert.Single(s.Response.Proposals, p => p.Action == Actions.ApplyPatch).Error);
     }
 
     [Fact]
     public void HangingWorkerIsKilledAtTheWallClockLimit()
     {
         var host = new InProcessWorkerHost { Body = WorkerBodies.Hanging };
-        using var s = ProjectWithNotes(_tmp, host, configure: x => x.Workers.WallClockSeconds = 5)
-            .Command("summarize atlas").Approve(Actions.LaunchWorker)
+        var mind = new ScriptedMind();
+        using var s = ProjectWithNotes(_tmp, host, mind, configure: x => x.Workers.WallClockSeconds = 5);
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
             .ExpectState(RelayState.Executing)
             .Advance(TimeSpan.FromSeconds(4))
@@ -141,8 +194,11 @@ public class WorkerTests : IDisposable
     public void CancelDuringAWorkerRunStopsItWithoutRaisingAnIncident()
     {
         var host = new InProcessWorkerHost { Body = WorkerBodies.Hanging };
-        using var s = ProjectWithNotes(_tmp, host)
-            .Command("summarize atlas").Approve(Actions.LaunchWorker)
+        var mind = new ScriptedMind();
+        using var s = ProjectWithNotes(_tmp, host, mind);
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
             .ExpectState(RelayState.Executing)
             .Cancel()
@@ -159,8 +215,11 @@ public class WorkerTests : IDisposable
     public void ShutdownDuringAWorkerRunTerminatesTheWorkerAndRecoveryReportsIt()
     {
         var host = new InProcessWorkerHost { Body = WorkerBodies.Hanging };
-        using var s = ProjectWithNotes(_tmp, host)
-            .Command("summarize atlas").Approve(Actions.LaunchWorker)
+        var mind = new ScriptedMind();
+        using var s = ProjectWithNotes(_tmp, host, mind);
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
             .ExpectState(RelayState.Executing)
             .Restart();
@@ -172,12 +231,17 @@ public class WorkerTests : IDisposable
     [Fact]
     public void WorkersCanBeDisabledInSettingsAndPolicyDeniesTheLaunch()
     {
-        using var s = Scenario.New(_tmp, configure: x => x.Workers.Enabled = false, workerHost: new InProcessWorkerHost()).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .Command("summarize atlas")
+        var host = new InProcessWorkerHost();
+        var mind = new ScriptedMind();
+        using var s = Scenario.New(_tmp, configure: x => { Thinking(x); x.Workers.Enabled = false; }, workerHost: host, mind: mind).WithWorkspace()
+            .Project("Atlas");
+        mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
+
+        s.Command("summarize atlas")
             .ExpectState(RelayState.Completed)
             .ExpectOutcome("denied")
             .ExpectProposal(Actions.LaunchWorker, "denied")
+            .ExpectAnswerContains("Workers are disabled in settings")
             .ExpectNoEvent(EventTypes.AgentRunLaunched);
     }
 
@@ -188,8 +252,10 @@ public class WorkerTests : IDisposable
         Assert.True(File.Exists(workerDll), "Relay.Worker.dll should be built beside the tests.");
         // The real Windows sandbox: the child runs inside a job object with kill-on-close, a memory cap and UI restrictions.
         var host = new Relay.Windows.JobObjectWorkerHost(workerDll);
+        var mind = new ScriptedMind();
 
-        using var h = new Harness(_tmp.Root, workerHost: host, inlinePost: false).Start();
+        using var h = new Harness(_tmp.Root, configure: Thinking, workerHost: host, inlinePost: false, mind: mind).Start();
+        mind.Always(WorkerMoves(() => h.Last(EventTypes.AgentRunLaunched)?.DataString("runId")));
         var ws = Path.Combine(Path.GetDirectoryName(_tmp.Root.Path)!, Path.GetFileName(_tmp.Root.Path) + "-ws");
         Directory.CreateDirectory(ws);
         try
@@ -204,7 +270,7 @@ public class WorkerTests : IDisposable
             h.Coordinator.TextChanged("summarize atlas");
             h.Coordinator.PressCommandKey();
             h.Scheduler.Advance(TimeSpan.FromSeconds(2));
-            Assert.True(h.Scheduler.PumpUntil(() => h.Snap.State == RelayState.AwaitingApproval, TimeSpan.FromSeconds(10)), "planning did not finish; state " + h.Snap.State);
+            Assert.True(h.Scheduler.PumpUntil(() => h.Snap.State == RelayState.AwaitingApproval, TimeSpan.FromSeconds(10)), "the mind did not finish; state " + h.Snap.State);
             h.Coordinator.ApproveAll();
             Assert.Equal(RelayState.Executing, h.Snap.State);
             h.Scheduler.Advance(TimeSpan.Zero); // starts the real process
@@ -215,7 +281,7 @@ public class WorkerTests : IDisposable
             Assert.Equal("executed", h.Snap.Response!.Outcome);
 
             var launched = h.Last(EventTypes.AgentRunLaunched)!;
-                Assert.Contains("job object sandbox", launched.DataString("host"));
+            Assert.Contains("job object sandbox", launched.DataString("host"));
             var completed = h.Last(EventTypes.AgentRunCompleted)!;
             Assert.True(completed.DataBool("ok"));
             Assert.Equal(0, completed.DataInt64("exitCode"));

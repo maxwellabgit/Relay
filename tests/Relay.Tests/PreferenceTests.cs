@@ -170,7 +170,7 @@ public class PreferenceTests : IDisposable
                          $"One added line: \"{ConciseLine}\"",
                          "The system prompt carries the line; reverting the change set removes it")]),
                 "Proposing the instruction in your own words")
-            .Step(Say("Answers are concise from now on, in your own words."), "Concise from now on");
+            .Always(_ => MindStep.Of(Say("Answers are concise from now on, in your own words."), "Concise from now on"));
 
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Do("Start from normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
@@ -259,21 +259,23 @@ public class PreferenceTests : IDisposable
     [Fact]
     public void PinningAndUnpinningATermGoThroughApprovedChangeSets()
     {
-        var mind = new ScriptedMind()
-            .Step(Propose(Actions.UpdatePreference, "You asked for CAD to be explained whenever it comes up.",
+        var mind = new ScriptedMind().Always(request => request.Transcript[^1] switch
+        {
+            InputObserved pin when pin.Text.Contains("always show", StringComparison.OrdinalIgnoreCase)
+                => MindStep.Of(Propose(Actions.UpdatePreference, "You asked for CAD to be explained whenever it comes up.",
                     [("key", "display.alwaysShow"), ("value", "CAD"),
                      .. Contract("'CAD' is defined on screen the moment it is heard, without asking",
                          "Writes config\\preferences.json (change set); reads local sources only",
                          "One watched term; the pinned card refreshes in place",
                          "Hearing 'CAD' while listening shows a pinned definition within one pass")]),
-                "Proposing to pin CAD", Read(0.2))
-            .Step(Say("CAD is pinned: its definition is refreshed in place whenever it comes up."), "Pinned CAD")
-            .Step(Propose(Actions.UpdatePreference, "You asked to stop pinning CAD.",
+                    "Proposing to pin CAD", Read(0.2)),
+            InputObserved => MindStep.Of(Propose(Actions.UpdatePreference, "You asked to stop pinning CAD.",
                     [("key", "display.stopShowing"), ("value", "CAD"),
                      .. Contract("One less thing on screen", "Writes config\\preferences.json (change set)",
                          "Removes one watched term", "Hearing 'CAD' no longer produces a pinned result")]),
-                "Proposing to unpin CAD", Read(0.2))
-            .Step(Say("CAD is no longer pinned."), "Unpinned CAD");
+                "Proposing to unpin CAD", Read(0.2)),
+            _ => MindStep.Of(Say("Your pinned terms are what you asked for."), "Done"),
+        });
 
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Command("always show what CAD means")
@@ -297,8 +299,9 @@ public class PreferenceTests : IDisposable
     [Fact]
     public void AStandingGrantFilesWithoutAskingAndIsRevocable()
     {
-        // Nothing files automatically in this session unless a grant says so.
-        var mind = new ScriptedMind();
+        // Nothing files automatically in this session unless a grant says so. Each change is scripted where the
+        // scenario reaches it, because the second one names the grant the first one made.
+        var mind = new ScriptedMind().Always(_ => MindStep.Of(Say("Filing for Atlas is what you asked for."), "Done"));
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); cfg.Orchestrator.AutoRouteThreshold = 0.99; }, mind: mind).WithWorkspace()
             .Project("Atlas")
             .Note("Decision: the Atlas beta ships on October 14.")
@@ -316,8 +319,7 @@ public class PreferenceTests : IDisposable
                          $"Standing approval for {Actions.RouteNote} into atlas ({NoteTypes.Decision} notes); additive writes only",
                          "One standing grant recorded in preferences; revocable in one step",
                          "A decision routed to atlas with moderate confidence is filed and the ledger names the grant")]),
-                "Proposing a standing grant for Atlas decisions", Read(0.3))
-            .Step(Say("Atlas decisions are filed without asking from now on."), "Granted");
+            "Proposing a standing grant for Atlas decisions", Read(0.3));
 
         s.Command("file Atlas decisions without asking")
             .ExpectProposal(Actions.UpdatePreference, "pending");
@@ -356,8 +358,7 @@ public class PreferenceTests : IDisposable
                          "Writes config\\preferences.json (change set); removes a standing grant, adds none",
                          $"Removes grant {grant.GrantId}",
                          "The next decision routed to atlas appears in Review instead of being filed")]),
-                "Proposing to revoke the standing grant", Read(0.3))
-            .Step(Say("Atlas decisions wait for your decision again."), "Revoked");
+            "Proposing to revoke the standing grant", Read(0.3));
 
         s.Command("stop filing Atlas decisions without asking")
             .ExpectProposal(Actions.UpdatePreference, "pending");

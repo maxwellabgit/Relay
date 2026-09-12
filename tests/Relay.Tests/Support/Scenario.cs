@@ -623,7 +623,7 @@ public sealed class ListeningMind : Relay.Core.Mind.IMind
     private readonly List<(string Phrase, Func<WindowLine, RaiseMove> Raise)> _rules = new();
     private readonly HashSet<string> _done = new(StringComparer.Ordinal);
 
-    public string Name => "scripted";
+    public string Name => "mind:scripted";
     public List<MindRequest> Requests { get; } = new();
     /// <summary>Only the listening passes, which is what these scenarios are about.</summary>
     public List<MindRequest> Passes => Requests.Where(r => r.Observing).ToList();

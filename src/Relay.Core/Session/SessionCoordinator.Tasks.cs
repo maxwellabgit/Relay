@@ -76,7 +76,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
     {
         public required string TaskId { get; init; }
         public required TaskOrigin Origin { get; init; }
-        public required TaskKind Kind { get; init; }
+        /// <summary>Settable because a direct ask starts as something to answer and the mind's work may show it was something else (see Relabel).</summary>
+        public required TaskKind Kind { get; set; }
         public required string Lane { get; init; }     // command | user_operation | ask | observed | dialogue
         public required string CaptureId { get; init; }
         public required string SourceEventId { get; init; }
@@ -210,6 +211,18 @@ public sealed partial class SessionCoordinator : IExecutionSink
     /// out from the words, and the card is relabelled if the work turns out to be something else.
     /// </summary>
     private const TaskKind DirectKind = TaskKind.Answer;
+
+    /// <summary>
+    /// Moves a live task into the lane its work turned out to belong to. The lane is not cosmetic — policy
+    /// asks what kind of task it is decided in — so a relabel is on the record with what it was before.
+    /// </summary>
+    private void Relabel(TaskState task, TaskKind kind)
+    {
+        var was = task.Kind;
+        task.Kind = kind;
+        Append(EventTypes.TaskRelabelled, new { taskId = task.TaskId, was = was.Wire(), now = kind.Wire() });
+        PersistTask(task);
+    }
 
     /// <summary>The command capture became a task: direct, foreground, drives the state machine.</summary>
     private void StartCommandTask(Captures.CaptureDraft draft, string sourceEventId)

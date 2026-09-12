@@ -74,8 +74,9 @@ public class EvaluationTests : IDisposable
         var s = World(tmp, configure ?? (cfg => { Mind(cfg); WithResearchProfile(cfg); }), mind, externalClients ?? (_ => new ScriptedModelClient()))
             .WithSecret("external-research")
             .Project("Lightshift");
+        // Every Lightshift note names the project, so the router files them itself; nothing is left to file.
         foreach (var text in LightshiftNotes) s.Note(text);
-        return s.FileAll("lightshift");
+        return s;
     }
 
     /// <summary>The authored set every run scores: unseen cases and failure cases over the <see cref="World"/>.</summary>
@@ -120,10 +121,14 @@ public class EvaluationTests : IDisposable
         Assert.Equal(DecisionOutcome.NeedsApproval, PolicyEngine.Decide(user, improve).Outcome);
     }
 
-    /// <summary>The four contract keys on an update_preference the mind proposes, with wording the card can show.</summary>
+    /// <summary>
+    /// The four contract keys on an update_preference the mind proposes, with wording the card can show.
+    /// The value is minimalist rather than concise so the change is a real one: concise is already the
+    /// default, and a revert that restores it would prove nothing.
+    /// </summary>
     private static (string Key, string Value)[] Concise() =>
     [
-        ("key", "response.verbosity"), ("value", "concise"),
+        ("key", "response.verbosity"), ("value", "minimalist"),
         ("benefit", "Answers stay short enough to read at a glance"),
         ("permissions", "preferences.json only"),
         ("scope", "one preference key"),
@@ -140,9 +145,13 @@ public class EvaluationTests : IDisposable
         using (var s = Scenario.New(_tmp, Mind, mind: bare).WithWorkspace()
             .Command("keep responses concise")
             .ExpectProposal(Actions.UpdatePreference, "denied")
-            .ExpectOutcome("answered"))
+            .ExpectOutcome("denied"))
         {
             var task = s.Response;
+            // The ask came in as something to answer; proposing a change to Relay is what made it an improvement,
+            // and only in that lane is the contract owed. Both are on the record.
+            Assert.Equal(TaskKind.Improve, task.Kind);
+            Assert.Equal("answer", s.H.Last(EventTypes.TaskRelabelled)!.DataString("was"));
             Assert.Contains(task.Proposals[0].Reasons, r => r.Contains("must state its benefit"));
             Assert.Contains(task.Proposals[0].Reasons, r => r.Contains("must state its acceptance"));
             Assert.Empty(s.Snap.ChangeSets);
@@ -160,11 +169,12 @@ public class EvaluationTests : IDisposable
         var card = Assert.Single(g.Response.Proposals);
         Assert.Contains("Benefit: Answers stay short", card.Detail);
         Assert.Contains("Acceptance: The next answer is under", card.Detail);
-        g.Approve().ExpectEvent(EventTypes.ChangeSetApplied);
+        g.Approve().ExpectEvent(EventTypes.ChangeSetApplied).ExpectPreference("response.verbosity", "minimalist");
         Assert.Contains("The next answer is under", g.H.Last(EventTypes.ChangeSetApplied)!.DataString("acceptance"));
         var set = Assert.Single(g.Snap.ChangeSets);
         Assert.False(set.Reverted);
-        g.Do("Revert", c => Assert.True(c.RevertChangeSet(set.ChangeSetId))).ExpectPreference("response.verbosity", "");
+        // Reverting puts back what was there before, not a blank: a change set is a before and an after.
+        g.Do("Revert", c => Assert.True(c.RevertChangeSet(set.ChangeSetId))).ExpectPreference("response.verbosity", "concise");
     }
 
     [Fact]
@@ -330,9 +340,10 @@ public class EvaluationTests : IDisposable
         using var s = World(_tmp, mind: mind);
         var sessionStart = s.H.Clock.UtcNow;
 
+        // The mind offers one operation at a time and waits, so refusing the destination ends the move there.
         s.Command("what did we decide about the Atlas beta date?").ExpectState(RelayState.Completed).ExpectAnswerContains("October 14")
          .Command("move the backyard notes into Garden").ExpectState(RelayState.AwaitingApproval)
-         .Reject(Actions.CreateProject).Reject().Reject().Reject().ExpectState(RelayState.Completed)
+         .Reject(Actions.CreateProject).ExpectState(RelayState.Completed).ExpectOutcome("rejected")
          .Command("keep responses concise").Approve().ExpectEvent(EventTypes.ChangeSetApplied);
         // The self-change is a change set: revert it, so the record is back where the authored cases expect it.
         foreach (var change in s.Snap.ChangeSets.Where(c => !c.Reverted).ToList()) s.Do($"Revert {change.Kind}", c => Assert.True(c.RevertChangeSet(change.ChangeSetId)));
@@ -439,10 +450,12 @@ public class EvaluationTests : IDisposable
     public async Task ScoringReadsTargetAssertionsIncludingDottedActionNames()
     {
         using var s = World(_tmp);
-        var mind = new ScriptedMind()
-            .Step(ScriptedMind.Propose(Actions.ModelRequest, "needs the outside world",
-                ("profile", "research"), ("allowSearch", "true"), ("objective", "price onboarding")), "Proposing the request")
-            .Always(_ => MindStep.Of(ScriptedMind.Say("Knowledge state: Missing: a. Capability: none."), "Answered"));
+        // Every case gets the same two steps, because each is scored on its own loop: a set's cases are
+        // independent, and a mind scripted with Step would spend its script on whichever ran first.
+        var mind = new ScriptedMind().Always(request => request.Transcript.OfType<MoveObserved>().Any()
+            ? MindStep.Of(ScriptedMind.Say("Knowledge state: Missing: a. Capability: none."), "Answered")
+            : MindStep.Of(ScriptedMind.Propose(Actions.ModelRequest, "needs the outside world",
+                ("profile", "research"), ("allowSearch", "true"), ("objective", "price onboarding")), "Proposing the request"));
 
         var holds = new Expectation { Moves = ["propose:model.request"], Targets = ["model.request.profile=research", "model.request.allowSearch"], MaxSteps = 3 };
         var breaks = new Expectation { Targets = ["model.request.profile=other", "model.request.budgetTokens", "nonsense"], MaxAnswerChars = 10, Consistent = true, ForbiddenMoves = ["propose:model.request"] };

@@ -85,7 +85,7 @@ public sealed class ModelGatewayTests : IDisposable
         Assert.Contains("exactly one JSON object", first.Messages[0].Content);
         Assert.Contains("list_projects", first.Messages[0].Content);
         Assert.Contains("create_project", first.Messages[0].Content);
-        Assert.Contains("which projects do I have?", first.Messages[1].Content);
+        Assert.Contains("which projects do I have", first.Messages[1].Content);
         Assert.True(first.JsonObject);
         Assert.Equal(MoveSchema.Json, first.JsonSchema);
         Assert.Equal(MoveSchema.SchemaName, first.SchemaName);
@@ -112,7 +112,7 @@ public sealed class ModelGatewayTests : IDisposable
             .Fail("HTTP 429 from api.example: rate limited", 429)
             .Fail("HTTP 429 from api.example: rate limited", 429);
 
-        using var s = Scenario.New(_tmp, MindMode, mind: new ModelMind(model)).WithWorkspace()
+        using var s = Scenario.New(_tmp, MindMode, mind: new ModelMind(model))
             .Command("what did we decide about the beta?")
             .ExpectState(RelayState.Failed)
             .ExpectEvent(EventTypes.MindFailed, 2)

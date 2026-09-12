@@ -243,8 +243,8 @@ public class AtlasWorkflowTests : IDisposable
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
-            .Note("We decided the Atlas beta ships on November 2 instead.")
-            .FileAll("atlas");
+            .Note("We decided the Atlas beta ships on November 2 instead.");
+        // Both notes name Atlas, so the router files them itself; the policy checks below need them on disk.
         var atlas = s.H.Registry.FindActive("atlas")!;
         var notes = ProjectNoteStore.ReadAll(atlas.RootPath).Notes.Select(n => n.Note).OrderBy(n => n.Created).ToList();
         Assert.Equal(2, notes.Count);

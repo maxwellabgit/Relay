@@ -66,7 +66,8 @@
       "outcome": "approval",
       "maxSteps": 3
     },
-    "tags": ["mind", "propose"]
+    "tags": ["mind", "propose"],
+    "why": "A project is a write, so the only right move is to offer it and wait. There is nothing here to look up, nothing to build and nothing to send away."
   },
   {
     "id": "unseen:mind/decision-from-notes",
@@ -81,7 +82,8 @@
       "answerContains": ["October 14"],
       "maxSteps": 4
     },
-    "tags": ["mind", "tool", "notes"]
+    "tags": ["mind", "tool", "notes"],
+    "why": "The answer is already on the record, so it is read with a tool and quoted. Answering from memory of the prompt, or delegating a fact the notes hold, are both wrong."
   },
   {
     "id": "unseen:mind/research-delegation",
@@ -95,7 +97,8 @@
       "outcome": "approval",
       "maxSteps": 4
     },
-    "tags": ["mind", "delegate"]
+    "tags": ["mind", "delegate"],
+    "why": "Nothing local can answer this and no tool can be built for it, so delegation is the move. Building a tool to scrape the web, or guessing the constraints, are the two ways it goes wrong."
   },
   {
     "id": "unseen:mind/check-conflicts-with-the-record",
