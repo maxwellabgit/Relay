@@ -1,12 +1,16 @@
+using System.Text.Json;
 using Relay.Core.Config;
 using Relay.Core.Ledger;
 using Relay.Core.Memory;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
 using Relay.Core.Policy;
 using Relay.Core.Projects;
+using Relay.Core.Search;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Tests.Support;
+using static Relay.Core.Mind.ScriptedMind;
 
 namespace Relay.Tests;
 
@@ -15,12 +19,87 @@ public class MemoryTests : IDisposable
 {
     private readonly TempRoot _tmp = new();
 
+    /// <summary>
+    /// Filing needs nothing interpreted: the note chord cuts, routes and checks for conflicts on its own,
+    /// which is why most of what follows holds without a mind at all. The mode is named here because
+    /// recall is the mind's, and because a Relay configured for a mind it does not have says so in Review.
+    /// </summary>
+    private static void Mind(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+    }
+
+    /// <summary>
+    /// What the mind does with a question about the record: search for what is stored, then open every note
+    /// the search listed — a search returns candidates, opening one of them is what grounds an answer — and
+    /// answer from what it read. A note the record itself no longer calls current is answered with that
+    /// mark, so a conclusion that was replaced is never presented as the standing one.
+    /// </summary>
+    private static ScriptedMind Recalling() => new ScriptedMind().Always(request =>
+    {
+        var calls = request.Transcript.OfType<ToolObserved>().ToList();
+        if (calls.Count == 0)
+            return MindStep.Of(Tool("search", ("query", Asked(request)), ("limit", "10")), "Looking for what is stored about it", Read(0.3, MindRead.NeedLocalNotes));
+
+        // One read per note the search listed; drafts in staging are not notes anything can open.
+        var notes = Hits(request).Where(h => h.Kind == SearchIndex.NoteKind).ToList();
+        if (calls.Count - 1 < notes.Count)
+            return MindStep.Of(Tool("read_note", ("projectId", notes[calls.Count - 1].ProjectSlug!), ("noteId", notes[calls.Count - 1].Id)), "Reading the record");
+        return MindStep.Of(Say(Grounded(request)), "Answering from the record");
+    });
+
+    /// <summary>The words the task was given.</summary>
+    private static string Asked(MindRequest request) => request.Transcript.OfType<InputObserved>().First().Text;
+
+    /// <summary>One thing the search listed. A note carries the slug of the project it lives in; a draft carries none.</summary>
+    private sealed record Hit(string Kind, string Id, string? ProjectSlug, string Excerpt);
+
+    /// <summary>What the search this task made found, in the order it ranked them.</summary>
+    private static List<Hit> Hits(MindRequest request)
+    {
+        var search = request.Transcript.OfType<ToolObserved>().FirstOrDefault(t => t.Tool == "search" && t.Data is not null);
+        if (search is null) return [];
+        using var hits = JsonDocument.Parse(search.Data!);
+        return hits.RootElement.EnumerateArray()
+            .Select(h => new Hit(h.GetProperty("kind").GetString()!, h.GetProperty("id").GetString()!,
+                h.GetProperty("projectSlug").GetString(), h.GetProperty("excerpt").GetString()!))
+            .ToList();
+    }
+
+    private static (string Id, string Type, string Status, string Body) Opened(string data)
+    {
+        using var note = JsonDocument.Parse(data);
+        var n = note.RootElement;
+        return (n.GetProperty("id").GetString()!, n.GetProperty("type").GetString()!, n.GetProperty("status").GetString()!, n.GetProperty("body").GetString()!);
+    }
+
+    /// <summary>
+    /// The answer: one line per note the mind opened, in the order the search ranked them, plus a line for
+    /// each draft still waiting in staging. Nothing the mind did not look at is quoted.
+    /// </summary>
+    private static string Grounded(MindRequest request)
+    {
+        var opened = request.Transcript.OfType<ToolObserved>()
+            .Where(t => t.Tool == "read_note" && t.Ok && t.Data is not null)
+            .Select(t => Opened(t.Data!))
+            .ToDictionary(n => n.Id, StringComparer.Ordinal);
+        var lines = new List<string>();
+        foreach (var hit in Hits(request))
+        {
+            if (hit.Kind == SearchIndex.NoteKind && opened.TryGetValue(hit.Id, out var note))
+                lines.Add($"{hit.ProjectSlug}/{note.Type}: {note.Body}" + (note.Status == NoteStatus.Active ? "" : $" ({note.Status})"));
+            else if (hit.Kind == SearchIndex.DraftKind) lines.Add("in staging: " + hit.Excerpt);
+        }
+        return lines.Count == 0 ? "Nothing stored mentions that." : string.Join("\n", lines);
+    }
+
     /// <summary>The README's scenario, verbatim, so the documentation cannot drift from the behaviour.</summary>
     [Fact]
     public void ReadmeScenarioHolds()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind, mind: Recalling()).WithWorkspace()
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers before then.")
             .ExpectEvent(EventTypes.NoteRouted, atLeast: 2)
             .Command("what did I say about the beta?")
@@ -115,8 +194,8 @@ public class MemoryTests : IDisposable
     [Fact]
     public void NoteModeFilesConfidentNotesAutomaticallyWithSpansBackToTheCapture()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind).WithWorkspace()
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers before then.")
             .ExpectState(RelayState.Completed)
             .ExpectEvent(EventTypes.NoteExtracted)
@@ -153,10 +232,11 @@ public class MemoryTests : IDisposable
     [Fact]
     public void NoteModeLeavesUnmentionedNotesInTheInboxAndAttachesCandidatesToAmbiguousOnes()
     {
-        // The deterministic grammar, named explicitly: mind is the default, and a mindless default has a Review notice of its own.
-        using var s = Scenario.New(_tmp, x => x.Orchestrator.Mode = OrchestratorSettings.Rules).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .Command("create project Garden").Approve()
+        // A mind is in place, so an empty Review here means routing raised nothing — not that Relay has none.
+        var mind = new ScriptedMind();
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Project("Garden")
             .Note("Buy compost and a new rake at the hardware store this weekend.")
             .ExpectState(RelayState.Completed)
             .ExpectEvent(EventTypes.NoteRoutingDeferred)
@@ -194,14 +274,15 @@ public class MemoryTests : IDisposable
         s.Do("file compost under atlas", c => Assert.True(c.RouteDraftNote(compost.NoteId, atlas.Id)));
         Assert.Empty(s.Snap.Inbox);
         Assert.Empty(s.H.Notes.Unrouted());
+        Assert.Empty(mind.Requests); // none of it asked anything of the mind
     }
 
     [Fact]
     public void InboxSuggestionsSurviveRestartAndCanBeDismissedKeepingTheNote()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .Command("create project Garden").Approve()
+        using var s = Scenario.New(_tmp, Mind).WithWorkspace()
+            .Project("Atlas")
+            .Project("Garden")
             .Note("Atlas and Garden both need a budget line before the board meeting.");
         Assert.True(Assert.Single(s.Snap.Inbox).HasSuggestions);
         s.Restart();
@@ -220,9 +301,9 @@ public class MemoryTests : IDisposable
     [Fact]
     public void AStaleRoutingDecisionWithoutItsNoteIsNotShown()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .Command("create project Garden").Approve()
+        using var s = Scenario.New(_tmp, Mind).WithWorkspace()
+            .Project("Atlas")
+            .Project("Garden")
             .Note("Atlas and Garden both need a budget line before the board meeting.");
         var item = Assert.Single(s.Snap.Inbox);
         // Simulate a hand-deleted staging note: the pending decision file is orphaned.
@@ -235,8 +316,8 @@ public class MemoryTests : IDisposable
     [Fact]
     public void ConflictingDecisionsAreKeptDisputedUntilTheUserSupersedesOne()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind, mind: Recalling()).WithWorkspace()
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
             .ExpectState(RelayState.Completed)
             .ExpectEvent(EventTypes.NoteRouted)
@@ -254,12 +335,13 @@ public class MemoryTests : IDisposable
         Assert.Equal(NoteStatus.Disputed, newer.Status);      // the newer one carries the link
         Assert.Equal([older.Id], newer.DisputedWith);
 
-        // Recall shows both, and says which is disputed.
+        // Recall shows both, and the dispute is on the record itself, so whatever reads it can say so.
         s.Command("What did I decide about the Atlas beta?")
             .ExpectState(RelayState.Completed)
             .ExpectAnswerContains("October 14")
             .ExpectAnswerContains("November 2")
             .ExpectAnswerContains("(disputed)");
+        Assert.Equal(2, s.Response.Citations.Count(c => c.Kind == SearchIndex.NoteKind));
 
         // Resolve: the new decision supersedes the old one. Both versions stay on disk.
         var item = s.Snap.Review.Single(r => r.Kind == ReviewItemKind.DisputedNotes);
@@ -275,19 +357,17 @@ public class MemoryTests : IDisposable
         Assert.Equal([older.Id], newer.Supersedes);
         Assert.True(Directory.EnumerateFiles(Path.Combine(project.RootPath, ProjectLayout.OrchestratorDirectoryName, "versions"), "*", SearchOption.AllDirectories).Count() >= 2);
 
-        // Recall still finds the superseded decision, marked, ranked below the current one.
+        // Recall still finds the superseded decision, and finds it marked: nothing was erased.
         s.Command("What did I decide about the Atlas beta?")
             .ExpectAnswerContains("November 2")
             .ExpectAnswerContains("(superseded)");
-        var answer = s.Response.Answer!;
-        Assert.True(answer.IndexOf("November 2", StringComparison.Ordinal) < answer.IndexOf("October 14", StringComparison.Ordinal), answer);
     }
 
     [Fact]
     public void DisputeCanBeResolvedByKeepingBoth()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind).WithWorkspace()
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
             .Note("We decided the Atlas beta ships on November 2 instead.")
             .ExpectReview(ReviewItemKind.DisputedNotes);
@@ -319,10 +399,9 @@ public class MemoryTests : IDisposable
     [Fact]
     public void ProjectPolicyCanRaiseTheBarForAutomaticFiling()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve();
+        using var s = Scenario.New(_tmp, Mind).WithWorkspace().Project("Atlas");
         var project = s.H.Registry.FindActive("atlas")!;
-        project.Policy.AutoRouteThreshold = 0.95; // a mention alone (0.7) is no longer enough for this project
+        project.Policy.AutoRouteThreshold = 0.95; // a mention alone is no longer enough for this project
         s.H.Registry.Update(project);
 
         s.Note("The Atlas kickoff is on Monday.")
@@ -333,17 +412,21 @@ public class MemoryTests : IDisposable
     }
 
     [Fact]
-    public void RecallFindsUnroutedDraftsAndFiledNotesAlikeWithCitations()
+    public void RecallFindsUnroutedDraftsAndFiledNotesAlikeAndCitesWhatItOpened()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        var mind = Recalling();
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
             .Note("Atlas pricing will be tiered by seat count.")                 // filed
             .Note("Remember the dentist appointment is on the 22nd at noon.")     // unrouted draft
             .Command("what did I say about pricing?")
-            .ExpectAnswerContains("seat count")
-            .Command("when is the dentist?")
-            .ExpectAnswerContains("22nd");
-        Assert.Contains(s.Response.Citations, c => c.Kind == "draft");
+            .ExpectAnswerContains("seat count");
+        Assert.Equal(SearchIndex.NoteKind, Assert.Single(s.Response.Citations).Kind);
+
+        s.Command("when is the dentist?").ExpectAnswerContains("22nd");
+        // Staging is searched beside the projects, but a draft is not a note that can be opened, so it grounds nothing.
+        Assert.Contains(Hits(mind.Requests[^1]), h => h.Kind == SearchIndex.DraftKind);
+        Assert.Empty(s.Response.Citations);
     }
 
     public void Dispose() => _tmp.Dispose();

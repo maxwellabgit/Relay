@@ -26,8 +26,6 @@ public sealed class CoordinatorServices
 {
     public required ProjectRegistry Registry { get; init; }
     public required WorkspaceRoots Roots { get; init; }
-    /// <summary>The planner. Replaced when the user changes orchestrator/model settings; read at the start of each task.</summary>
-    public required IOrchestrator Orchestrator { get; set; }
     /// <summary>
     /// Relay's one mind (docs/09): it runs every task and reads every conversation. Replaced when the user
     /// changes model settings; read at the start of each task and each listening pass. Null when no model answers.
@@ -208,20 +206,20 @@ public sealed partial class SessionCoordinator : IExecutionSink
     // ----------------------------------------------------------------------------------------
 
     /// <summary>
-    /// What lane a direct ask is filed under. The mind works this out for itself from the words, so
-    /// under it every ask starts as something to answer; the grammar needs the lane up front.
+    /// Every direct ask starts as something to answer. What lane it really belongs to is the mind's to work
+    /// out from the words, and the card is relabelled if the work turns out to be something else.
     /// </summary>
-    private TaskKind DirectKind(string text) => MindMode ? TaskKind.Answer : Orchestration.RuleBasedOrchestrator.DirectKind(text);
+    private const TaskKind DirectKind = TaskKind.Answer;
 
     /// <summary>The command capture became a task: direct, foreground, drives the state machine.</summary>
     private void StartCommandTask(Captures.CaptureDraft draft, string sourceEventId)
     {
-        var task = NewTask(TaskOrigin.Direct, DirectKind(draft.Text), "command", draft.CaptureId, sourceEventId, draft.Text, foreground: true, title: Truncate(draft.Text, 80));
+        var task = NewTask(TaskOrigin.Direct, DirectKind, "command", draft.CaptureId, sourceEventId, draft.Text, foreground: true, title: Truncate(draft.Text, 80));
         _lastForeground = task;
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: draft.Text.Length)) is null) return;
         PersistTask(task);
         if (!Apply(Trigger.BeginPlanning).Accepted) return;
-        BeginPlanning(task);
+        BeginTask(task);
     }
 
     /// <summary>
@@ -235,15 +233,15 @@ public sealed partial class SessionCoordinator : IExecutionSink
         text = (text ?? "").Trim();
         if (text.Length == 0) { _notice = "Type or dictate something to ask."; Notify(); return false; }
         if (_state is RelayState.Locked or RelayState.Starting or RelayState.Failed) { _notice = "Resolve the current incident first."; Notify(); return false; }
-        if (!OrchestratorEnabled) { _notice = "The orchestrator is off; enable it in settings to ask."; Notify(); return false; }
-        // Mind mode: a task waiting for the user's answer gets the typed text as its reply, in the same box.
+        if (!OrchestratorEnabled) { _notice = "Relay's mind is off; enable it in settings to ask."; Notify(); return false; }
+        // A task waiting for the user's answer gets the typed text as its reply, in the same box.
         if (Foreground is { Loop: not null } waitingTask && waitingTask.Loop.WaitingFor == Mind.Waits.User) return AnswerMind(waitingTask.TaskId, text);
         var now = _clock.UtcNow;
         var foreground = _state is RelayState.Idle or RelayState.Completed;
         if (foreground && Foreground is not null) foreground = false;
         var source = Append(EventTypes.AskRecorded, new { text, chars = text.Length, whileListening = _state == RelayState.NoteCapture, foreground });
         if (source is null) { Notify(); return false; }
-        var task = NewTask(TaskOrigin.Direct, DirectKind(text), "ask", "", source.Id, text, foreground, title: Truncate(text, 80));
+        var task = NewTask(TaskOrigin.Direct, DirectKind, "ask", "", source.Id, text, foreground, title: Truncate(text, 80));
         if (foreground)
         {
             _receiptTimer?.Dispose();
@@ -257,7 +255,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
             if (_state == RelayState.Completed) Apply(Trigger.Dismiss);
             if (!Apply(Trigger.BeginPlanning).Accepted) { _tasks.Remove(task); Notify(); return false; }
         }
-        BeginPlanning(task);
+        BeginTask(task);
         Notify();
         return true;
     }
@@ -268,7 +266,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         var task = NewTask(TaskOrigin.Dialogue, kind, "dialogue", parent.CaptureId, sourceEventId, instruction, foreground: false, parentTaskId: parent.TaskId, title: title, mergeKey: parent.MergeKey, topic: parent.Topic, projectHint: parent.ProjectHint, artifactId: artifactId);
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: instruction.Length)) is null) return;
         PersistTask(task);
-        BeginPlanning(task);
+        BeginTask(task);
     }
 
     private TaskState NewTask(TaskOrigin origin, TaskKind kind, string lane, string captureId, string sourceEventId, string instruction, bool foreground,
@@ -357,102 +355,24 @@ public sealed partial class SessionCoordinator : IExecutionSink
     }
 
     // ----------------------------------------------------------------------------------------
-    // Planning
+    // Running a task
     // ----------------------------------------------------------------------------------------
 
-    private void BeginPlanning(TaskState task)
+    /// <summary>
+    /// Hands the task to the mind. Nothing else can run one: with the mode off no task is created, and
+    /// with the mode on but no model the coordinator refuses at start (see <see cref="MindUnavailable"/>).
+    /// </summary>
+    private void BeginTask(TaskState task)
     {
         if (MindMode) { BeginMindLoop(task); return; }
-        task.Timeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Orchestrator.PlanningTimeoutMs), () =>
-        {
-            if (!_tasks.Contains(task) || task.Status != TaskStatus.Planning) return;
-            FailTask(task, "planning_timeout", $"The planner did not answer within {_settings.Orchestrator.PlanningTimeoutMs / 1000}s.", null);
-            task.Cts.Cancel(); // after the task is closed, so the cancelled continuation finds nothing to do
-            Notify();
-        });
-
-        var request = new TurnRequest(task.TaskId, task.CaptureId, task.SourceEventId, task.Instruction, task.StartedAt, task.Origin, task.Kind, task.ExcerptId, task.ArtifactId);
-        var sink = new TaskSink(this, task);
-        var context = new TurnContext
-        {
-            Tools = new ToolBroker(ToolSources, sink, _settings.Orchestrator.MaxToolCalls),
-            Sink = sink,
-            Registry = _services.Registry,
-            Roots = _services.Roots,
-            Drafts = _notes,
-            Settings = _settings.Orchestrator,
-            CompletedRuns = projectId => Agents.AgentRunStatus.All(_root).Where(s => s.ProjectId == projectId && s.State == "completed" && !s.Applied).ToList(),
-            Preferences = Preferences,
-            ExternalProfiles = _services.External?.ProfileNames ?? [],
-            SearchProfiles = _services.External?.SearchProfileNames ?? [],
-            PromptFragment = SelfChange?.PromptFragment("planner"),
-        };
-
-        Task<TurnPlan> planning;
-        try { planning = _services.Orchestrator.PlanAsync(request, context, task.Cts.Token); }
-        catch (Exception ex) { planning = Task.FromException<TurnPlan>(ex); }
-        planning.ContinueWith(t => _scheduler.Post(() => OnPlanFinished(task, t)), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-    }
-
-    private void OnPlanFinished(TaskState task, Task<TurnPlan> planning)
-    {
-        if (!_tasks.Contains(task) || task.Status != TaskStatus.Planning) return; // cancelled, timed out, or failed meanwhile
-        task.Timeout?.Dispose();
-        task.Timeout = null;
-
-        if (planning.IsCanceled) return;
-        if (planning.IsFaulted)
-        {
-            var ex = planning.Exception?.GetBaseException() ?? new InvalidOperationException("Planning failed.");
-            FailTask(task, "planning_failed", ex.Message, ex.ToString());
-            Notify();
-            return;
-        }
-
-        var plan = planning.Result;
-        task.Plan = plan;
-        if (Append(EventTypes.TaskPlanned, new
-        {
-            taskId = task.TaskId,
-            producer = plan.Producer,
-            understood = plan.Understood,
-            summary = Guarded(task, plan.Summary),
-            steps = Guarded(task, plan.Steps),
-            answer = Guarded(task, plan.Answer),
-            citations = plan.Citations.Select(c => new { c.Kind, c.Id, c.ProjectSlug, span = c.Span }),
-            consistent = plan.Consistent,
-            knowledge = task.Overheard && plan.Knowledge is { } k
-                ? new { known = k.Known.Count, missing = k.Missing.Count, capabilityGap = k.CapabilityGap, summary = Guarded(task, k.Summary) }
-                : (object?)plan.Knowledge,
-            proposals = plan.Proposals.Count,
-            toolCalls = task.ToolCalls.Count,
-            modelCalls = task.ModelCalls.Count,
-            promptTokens = task.PromptTokens,
-            completionTokens = task.CompletionTokens,
-            raw = Guarded(task, plan.Raw),
-        }) is null) return;
-
-        if (!plan.Understood)
-        {
-            task.Plan = plan with
-            {
-                Answer = plan.Answer ?? (task.Origin != TaskOrigin.Direct ? null
-                    : _settings.Model.Enabled || plan.Producer.StartsWith(Model.ModelOrchestrator.ProducerPrefix, StringComparison.Ordinal)
-                        ? "The instruction could not be interpreted: " + plan.Summary
-                        : "The built-in grammar did not understand that, and RELAY0's model is not enabled. Try: \"create project <name>\", \"archive project <name>\", \"list projects\", \"remember that …\", \"file the last note under <project>\", \"what did I say about …\", \"summarize project <name>\", \"export a backup\"."),
-            };
-        }
-
-        // Prerequisites are decided before their dependents so a dependent can name a project its prerequisite creates.
-        foreach (var proposal in plan.Proposals.OrderBy(p => p.Dependencies.Count)) ReceiveProposal(task, proposal);
-        AdvanceTask(task);
+        FailTask(task, "no_mind", MindUnavailable, null);
         Notify();
     }
 
     private void ReceiveProposal(TaskState task, Proposal proposal)
     {
         PersistProposal(proposal);
-        // A planner's reason and the prose in its target (note text, an objective, a title) can quote the overheard words, so they are guarded like its answer; ids, slugs and flags stay legible.
+        // The mind's reason and the prose in its target (note text, an objective, a title) can quote the overheard words, so they are guarded like its answer; ids, slugs and flags stay legible.
         Append(EventTypes.ProposalReceived, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, reason = Guarded(task, proposal.Reason), target = GuardedTarget(task, proposal.Target), sourceEventIds = proposal.SourceEventIds, expectedEffects = Guarded(task, proposal.ExpectedEffects), risk = proposal.Risk, requiresApproval = proposal.RequiresApproval, proposedBy = proposal.ProposedBy, dependsOn = proposal.Dependencies, hash = proposal.Hash() });
         var decision = PolicyEngine.Decide(proposal, WorldFor(task));
         Append(EventTypes.ProposalDecided, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action = proposal.Action, outcome = decision.Outcome.ToString(), tier = decision.Tier.ToString(), reasons = decision.Reasons, target = GuardedTarget(task, decision.NormalizedTarget) });

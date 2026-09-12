@@ -17,18 +17,20 @@ using TaskStatus = Relay.Core.Tasks.TaskStatus;
 namespace Relay.Core.Session;
 
 /// <summary>
-/// Mind mode (docs/09, slice 1): every task runs a <see cref="TaskLoop"/> and this partial is its host —
-/// the owner of consequences. Tools run through the same read-only broker, proposals through the same
-/// policy engine, approvals through the same buttons, operations through the same executor and pending
-/// completions; what changes is that each consequence is handed back to the loop as an observation, and
-/// the task ends when the mind says it does (or a budget does). The old pipeline stays intact beside it,
-/// selected by <c>orchestrator.mode</c>; nothing here runs unless the mode is "mind".
+/// Every task runs a <see cref="TaskLoop"/> and this partial is its host — the owner of consequences.
+/// Tools run through the read-only broker, proposals through the policy engine, approvals through the
+/// same buttons, operations through the executor and pending completions; each consequence is handed
+/// back to the loop as an observation, and the task ends when the mind says it does (or a budget does).
 /// </summary>
 public sealed partial class SessionCoordinator
 {
+    /// <summary>The mind is in place and selected. Without it nothing interprets anything: no task runs and no conversation is read.</summary>
     private bool MindMode => _settings.Orchestrator.Mode == OrchestratorSettings.Mind && _services.Mind is not null;
 
-    private string PlannerName => MindMode ? _services.Mind!.Name : _services.Orchestrator.Name;
+    /// <summary>Said to the user when a task is started with no mind behind it. The incident is raised at start; this is the task's own failure.</summary>
+    private const string MindUnavailable = "Relay has no mind: the local model is off or unreachable. Nothing can be interpreted until it is running.";
+
+    private string PlannerName => _services.Mind?.Name ?? "none";
 
     private static string LoopOrigin(TaskState task) => task.Origin switch
     {
@@ -105,10 +107,10 @@ public sealed partial class SessionCoordinator
     private void ArmMindTimeout(TaskState task)
     {
         task.Timeout?.Dispose();
-        task.Timeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Orchestrator.PlanningTimeoutMs), () =>
+        task.Timeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Orchestrator.StepTimeoutMs), () =>
         {
             if (!_tasks.Contains(task) || !task.IsLive || task.Loop is null || !task.LoopBusy) return;
-            FailTask(task, "mind_timeout", $"The mind did not answer within {_settings.Orchestrator.PlanningTimeoutMs / 1000}s.", null);
+            FailTask(task, "mind_timeout", $"The mind did not answer within {_settings.Orchestrator.StepTimeoutMs / 1000}s.", null);
             task.Cts.Cancel();
             Notify();
         });

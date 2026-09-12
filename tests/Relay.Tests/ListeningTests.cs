@@ -3,7 +3,6 @@ using Relay.Core.Config;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
 using Relay.Core.Notes;
-using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Session;
 using Relay.Core.State;
@@ -29,22 +28,20 @@ public class ListeningTests : IDisposable
     private const string LaunchEmail = "Marketing wants the launch email out a week before.";
 
     /// <summary>
-    /// The deterministic grammar still plans what the mind raises (docs/10, step 1c). Listening stays off
-    /// here so the note chord dictates while the world is built; <see cref="Scenario.WithListening"/> turns it on.
-    /// </summary>
-    private static void Planned(RelaySettings s) => s.Orchestrator.Mode = OrchestratorSettings.Rules;
-
-    private static Action<RelaySettings> Planned(Action<RelaySettings> also) => s => { Planned(s); also(s); };
-
-    /// <summary>
-    /// The mind runs everything, which is where this is going (docs/10, step 1). Listening stays off here too,
-    /// so the note chord dictates while the world is built and <see cref="Scenario.WithListening"/> turns it on.
+    /// The mind runs everything. Listening stays off here, so the note chord dictates while the world is
+    /// built and <see cref="Scenario.WithListening"/> turns it on once there is something to listen about.
     /// </summary>
     private static void Mind(RelaySettings s)
     {
         s.Orchestrator.Mode = OrchestratorSettings.Mind;
         s.Model.Enabled = true;
     }
+
+    private static Action<RelaySettings> Mind(Action<RelaySettings> also) => s => { Mind(s); also(s); };
+
+    /// <summary>What a raised check does when the scenario is about the stream rather than the checking: agree, and say so.</summary>
+    private static ScriptedMind Agreeing() => new ScriptedMind().Always(_ =>
+        MindStep.Of(ScriptedMind.Say("What was said agrees with what is stored."), "Checked.", ScriptedMind.Verdict(consistent: true)));
 
     // ----------------------------------------------------------------------------------------
     // Units: segmenter, buffer, guard
@@ -126,7 +123,7 @@ public class ListeningTests : IDisposable
     public void WholeConversationIsHeldAndIngestedInStretchesNotFragments()
     {
         var mind = new ListeningMind().When("launch email", "remember", "Keep the launch email timing.", note: "The launch email goes out a week before the beta.", noteType: "decision");
-        using var s = Scenario.New(_tmp, Planned(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 240; cfg.Stream.MinIngestSeconds = 20; }), mind: mind)
+        using var s = Scenario.New(_tmp, Mind(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 240; cfg.Stream.MinIngestSeconds = 20; }), mind: mind)
             .WithWorkspace()
             .WithListening().StartListening().ExpectListening()
             .Hear(Decision).Observe();                                                  // one short sentence, seconds old: held, not read yet
@@ -163,7 +160,7 @@ public class ListeningTests : IDisposable
     public void WatchedTermsAreReadAtOnceEvenWithSlowIngest()
     {
         var mind = new ListeningMind();
-        using var s = Scenario.New(_tmp, Planned(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 5000; cfg.Stream.MinIngestSeconds = 300; }), mind: mind)
+        using var s = Scenario.New(_tmp, Mind(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 5000; cfg.Stream.MinIngestSeconds = 300; }), mind: mind)
             .WithWorkspace()
             .Do("Always show Atlas", c => Assert.True(c.UpdatePreference("display.alwaysShow", "Atlas")))
             .WithListening().StartListening().Hear(Chatter).Observe();
@@ -177,7 +174,7 @@ public class ListeningTests : IDisposable
     public void ListeningKeepsNoWordsExpiresTheBufferAndLeavesOnlyMetadataBehind()
     {
         var mind = new ListeningMind();   // hears everything, raises nothing
-        using var s = Scenario.New(_tmp, Planned, mind: mind).WithWorkspace()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .WithListening().StartListening().ExpectState(RelayState.NoteCapture).ExpectListening()
             .Hear(Decision)
             .Hear(Chatter)
@@ -220,30 +217,26 @@ public class ListeningTests : IDisposable
     }
 
     /// <summary>
-    /// Found by the live model run: a model planner quotes the overheard sentence in a proposal's reason and in the note
-    /// text it proposes. Proposal events are ledger events, so for an overheard task the reason, the expected effects and
-    /// the prose in the target are fingerprinted like the plan's answer; ids, slugs, types and confidences stay legible.
+    /// Found by the live model run: the mind quotes the overheard sentence in a proposal's reason and in the note
+    /// text it proposes. Proposal events are ledger events, so for an overheard task the reason and the prose in the
+    /// target are fingerprinted like the answer; ids, slugs, types and confidences stay legible.
     /// </summary>
     [Fact]
-    public void APlannerThatQuotesTheOverheardWordsInAProposalLeavesNoWordsInTheLedger()
+    public void AMindThatQuotesTheOverheardWordsInAProposalLeavesNoWordsInTheLedger()
     {
         const string Heard = "Someone needs to find out whether Hull council requires a separate licence for the Lightshift pilot.";
         // The raise's why is a category, as the mind is told to write it (it is ledgered); the objective quotes the words.
         var mind = new ListeningMind().When("Hull council", "research",
             "Find out whether Hull council requires a separate licence for the Lightshift pilot.", project: "Lightshift", topic: "licensing");
-        // The grammar builds the world (direct asks); the overheard task is planned by a stand-in for the model that quotes the words everywhere it can.
-        var rules = new RuleBasedOrchestrator();
-        var planner = new CannedOrchestrator();
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace();
-        planner.Otherwise((req, ctx) => req.Origin != TaskOrigin.Observed
-            ? rules.PlanAsync(req, ctx, CancellationToken.None).GetAwaiter().GetResult()
-            : new TurnPlan(true, "Someone must check with Hull council about the Lightshift pilot licence", ["Read the excerpt: " + Heard], "The room said: " + Heard, [],
-                [new Proposal("01PROPOSALHULL000000000000", Actions.CreateDraftNote, "The excerpt says: " + Heard,
-                    new Dictionary<string, string> { ["projectId"] = ctx.Registry.FindActive("lightshift")!.Id, ["type"] = "task", ["confidence"] = "0.9", ["text"] = "Find out whether Hull council requires a separate licence for the Lightshift pilot." },
-                    ["01SOURCE000000000000000000"], ["A task note quoting: " + Heard], Risks.StagingWrite, false, Producers.Model)],
-                "canned"));
-        s.Command("create project Lightshift").Approve();
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace().Project("Lightshift");
         var lightshift = s.H.Registry.FindActive("lightshift")!;
+        // A stand-in for the model that quotes the room everywhere it can: in its reason, in the note text it proposes, and in its answer.
+        mind.Works(new ScriptedMind().Always(request => request.Transcript.OfType<PolicyObserved>().Any()
+            ? MindStep.Of(ScriptedMind.Say("The room said: " + Heard), "Kept what the room said as a task note.")
+            : MindStep.Of(ScriptedMind.Propose(Actions.CreateDraftNote, "The excerpt says: " + Heard,
+                    ("projectId", lightshift.Id), ("type", NoteTypes.Task), ("confidence", "0.9"),
+                    ("text", "Find out whether Hull council requires a separate licence for the Lightshift pilot.")),
+                "Proposing a task note quoting: " + Heard)));
 
         s.WithListening().StartListening()
             .Hear(Chatter)
@@ -256,15 +249,14 @@ public class ListeningTests : IDisposable
             Assert.DoesNotContain(words, ledger, StringComparison.OrdinalIgnoreCase);
 
         var task = s.FindTask(TaskKind.Research)!;
-        Assert.StartsWith("canned", task.Producer);
+        Assert.Equal("mind:scripted", task.Producer);
         var received = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ProposalReceived && r.DataString("taskId") == task.TaskId);
         Assert.StartsWith("withheld: ", received.DataString("reason"));
         var target = received.Data.GetProperty("target");
         Assert.Equal(lightshift.Id, target.GetProperty("projectId").GetString());                 // references stay readable for the audit trail
-        Assert.Equal("task", target.GetProperty("type").GetString());
+        Assert.Equal(NoteTypes.Task, target.GetProperty("type").GetString());
         Assert.Equal("0.9", target.GetProperty("confidence").GetString());
         Assert.StartsWith("withheld: ", target.GetProperty("text").GetString());                 // prose does not
-        Assert.All(received.Data.GetProperty("expectedEffects").EnumerateArray(), e => Assert.StartsWith("withheld: ", e.GetString()));
         var decided = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ProposalDecided && r.DataString("taskId") == task.TaskId);
         Assert.StartsWith("withheld: ", decided.Data.GetProperty("target").GetProperty("text").GetString());
         // Tier A executes at once; the execution record names the note by id and fingerprints its text, while the journal keeps the target whole.
@@ -273,11 +265,9 @@ public class ListeningTests : IDisposable
         Assert.Equal(lightshift.Id, started.Data.GetProperty("target").GetProperty("projectId").GetString());
         s.ExpectEvent(EventTypes.NoteDraftCreated);
 
-        // The proposal itself is intact where it is acted on: the task record and the pending proposal carry the words.
+        // The proposal itself is intact where it is acted on: the task record and the proposal carry the words.
         Assert.Contains("Hull council", Assert.Single(task.Proposals).Target["text"]);
         Assert.Contains("Hull council", File.ReadAllText(Path.Combine(s.H.Root.TasksDirectory, task.TaskId + ".json")));
-        // A typed instruction is the user's own words and stays in the ledger verbatim.
-        Assert.Contains("create project Lightshift", ledger);
     }
 
     /// <summary>Work raised over a claim that conflicts with two stored decisions is the one thing that earns an alert.</summary>
@@ -289,7 +279,7 @@ public class ListeningTests : IDisposable
             $"Check the Atlas ship date claimed in line {line.Label} against stored decisions.", [line.Label],
             "a dated claim about a known project", Project: "Atlas", MergeKey: "check:atlas:ship-date"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
-            .Do("create project Atlas", c => Assert.True(c.CreateProject("Atlas")))
+            .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
             .Note("The Atlas launch email goes out on October 7.");
         var atlas = s.H.Registry.FindActive("atlas")!;
@@ -385,9 +375,9 @@ public class ListeningTests : IDisposable
     {
         var mind = new ListeningMind()
             .When("ships on", "check", "Check the ship date.", project: "Atlas")
-            .WhenWholeWindow("agreed", "check", "Check the email date against the ship date.", project: "Atlas");
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Checked", [], "Consistent.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+            .WhenWholeWindow("agreed", "check", "Check the email date against the ship date.", project: "Atlas")
+            .Works(Agreeing());
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectExcerpts(1)
@@ -417,9 +407,8 @@ public class ListeningTests : IDisposable
     [Fact]
     public void TheRetentionGuardShrinksAnOverlongExcerptToTheTrigger()
     {
-        var mind = new ListeningMind().WhenWholeWindow("agreed", "check", "Check what was agreed.", project: "Atlas");
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Checked", [], "Consistent.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+        var mind = new ListeningMind().WhenWholeWindow("agreed", "check", "Check what was agreed.", project: "Atlas").Works(Agreeing());
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Decision)
             .Silence(TimeSpan.FromSeconds(40))                                        // 40 s apart: the pair would exceed the 30 s bound
@@ -441,7 +430,7 @@ public class ListeningTests : IDisposable
     {
         var mind = new ListeningMind { Throws = new InvalidOperationException("llama.cpp is not running") };
         mind.When("launch email", "remember", "Keep the launch email timing.", note: "The launch email goes out a week before.", noteType: "decision");
-        using var s = Scenario.New(_tmp, Planned, mind: mind).WithWorkspace()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectEvent(EventTypes.ObserveFailed)
@@ -467,7 +456,7 @@ public class ListeningTests : IDisposable
     public void AMindThatNeverAnswersIsTimedOutAndTheStreamGoesOn()
     {
         var mind = new HangingMind();
-        using var s = Scenario.New(_tmp, Planned(x => x.Listening.PassTimeoutMs = 3_000), mind: mind).WithWorkspace()
+        using var s = Scenario.New(_tmp, Mind(x => x.Listening.PassTimeoutMs = 3_000), mind: mind).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Chatter)
             .Silence(TimeSpan.FromSeconds(8))
@@ -487,9 +476,10 @@ public class ListeningTests : IDisposable
     public void AWatchedTermIsResolvedAtOnceAndPinned()
     {
         var mind = new ListeningMind().When("SLA", line => new RaiseMove("resolve",
-            $"Define SLA as it is used in line {line.Label}.", [line.Label], "an acronym the user watches", Topic: "SLA", MergeKey: "define:sla"));
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Defined SLA", [], "SLA: service level agreement — the uptime and response commitments in the Atlas contract.", [], [], "canned"));
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+                $"Define SLA as it is used in line {line.Label}.", [line.Label], "an acronym the user watches", Topic: "SLA", MergeKey: "define:sla"))
+            .Works(new ScriptedMind().Always(_ => MindStep.Of(
+                ScriptedMind.Say("SLA: service level agreement — the uptime and response commitments in the Atlas contract."), "Defined SLA.")));
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Do("Always show SLA", c => Assert.True(c.UpdatePreference("display.alwaysShow", "SLA")))
             .ExpectPreference("display.alwaysShow", "SLA")
             .ExpectEvent(EventTypes.ChangeSetApplied)
@@ -517,8 +507,12 @@ public class ListeningTests : IDisposable
     [Fact]
     public void ADirectAskWhileListeningRunsBesideTheStream()
     {
-        using var s = Scenario.New(_tmp, Planned, mind: new ListeningMind()).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        // The ask is answered from what is filed: it looks the beta date up and says what the record holds.
+        var mind = new ListeningMind().Works(new ScriptedMind().Always(request => request.Transcript.OfType<ToolObserved>().Any()
+            ? MindStep.Of(ScriptedMind.Say("You said the Atlas beta ships on October 14."), "Answered from the record.")
+            : MindStep.Of(ScriptedMind.Tool("search", ("query", "Atlas beta ships"), ("limit", "5")), "Looking up what is stored about the beta.")));
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
             .Note(Decision)
             .WithListening().StartListening()
             .Hear(Chatter)
@@ -545,7 +539,7 @@ public class ListeningTests : IDisposable
     [Fact]
     public void ACrashWhileListeningDiscardsTheWindowAndRecordsOnlyItsSize()
     {
-        using var s = Scenario.New(_tmp, Planned, mind: new ListeningMind()).WithWorkspace()
+        using var s = Scenario.New(_tmp, Mind, mind: new ListeningMind()).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Decision)
             .Hear(Chatter)
@@ -570,8 +564,8 @@ public class ListeningTests : IDisposable
     [Fact]
     public void WithListeningOffTheNoteChordDictates()
     {
-        using var s = Scenario.New(_tmp, Planned).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind, mind: new ListeningMind()).WithWorkspace()
+            .Project("Atlas")
             .StartListening();
         Assert.Null(s.Snap.Listening);
         Assert.False(s.Snap.ListeningEnabled);

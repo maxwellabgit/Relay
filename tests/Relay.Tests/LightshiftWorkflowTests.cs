@@ -1,25 +1,27 @@
 using System.Text.Json;
 using Relay.Core.Config;
+using Relay.Core.Decisions;
 using Relay.Core.Ledger;
-using Relay.Core.Model;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
-using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Search;
 using Relay.Core.State;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
+using static Relay.Core.Mind.ScriptedMind;
 using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Tests;
 
 /// <summary>
 /// The README's Lightshift workflow: "research Lightshift's competitors and give me an implementation plan".
-/// The planner climbs the source ladder (notes, excerpts, artifacts), states the two-axis knowledge gap,
-/// and proposes one bounded external task that binds the exact package. Approval sends exactly that
-/// package; the response is stored as a source artifact; a follow-up shows a concise summary with its
-/// limits and files the findings as a separate draft note. The external model is scripted; everything
-/// else is the production path.
+/// The work goes to a named external model, and everything about that is held here. The mind opens the project
+/// notes the question stands on and writes the prompt itself; the package that carries them needs the user's
+/// approval, so nothing leaves the machine until it is granted; the reply is stored as a source artifact the
+/// answer is built from and cites; the findings are kept as a separate draft note pointing at that artifact;
+/// and whether online search is part of the package is a permission, not the mind's to assume. The external
+/// model and the mind are scripted; everything between them is the production path.
 /// </summary>
 public class LightshiftWorkflowTests : IDisposable
 {
@@ -35,47 +37,116 @@ public class LightshiftWorkflowTests : IDisposable
         "The plan assumes the independent-restaurant focus recorded in the notes; a chain-first strategy would reorder steps 3 and 5. " +
         "I could not determine current pricing for 7shifts' enterprise tier, and market share figures are unverified.";
 
-    private static void WithResearchProfile(RelaySettings s, bool supportsSearch = true)
-        => s.ExternalModels.Add(new ExternalModelProfile { Name = "research", Endpoint = "https://api.example.test/v1/chat/completions", Model = "gpt-5-nano", SecretName = "external-research", SupportsSearch = supportsSearch });
+    /// <summary>The prompt the mind writes for the external model. It is the whole of the objective: the package carries this and the sources, nothing else.</summary>
+    private const string Prompt =
+        "Research Lightshift's competitors in shift scheduling for small restaurants and give an implementation plan. " +
+        "Work from the sources below and say what you could not determine.";
 
-    /// <summary>A Lightshift project with two notes, a scripted research model, and background completions pumped by the test.</summary>
-    private static (Scenario S, ScriptedModelClient Model) Seeded(TempRoot tmp, ScriptedModelClient? model = null, bool supportsSearch = true)
+    /// <summary>The reference note the findings are kept in: short, and traceable to the artifact through the proposal's target.</summary>
+    private const string Findings =
+        "Lightshift's competitors are Deputy, When I Work, and 7shifts, with Homebase and Sling at the free tier. " +
+        "None of them offers a template library for recurring restaurant shift patterns.";
+
+    /// <summary>
+    /// The mind runs every task and may hand work to one external profile. <paramref name="profile"/> is false only
+    /// where the subject is having nowhere to delegate to; <paramref name="search"/> is what that profile's host can do,
+    /// which is configuration and so known before any card is shown.
+    /// </summary>
+    private static void Delegating(RelaySettings s, bool profile = true, bool search = true, bool listening = false)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+        s.Listening.Enabled = listening;
+        if (profile)
+            s.ExternalModels.Add(new ExternalModelProfile { Name = "research", Endpoint = "https://api.example.test/v1/chat/completions", Model = "gpt-5-nano", SecretName = "external-research", SupportsSearch = search });
+    }
+
+    /// <summary>
+    /// A Lightshift project with the two notes a research request stands on, and a research model waiting to answer.
+    /// The world is built through the Projects panel and the note chord, so nothing in the setup depends on the mind;
+    /// the script is attached afterwards, when there are notes for it to name.
+    /// </summary>
+    private static (Scenario S, ScriptedModelClient Model) Seeded(TempRoot tmp, ScriptedMind mind, ScriptedModelClient? model = null, bool search = true)
     {
         var client = model ?? new ScriptedModelClient().Reply(Answer);
-        var s = Scenario.New(tmp, configure: st => WithResearchProfile(st, supportsSearch), externalClients: _ => client, inlinePost: false).WithWorkspace()
-            .Command("create project Lightshift").Approve().ExpectProject("lightshift")
+        var s = Scenario.New(tmp, st => Delegating(st, search: search), externalClients: _ => client, inlinePost: false, mind: mind).WithWorkspace()
+            .Project("Lightshift")
             .Note("Lightshift is our scheduling app for shift workers in small restaurants.")
             .Note("We decided Lightshift targets independent restaurants first, chains later.")
-            .Command("file all notes under Lightshift").ExpectState(RelayState.Completed);
+            .ExpectEvent(EventTypes.NoteRouted, atLeast: 2);
+        var project = s.H.Registry.FindActive("lightshift")!;
+        var notes = ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note).OrderBy(n => n.Created).Select(n => n.Id).ToList();
+        mind.Always(Researching(project.Id, notes, search));
         return (s, client);
     }
 
-    [Fact]
-    public void TheRequestStatesTheKnowledgeGapAndProposesOneBoundPackage()
+    /// <summary>
+    /// What the mind does with a research request. It opens every note it means to send, so what leaves the machine is
+    /// only ever something it looked at, and then delegates — which is where the user is asked. When the reply is back it
+    /// opens the stored artifact, so the answer stands on something Relay holds and cites it, keeps the findings as a
+    /// reference note pointing at that artifact, and answers with a summary that repeats the reply's own limits.
+    /// Scripted so the package, the approval and the artifact are what these tests watch.
+    /// </summary>
+    private static Func<MindRequest, MindStep> Researching(string projectId, IReadOnlyList<string> notes, bool search) => request =>
     {
-        var (s, model) = Seeded(_tmp);
+        var opened = request.Transcript.OfType<ToolObserved>().Count(t => t.Tool == "read_note");
+        return request.Transcript[^1] switch
+        {
+            DelegateObserved { Stage: DelegateObserved.Returned } returned
+                => MindStep.Of(Tool("read_artifact", ("artifactId", returned.ArtifactId!)), "Opening the reply research sent back."),
+            DelegateObserved { Stage: DelegateObserved.Failed }
+                => MindStep.Of(Say("Research could not be reached, so nothing came back and I have kept nothing."), "Reporting that research was unavailable."),
+            DelegateObserved => MindStep.Of(Wait("the reply is on its way"), "Research is working."),
+            ToolObserved { Tool: "read_artifact", Ok: true }
+                => MindStep.Of(Propose(Actions.CreateDraftNote, "Findings from an approved external task are worth keeping, traceable to the artifact they came from.",
+                        ("text", Findings), ("type", NoteTypes.Reference), ("sourceArtifactId", Artifact(request))),
+                    "Keeping the findings as a reference note."),
+            ExecutionObserved { Action: Actions.CreateDraftNote, Ok: true }
+                => MindStep.Of(Say(Summary(request)), "Answered from what research established."),
+            ApprovalObserved { Granted: false }
+                => MindStep.Of(Say("Nothing was sent. What the notes hold is all I have about Lightshift's competitors."), "Nothing left the machine."),
+            PolicyObserved { Outcome: PolicyObserved.Denied } denied
+                => MindStep.Of(Say("I cannot send anything out from this: " + string.Join(" ", denied.Reasons)), "Reporting what policy refused."),
+            SystemObserved told when told.Text.StartsWith("No delegate profile", StringComparison.Ordinal)
+                => MindStep.Of(Say("The notes say Lightshift targets independent restaurants first. Who its competitors are is not in them, and there is no model here that could settle it."),
+                    "Answering with the gap named."),
+            _ when opened < notes.Count
+                => MindStep.Of(Tool("read_note", ("projectId", projectId), ("noteId", notes[opened])), "Opening a Lightshift note to send with the question.",
+                    Read(0.9, MindRead.NeedExternalReasoning)),
+            _ => MindStep.Of(Delegate("research", Prompt, 4_000, search, [.. notes]), "Asking research, with both notes and nothing else.",
+                    Read(0.9, MindRead.NeedExternalReasoning)),
+        };
+    };
+
+    /// <summary>The artifact the reply was stored as: what the answer cites and the findings note points at.</summary>
+    private static string Artifact(MindRequest request)
+        => request.Transcript.OfType<DelegateObserved>().Last(d => d.Stage == DelegateObserved.Returned).ArtifactId!;
+
+    /// <summary>The answer: shorter than the reply, the reply's own limits named, the artifact behind it.</summary>
+    private static string Summary(MindRequest request)
+        => "Deputy, When I Work, and 7shifts are the closest competitors, and none of them has a shift-pattern template library. " +
+           "Limits: research could not determine 7shifts' enterprise pricing, and its market share figures are unverified. " +
+           "Source: artifact " + Artifact(request) + ".";
+
+    [Fact]
+    public void TheRequestNamesWhatIsMissingAndProposesOnePackageBoundToWhatTheMindOpened()
+    {
+        var mind = new ScriptedMind();
+        var (s, model) = Seeded(_tmp, mind);
         using var _ = s;
         s.Command("research Lightshift's competitors and give me an implementation plan").ExpectState(RelayState.AwaitingApproval);
 
         var task = s.Response;
-        Assert.Equal(TaskKind.Research, task.Kind);
-        // Two-axis knowledge state: what is missing, and that the local model cannot do it.
-        Assert.Equal(2, task.Knowledge.Known.Count);
-        Assert.Contains(task.Knowledge.Missing, m => m.Contains("competitors", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(task.Knowledge.Missing, m => m.Contains("implementation plan", StringComparison.OrdinalIgnoreCase));
-        Assert.True(task.Knowledge.CapabilityGap);
-        Assert.Contains("Knowledge state", task.Answer);
-        Assert.Contains("Missing:", task.Answer);
-        Assert.Contains("Capability:", task.Answer);
-        Assert.Equal(2, task.Citations.Count);
-        // The source ladder is visible in the steps, in order.
-        var ladder = task.Steps.Where(st => st.StartsWith("Source ladder", StringComparison.Ordinal)).ToList();
-        Assert.Equal(3, ladder.Count);
-        Assert.StartsWith("Source ladder 1/3: project notes", ladder[0]);
-        Assert.StartsWith("Source ladder 2/3: retained excerpts", ladder[1]);
-        Assert.StartsWith("Source ladder 3/3: stored external artifacts", ladder[2]);
+        Assert.Equal(mind.Name, task.Producer);
+        // Two axes of the same gap: what the notes do not hold, and that settling it is beyond what runs here.
+        var stepped = s.H.Records().First(r => r.Type == EventTypes.MindStepped && r.DataString("taskId") == task.TaskId);
+        Assert.Contains(MindRead.NeedExternalReasoning, stepped.Data.GetProperty("read").GetProperty("needs").EnumerateArray().Select(n => n.GetString()));
+        var route = s.H.Records().First(r => r.Type == EventTypes.DecisionMade && r.DataString("decision") == Decider.Route);
+        Assert.Equal(Decider.OfferDelegate, route.DataString("outcome"));
+        Assert.Contains(task.Steps, step => step.Contains("both notes"));
 
-        // One proposal binding the exact package.
+        // Only what the mind opened may go: the two notes are its citations and exactly the references on the card.
+        Assert.Equal(2, task.Citations.Count);
         var proposal = Assert.Single(task.Proposals);
         Assert.Equal(Actions.ModelRequest, proposal.Action);
         Assert.Equal("pending", proposal.Status);
@@ -84,7 +155,7 @@ public class LightshiftWorkflowTests : IDisposable
         Assert.Equal("4000", proposal.Target["budgetTokens"]);
         var refs = proposal.Target["refs"].Split(',');
         Assert.Equal(2, refs.Length);
-        Assert.All(refs, r => Assert.Contains(r, task.Knowledge.Known));
+        Assert.All(refs, r => Assert.Contains(r, task.Citations.Select(c => c.Id)));
         Assert.Contains("References leaving the machine:", proposal.Detail);
         Assert.Contains("online search: true", proposal.Detail);
         Assert.Contains(proposal.Reasons, r => r.Contains("not granted by preference") && r.Contains("this task only"));
@@ -93,19 +164,20 @@ public class LightshiftWorkflowTests : IDisposable
     }
 
     [Fact]
-    public void ApprovingSendsExactlyThePackageStoresTheArtifactAndSummarisesWithLimits()
+    public void ApprovingSendsExactlyThePackageStoresTheArtifactAndAnswersWithItsLimits()
     {
-        var (s, model) = Seeded(_tmp);
+        var mind = new ScriptedMind();
+        var (s, model) = Seeded(_tmp, mind);
         using var _ = s;
         s.Command("research Lightshift's competitors and give me an implementation plan").Approve(Actions.ModelRequest)
             .ExpectEvent(EventTypes.ExternalPackaged)                                // recorded before anything is sent
-            .PumpUntil("the external response is stored", () => s.H.Count(EventTypes.ArtifactStored) > 0)
+            .PumpUntil("the reply, the artifact and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed)
             .ExpectState(RelayState.Completed).ExpectOutcome("executed");
 
-        // Exactly the package: the objective plus the two cited notes, nothing else.
+        // Exactly the package: the prompt the mind wrote plus the two notes it opened, nothing else.
         var request = Assert.Single(model.Requests);
         var user = request.Messages.Single(m => m.Role == "user").Content;
-        Assert.Contains("Research Lightshift's competitors and produce implementation plan", user);
+        Assert.Contains("Research Lightshift's competitors in shift scheduling", user);
         Assert.Contains("scheduling app for shift workers", user);
         Assert.Contains("independent restaurants first", user);
         Assert.Contains("You may search online", user);
@@ -134,43 +206,35 @@ public class LightshiftWorkflowTests : IDisposable
         var artifactId = stored.DataString("artifactId")!;
         Assert.Equal(Answer, s.H.External.ReadArtifact(artifactId));
 
-        // The follow-up: a concise summary, the limits named, the artifact cited, and the findings as a separate draft note.
-        var summary = s.FindTask(TaskKind.Research, TaskStatus.Completed, TaskOrigin.Dialogue) ?? throw s.Fail("no follow-up task");
-        Assert.Equal(s.Response.TaskId, summary.ParentTaskId);
-        Assert.NotNull(summary.Answer);
-        Assert.True(summary.Answer!.Length < Answer.Length, "the summary must be shorter than the response");
-        Assert.Contains("Deputy, When I Work, and 7shifts", summary.Answer);
-        Assert.Contains("Limits: I could not determine current pricing", summary.Answer);
-        Assert.DoesNotContain("Limits: the response did not name", summary.Answer);
-        Assert.Contains(artifactId, summary.Answer);
-        var citation = Assert.Single(summary.Citations);
-        Assert.Equal(SearchIndex.ArtifactKind, citation.Kind);
+        // The answer: concise, the limits named, the artifact cited, and the findings kept as a separate draft note.
+        var task = s.Response;
+        Assert.NotNull(task.Answer);
+        Assert.True(task.Answer!.Length < Answer.Length, "the answer must be shorter than the reply");
+        Assert.Contains("Deputy, When I Work, and 7shifts", task.Answer);
+        Assert.Contains("could not determine 7shifts' enterprise pricing", task.Answer);
+        Assert.Contains(artifactId, task.Answer);
+        var citation = Assert.Single(task.Citations, c => c.Kind == SearchIndex.ArtifactKind);
         Assert.Equal(artifactId, citation.Id);
-        Assert.Equal([artifactId], summary.Knowledge.Known);
-        var note = Assert.Single(summary.Proposals);
-        Assert.Equal(Actions.CreateDraftNote, note.Action);
+        var note = Assert.Single(task.Proposals, p => p.Action == Actions.CreateDraftNote);
         Assert.Equal("executed", note.Status);                                     // staging write: automatic
         Assert.Equal(NoteTypes.Reference, note.Target["type"]);
         Assert.Equal(artifactId, note.Target["sourceArtifactId"]);
         var draft = s.H.Notes.Unrouted().Single();
-        Assert.StartsWith("Findings (", draft.Text);
         Assert.Contains("Deputy", draft.Text);
 
-        // Presented as findings, not an alert: the user asked for it.
-        Assert.Equal(Presentation.Findings, summary.Presentation);
-        s.ExpectAttention(Presentation.Findings, "External result");
-
         // The artifact is a searchable source from now on.
-        s.Command("what do I know about 7shifts").ExpectAnswerContains("artifact");
+        Assert.Contains(s.H.Index.Search("7shifts", null, 5), hit => hit.Kind == SearchIndex.ArtifactKind && hit.Id == artifactId);
     }
 
     [Fact]
     public void RejectingTheRequestSendsNothing()
     {
-        var (s, model) = Seeded(_tmp);
+        var mind = new ScriptedMind();
+        var (s, model) = Seeded(_tmp, mind);
         using var _ = s;
         s.Command("research Lightshift's competitors").Reject(Actions.ModelRequest, "not now")
             .ExpectState(RelayState.Completed).ExpectOutcome("rejected")
+            .ExpectAnswerContains("Nothing was sent")
             .ExpectNoEvent(EventTypes.ExternalPackaged);
         Assert.Empty(model.Requests);
         Assert.Empty(Directory.EnumerateFiles(s.H.Root.ExternalArtifactsDirectory));
@@ -179,88 +243,77 @@ public class LightshiftWorkflowTests : IDisposable
     [Fact]
     public void AFailingExternalModelFailsTheTaskVisiblyAndStoresNoArtifact()
     {
-        var (s, _) = Seeded(_tmp, new ScriptedModelClient().Fail("upstream 503"));
+        var mind = new ScriptedMind();
+        var (s, _) = Seeded(_tmp, mind, new ScriptedModelClient().Fail("upstream 503"));
         using var __ = s;
         s.Command("research Lightshift's competitors").Approve(Actions.ModelRequest)
-            .PumpUntil("the failure is recorded", () => s.H.Count(EventTypes.ExternalResponded) > 0)
+            .PumpUntil("the failure", () => s.Snap.State is RelayState.Completed or RelayState.Failed)
             .ExpectState(RelayState.Failed).ExpectOutcome("failed")
             .ExpectNoEvent(EventTypes.ArtifactStored);
         var proposal = Assert.Single(s.Response.Proposals);
         Assert.Equal("failed", proposal.Status);
         Assert.Contains("upstream 503", proposal.Error);
         Assert.False(s.H.Last(EventTypes.ExternalResponded)!.DataBool("ok"));
-        Assert.Null(s.FindTask(TaskKind.Research, origin: TaskOrigin.Dialogue));   // no follow-up without an artifact
+        Assert.Empty(s.H.Notes.Unrouted());                                        // nothing is kept without an artifact behind it
     }
 
     [Fact]
-    public void WithoutAnExternalProfileTheGapIsStatedAndNothingIsProposed()
+    public void WithNoExternalModelConfiguredTheMindIsToldSoAndAnswersWithTheGapNamed()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("create project Lightshift").Approve()
-            .Command("research Lightshift's competitors and give me an implementation plan")
+        var mind = new ScriptedMind();
+        using var s = Scenario.New(_tmp, st => Delegating(st, profile: false), mind: mind).WithWorkspace()
+            .Project("Lightshift");
+        mind.Always(Researching(s.H.Registry.FindActive("lightshift")!.Id, [], search: true));
+
+        s.Command("research Lightshift's competitors and give me an implementation plan")
             .ExpectState(RelayState.Completed).ExpectNoProposals()
-            .ExpectAnswerContains("Knowledge state").ExpectAnswerContains("No external model profile is configured");
-        Assert.True(s.Response.Knowledge.CapabilityGap);
-        Assert.Empty(s.Response.Knowledge.Known);
+            .ExpectAnswerContains("no model here that could settle it");
+        var route = s.H.Records().First(r => r.Type == EventTypes.DecisionMade && r.DataString("decision") == Decider.Route);
+        Assert.Equal(Decider.Local, route.DataString("outcome"));
+        Assert.Contains("no delegate profile is configured", route.DataString("rationale"));
     }
 
     [Fact]
     public void AProfileWithoutSearchGetsAnOfflinePackageAndTheReasonSaysSo()
     {
-        var (s, model) = Seeded(_tmp, supportsSearch: false);
+        var mind = new ScriptedMind();
+        var (s, model) = Seeded(_tmp, mind, search: false);
         using var _ = s;
         s.Command("research Lightshift's competitors").ExpectState(RelayState.AwaitingApproval);
         var proposal = Assert.Single(s.Response.Proposals);
         Assert.Equal("false", proposal.Target["allowSearch"]);
         Assert.Contains(proposal.Reasons, r => r.Contains("No online search"));
-        s.Approve().PumpUntil("the response", () => s.H.Count(EventTypes.ArtifactStored) > 0);
+        s.Approve().PumpUntil("the reply", () => s.H.Count(EventTypes.ArtifactStored) > 0);
         Assert.Contains("Do not use anything beyond the sources above", model.Requests.Single().Messages.Single(m => m.Role == "user").Content);
     }
 
     [Fact]
     public void AGrantedOnlineSearchPreferenceIsNamedInTheReason()
     {
-        var (s, _) = Seeded(_tmp);
+        var mind = new ScriptedMind();
+        var (s, _) = Seeded(_tmp, mind);
         using var __ = s;
-        s.Command("allow online search").ExpectProposal(Actions.UpdatePreference, "pending").Approve()
-            .ExpectState(RelayState.Completed).ExpectPreference("sources.allowOnlineSearch", "true");
-        s.Command("research Lightshift's competitors").ExpectState(RelayState.AwaitingApproval);
+        s.Do("allow online search", c => Assert.True(c.UpdatePreference("sources.allowOnlineSearch", "true")))
+            .ExpectPreference("sources.allowOnlineSearch", "true")
+            .Command("research Lightshift's competitors").ExpectState(RelayState.AwaitingApproval);
         Assert.Contains(Assert.Single(s.Response.Proposals).Reasons, r => r.Contains("allowed by your sources preference"));
-    }
-
-    [Fact]
-    public void AskingANamedProfileDirectlyIsAlsoABoundPackage()
-    {
-        var (s, model) = Seeded(_tmp);
-        using var _ = s;
-        s.Command("ask research to compare Lightshift with Deputy on pricing").ExpectState(RelayState.AwaitingApproval);
-        var proposal = Assert.Single(s.Response.Proposals);
-        Assert.Equal(Actions.ModelRequest, proposal.Action);
-        Assert.Equal("research", proposal.Target["profile"]);
-        Assert.StartsWith("Research compare Lightshift with Deputy on pricing", proposal.Target["objective"]);
-        Assert.Empty(model.Requests);
     }
 
     [Fact]
     public void AnObservedTaskCanNeverSendAnythingOutside()
     {
-        // The mind raises a research task from something overheard; a planner that proposes model.request is denied by policy.
-        var mind = new ListeningMind().When("competitors", "research", "Research Lightshift's competitors.", project: "Lightshift", topic: "lightshift");
-        var planner = new CannedOrchestrator().Otherwise((request, context) =>
-        {
-            if (request.Origin != TaskOrigin.Observed) return TurnPlan.NotUnderstood("canned", "only observed tasks are scripted");
-            var p = new Proposal(Relay.Core.Ids.Ulid.NewUlid(request.At), Actions.ModelRequest, "Overheard a research need.",
-                new Dictionary<string, string> { ["profile"] = "research", ["objective"] = "Research Lightshift's competitors.", ["refs"] = "", ["budgetTokens"] = "1000", ["allowSearch"] = "true" },
-                [request.SourceEventId], ["Sends a package"], Risks.ControlledWrite, true, Producers.Model);
-            return new TurnPlan(true, "Research overheard", ["Proposed an external task"], null, [], [p], "canned", Knowledge: new KnowledgeState([], ["competitors"], true, "gap"));
-        });
+        // Work raised from something overheard runs like any other task, except that a package leaving the machine
+        // needs the user's own words: the mind may write the request, and policy refuses it on origin alone.
         var client = new ScriptedModelClient().Reply(Answer);
-        using var s = Scenario.New(_tmp, configure: st => { WithResearchProfile(st); st.Orchestrator.Mode = Relay.Core.Config.OrchestratorSettings.Rules; st.Listening.Enabled = true; },
-                orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner), mind: mind, externalClients: _ => client, inlinePost: false).WithWorkspace()
-            .Command("create project Lightshift").Approve()
+        var mind = new ListeningMind()
+            .When("competitors", "research", "Research Lightshift's competitors.", project: "Lightshift", topic: "lightshift")
+            .Works(new ScriptedMind().Always(Researching("lightshift", [], search: true)));
+        using var s = Scenario.New(_tmp, st => Delegating(st, listening: true), externalClients: _ => client, mind: mind).WithWorkspace()
+            .Project("Lightshift")
             .StartListening()
             .Listen("Someone should look at Lightshift's competitors before the beta.")
             .ExpectTask(TaskKind.Research, TaskStatus.Completed, TaskOrigin.Observed);
+
         var task = s.FindTask(TaskKind.Research, origin: TaskOrigin.Observed)!;
         var proposal = Assert.Single(task.Proposals);
         Assert.Equal("denied", proposal.Status);

@@ -1,25 +1,30 @@
+using System.Text.Json;
+using Relay.Core.Config;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
-using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Projects;
+using Relay.Core.Search;
 using Relay.Core.State;
-using Relay.Core.Tasks;
 using Relay.Tests.Support;
-using TaskStatus = Relay.Core.Tasks.TaskStatus;
+using static Relay.Core.Mind.ScriptedMind;
 
 namespace Relay.Tests;
 
 /// <summary>
 /// The README's Backyard workflow: "move the backyard notes into Garden" when Garden does not exist yet.
-/// One task, one operation graph: create_project as the prerequisite and one move_note per note that
-/// depends on it. Each proposal is approved on its own; a dependent cannot be approved once its
-/// prerequisite was rejected, nothing runs before the prerequisite has run, and every move is checked
-/// again against the real registry when it executes.
+/// A note cannot go anywhere until the place exists, so the project is proposed first and every operation
+/// after it is decided on its own — nothing runs before the project has, a refusal leaves what needed it
+/// with nowhere to go, and every move is checked again against the real registry when it executes. The
+/// mind reading the instruction is scripted; everything after it is the production path.
 /// </summary>
 public class BackyardWorkflowTests : IDisposable
 {
     private readonly TempRoot _tmp = new();
+
+    private const string Topic = "backyard";
+    private const string Destination = "Garden";
 
     private static readonly string[] BackyardNotes =
     [
@@ -28,14 +33,20 @@ public class BackyardWorkflowTests : IDisposable
         "We decided the backyard fence gets replaced in spring.",
     ];
 
-    /// <summary>A Home project holding the three backyard notes and one unrelated note.</summary>
-    private static Scenario Seeded(TempRoot tmp)
+    /// <summary>Mind mode with the model on and the note chord dictating: the instruction is the mind's, the notes are not.</summary>
+    private static void Mind(RelaySettings s)
     {
-        var s = Scenario.New(tmp).WithWorkspace()
-            .Command("create project Home").Approve().ExpectProject("home");
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+    }
+
+    /// <summary>A Home project holding the three backyard notes and one unrelated note.</summary>
+    private static Scenario Seeded(TempRoot tmp, IMind? mind = null)
+    {
+        var s = Scenario.New(tmp, Mind, mind: mind).WithWorkspace().Project("Home");
         foreach (var text in BackyardNotes) s.Note(text);
         s.Note("Idea: repaint the kitchen cabinets.");
-        return s.Command("file all notes under Home").ExpectState(RelayState.Completed);
+        return s.FileAll("home").ExpectState(RelayState.Completed);
     }
 
     private static IReadOnlyList<NoteDocument> NotesOf(Scenario s, string slug)
@@ -44,57 +55,166 @@ public class BackyardWorkflowTests : IDisposable
         return ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note).ToList();
     }
 
-    [Fact]
-    public void MovingNotesIntoAProjectThatDoesNotExistIsOneGraphOfDependentProposals()
+    /// <summary>
+    /// Approves whatever the mind is asking about until it stops asking. There is never more than one card
+    /// at a time: the mind sees what the user decided about one operation before it proposes the next.
+    /// </summary>
+    private static void ApproveEach(Scenario s, int limit = 8)
     {
-        using var s = Seeded(_tmp);
+        for (var i = 0; i < limit && s.Snap.PendingProposals.Any(); i++) s.Approve();
+        if (s.Snap.PendingProposals.Any()) throw s.Fail($"Still {s.Snap.PendingProposals.Count()} proposal(s) pending after {limit} approval(s)");
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // The mind this workflow is driven by
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// What the mind does with this workflow. A move reads the projects (their ids are what a proposal
+    /// names), searches for the notes on the topic, proposes the destination when no project answers to it,
+    /// and then proposes one move per note that is not already there. A question is answered from the notes
+    /// it opens. Scripted so the workflow is deterministic; every consequence after it is the real path.
+    /// </summary>
+    private static ScriptedMind Working(string topic = Topic) => new ScriptedMind().Always(request =>
+        Asked(request).StartsWith("move", StringComparison.OrdinalIgnoreCase) ? Moving(request, topic) : Answering(request));
+
+    private static MindStep Moving(MindRequest request, string topic)
+    {
+        var projects = Projects(request);
+        if (projects is null)
+            return MindStep.Of(Tool("list_projects"), "Looking at your projects", Read(0.3, MindRead.NeedLocalNotes));
+        if (request.Transcript.OfType<ToolObserved>().All(t => t.Tool != "search"))
+            return MindStep.Of(Tool("search", ("query", topic), ("limit", "25")), $"Searching the notes for \"{topic}\"");
+
+        var slug = Slug.From(Destination);
+        var found = Hits(request).Where(h => h.Kind == SearchIndex.NoteKind).ToList();
+        var elsewhere = found.Where(h => h.ProjectSlug != slug).ToList();
+        if (elsewhere.Count == 0)
+            return MindStep.Of(Say(found.Count == 0
+                ? $"No note mentions the {topic}, so there is nothing to move and no reason to create '{Destination}'."
+                : $"Every note about the {topic} is already in '{Destination}'. Nothing to move."), "Nothing to move");
+
+        var decided = request.Transcript.OfType<PolicyObserved>().ToList();
+        var destination = projects.GetValueOrDefault(slug) ?? Created(request);
+        if (destination is null && decided.All(p => p.Action != Actions.CreateProject))
+            return MindStep.Of(Propose(Actions.CreateProject, $"No active project answers to '{Destination}' and the notes about the {topic} need somewhere to go.",
+                    ("name", Destination), ("slug", slug)),
+                $"'{Destination}' does not exist: proposing it before anything moves");
+
+        var moves = decided.Count(p => p.Action == Actions.MoveNote);
+        if (destination is null && moves > 0)
+            return MindStep.Of(Say($"'{Destination}' was not created, so the notes about the {topic} stay where they are."), "Nothing moved");
+        if (moves < elsewhere.Count)
+        {
+            var note = elsewhere[moves];
+            return MindStep.Of(Propose(Actions.MoveNote, $"The note is about the {topic}.",
+                    ("projectId", projects[note.ProjectSlug!]), ("noteId", note.Id), ("toProject", destination ?? Destination)),
+                $"Moving note {note.Id[^8..]} into '{Destination}'");
+        }
+        var moved = request.Transcript.OfType<ExecutionObserved>().Count(e => e.Action == Actions.MoveNote && e.Ok);
+        return MindStep.Of(Say($"Moved {moved} note(s) about the {topic} into '{Destination}'."), "Done");
+    }
+
+    /// <summary>A question about the record: search, open every note the search listed, answer with where each one lives and what it says.</summary>
+    private static MindStep Answering(MindRequest request)
+    {
+        var calls = request.Transcript.OfType<ToolObserved>().ToList();
+        if (calls.Count == 0)
+            return MindStep.Of(Tool("search", ("query", Asked(request)), ("limit", "10")), "Looking for what is stored about it", Read(0.3, MindRead.NeedLocalNotes));
+        var notes = Hits(request).Where(h => h.Kind == SearchIndex.NoteKind).ToList();
+        if (calls.Count - 1 < notes.Count)
+            return MindStep.Of(Tool("read_note", ("projectId", notes[calls.Count - 1].ProjectSlug!), ("noteId", notes[calls.Count - 1].Id)), "Reading the record");
+        var bodies = calls.Where(t => t.Tool == "read_note" && t.Ok && t.Data is not null).Select(t => Body(t.Data!)).ToList();
+        return MindStep.Of(Say(string.Join("\n", notes.Zip(bodies, (note, body) => $"{note.ProjectSlug}/{note.Type}: {body}"))), "Answering from the record");
+    }
+
+    /// <summary>The words the task was given.</summary>
+    private static string Asked(MindRequest request) => request.Transcript.OfType<InputObserved>().First().Text;
+
+    /// <summary>Slug to id for every project the mind has listed, or null before it has listed them.</summary>
+    private static Dictionary<string, string>? Projects(MindRequest request)
+    {
+        var listed = request.Transcript.OfType<ToolObserved>().FirstOrDefault(t => t.Tool == "list_projects" && t.Data is not null);
+        if (listed is null) return null;
+        using var projects = JsonDocument.Parse(listed.Data!);
+        var bySlug = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var p in projects.RootElement.EnumerateArray()) bySlug[p.GetProperty("slug").GetString()!] = p.GetProperty("id").GetString()!;
+        return bySlug;
+    }
+
+    /// <summary>The destination this task created, when it did: the id its moves must name.</summary>
+    private static string? Created(MindRequest request) => request.Transcript.OfType<ExecutionObserved>()
+        .FirstOrDefault(e => e.Action == Actions.CreateProject && e.Ok)?.Outputs.GetValueOrDefault("projectId");
+
+    /// <summary>One thing the search listed. A note carries the slug of the project it lives in; a draft carries none.</summary>
+    private sealed record Hit(string Kind, string Id, string? ProjectSlug, string Type);
+
+    private static List<Hit> Hits(MindRequest request)
+    {
+        var search = request.Transcript.OfType<ToolObserved>().FirstOrDefault(t => t.Tool == "search" && t.Data is not null);
+        if (search is null) return [];
+        using var hits = JsonDocument.Parse(search.Data!);
+        return hits.RootElement.EnumerateArray()
+            .Select(h => new Hit(h.GetProperty("kind").GetString()!, h.GetProperty("id").GetString()!,
+                h.GetProperty("projectSlug").GetString(), h.GetProperty("type").GetString()!))
+            .ToList();
+    }
+
+    private static string Body(string data)
+    {
+        using var note = JsonDocument.Parse(data);
+        return note.RootElement.GetProperty("body").GetString()!;
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // The workflow
+    // ----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void MovingNotesIntoAProjectThatDoesNotExistProposesThatProjectBeforeAnythingMoves()
+    {
+        var mind = Working();
+        using var s = Seeded(_tmp, mind);
         Assert.Equal(4, NotesOf(s, "home").Count);
 
-        s.Command("move the backyard notes into Garden").ExpectState(RelayState.AwaitingApproval);
+        s.Command("move the backyard notes into Garden")
+            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectProposal(Actions.CreateProject, "pending")
+            .ExpectEvent(EventTypes.MindStepped, 3)             // the projects, the search, the proposal
+            .ExpectEvent(EventTypes.LoopWaiting);
 
-        var proposals = s.Response.Proposals;
-        var create = Assert.Single(proposals, p => p.Action == Actions.CreateProject);
-        var moves = proposals.Where(p => p.Action == Actions.MoveNote).ToList();
-        Assert.Equal(3, moves.Count);
+        var create = Assert.Single(s.Snap.PendingProposals);
         Assert.Equal("garden", create.Target["slug"]);
-        Assert.Empty(create.DependsOn);
-        Assert.All(moves, m =>
-        {
-            Assert.Equal([create.ProposalId], m.DependsOn);
-            Assert.Equal("pending", m.Status);
-            Assert.Null(m.BlockedBy);
-            Assert.Equal("garden", m.Target["toProjectSlug"]);
-            Assert.False(m.Target.ContainsKey("toProjectId"));                      // nothing to point at yet
-            Assert.Contains(m.Reasons, r => r.Contains("does not exist yet") && r.Contains("checked again when it runs"));
-        });
-        // The unrelated note was not swept up.
-        var kitchen = NotesOf(s, "home").Single(n => n.Body.Contains("kitchen"));
-        Assert.DoesNotContain(moves, m => m.Target["noteId"] == kitchen.Id);
-        // Nothing has run; the record is untouched.
+        Assert.Equal(mind.Name, s.Response.Producer);
+        // Nothing can be offered towards a project that does not exist, and nothing has run.
+        Assert.DoesNotContain(s.Response.Proposals, p => p.Action == Actions.MoveNote);
         s.ExpectProject("garden", exists: false).ExpectNoEvent(EventTypes.NoteMoved);
-        Assert.Contains(s.Response.Steps, step => step.Contains("depends on it"));
     }
 
     [Fact]
-    public void ApprovingEverythingCreatesTheProjectFirstAndThenMovesEachNoteWithItsHistory()
+    public void ApprovingEachProposalCreatesTheProjectFirstAndThenMovesEveryNoteWithItsHistory()
     {
-        using var s = Seeded(_tmp);
+        var mind = Working();
+        using var s = Seeded(_tmp, mind);
         var before = NotesOf(s, "home").Where(n => n.Body.Contains("backyard")).Select(n => n.Id).OrderBy(x => x).ToList();
 
-        s.Command("move the backyard notes into Garden").ApproveAll()
-            .ExpectState(RelayState.Completed).ExpectOutcome("executed")
+        s.Command("move the backyard notes into Garden");
+        ApproveEach(s);
+        s.ExpectState(RelayState.Completed).ExpectOutcome("executed")
             .ExpectProject("garden").ExpectEvent(EventTypes.ProjectCreated).ExpectEvent(EventTypes.NoteMoved, atLeast: 3);
 
+        Assert.Equal(4, s.Response.Proposals.Count);
         Assert.All(s.Response.Proposals, p => Assert.Equal("executed", p.Status));
+        Assert.All(s.Response.Proposals.Where(p => p.Action == Actions.MoveNote), p => Assert.Equal("garden", p.Target["toProjectSlug"]));
         var garden = NotesOf(s, "garden").Select(n => n.Id).OrderBy(x => x).ToList();
         Assert.Equal(before, garden);                                              // the same notes, same ids, now in Garden
         var home = NotesOf(s, "home");
         Assert.Single(home);
-        Assert.Contains("kitchen", home[0].Body);
+        Assert.Contains("kitchen", home[0].Body);                                  // the unrelated note was not swept up
 
         // Order in the ledger: the project exists before any note moves.
         var records = s.H.Records().ToList();
-        var created = records.FindIndex(r => r.Type == EventTypes.ProjectCreated);
+        var created = records.FindIndex(r => r.Type == EventTypes.ProjectCreated && r.DataString("slug") == "garden");
         var firstMove = records.FindIndex(r => r.Type == EventTypes.NoteMoved);
         Assert.True(created >= 0 && created < firstMove, "the project must be created before the first move");
 
@@ -107,124 +227,96 @@ public class BackyardWorkflowTests : IDisposable
     }
 
     [Fact]
-    public void RejectingThePrerequisiteBlocksItsDependentsAndTheRefusalIsRecorded()
+    public void RefusingTheProjectLeavesTheNotesWhereTheyAreAndPolicyDeniesTheMoveThatNeededIt()
     {
-        using var s = Seeded(_tmp);
-        var executionsBefore = s.H.Count(EventTypes.ExecutionStarted);
+        var mind = Working();
+        using var s = Seeded(_tmp, mind);
+        var movesBefore = s.H.Count(EventTypes.NoteMoved);
+
         s.Command("move the backyard notes into Garden")
-            .Reject(Actions.CreateProject, "not a new project");
+            .Reject(Actions.CreateProject, "not a new project")
+            .ExpectState(RelayState.Completed).ExpectOutcome("rejected");
 
-        // The moves are still pending but cannot be approved: the project they need will not exist.
-        s.ExpectState(RelayState.AwaitingApproval);
-        var moves = s.Response.Proposals.Where(p => p.Action == Actions.MoveNote).ToList();
-        Assert.All(moves, m => { Assert.Equal("pending", m.Status); Assert.Contains("Create project 'Garden' (rejected)", m.BlockedBy); });
-
-        s.Approve(Actions.MoveNote);
-        Assert.Contains("Create project 'Garden' (rejected)", s.Snap.Notice);
-        Assert.All(s.Response.Proposals.Where(p => p.Action == Actions.MoveNote), m => Assert.Equal("pending", m.Status));
-        s.ExpectEvent(EventTypes.ApprovalRefused).ExpectNoEvent(EventTypes.NoteMoved).ExpectProject("garden", exists: false);
-        var refused = s.H.Last(EventTypes.ApprovalRefused)!;
-        Assert.Equal(Actions.MoveNote, refused.DataString("action"));
-        Assert.Contains("(rejected)", refused.DataString("reason"));
-
-        // Rejecting the dependents closes the task; nothing ran.
-        foreach (var _ in moves) s.Reject(Actions.MoveNote);
-        s.ExpectState(RelayState.Completed).ExpectOutcome("rejected");
-        Assert.Equal(executionsBefore, s.H.Count(EventTypes.ExecutionStarted));
+        // The move the mind tried anyway names a project that does not exist, and the registry is the judge of that.
+        var move = Assert.Single(s.Response.Proposals, p => p.Action == Actions.MoveNote);
+        Assert.Equal("denied", move.Status);
+        Assert.Contains(move.Reasons, r => r.Contains($"No active project matches '{Destination}'"));
+        s.ExpectProject("garden", exists: false).ExpectEvent(EventTypes.ApprovalRejected);
+        Assert.Equal(movesBefore, s.H.Count(EventTypes.NoteMoved));
         Assert.Equal(4, NotesOf(s, "home").Count);
+
+        var rejected = s.H.Last(EventTypes.ApprovalRejected)!;
+        Assert.Equal(Actions.CreateProject, rejected.DataString("action"));
+        Assert.Equal("not a new project", rejected.DataString("reason"));
     }
 
     [Fact]
     public void PartialApprovalMovesOnlyWhatWasApproved()
     {
-        using var s = Seeded(_tmp);
-        var executionsBefore = s.H.Count(EventTypes.ExecutionStarted);
-        s.Command("move the backyard notes into Garden");
+        var mind = Working();
+        using var s = Seeded(_tmp, mind);
 
-        // Approve a move before its prerequisite: allowed, but nothing runs until the whole set is decided.
-        s.Approve(Actions.MoveNote).ExpectState(RelayState.AwaitingApproval);
-        Assert.Equal(executionsBefore, s.H.Count(EventTypes.ExecutionStarted));
-        s.Reject(Actions.MoveNote, "this one stays");
-        s.Approve(Actions.CreateProject).ExpectState(RelayState.AwaitingApproval);   // one move still undecided
-        s.Approve(Actions.MoveNote).ExpectState(RelayState.Completed).ExpectOutcome("executed").ExpectProject("garden");
+        s.Command("move the backyard notes into Garden")
+            .Approve(Actions.CreateProject).ExpectProject("garden")
+            .Approve(Actions.MoveNote)
+            .Reject(Actions.MoveNote, "this one stays")
+            .Approve(Actions.MoveNote)
+            .ExpectState(RelayState.Completed).ExpectOutcome("executed");
 
         Assert.Equal(2, NotesOf(s, "garden").Count);
         Assert.Equal(2, NotesOf(s, "home").Count);                                 // kitchen + the one that stayed
-        var stayed = s.Response.Proposals.Single(p => p.Status == "rejected");
+        var stayed = Assert.Single(s.Response.Proposals, p => p.Status == "rejected");
         Assert.Contains(NotesOf(s, "home"), n => n.Id == stayed.Target["noteId"]);
-        Assert.Equal(3, s.Response.Proposals.Count(p => p.Status == "executed"));
+        Assert.Equal(3, s.Response.Proposals.Count(p => p.Status == "executed"));   // the project and the two moves
     }
 
     [Fact]
-    public void RenamingTheNewProjectInTheEditCarriesTheMovesWithIt()
+    public void RenamingTheNewProjectInTheEditSendsTheMovesToTheNameThatWasCreated()
     {
-        using var s = Seeded(_tmp).Command("move the backyard notes into Garden")
+        var mind = Working();
+        using var s = Seeded(_tmp, mind)
+            .Command("move the backyard notes into Garden")
             .Edit(Actions.CreateProject, ("name", "Yard"), ("slug", "yard"));
+        Assert.Equal("Yard", Assert.Single(s.Snap.PendingProposals).Target["name"]);
 
-        var moves = s.Response.Proposals.Where(p => p.Action == Actions.MoveNote && p.Status == "pending").ToList();
+        ApproveEach(s);
+        s.ExpectState(RelayState.Completed).ExpectOutcome("executed")
+            .ExpectProject("yard").ExpectProject("garden", exists: false);
+        var moves = s.Response.Proposals.Where(p => p.Action == Actions.MoveNote).ToList();
         Assert.Equal(3, moves.Count);
-        var replacement = s.Response.Proposals.Single(p => p.Action == Actions.CreateProject && p.Status == "pending");
-        Assert.All(moves, m =>
-        {
-            Assert.Equal([replacement.ProposalId], m.DependsOn);                    // dependents follow the replacement
-            Assert.Equal("yard", m.Target["toProjectSlug"]);                        // and its new name
-            Assert.Null(m.BlockedBy);
-        });
-
-        s.ApproveAll().ExpectState(RelayState.Completed).ExpectOutcome("executed").ExpectProject("yard").ExpectProject("garden", exists: false);
+        Assert.All(moves, m => { Assert.Equal("executed", m.Status); Assert.Equal("yard", m.Target["toProjectSlug"]); });
         Assert.Equal(3, NotesOf(s, "yard").Count);
     }
 
     [Fact]
-    public void WhenTheDestinationExistsThereIsNoPrerequisiteAndNotesAlreadyThereAreLeftAlone()
+    public void WhenTheDestinationExistsThereIsNoProjectToProposeAndNotesAlreadyThereAreLeftAlone()
     {
-        using var s = Seeded(_tmp).Command("create project Garden").Approve()
-            .Command("move the backyard notes into Garden");
+        var mind = Working();
+        using var s = Seeded(_tmp, mind).Project("Garden").Command("move the backyard notes into Garden");
+        var garden = s.H.Registry.FindActive("garden")!;
 
-        var proposals = s.Response.Proposals;
-        Assert.DoesNotContain(proposals, p => p.Action == Actions.CreateProject);
-        Assert.Equal(3, proposals.Count(p => p.Action == Actions.MoveNote));
-        Assert.All(proposals, p => { Assert.Empty(p.DependsOn); Assert.Equal(s.H.Registry.FindActive("garden")!.Id, p.Target["toProjectId"]); });
-
-        s.ApproveAll().ExpectOutcome("executed");
+        ApproveEach(s);
+        s.ExpectState(RelayState.Completed).ExpectOutcome("executed");
+        Assert.DoesNotContain(s.Response.Proposals, p => p.Action == Actions.CreateProject);
+        Assert.Equal(3, s.Response.Proposals.Count(p => p.Action == Actions.MoveNote));
+        Assert.All(s.Response.Proposals, p => Assert.Equal(garden.Id, p.Target["toProjectId"]));
         Assert.Equal(3, NotesOf(s, "garden").Count);
 
         // Asking again finds every backyard note already in Garden: an answer, not a proposal.
-        s.Command("move the backyard notes into Garden").ExpectState(RelayState.Completed).ExpectNoProposals()
-            .ExpectAnswerContains("already in 'Garden'");
+        s.Command("move the backyard notes into Garden")
+            .ExpectState(RelayState.Completed).ExpectNoProposals().ExpectOutcome("answered");
+        Assert.All(Hits(mind.Requests[^1]).Where(h => h.Kind == SearchIndex.NoteKind), h => Assert.Equal("garden", h.ProjectSlug));
     }
 
     [Fact]
     public void ATopicNobodyWroteAboutMovesNothingAndCreatesNothing()
     {
-        using var s = Seeded(_tmp)
-            .Command("move the greenhouse notes into Garden").ExpectState(RelayState.Completed).ExpectNoProposals()
-            .ExpectAnswerContains("nothing to move").ExpectAnswerContains("no reason to create 'Garden'")
+        var mind = Working("greenhouse");
+        using var s = Seeded(_tmp, mind)
+            .Command("move the greenhouse notes into Garden")
+            .ExpectState(RelayState.Completed).ExpectNoProposals().ExpectOutcome("answered")
             .ExpectProject("garden", exists: false);
-    }
-
-    [Fact]
-    public void TheMoveGrammarReadsSeveralPhrasingsAndLeavesDraftFilingAlone()
-    {
-        using var s = Seeded(_tmp);
-        foreach (var phrasing in new[]
-        {
-            "move everything about the backyard into a new project called Garden",
-            "move all notes about backyard to Garden",
-            "transfer the backyard notes to project Garden",
-        })
-        {
-            s.Command(phrasing).ExpectState(RelayState.AwaitingApproval);
-            Assert.Equal(1, s.Response.Proposals.Count(p => p.Action == Actions.CreateProject));
-            Assert.Equal(3, s.Response.Proposals.Count(p => p.Action == Actions.MoveNote));
-            s.Cancel().ExpectState(RelayState.Idle);
-        }
-
-        // "move the notes into X" is filing drafts from the inbox, not a topic move.
-        s.Note("Idea: a rain barrel by the backyard downspout.")
-            .Command("move the notes into Home").ExpectState(RelayState.Completed);
-        Assert.Contains(s.Response.Proposals, p => p.Action == Actions.RouteNote && p.Status == "executed");
-        Assert.DoesNotContain(s.Response.Proposals, p => p.Action == Actions.MoveNote);
+        Assert.DoesNotContain(Hits(mind.Requests[^1]), h => h.Kind == SearchIndex.NoteKind);
     }
 
     [Fact]
@@ -234,14 +326,14 @@ public class BackyardWorkflowTests : IDisposable
         using var s = Seeded(_tmp);
         var home = s.H.Registry.FindActive("home")!;
         var note = NotesOf(s, "home").First();
-        var target = new Dictionary<string, string> { ["projectId"] = home.Id, ["noteId"] = note.Id, ["toProject"] = "Garden" };
+        var target = new Dictionary<string, string> { ["projectId"] = home.Id, ["noteId"] = note.Id, ["toProject"] = Destination };
         PolicyWorld World(IReadOnlyList<string> planned) => new()
         {
             Registry = s.H.Registry, Roots = s.H.Roots, DataRoot = _tmp.Root, DraftNoteExists = _ => false,
             ProjectNoteExists = (projectId, noteId) => s.H.Registry.ById(projectId) is { } p && ProjectNoteStore.Find(p.RootPath, noteId) is not null,
             PlannedProjects = planned,
         };
-        var proposal = new Proposal("01HZZZZZZZZZZZZZZZZZZZZZZ1", Actions.MoveNote, "test", target, ["01HZZZZZZZZZZZZZZZZZZZZZZ0"], [], Risks.ControlledWrite, true, Producers.Rules);
+        var proposal = new Proposal("01HZZZZZZZZZZZZZZZZZZZZZZ1", Actions.MoveNote, "test", target, ["01HZZZZZZZZZZZZZZZZZZZZZZ0"], [], Risks.ControlledWrite, true, Producers.Mind);
 
         var deciding = PolicyEngine.Decide(proposal, World(["garden"]));
         Assert.Equal(DecisionOutcome.NeedsApproval, deciding.Outcome);
@@ -249,7 +341,7 @@ public class BackyardWorkflowTests : IDisposable
 
         var running = PolicyEngine.Decide(proposal, World([]));
         Assert.Equal(DecisionOutcome.Deny, running.Outcome);
-        Assert.Contains(running.Reasons, r => r.Contains("No active project matches 'Garden'"));
+        Assert.Contains(running.Reasons, r => r.Contains($"No active project matches '{Destination}'"));
     }
 
     public void Dispose() => _tmp.Dispose();

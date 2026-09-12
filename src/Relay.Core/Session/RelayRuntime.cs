@@ -81,8 +81,6 @@ public sealed class RelayRuntime : IDisposable
         var indexProblems = new List<string>();
         var index = SearchIndex.Build(recovery.Verification.Records, notes, registry, indexProblems, excerpts);
 
-        var orchestrator = BuildOrchestrator(settings.Settings, options);
-
         WorkerRuntime? workers = null;
         ToolRuntime? tools = null;
         var current = settings.Settings; // the settings the tool drafter reads; replaced when the UI changes them
@@ -115,7 +113,6 @@ public sealed class RelayRuntime : IDisposable
         {
             Registry = registry,
             Roots = roots,
-            Orchestrator = orchestrator,
             Mind = BuildMind(settings.Settings, options),
             Decisions = decisions,
             Usage = new UsageRecorder(root),
@@ -140,30 +137,17 @@ public sealed class RelayRuntime : IDisposable
             external.Completed = coordinator.CompletePendingOperation;
             external.Progress = coordinator.ReportDelegateProgress;
         }
-        // Model, mind and orchestrator settings changed in the UI take effect on the next task or listening pass.
+        // Model and mind settings changed in the UI take effect on the next task or listening pass.
         coordinator.SettingsChanged += changed =>
         {
             current = changed;
-            services.Orchestrator = BuildOrchestrator(changed, options);
             services.Mind = BuildMind(changed, options);
         };
 
         return new RelayRuntime(root, ledger, coordinator, recovery, settings, services);
     }
 
-    /// <summary>
-    /// The deterministic grammar plans first (instant, free, exact for the fixed commands); RELAY0's
-    /// model takes everything the grammar does not cover — prose asks, overheard work, follow-ups.
-    /// </summary>
-    public static IOrchestrator BuildOrchestrator(RelaySettings settings, RuntimeOptions options)
-    {
-        IOrchestrator rules = new RuleBasedOrchestrator();
-        if (settings.Orchestrator.Mode == OrchestratorSettings.RulesAndModel && settings.Model.Enabled && options.ModelClientFactory?.Invoke(settings.Model) is { } client)
-            return new CompositeOrchestrator(rules, new ModelOrchestrator(client, settings.Model.MaxOutputTokens));
-        return rules;
-    }
-
-    /// <summary>The mind of the rebuilt orchestrator (docs/09): RELAY0's model behind the step schema. Null unless mind mode is selected and the model enabled.</summary>
+    /// <summary>The one interpreter (docs/09): RELAY0's model behind the step schema. Null unless mind mode is selected and the model enabled.</summary>
     public static IMind? BuildMind(RelaySettings settings, RuntimeOptions options)
     {
         if (settings.Orchestrator.Mode != OrchestratorSettings.Mind || !settings.Model.Enabled) return null;

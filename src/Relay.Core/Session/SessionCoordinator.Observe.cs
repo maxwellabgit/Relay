@@ -253,11 +253,11 @@ public sealed partial class SessionCoordinator
         }
         if (!OrchestratorEnabled)
         {
-            task.Plan = new TurnPlan(false, "The orchestrator is off; what was heard is on record and nothing was planned.", [], null, [], [], Producers.Engine);
+            task.Plan = new TurnPlan(false, "Relay's mind is off; what was heard is on record and nothing was done with it.", [], null, [], [], Producers.Engine);
             FinishTask(task);
             return task;
         }
-        BeginPlanning(task);
+        BeginTask(task);
         return task;
     }
 

@@ -517,14 +517,23 @@ public class MindModeTests : IDisposable
         Assert.False(mind.Requests[0].Context.CanBuild);
     }
 
+    /// <summary>
+    /// The mode decides whether anything is interpreted, not whether a mind happens to be in place. Everything
+    /// above runs under <c>mind</c>; under <c>off</c> the same mind is never asked, so an instruction is recorded
+    /// and nothing is planned, proposed or run.
+    /// </summary>
     [Fact]
-    public void RulesModeIsUntouchedWhenTheMindIsConfiguredButNotSelected()
+    public void WithTheModeOffTheMindIsNeverConsultedAndTheInstructionIsOnlyRecorded()
     {
-        var mind = new ScriptedMind().Always(_ => throw new InvalidOperationException("the mind must not be consulted in rules mode"));
-        using var s = Scenario.New(_tmp, cfg => cfg.Orchestrator.Mode = OrchestratorSettings.Rules, mind: mind).WithWorkspace()
-            .Command("create project Harbor").Approve().ExpectProject("harbor").ExpectState(RelayState.Completed)
+        var mind = new ScriptedMind().Always(_ => throw new InvalidOperationException("the mind must not be consulted with the mode off"));
+        using var s = Scenario.New(_tmp, cfg => cfg.Orchestrator.Mode = OrchestratorSettings.Off, mind: mind).WithWorkspace()
+            .Command("create project Harbor")
+            .ExpectState(RelayState.Completed)
+            .ExpectProject("harbor", exists: false)
+            .ExpectTaskCount(0)
             .ExpectNoEvent(EventTypes.MindStepped);
         Assert.Empty(mind.Requests);
+        Assert.Equal(false, s.H.Last(EventTypes.CommandRecorded)!.DataBool("executed"));
     }
 
     public void Dispose() => _tmp.Dispose();

@@ -56,8 +56,8 @@ public sealed class LiveModel
     /// <summary>Settings for a scenario that runs with this model as RELAY0. Listening is left to the test: dictation needs it off while the world is built.</summary>
     public void Configure(RelaySettings cfg)
     {
-        cfg.Orchestrator.Mode = OrchestratorSettings.RulesAndModel;
-        cfg.Orchestrator.PlanningTimeoutMs = TimeoutMs;
+        cfg.Orchestrator.Mode = OrchestratorSettings.Mind;
+        cfg.Orchestrator.StepTimeoutMs = TimeoutMs;
         cfg.Model.Enabled = true;
         cfg.Model.Endpoint = Endpoint;
         cfg.Model.Model = Model;

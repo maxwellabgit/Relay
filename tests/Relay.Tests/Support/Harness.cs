@@ -44,7 +44,7 @@ public sealed class Harness : IDisposable
     }
 
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
-        IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true,
+        IWorkerHost? workerHost = null, bool inlinePost = true,
         Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
         Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
     {
@@ -99,7 +99,6 @@ public sealed class Harness : IDisposable
         {
             Registry = Registry,
             Roots = Roots,
-            Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
             Mind = mind,
             Decisions = Relay.Core.Decisions.DecisionSet.Load(root, out _),
             Usage = new Relay.Core.Usage.UsageRecorder(root),
@@ -154,8 +153,8 @@ public sealed class Harness : IDisposable
     public SelfChangeRuntime SelfChange => _selfChange ??= new SelfChangeRuntime(Root, Preferences, ChangeSets, () => Clock.UtcNow);
     private SelfChangeRuntime? _selfChange;
 
-    /// <summary>A planner context equivalent to the one the coordinator hands a task, for driving an orchestrator directly.</summary>
-    public TurnContext PlannerContext(ITurnSink? sink = null)
+    /// <summary>The world one turn's tools see, equivalent to the one the coordinator builds per task, for driving tools or the loop directly.</summary>
+    public TurnContext TurnWorld(ITurnSink? sink = null)
     {
         var s = sink ?? new NullTurnSink();
         return new TurnContext
@@ -169,11 +168,10 @@ public sealed class Harness : IDisposable
             Preferences = Preferences.Compiled(),
             ExternalProfiles = External?.ProfileNames ?? [],
             SearchProfiles = External?.SearchProfileNames ?? [],
-            PromptFragment = SelfChange.PromptFragment("planner"),
         };
     }
 
-    /// <summary>The mind's context equivalent to the one the coordinator builds for a task in mind mode (docs/09), for the evaluation runner.</summary>
+    /// <summary>The mind's context equivalent to the one the coordinator builds for a task (docs/09), for the evaluation runner.</summary>
     public Relay.Core.Mind.MindContext MindContext(bool canBuild = true) => new()
     {
         Tools = ToolBroker.Descriptors,
@@ -189,7 +187,7 @@ public sealed class Harness : IDisposable
     };
 
     /// <summary>
-    /// Stores overheard words as an excerpt under a known id, the way a raise would have kept them, so a planner
+    /// Stores overheard words as an excerpt under a known id, the way a raise would have kept them, so a mind
     /// driven directly (the evaluation runner) can read_excerpt an observed task exactly as it does in the application.
     /// </summary>
     public Harness Heard(string excerptId, string words, string selectedBy = "eval")
@@ -204,11 +202,11 @@ public sealed class Harness : IDisposable
         return this;
     }
 
-    /// <summary>The planner context for an evaluation case: an observed case's heard words are stored as its excerpt first.</summary>
-    public TurnContext PlannerContext(EvaluationCase c)
+    /// <summary>The world for an evaluation case: an observed case's heard words are stored as its excerpt first.</summary>
+    public TurnContext TurnWorld(EvaluationCase c)
     {
         if (c.Heard is not null) Heard(EvaluationRunner.ExcerptIdFor(c), c.Heard);
-        return PlannerContext();
+        return TurnWorld();
     }
 
     public Harness Start()

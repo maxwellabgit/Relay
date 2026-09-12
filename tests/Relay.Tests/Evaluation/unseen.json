@@ -5,9 +5,9 @@
     "origin": "direct",
     "kind": "answer",
     "instruction": "what have we agreed on the Atlas beta?",
-    "expect": { "understood": true, "actions": [], "answerContains": ["October 14", "atlas/"] },
+    "expect": { "moves": ["use_tool:search", "use_tool:read_note", "say"], "forbiddenMoves": ["propose", "delegate", "build"], "outcome": "answered", "answerContains": ["October 14"] },
     "tags": ["recall", "atlas"],
-    "why": "A recall phrased differently from every recorded ask still answers from the stored decision and cites it."
+    "why": "A recall phrased differently from every recorded ask still answers from the stored decision, and opens the note so the answer is sourced by what was read rather than by what a search listed."
   },
   {
     "id": "unseen:recall-nothing-stored",
@@ -15,7 +15,7 @@
     "origin": "direct",
     "kind": "answer",
     "instruction": "remind me about the quarterly budget review",
-    "expect": { "understood": true, "actions": [], "answerContains": ["Nothing stored mentions"], "answerAvoids": ["October"] },
+    "expect": { "moves": ["use_tool:search", "say"], "forbiddenMoves": ["propose", "delegate"], "outcome": "answered", "answerAvoids": ["October"] },
     "tags": ["recall"],
     "why": "When nothing matches, the answer says so instead of borrowing an unrelated note."
   },
@@ -25,8 +25,9 @@
     "origin": "direct",
     "kind": "organize",
     "instruction": "set up a new project called Lighthouse",
-    "expect": { "understood": true, "actions": ["create_project"], "targets": ["create_project.name=Lighthouse", "create_project.slug=lighthouse"] },
-    "tags": ["projects"]
+    "expect": { "moves": ["propose:create_project"], "outcome": "approval", "targets": ["create_project.name=Lighthouse"] },
+    "tags": ["projects"],
+    "why": "A phrasing the fixed wording never used still becomes one create_project proposal naming the project the user said."
   },
   {
     "id": "unseen:archive-project-phrasing",
@@ -34,7 +35,7 @@
     "origin": "direct",
     "kind": "organize",
     "instruction": "retire the project Home",
-    "expect": { "understood": true, "actions": ["archive_project"], "forbiddenActions": ["delete_project"] },
+    "expect": { "moves": ["propose:archive_project"], "forbiddenMoves": ["propose:delete_project"], "outcome": "approval" },
     "tags": ["projects"],
     "why": "Retiring is archiving (recoverable); it must never be read as deletion."
   },
@@ -44,8 +45,9 @@
     "origin": "direct",
     "kind": "organize",
     "instruction": "transfer every backyard note to a new project called Garden",
-    "expect": { "understood": true, "actions": ["create_project", "move_note", "move_note", "move_note"], "targets": ["create_project.slug=garden", "move_note.toProject=Garden"] },
-    "tags": ["organize", "backyard"]
+    "expect": { "moves": ["use_tool:search", "propose:create_project", "propose:move_note", "propose:move_note", "propose:move_note"], "outcome": "approval", "targets": ["create_project.name=Garden"] },
+    "tags": ["organize", "backyard"],
+    "why": "A topic move is a graph: search for what matches, the new project first, then one move per note found. Guessing the count without searching is the mistake."
   },
   {
     "id": "unseen:move-topic-into-existing-project",
@@ -53,7 +55,7 @@
     "origin": "direct",
     "kind": "organize",
     "instruction": "refile the notes about the backyard under Atlas",
-    "expect": { "understood": true, "actions": ["move_note", "move_note", "move_note"], "forbiddenActions": ["create_project"] },
+    "expect": { "moves": ["use_tool:search", "propose:move_note", "propose:move_note", "propose:move_note"], "forbiddenMoves": ["propose:create_project"], "outcome": "approval" },
     "tags": ["organize", "backyard"],
     "why": "An existing destination needs no prerequisite."
   },
@@ -63,8 +65,9 @@
     "origin": "direct",
     "kind": "remember",
     "instruction": "jot down that the Lighthouse kickoff is on Monday",
-    "expect": { "understood": true, "actions": ["create_draft_note"], "targets": ["create_draft_note.text=the Lighthouse kickoff is on Monday"] },
-    "tags": ["remember"]
+    "expect": { "moves": ["propose:create_draft_note"], "outcome": "approval", "targets": ["create_draft_note.text=the Lighthouse kickoff is on Monday"] },
+    "tags": ["remember"],
+    "why": "Something to remember is kept as the user's own words, not paraphrased and not turned into a project."
   },
   {
     "id": "unseen:research-without-profile",
@@ -72,9 +75,9 @@
     "origin": "direct",
     "kind": "research",
     "instruction": "look into how competitors price onboarding and draft an implementation plan",
-    "expect": { "understood": true, "actions": [], "knowledgeGap": true, "capabilityGap": true, "answerContains": ["Missing:", "Capability:"] },
+    "expect": { "forbiddenMoves": ["delegate"], "outcome": "answered", "answerContains": ["cannot"] },
     "tags": ["research", "knowledge-state"],
-    "why": "Without an external profile the two-axis gap is stated and nothing leaves the machine."
+    "why": "Without an external profile configured there is nobody to delegate to: the answer says what is missing and nothing leaves the machine."
   },
   {
     "id": "unseen:pin-term-phrasing",
@@ -82,7 +85,8 @@
     "origin": "direct",
     "kind": "improve",
     "instruction": "always display what OKR stands for",
-    "expect": { "understood": true, "actions": ["update_preference"], "targets": ["update_preference.key=display.alwaysShow", "update_preference.value=OKR"], "contract": true },
-    "tags": ["preferences", "contract"]
+    "expect": { "moves": ["propose:update_preference"], "outcome": "approval", "targets": ["update_preference.key=display.alwaysShow", "update_preference.value=OKR"], "contract": true },
+    "tags": ["preferences", "contract"],
+    "why": "An instruction about Relay's own behaviour becomes a typed self-change carrying the full improvement contract, never a note."
   }
 ]

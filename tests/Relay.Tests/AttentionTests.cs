@@ -2,10 +2,8 @@ using Relay.Core.Attention;
 using Relay.Core.Config;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
-using Relay.Core.Orchestration;
+using Relay.Core.Notes;
 using Relay.Core.Preferences;
-using Relay.Core.Search;
-using Relay.Core.State;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
 using TaskStatus = Relay.Core.Tasks.TaskStatus;
@@ -279,27 +277,55 @@ public class AttentionTests : IDisposable
     // Through the coordinator: listening scenarios
     // ----------------------------------------------------------------------------------------
 
+    private const string Decision = "We decided the Atlas beta ships on October 14.";
     private const string Chatter = "Anyway the coffee machine is broken again.";
 
-    /// <summary>Listening on with the deterministic grammar still planning what is raised (docs/10, step 1c).</summary>
-    private static void Listening(RelaySettings s)
+    /// <summary>
+    /// The mind runs everything. Listening stays off while the world is built, so the note chord dictates the
+    /// record a check is later measured against; <see cref="Scenario.WithListening"/> turns it on.
+    /// </summary>
+    private static void Mind(RelaySettings s)
     {
-        s.Orchestrator.Mode = OrchestratorSettings.Rules;
-        s.Listening.Enabled = true;
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
     }
 
     /// <summary>A raise over one line, under the topic and merge key these scenarios share.</summary>
     private static RaiseMove Check(string objective, WindowLine line)
         => new("check", objective, [line.Label], "a dated claim about a known project", Topic: "atlas beta date", MergeKey: "check:atlas:date");
 
-    /// <summary>A planner that reports a conflict with two sources for every check task, and proposes nothing.</summary>
-    private static CannedOrchestrator ConflictPlanner() => new CannedOrchestrator().Otherwise((request, _) =>
-        request.Kind == TaskKind.Check
-            ? new TurnPlan(true, "The stated date disagrees with the stored decision", ["Searched", "Compared"],
-                "Stored: October 14. Heard: the 21st. These conflict.",
-                [new Citation(SearchIndex.NoteKind, "01NOTE00000ATLAS", null, "atlas", "Atlas beta ships on October 14.", null), new Citation(SearchIndex.ExcerptKind, request.ExcerptId ?? "01EXCERPT000000X", null, null, "the 21st", null)],
-                [], "canned", Consistent: false)
-            : TurnPlan.NotUnderstood("canned", "only check tasks are scripted"));
+    /// <summary>The one note filed under a project: the record a raised check opens first.</summary>
+    private static (string ProjectId, string NoteId) StoredIn(Scenario s, string slug)
+    {
+        var project = s.H.Registry.FindActive(slug) ?? throw s.Fail($"No active project '{slug}' to check against");
+        return (project.Id, Assert.Single(ProjectNoteStore.ReadAll(project.RootPath).Notes.Select(n => n.Note)).Id);
+    }
+
+    /// <summary>The excerpt the raise anchored to: the words being checked.</summary>
+    private static string Heard(MindRequest request) => request.Transcript.OfType<InputObserved>().First().ExcerptId!;
+
+    /// <summary>What the raise asked the task to do; it names the topic the check is about.</summary>
+    private static string Objective(MindRequest request) => request.Transcript.OfType<InputObserved>().First().Text;
+
+    /// <summary>
+    /// What a raised check does: open the stored decision it is about, open the words it was raised from, and
+    /// end with the verdict. Evidence is what was opened by id — a search returns candidates and grounds
+    /// nothing — so a check that alerts has to hold both sides in its hands.
+    /// </summary>
+    private static ScriptedMind Conflicting(Func<MindRequest, (string ProjectId, string NoteId)> record) => new ScriptedMind().Always(request =>
+    {
+        var opened = request.Transcript.OfType<ToolObserved>().Count();
+        if (opened == 0)
+        {
+            var (projectId, noteId) = record(request);
+            return MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", projectId), ("noteId", noteId)), "Reading the stored decision.");
+        }
+        if (opened == 1) return MindStep.Of(ScriptedMind.Tool("read_excerpt", ("excerptId", Heard(request))), "Reading back what was just said.");
+        return MindStep.Of(ScriptedMind.Say("The stored decision and what was just said name different dates."),
+            "What was said disagrees with the stored decision.", ScriptedMind.Verdict(consistent: false));
+    });
+
+    private static ScriptedMind Conflicting(string projectId, string noteId) => Conflicting(_ => (projectId, noteId));
 
     [Fact]
     public void RepeatedConflictsOnOneTopicShareOneCardAndADismissedCardStaysAway()
@@ -308,13 +334,19 @@ public class AttentionTests : IDisposable
         var mind = new ListeningMind();
         foreach (var date in new[] { "21st", "22nd", "23rd" })
             mind.When(date, line => Check($"Check the date stated in line {line.Label}.", line));
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Note(Decision);
+        var (projectId, noteId) = StoredIn(s, "atlas");
+        mind.Works(Conflicting(projectId, noteId));
+
+        s.WithListening().StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Alert, "Conflict");
         var card = Assert.Single(s.Snap.Attention);
         Assert.Equal(1, card.Occurrences);
+        Assert.Equal(2, s.FindTask(TaskKind.Check)!.Citations.Count);                                       // the stored decision and the words it was checked against
 
         s.Listen(Chatter)
             .Listen("Sales now says the 22nd.")
@@ -348,13 +380,22 @@ public class AttentionTests : IDisposable
     [Fact]
     public void TheAlertBudgetFromPreferencesTurnsTheThirdAlertIntoAResult()
     {
+        var projects = new[] { "Atlas", "Backyard", "Lightshift" };
         var mind = new ListeningMind();
-        foreach (var project in new[] { "Atlas", "Backyard", "Lightshift" })
+        foreach (var project in projects)
             mind.When(project, "check", $"Check what was said about {project}.", topic: project.ToLowerInvariant(), mergeKey: "check:" + project.ToLowerInvariant());
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
+        // Three topics, each with a decision of its own on record: a check can only alert about something it can open.
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas").Note(Decision)
+            .Project("Backyard").Note("We decided the Backyard budget is twelve thousand.")
+            .Project("Lightshift").Note("We decided the Lightshift pilot runs through March.")
             .Do("Two alerts per ten minutes", c => Assert.True(c.UpdatePreference("display.maxAlertsPer10Minutes", "2")))
-            .ExpectPreference("display.maxAlertsPer10Minutes", "2")
-            .StartListening()
+            .ExpectPreference("display.maxAlertsPer10Minutes", "2");
+        var records = projects.Select(name => (Name: name, Stored: StoredIn(s, name.ToLowerInvariant()))).ToList();
+        // Each check opens the decision of the project its objective names; every topic is its own card and its own budget line.
+        mind.Works(Conflicting(request => records.First(r => Objective(request).Contains(r.Name, StringComparison.OrdinalIgnoreCase)).Stored));
+
+        s.WithListening().StartListening()
             .Listen("Atlas slipped a week.")
             .Listen("Backyard is over budget.")
             .Listen("Lightshift lost its sponsor.");
@@ -372,10 +413,15 @@ public class AttentionTests : IDisposable
     public void AConsistentObservationShowsNothingButIsFullyRecorded()
     {
         var mind = new ListeningMind().When("October 14", line => Check("Check the stated date.", line));
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Agrees with the stored decision", ["Searched"], "Consistent with the decision of October 14.",
-            [new Citation(SearchIndex.NoteKind, "01NOTE00000ATLAS", null, "atlas", "Atlas beta ships on October 14.", null)], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: planner).WithWorkspace()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Note(Decision);
+        var (projectId, noteId) = StoredIn(s, "atlas");
+        mind.Works(new ScriptedMind().Always(request => request.Transcript.OfType<ToolObserved>().Any()
+            ? MindStep.Of(ScriptedMind.Say("Stored and heard agree: October 14."), "Agrees with the stored decision.", ScriptedMind.Verdict(consistent: true))
+            : MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", projectId), ("noteId", noteId)), "Reading the stored decision.")));
+
+        s.WithListening().StartListening()
             .Listen("So the beta still ships October 14, right?")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectNoAttention()
@@ -392,10 +438,16 @@ public class AttentionTests : IDisposable
     public void AThinConflictIsAResultNotAnAlert()
     {
         var mind = new ListeningMind { Significance = 0.9 }.When("21st", line => Check("Check the stated date.", line));
-        var planner = new CannedOrchestrator().Otherwise((request, _) => new TurnPlan(true, "Possibly disagrees", ["Searched"], "One note says October 14; the room said the 21st.",
-            [new Citation(SearchIndex.NoteKind, "01NOTE00000ATLAS", null, "atlas", "Atlas beta ships on October 14.", null)], [], "canned", Consistent: false));   // one source only
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: planner).WithWorkspace()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Note(Decision);
+        var (projectId, noteId) = StoredIn(s, "atlas");
+        // The stored decision is opened and the words heard are not: a finding on one source, however sure the mind is of it.
+        mind.Works(new ScriptedMind().Always(request => request.Transcript.OfType<ToolObserved>().Any()
+            ? MindStep.Of(ScriptedMind.Say("One note says October 14; the room said the 21st."), "Possibly disagrees with the stored decision.", ScriptedMind.Verdict(consistent: false))
+            : MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", projectId), ("noteId", noteId)), "Reading the stored decision.")));
+
+        s.WithListening().StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectAttention(Presentation.Result, "Conflict")
             .ExpectNoAttention(Presentation.Alert);
@@ -406,8 +458,14 @@ public class AttentionTests : IDisposable
     public void SomethingTheMindBarelyRatedCannotAlert()
     {
         var mind = new ListeningMind { Significance = 0.58 }.When("21st", line => Check("Check the stated date.", line));
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Note(Decision);
+        var (projectId, noteId) = StoredIn(s, "atlas");
+        mind.Works(Conflicting(projectId, noteId));
+
+        // Both sources are opened: the evidence is whole and the mind's own rating of what it heard is what holds the card back.
+        s.WithListening().StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Result)
@@ -419,8 +477,13 @@ public class AttentionTests : IDisposable
     public void TheUsersReactionToACardIsRecordedOnTheTask()
     {
         var mind = new ListeningMind().When("21st", line => Check("Check the stated date.", line));
-        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Project("Atlas")
+            .Note(Decision);
+        var (projectId, noteId) = StoredIn(s, "atlas");
+        mind.Works(Conflicting(projectId, noteId));
+
+        s.WithListening().StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectAttention(Presentation.Alert)
             .Respond("not needed, marketing does not set dates")

@@ -26,67 +26,60 @@ public static class CaseSources
 }
 
 /// <summary>
-/// What a planner or the mind is expected to do with one case. Every property is optional; a property
-/// that is null is not checked. An expectation with nothing to check is rejected by the completeness guard.
+/// What the mind is expected to do with one case. Every property is optional; a property that is null is
+/// not checked. An expectation with nothing to check is rejected by the completeness guard.
+///
+/// A case is scored on the moves the loop made, which is the only thing the mind produces: a move is
+/// written "type" or "type:name" — use_tool:list_projects, propose:create_project, delegate:research,
+/// build:world_clock, say, ask_user — and a name of "*" matches any.
 /// </summary>
 public sealed class Expectation
 {
-    /// <summary>The planner must (or must not) understand the request.</summary>
-    [JsonPropertyName("understood")] public bool? Understood { get; init; }
-    /// <summary>Exactly these proposal actions, as a multiset (order-free). An empty list means no proposals at all.</summary>
-    [JsonPropertyName("actions")] public IReadOnlyList<string>? Actions { get; init; }
-    /// <summary>Actions that must not appear among the proposals.</summary>
-    [JsonPropertyName("forbiddenActions")] public IReadOnlyList<string>? ForbiddenActions { get; init; }
+    /// <summary>The very first move must match.</summary>
+    [JsonPropertyName("firstMove")] public string? FirstMove { get; init; }
+    /// <summary>These moves must occur in this order (not necessarily adjacent).</summary>
+    [JsonPropertyName("moves")] public IReadOnlyList<string>? Moves { get; init; }
+    /// <summary>None of these moves may occur. "propose" with no action forbids proposing anything at all.</summary>
+    [JsonPropertyName("forbiddenMoves")] public IReadOnlyList<string>? ForbiddenMoves { get; init; }
+    /// <summary>Needs the first read must include (local_notes, world_knowledge, new_tool, external_reasoning, user_input, none).</summary>
+    [JsonPropertyName("needs")] public IReadOnlyList<string>? Needs { get; init; }
+    /// <summary>The route decision the first read must produce (local, offer_delegate, offer_build, ask_user).</summary>
+    [JsonPropertyName("route")] public string? Route { get; init; }
+    /// <summary>How the loop must end — answered, or the wait it reached: approval, user, build, delegate.</summary>
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+    /// <summary>At most this many steps before the loop ends or waits.</summary>
+    [JsonPropertyName("maxSteps")] public int? MaxSteps { get; init; }
+    /// <summary>The loop must reach an end or a wait rather than failing. False pins a case where failing is the right outcome.</summary>
+    [JsonPropertyName("completes")] public bool? Completes { get; init; }
     /// <summary>Case-insensitive fragments the answer must contain.</summary>
     [JsonPropertyName("answerContains")] public IReadOnlyList<string>? AnswerContains { get; init; }
     /// <summary>Case-insensitive fragments the answer must not contain.</summary>
     [JsonPropertyName("answerAvoids")] public IReadOnlyList<string>? AnswerAvoids { get; init; }
     /// <summary>An upper bound on the answer length (the user's verbosity preference made checkable).</summary>
     [JsonPropertyName("maxAnswerChars")] public int? MaxAnswerChars { get; init; }
-    /// <summary>The plan must (or must not) state a knowledge gap: something missing or a capability gap.</summary>
-    [JsonPropertyName("knowledgeGap")] public bool? KnowledgeGap { get; init; }
-    /// <summary>The plan's capability-gap axis must have this value.</summary>
-    [JsonPropertyName("capabilityGap")] public bool? CapabilityGap { get; init; }
-    /// <summary>For check tasks, in either stage: the consistency verdict that must be reached.</summary>
+    /// <summary>For check tasks: the consistency verdict that must be reached.</summary>
     [JsonPropertyName("consistent")] public bool? Consistent { get; init; }
-    /// <summary>Target assertions of the form <c>action.key=value</c> (exact) or <c>action.key</c> (present, non-empty); each must hold for at least one proposal of that action.</summary>
+    /// <summary>
+    /// What a proposal must be about, as <c>action.key=value</c> (exact) or <c>action.key</c> (present, non-empty);
+    /// each must hold for at least one propose move of that action. A move says what was proposed; this says what
+    /// it was proposed about, which is where a plausible-looking proposal goes wrong.
+    /// </summary>
     [JsonPropertyName("targets")] public IReadOnlyList<string>? Targets { get; init; }
     /// <summary>Every self-change proposal (update_preference, update_prompt) must carry the four improvement-contract fields.</summary>
     [JsonPropertyName("contract")] public bool? Contract { get; init; }
-    // Mind stage (docs/09): the case runs the loop until it ends or first needs the user; the moves are what is scored.
-    // A move is written "type" or "type:name" — use_tool:list_projects, propose:create_project, delegate:research, build:world_clock, say, ask_user.
-    /// <summary>Mind stage: the very first move must match.</summary>
-    [JsonPropertyName("firstMove")] public string? FirstMove { get; init; }
-    /// <summary>Mind stage: these moves must occur in this order (not necessarily adjacent).</summary>
-    [JsonPropertyName("moves")] public IReadOnlyList<string>? Moves { get; init; }
-    /// <summary>Mind stage: none of these moves may occur.</summary>
-    [JsonPropertyName("forbiddenMoves")] public IReadOnlyList<string>? ForbiddenMoves { get; init; }
-    /// <summary>Mind stage: needs the first read must include (local_notes, world_knowledge, new_tool, external_reasoning, user_input, none).</summary>
-    [JsonPropertyName("needs")] public IReadOnlyList<string>? Needs { get; init; }
-    /// <summary>Mind stage: the route decision the first read must produce (local, offer_delegate, offer_build, ask_user).</summary>
-    [JsonPropertyName("route")] public string? Route { get; init; }
-    /// <summary>Mind stage: how the loop must end — answered, or the wait it reached: approval, user, build, delegate.</summary>
-    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
-    /// <summary>Mind stage: at most this many steps before the loop ends or waits.</summary>
-    [JsonPropertyName("maxSteps")] public int? MaxSteps { get; init; }
-
-    /// <summary>True when at least one mind-stage property is set.</summary>
-    [JsonIgnore]
-    public bool ChecksMind =>
-        FirstMove is not null || Moves is { Count: > 0 } || ForbiddenMoves is { Count: > 0 } || Needs is { Count: > 0 } || Route is not null || Outcome is not null || MaxSteps is not null;
 
     /// <summary>True when at least one property is set; an expectation that checks nothing is not a case.</summary>
     [JsonIgnore]
     public bool ChecksSomething =>
-        Understood is not null || Actions is not null || ForbiddenActions is { Count: > 0 } || AnswerContains is { Count: > 0 } || AnswerAvoids is { Count: > 0 }
-        || MaxAnswerChars is not null || KnowledgeGap is not null || CapabilityGap is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null
-        || ChecksMind;
+        FirstMove is not null || Moves is { Count: > 0 } || ForbiddenMoves is { Count: > 0 } || Needs is { Count: > 0 } || Route is not null
+        || Outcome is not null || MaxSteps is not null || Completes is not null || AnswerContains is { Count: > 0 } || AnswerAvoids is { Count: > 0 }
+        || MaxAnswerChars is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null;
 }
 
 /// <summary>
-/// One evaluation case: a request Relay is given and what should come of it. A case that expects moves
-/// runs the mind's loop; otherwise it evaluates the planner with <see cref="Instruction"/> in the lane
-/// named by <see cref="Origin"/> and <see cref="Kind"/>.
+/// One evaluation case: a request Relay is given and what should come of it. The mind's loop runs it
+/// with <see cref="Instruction"/> in the lane named by <see cref="Origin"/> and <see cref="Kind"/>,
+/// and the moves it makes are what is scored.
 /// </summary>
 public sealed class EvaluationCase
 {
@@ -104,7 +97,7 @@ public sealed class EvaluationCase
     /// </summary>
     [JsonPropertyName("heard")] public string? Heard { get; init; }
     /// <summary>
-    /// Mind cases: tools the case's world already holds as if Relay had built and promoted them (docs/09 slice 6). The mind
+    /// Tools the case's world already holds as if Relay had built and promoted them (docs/09 slice 6). The mind
     /// sees them in its tool list; a call returns the scripted <see cref="EvaluationTool.Result"/> instead of running the sandbox.
     /// </summary>
     [JsonPropertyName("tools")] public IReadOnlyList<EvaluationTool>? Tools { get; init; }
@@ -114,9 +107,6 @@ public sealed class EvaluationCase
     [JsonPropertyName("why")] public string? Why { get; init; }
     /// <summary>For recorded cases: the task the case was derived from.</summary>
     [JsonPropertyName("recordedTaskId")] public string? RecordedTaskId { get; init; }
-
-    /// <summary>A case scored on the mind's moves (docs/09) rather than on a plan.</summary>
-    [JsonIgnore] public bool IsMindCase => Expect.ChecksMind;
 
     public TaskOrigin ParsedOrigin => Origin.Trim().ToLowerInvariant() switch
     {
@@ -214,15 +204,18 @@ public sealed class EvaluationSet
             if (c.Kind is not null && !KnownKinds.Contains(c.Kind.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown kind '{c.Kind}'.");
             if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': no instruction.");
             if (!c.Expect.ChecksSomething) problems.Add($"Case '{c.Id}': the expectation checks nothing.");
-            if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
-                problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids, consistent); it cannot also expect plan output.");
             foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
-                if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move ({string.Join(", ", Mind.Move.Types)}).");
+            {
+                var parts = move.Split(':', 2);
+                if (!Mind.Move.Types.Contains(parts[0], StringComparer.Ordinal)) { problems.Add($"Case '{c.Id}': '{move}' is not a move ({string.Join(", ", Mind.Move.Types)})."); continue; }
+                // A misspelled action would make a propose move that can never match, or a forbidden one that forbids nothing.
+                if (parts[0] == Mind.Move.Propose && parts.Length == 2 && parts[1] != "*" && PolicyEngine.TierOf(parts[1]) == Tier.Prohibited && !Actions.Prohibited.Contains(parts[1]))
+                    problems.Add($"Case '{c.Id}': '{parts[1]}' is not an action Relay knows.");
+            }
             foreach (var need in c.Expect.Needs ?? [])
                 if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
             if (c.Tools is { Count: > 0 })
             {
-                if (!c.IsMindCase) problems.Add($"Case '{c.Id}': tools belong to a mind case (they are the tools the mind may call).");
                 foreach (var tool in c.Tools)
                 {
                     if (!Tools.ToolPackage.ValidName(tool.Name)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' needs a snake_case name.");
@@ -235,8 +228,6 @@ public sealed class EvaluationSet
                 problems.Add($"Case '{c.Id}': heard is the excerpt of an observed case; it needs origin=observed, an instruction, and words.");
             if (string.Equals(c.Source, CaseSources.Failure, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(c.Why))
                 problems.Add($"Case '{c.Id}': a failure case must say which mistake it guards against (why).");
-            foreach (var action in (c.Expect.Actions ?? []).Concat(c.Expect.ForbiddenActions ?? []))
-                if (PolicyEngine.TierOf(action) == Tier.Prohibited && !Actions.Prohibited.Contains(action)) problems.Add($"Case '{c.Id}': '{action}' is not an action Relay knows.");
         }
 
         var recorded = Of(CaseSources.Recorded).ToList();
@@ -259,13 +250,14 @@ public sealed class EvaluationSet
 }
 
 /// <summary>
-/// Turns finished task diagnostics into recorded cases. The user's response is the label. A plan the
-/// user accepted whole (every proposal ran, was granted, or was allowed) is expected to come back with
-/// the same actions; an action policy denied must not be proposed again; a task that reached an
-/// answer or a result was understood; a capability gap the planner stated is expected to be stated
-/// again. A rejection is not a label (the user may simply have changed their mind) and is kept only as
-/// the case's note. Nothing about an answer's content is assumed; that is what authored cases are for.
-/// Recorded cases replay against the current record: one whose world has moved on fails visibly.
+/// Turns finished task diagnostics into recorded cases. The user's response is the label. A task the
+/// user accepted whole (every proposal ran, was granted, or was allowed) is expected to propose the
+/// same things again, in the same order; an action policy denied must not be proposed again; a task
+/// that proposed nothing must propose nothing again; a capability gap the mind stated is expected to
+/// be stated again. A rejection is not a label (the user may simply have changed their mind) and is
+/// kept only as the case's note, so such a case asks no more than that the loop gets somewhere.
+/// Nothing about an answer's content is assumed; that is what authored cases are for. Recorded cases
+/// replay against the current record: one whose world has moved on fails visibly.
 /// </summary>
 public static class RecordedCases
 {
@@ -275,19 +267,19 @@ public static class RecordedCases
     {
         if (string.IsNullOrWhiteSpace(d.FocusedPrompt)) return null;
         if (d.Status is not ("completed" or "failed")) return null;
-        if (d.Planner is null || d.Outcome is "failed" or "cancelled") return null;             // no plan, or the task never reached the user: nothing to learn from
-        if (d.Planner is Producers.User or Producers.Engine or Producers.Router) return null;  // not a planner's work
+        if (d.Planner is null || d.Outcome is "failed" or "cancelled") return null;             // nothing ran, or the task never reached the user: nothing to learn from
+        if (d.Planner is Producers.User or Producers.Engine or Producers.Router) return null;  // not the mind's work
         var acceptedWhole = d.Proposals.Count > 0 && d.Proposals.All(p => Accepted.Contains(p.Status));
-        var expected = acceptedWhole ? d.Proposals.Select(p => p.Action).OrderBy(a => a, StringComparer.Ordinal).ToList() : null;
         var denied = d.Proposals.Where(p => p.Status == "denied").Select(p => p.Action).Distinct(StringComparer.Ordinal)
             .Where(a => d.Proposals.All(p => p.Action != a || p.Status == "denied")).OrderBy(a => a, StringComparer.Ordinal).ToList();
         var rejected = d.Proposals.Where(p => p.Status is "rejected" or "edited").Select(p => p.Action).Distinct(StringComparer.Ordinal).ToList();
         var expect = new Expectation
         {
-            Understood = true,
-            Actions = expected ?? (d.Proposals.Count == 0 ? [] : null),
-            ForbiddenActions = denied.Count > 0 ? denied : null,
-            CapabilityGap = d.Knowledge.CapabilityGap ? true : null,
+            Completes = true,
+            Moves = acceptedWhole ? d.Proposals.Select(p => Mind.Move.Propose + ":" + p.Action).ToList() : null,
+            ForbiddenMoves = denied.Count > 0 ? denied.Select(a => Mind.Move.Propose + ":" + a).ToList()
+                : d.Proposals.Count == 0 ? [Mind.Move.Propose] : null,
+            Needs = d.Knowledge.CapabilityGap ? [Mind.MindRead.NeedNewTool] : null,
         };
         var notes = new List<string>();
         if (d.UserResponse is not null) notes.Add($"user response: {d.UserResponse}");

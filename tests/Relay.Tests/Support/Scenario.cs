@@ -23,7 +23,6 @@ namespace Relay.Tests.Support;
 public sealed class Scenario : IDisposable
 {
     private readonly TempRoot _tmp;
-    private readonly IOrchestrator? _orchestrator;
     private readonly IWorkerHost? _workerHost;
     private readonly Func<ExternalModelProfile, IModelClient>? _externalClients;
     private readonly Relay.Core.Mind.IMind? _mind;
@@ -38,10 +37,9 @@ public sealed class Scenario : IDisposable
     private long _activityFrom;
     private string _heard = "";
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IWorkerHost? workerHost, FixedClock? clock, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester)
     {
         _tmp = tmp;
-        _orchestrator = orchestrator;
         _workerHost = workerHost;
         _externalClients = externalClients;
         _mind = mind;
@@ -53,15 +51,15 @@ public sealed class Scenario : IDisposable
     }
 
     /// <param name="inlinePost">False when background threads (external requests, real workers) post completions; the test then drains them with <see cref="PumpUntil"/>.</param>
-    /// <param name="mind">Relay's mind: it runs every task in <c>orchestrator.mode = "mind"</c> and reads every conversation when listening is on.</param>
+    /// <param name="mind">Relay's mind: it runs every task and reads every conversation when listening is on. Without one no task can run.</param>
     /// <param name="toolDrafter">The model that drafts tools for the mind's build move (slice 6); needs <paramref name="workerHost"/> for the sandbox.</param>
     /// <param name="digester">The local model that digests delegate replies into feed lines (slice 5); null means the reply's own first lines.</param>
-    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
+    public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
         Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
-        => new(tmp, configure, orchestrator, workerHost, clock, externalClients, inlinePost, mind, toolDrafter, digester);
+        => new(tmp, configure, workerHost, clock, externalClients, inlinePost, mind, toolDrafter, digester);
 
     private Harness Open(Action<RelaySettings>? configure, FixedClock? clock)
-        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester).Start();
+        => new Harness(_tmp.Root, configure: configure, workerHost: _workerHost, clock: clock, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester).Start();
 
     /// <summary>Drains work posted by background threads on this thread until the condition holds; fails the scenario on timeout.</summary>
     public Scenario PumpUntil(string what, Func<bool> condition, TimeSpan? timeout = null)
@@ -114,8 +112,45 @@ public sealed class Scenario : IDisposable
 
     /// <summary>Note chord with listening off: a dictated note, organized when it settles.</summary>
     public Scenario Note(string text) => Capture(CaptureMode.Note, text);
-    /// <summary>Command chord: a direct instruction, planned by the orchestrator.</summary>
+    /// <summary>Command chord: a direct instruction, run by the mind.</summary>
     public Scenario Command(string text) => Capture(CaptureMode.Command, text);
+
+    // ----------------------------------------------------------------------------------------
+    // Building a world
+    // ----------------------------------------------------------------------------------------
+    //
+    // A test's world is built through the same calls the Projects and Memory panels make, not by asking
+    // the mind to interpret a sentence. That keeps the setup of a test out of what the test is about:
+    // the mind is then scripted only for the moves the test is actually watching.
+
+    /// <summary>Creates a project the way the Projects panel does, and checks it exists.</summary>
+    public Scenario Project(string name, string? slug = null)
+        => Do($"create project {name}", c =>
+        {
+            if (!c.CreateProject(name, slug)) throw Fail($"Could not create project '{name}': {Snap.Notice}");
+        }).ExpectProject(slug ?? Slug(name));
+
+    /// <summary>Files every note still waiting in staging into this project, the way the Memory panel does.</summary>
+    public Scenario FileAll(string slug)
+        => Do($"file all notes under {slug}", c =>
+        {
+            var project = _h.Registry.FindActive(slug) ?? throw Fail($"No active project '{slug}' to file into");
+            var staged = Snap.Inbox.Select(n => n.NoteId).ToList();
+            if (staged.Count == 0) throw Fail($"Nothing is staged to file under '{slug}'");
+            foreach (var noteId in staged)
+                if (!c.RouteDraftNote(noteId, project.Id)) throw Fail($"Could not file note {noteId[^8..]} under '{slug}': {Snap.Notice}");
+        });
+
+    /// <summary>The last note dictated, filed into this project with an optional note type.</summary>
+    public Scenario FileLast(string slug, string? type = null)
+        => Do($"file the last note under {slug}" + (type is null ? "" : $" as a {type}"), c =>
+        {
+            var project = _h.Registry.FindActive(slug) ?? throw Fail($"No active project '{slug}' to file into");
+            var note = Snap.Inbox.LastOrDefault() ?? throw Fail($"No staged note to file under '{slug}'");
+            if (!c.PromoteDraftNote(note.NoteId, project.Id, type)) throw Fail($"Could not file note {note.NoteId[^8..]} under '{slug}': {Snap.Notice}");
+        });
+
+    private static string Slug(string name) => new string(name.ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
 
     private Scenario Capture(CaptureMode mode, string text)
     {
@@ -522,64 +557,44 @@ public sealed class Scenario : IDisposable
     }
 }
 
-/// <summary>Returns scripted plans by instruction; unknown instructions are "not understood".</summary>
-public sealed class CannedOrchestrator : IOrchestrator
+/// <summary>
+/// Holds every step until the test releases it, so cancellation and a timeout mid-step are deterministic.
+/// The inner mind decides what the released step is; without one the step is a plain answer.
+/// </summary>
+public sealed class PausingMind : Relay.Core.Mind.IMind
 {
-    private readonly Dictionary<string, Func<TurnRequest, TurnContext, TurnPlan>> _plans = new(StringComparer.OrdinalIgnoreCase);
-    private Func<TurnRequest, TurnContext, TurnPlan>? _fallback;
+    private readonly Relay.Core.Mind.IMind? _inner;
+    private TaskCompletionSource<MindStep>? _gate;
+    private MindRequest? _pending;
 
-    public string Name => "canned";
-    public List<TurnRequest> Requests { get; } = new();
-    public List<TurnContext> Contexts { get; } = new();
+    public PausingMind(Relay.Core.Mind.IMind? inner = null) => _inner = inner;
 
-    public CannedOrchestrator On(string instruction, Func<TurnRequest, TurnContext, TurnPlan> plan) { _plans[instruction] = plan; return this; }
-    public CannedOrchestrator On(string instruction, TurnPlan plan) => On(instruction, (_, _) => plan);
-    /// <summary>Plans anything not matched by instruction (observed tasks carry focused prompts the test may not want to spell out).</summary>
-    public CannedOrchestrator Otherwise(Func<TurnRequest, TurnContext, TurnPlan> plan) { _fallback = plan; return this; }
-
-    public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken)
-    {
-        Requests.Add(request);
-        Contexts.Add(context);
-        if (_plans.TryGetValue(request.Instruction.Trim(), out var plan)) return Task.FromResult(plan(request, context));
-        if (_fallback is not null) return Task.FromResult(_fallback(request, context));
-        return Task.FromResult(TurnPlan.NotUnderstood(Name, "no canned plan"));
-    }
-}
-
-/// <summary>Holds every plan until the test releases it, so cancellation and timeout during PLANNING are deterministic.</summary>
-public sealed class PausingOrchestrator : IOrchestrator
-{
-    private readonly IOrchestrator _inner;
-    private TaskCompletionSource<TurnPlan>? _gate;
-    private (TurnRequest Request, TurnContext Context)? _pending;
-
-    public PausingOrchestrator(IOrchestrator inner) => _inner = inner;
-
-    public string Name => "pausing-" + _inner.Name;
+    public string Name => "mind:pausing" + (_inner is null ? "" : "-" + _inner.Name);
     public bool IsPaused => _gate is not null;
     public CancellationToken LastToken { get; private set; }
 
-    public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken)
+    public Task<MindStep> StepAsync(MindRequest request, CancellationToken cancellationToken)
     {
         LastToken = cancellationToken;
         // Continuations run synchronously on the completing (test) thread so the coordinator is never touched from elsewhere.
-        _gate = new TaskCompletionSource<TurnPlan>();
-        _pending = (request, context);
+        _gate = new TaskCompletionSource<MindStep>();
+        _pending = request;
         cancellationToken.Register(() => _gate.TrySetCanceled(cancellationToken));
         return _gate.Task;
     }
 
-    /// <summary>Lets the inner orchestrator produce the plan now. Returns false when nothing was waiting.</summary>
+    /// <summary>Lets the step through now. Returns false when nothing was waiting.</summary>
     public bool Release()
     {
         if (_gate is null || _pending is null) return false;
-        var (request, context) = _pending.Value;
+        var request = _pending;
         var gate = _gate;
         _gate = null;
         _pending = null;
-        var plan = _inner.PlanAsync(request, context, CancellationToken.None).GetAwaiter().GetResult();
-        return gate.TrySetResult(plan);
+        var step = _inner is null
+            ? MindStep.Of(ScriptedMind.Say("Done."), "Answered.")
+            : _inner.StepAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+        return gate.TrySetResult(step);
     }
 
     public bool Fail(Exception ex)
@@ -591,18 +606,17 @@ public sealed class PausingOrchestrator : IOrchestrator
     }
 }
 
-/// <summary>An orchestrator that throws, for failure-path tests.</summary>
-public sealed class ThrowingOrchestrator : IOrchestrator
+/// <summary>A mind that throws rather than answering, for failure-path tests.</summary>
+public sealed class ThrowingMind : Relay.Core.Mind.IMind
 {
-    public string Name => "throwing";
-    public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken) => throw new InvalidOperationException("model exploded");
+    public string Name => "mind:throwing";
+    public Task<MindStep> StepAsync(MindRequest request, CancellationToken cancellationToken) => throw new InvalidOperationException("model exploded");
 }
 
 /// <summary>
 /// A mind that reads conversations by phrase: a pass raises the work paired with every phrase that appears in a
 /// line it has not raised on yet, then waits. Stands in for RELAY0 so listening scenarios are deterministic and
-/// say exactly what was heard. The tasks its raises start are handled by <see cref="Working"/>, or by whatever
-/// plans them when the scenario runs the older pipeline beside it.
+/// say exactly what was heard. The tasks its raises start are run by <see cref="Working"/>.
 /// </summary>
 public sealed class ListeningMind : Relay.Core.Mind.IMind
 {

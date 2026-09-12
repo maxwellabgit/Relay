@@ -225,15 +225,10 @@ public sealed partial class MainWindow : Window
         LedgerDot.Fill = new SolidColorBrush(s.LedgerHealth == LedgerHealth.Ok ? Palette.Good : s.LedgerHealth == LedgerHealth.TornTail ? Palette.Warn : Palette.Bad);
 
         var modelReady = s.ModelEnabled && (s.ModelKeyStored || IsLoopback(s.ModelEndpoint));
-        OrchestratorChip.Text = s.OrchestratorMode switch
-        {
-            OrchestratorSettings.Off => "Planner off",
-            OrchestratorSettings.Rules => "Rules only · no model",
-            OrchestratorSettings.Mind => s.ModelEnabled ? $"Mind · {s.ModelName}" + (modelReady ? "" : " · NO KEY") : "Mind (model disabled — enable it)",
-            _ => s.ModelEnabled ? $"Rules + {s.ModelName}" + (modelReady ? "" : " · NO KEY") : "Rules + model (model disabled)",
-        };
-        OrchestratorDot.Fill = new SolidColorBrush(s.OrchestratorMode == OrchestratorSettings.Off ? Palette.Neutral
-            : s.OrchestratorMode == OrchestratorSettings.Rules || modelReady ? Palette.Good : Palette.Warn);
+        OrchestratorChip.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "Mind off"
+            : s.ModelEnabled ? $"Mind · {s.ModelName}" + (modelReady ? "" : " · NO KEY")
+            : "Mind (model disabled — enable it)";
+        OrchestratorDot.Fill = new SolidColorBrush(s.OrchestratorMode == OrchestratorSettings.Off ? Palette.Neutral : modelReady ? Palette.Good : Palette.Warn);
 
         // What the note chord does: open a conversation the mind reads, or take one silent note. Without a mind there is nothing to read with.
         ListeningChip.Text = s.ListeningEnabled ? "Listening · read by the mind"
@@ -367,7 +362,7 @@ public sealed partial class MainWindow : Window
         AskPanel.Visibility = Vis(s.State is not (RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Locked or RelayState.Failed or RelayState.Starting));
         AskBox.IsEnabled = canAsk;
         AskButton.IsEnabled = canAsk;
-        AskHint.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "The planner is off; enable it in Settings to ask."
+        AskHint.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "Relay's mind is off; enable it in Settings to ask."
             : listening ? "Ask without stopping the stream: the question runs beside it and the answer arrives as a card in Attention."
             : s.State is RelayState.Idle or RelayState.Completed ? "A direct question or instruction, answered in Response. Nothing runs without approval."
             : "Asked now, the question runs in the background and answers in Attention.";
@@ -426,7 +421,7 @@ public sealed partial class MainWindow : Window
             ("Ledger", $"{s.LedgerPath}\n{s.LedgerRecords} records · health {s.LedgerHealth} · tail {s.LedgerLastHash}", null),
             ("Session", $"{s.SessionId} · pid {s.ProcessId} · Relay {s.AppVersion}\n{s.Tasks.Count} task(s) this session · {cost.PromptTokens} prompt + {cost.CompletionTokens} completion tokens · {cost.ModelCalls} model call(s) · {cost.ToolCalls} tool call(s)", _runtime.Root.TasksDirectory),
             ("Settings", $"{_runtime.Root.SettingsPath}\nhash {Short(settings.ComputeHash())}" + (_runtime.Settings.Problems.Count > 0 ? $" · {_runtime.Settings.Problems.Count} problem(s) at startup" : ""), _runtime.Root.SettingsPath),
-            ("Planner", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nplanning timeout {settings.Orchestrator.PlanningTimeoutMs} ms · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
+            ("Mind", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nstep timeout {settings.Orchestrator.StepTimeoutMs} ms · step budget {settings.Orchestrator.MaxSteps} · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
             ("Listening", settings.Listening.Enabled ? $"on — the note chord opens a conversation{(s.MindReady ? "" : ", but there is no mind to read it")}\npass timeout {settings.Listening.PassTimeoutMs} ms · ≤ {settings.Stream.MaxMovesPerPass} move(s), {settings.Stream.MaxToolCallsPerPass} tool call(s), {settings.Stream.MaxRaisesPerPass} raise(s) per pass" : "off — the note chord dictates one silent note and nothing is read", null),
             ("Stream", $"buffer {s.Preferences.Buffer.TotalSeconds:0}s (settings {settings.Stream.BufferSeconds}s) · segment quiet {settings.Stream.SegmentQuietMs} ms · read every {settings.Stream.ObserveIntervalMs} ms\nexcerpt ≤ {s.Preferences.ExcerptMaxSeconds:0}s · retained ≤ {s.Preferences.MaxRetainedFraction:P0} of elapsed · window file only in staging\\stream", _runtime.Root.ExcerptsDirectory),
             ("Model", s.ModelEnabled ? $"{s.ModelName} at {s.ModelEndpoint}\nkey {(s.ModelKeyStored ? "stored (DPAPI, this account)" : IsLoopback(s.ModelEndpoint) ? "none (loopback)" : "NOT STORED")} · timeout {settings.Model.TimeoutMs} ms · max output {settings.Model.MaxOutputTokens} tokens" : "disabled — no network connection is ever opened", null),

@@ -15,7 +15,6 @@ namespace Relay.Core.Evaluation;
 public sealed record CaseResult(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("source")] string Source,
-    [property: JsonPropertyName("stage")] string Stage,
     [property: JsonPropertyName("passed")] bool Passed,
     [property: JsonPropertyName("failures")] IReadOnlyList<string> Failures,
     [property: JsonPropertyName("observed")] string Observed,
@@ -32,7 +31,7 @@ public sealed record SourceScore(
 }
 
 /// <summary>
-/// The result of evaluating a set: which set (by hash), against which planner, and every case's verdict.
+/// The result of evaluating a set: which set (by hash), against which mind, and every case's verdict.
 /// A report over an incomplete set has <see cref="Problems"/> and no results; it never passes. Written as
 /// JSON so an improve task can cite it as the acceptance evidence for a change set.
 /// </summary>
@@ -40,7 +39,7 @@ public sealed class EvaluationReport
 {
     [JsonPropertyName("setSha256")] public required string SetSha256 { get; init; }
     [JsonPropertyName("ranAt")] public required DateTimeOffset RanAt { get; init; }
-    [JsonPropertyName("planner")] public required string Planner { get; init; }
+    [JsonPropertyName("mind")] public required string Mind { get; init; }
     /// <summary>The completeness guard's findings; non-empty means nothing was run.</summary>
     [JsonPropertyName("problems")] public IReadOnlyList<string> Problems { get; init; } = [];
     [JsonPropertyName("results")] public IReadOnlyList<CaseResult> Results { get; init; } = [];
@@ -61,13 +60,13 @@ public sealed class EvaluationReport
     public string Render()
     {
         var sb = new StringBuilder();
-        sb.Append("Evaluation of set ").Append(SetSha256[..12]).Append(" with ").Append(Planner);
+        sb.Append("Evaluation of set ").Append(SetSha256[..12]).Append(" with ").Append(Mind);
         sb.Append(": ").Append(Passed ? "PASS" : "FAIL").Append('\n');
         foreach (var p in Problems) sb.Append("  guard: ").Append(p).Append('\n');
         foreach (var s in Scores) sb.Append("  ").Append(s.Source).Append(": ").Append(s.Passed).Append('/').Append(s.Total).Append('\n');
         foreach (var r in Failed)
         {
-            sb.Append("  FAILED ").Append(r.Id).Append(" [").Append(r.Source).Append(", ").Append(r.Stage).Append("] by ").Append(r.Producer).Append('\n');
+            sb.Append("  FAILED ").Append(r.Id).Append(" [").Append(r.Source).Append("] by ").Append(r.Producer).Append('\n');
             foreach (var f in r.Failures) sb.Append("    - ").Append(f).Append('\n');
             sb.Append("    observed: ").Append(r.Observed).Append('\n');
         }
@@ -76,66 +75,61 @@ public sealed class EvaluationReport
 }
 
 /// <summary>
-/// Runs an evaluation set against a planner (and the mind, for cases that expect moves) and scores each case
-/// against its expectation. Each is called exactly as the coordinator calls it, with a context
-/// the caller supplies per case, so the same cases score the deterministic grammar, a scripted model,
-/// or a live model. Nothing here executes proposals; only the plan or the moves are scored.
+/// Runs an evaluation set against a mind and scores each case against its expectation. The loop is built
+/// exactly as the coordinator builds it, over a world the caller supplies per case, so the same cases
+/// score a scripted mind or a live model. Nothing here is executed: read-only tools run for real, and
+/// anything that would need the user leaves the loop waiting where the engine would have asked.
 /// </summary>
 public sealed class EvaluationRunner
 {
-    private readonly IOrchestrator _planner;
-    private readonly Func<EvaluationCase, TurnContext> _context;
-    private readonly IMind? _mind;
-    private readonly Func<EvaluationCase, MindContext>? _mindContext;
+    private readonly IMind _mind;
+    private readonly Func<EvaluationCase, TurnContext> _world;
+    private readonly Func<EvaluationCase, MindContext> _context;
     private readonly Func<DateTimeOffset> _clock;
 
-    public EvaluationRunner(IOrchestrator planner, Func<EvaluationCase, TurnContext> context, Func<DateTimeOffset>? clock = null,
-        IMind? mind = null, Func<EvaluationCase, MindContext>? mindContext = null)
+    public EvaluationRunner(IMind mind, Func<EvaluationCase, TurnContext> world, Func<EvaluationCase, MindContext> context, Func<DateTimeOffset>? clock = null)
     {
-        _planner = planner;
-        _context = context;
         _mind = mind;
-        _mindContext = mindContext;
+        _world = world;
+        _context = context;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
-    /// <summary>Per-case time limit; a planner that does not answer in time fails the case rather than hanging the run.</summary>
+    /// <summary>Per-case time limit; a mind that does not answer in time fails the case rather than hanging the run.</summary>
     public TimeSpan CaseTimeout { get; init; } = TimeSpan.FromSeconds(90);
-    /// <summary>Mind cases: the loop's step budget when the case sets none.</summary>
-    public int MindMaxSteps { get; init; } = 8;
+    /// <summary>The loop's step budget when the case sets none.</summary>
+    public int MaxSteps { get; init; } = 8;
 
     public async Task<EvaluationReport> RunAsync(EvaluationSet set, CancellationToken cancellationToken)
     {
         var problems = set.Validate();
         if (problems.Count > 0)
-            return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Problems = problems };
+            return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Mind = _mind.Name, Problems = problems };
 
         var results = new List<CaseResult>(set.Cases.Count);
         foreach (var c in set.Cases)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(c.IsMindCase ? await RunMindCaseAsync(c, cancellationToken).ConfigureAwait(false)
-                : await RunPlanCaseAsync(c, cancellationToken).ConfigureAwait(false));
+            results.Add(await RunCaseAsync(c, cancellationToken).ConfigureAwait(false));
         }
-        return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Results = results };
+        return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Mind = _mind.Name, Results = results };
     }
 
     // ----------------------------------------------------------------------------------------
-    // Mind stage: the loop runs against the case's world until it ends or first needs the user
+    // One case: the loop runs against the case's world until it ends or first needs the user
     // ----------------------------------------------------------------------------------------
 
-    private async Task<CaseResult> RunMindCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
+    private async Task<CaseResult> RunCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
-        if (_mind is null || _mindContext is null) return new CaseResult(c.Id, c.Source, "mind", false, ["No mind was given to the runner; the case expects moves."], "(no mind)", "-", 0);
         var at = _clock();
-        var turn = _context(c);
-        var context = _mindContext(c);
+        var turn = _world(c);
+        var context = _context(c);
         var built = c.Tools ?? [];
         if (built.Count > 0) context.Tools = [.. context.Tools.Where(t => built.All(b => b.Name != t.Name)), .. built.Select(b => new ToolDescriptor(b.Name, b.Description, b.Arguments))];
         var host = new EvaluationHost(turn.Tools, built, _clock);
         var source = c.ParsedOrigin switch { TaskOrigin.Observed => InputObserved.Heard, TaskOrigin.Dialogue => InputObserved.FollowUp, _ => InputObserved.Ask };
-        var loop = new TaskLoop("eval-" + c.Id, source, _mind, host, context, new Decider(DecisionSet.Default()), new LoopBudget(c.Expect.MaxSteps ?? MindMaxSteps, turn.Settings.MaxToolCalls), new FixedClock(_clock));
+        var loop = new TaskLoop("eval-" + c.Id, source, _mind, host, context, new Decider(DecisionSet.Default()), new LoopBudget(c.Expect.MaxSteps ?? MaxSteps, turn.Settings.MaxToolCalls), new FixedClock(_clock));
         loop.Observe(new InputObserved(at, source, c.Instruction, c.Heard is null ? null : ExcerptIdFor(c)));
         LoopResult? result;
         try
@@ -146,14 +140,14 @@ public sealed class EvaluationRunner
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new CaseResult(c.Id, c.Source, "mind", false, [$"The mind did not finish within {CaseTimeout.TotalSeconds:0}s."], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
+            return new CaseResult(c.Id, c.Source, false, [$"The mind did not finish within {CaseTimeout.TotalSeconds:0}s."], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new CaseResult(c.Id, c.Source, "mind", false, [$"The mind threw {ex.GetType().Name}: {ex.Message}"], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
+            return new CaseResult(c.Id, c.Source, false, [$"The mind threw {ex.GetType().Name}: {ex.Message}"], Observe(loop, null), _mind.Name, watch.ElapsedMilliseconds);
         }
         var failures = Score(c.Expect, loop, result);
-        return new CaseResult(c.Id, c.Source, "mind", failures.Count == 0, failures, Observe(loop, result), _mind.Name, watch.ElapsedMilliseconds);
+        return new CaseResult(c.Id, c.Source, failures.Count == 0, failures, Observe(loop, result), _mind.Name, watch.ElapsedMilliseconds);
     }
 
     /// <summary>The outcome of a mind case: "answered" (or another end), or the wait it stopped at (approval, user, build, delegate).</summary>
@@ -165,7 +159,9 @@ public sealed class EvaluationRunner
         var failures = new List<string>();
         var moves = loop.Transcript.OfType<MoveObserved>().Select(m => m.Move).ToList();
         var written = moves.Select(Written).ToList();
-        if (result is { Status: LoopStatus.Failed }) failures.Add($"The loop failed: {result.Error ?? result.Outcome}.");
+        // A loop that failed fails its case, unless failing is what the case pins.
+        if (result is { Status: LoopStatus.Failed } && e.Completes != false) failures.Add($"The loop failed: {result.Error ?? result.Outcome}.");
+        if (e.Completes == false && result is not { Status: LoopStatus.Failed }) failures.Add("Expected the loop to fail; it ran to an end.");
         if (e.FirstMove is { } first && (moves.Count == 0 || !Matches(moves[0], first)))
             failures.Add($"Expected the first move to be {first}; it was {(moves.Count == 0 ? "nothing" : written[0])}.");
         if (e.Moves is { Count: > 0 } wanted)
@@ -190,10 +186,43 @@ public sealed class EvaluationRunner
         if (e.MaxAnswerChars is { } maxChars && answer.Length > maxChars) failures.Add($"The answer is {answer.Length} characters; at most {maxChars} were allowed.");
         if (e.Consistent is { } wantVerdict && loop.Consistent != wantVerdict)
             failures.Add($"Expected the verdict consistent={Word(wantVerdict)} but the mind said {(loop.Consistent is null ? "nothing" : Word(loop.Consistent.Value))}.");
+
+        // A move says what was proposed; these say what it was proposed about, which is where a plausible-looking proposal goes wrong.
+        var proposals = moves.OfType<ProposeMove>().ToList();
+        foreach (var assertion in e.Targets ?? [])
+        {
+            var (action, key, value) = ParseTargetAssertion(assertion);
+            if (action is null || key is null) { failures.Add($"Malformed target assertion '{assertion}' (use action.key or action.key=value)."); continue; }
+            var candidates = proposals.Where(p => string.Equals(p.Action, action, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (candidates.Count == 0) { failures.Add($"Target assertion '{assertion}': no '{action}' proposal."); continue; }
+            var holds = candidates.Any(p => p.Target.TryGetValue(key, out var v) && v.Length > 0 && (value is null || string.Equals(v, value, StringComparison.OrdinalIgnoreCase)));
+            if (!holds) failures.Add($"Target assertion '{assertion}' does not hold; {action} targets: {string.Join(" | ", candidates.Select(p => Render(p.Target)))}.");
+        }
+        if (e.Contract == true)
+            foreach (var p in proposals.Where(p => p.Action is Actions.UpdatePreference or Actions.UpdatePrompt))
+            {
+                var missing = PolicyEngine.ContractKeys.Where(k => string.IsNullOrWhiteSpace(p.Target.GetValueOrDefault(k))).ToList();
+                if (missing.Count > 0) failures.Add($"{p.Action} lacks the improvement contract field(s): {string.Join(", ", missing)}.");
+            }
         return failures;
 
         static string Word(bool consistent) => consistent ? MindRead.Agrees : MindRead.Conflicts;
     }
+
+    private static (string? Action, string? Key, string? Value) ParseTargetAssertion(string assertion)
+    {
+        var eq = assertion.IndexOf('=');
+        var path = eq < 0 ? assertion : assertion[..eq];
+        var value = eq < 0 ? null : assertion[(eq + 1)..];
+        var dot = path.IndexOf('.');
+        if (dot <= 0 || dot == path.Length - 1) return (null, null, null);
+        // "model.request.profile" has a dot inside the action name: the key is the last segment.
+        var lastDot = path.LastIndexOf('.');
+        return (path[..lastDot], path[(lastDot + 1)..], value);
+    }
+
+    private static string Render(IReadOnlyDictionary<string, string> target)
+        => "{" + string.Join(", ", target.Select(kv => $"{kv.Key}={(kv.Value.Length > 40 ? kv.Value[..39] + "…" : kv.Value)}")) + "}";
 
     /// <summary>"type" or "type:name" — the name is the tool, action, profile or tool-to-build; a name of "*" matches any.</summary>
     private static bool Matches(Move move, string pattern)
@@ -298,108 +327,10 @@ public sealed class EvaluationRunner
     }
 
     /// <summary>
-    /// The excerpt id an observed plan case's <see cref="EvaluationCase.Heard"/> words are stored under. The context factory
-    /// owns the excerpt store, so it persists the words under this id before the planner runs; the runner puts the same id
-    /// on the request. Safe as a file name: everything outside letters, digits, '-' and '_' becomes '-'.
+    /// The excerpt id an observed case's <see cref="EvaluationCase.Heard"/> words are stored under. The world factory
+    /// owns the excerpt store, so it persists the words under this id before the loop runs; the runner puts the same id
+    /// on the input the mind observes. Safe as a file name: everything outside letters, digits, '-' and '_' becomes '-'.
     /// </summary>
     public static string ExcerptIdFor(EvaluationCase c) =>
         "eval-heard-" + new string(c.Id.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-').ToArray());
-
-    private async Task<CaseResult> RunPlanCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
-    {
-        var watch = Stopwatch.StartNew();
-        var at = _clock();
-        var request = new TurnRequest("eval-" + c.Id, "eval", "eval:" + c.Id, c.Instruction, at, c.ParsedOrigin, c.ParsedKind, ExcerptId: c.Heard is null ? null : ExcerptIdFor(c));
-        TurnPlan plan;
-        try
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(CaseTimeout);
-            plan = await _planner.PlanAsync(request, _context(c), timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new CaseResult(c.Id, c.Source, "plan", false, [$"The planner did not answer within {CaseTimeout.TotalSeconds:0}s."], "(timeout)", _planner.Name, watch.ElapsedMilliseconds);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return new CaseResult(c.Id, c.Source, "plan", false, [$"The planner threw {ex.GetType().Name}: {ex.Message}"], "(exception)", _planner.Name, watch.ElapsedMilliseconds);
-        }
-        var failures = Score(c.Expect, plan);
-        return new CaseResult(c.Id, c.Source, "plan", failures.Count == 0, failures, Observe(plan), plan.Producer, watch.ElapsedMilliseconds);
-    }
-
-    /// <summary>Every way the plan falls short of the expectation, in plain words.</summary>
-    public static IReadOnlyList<string> Score(Expectation e, TurnPlan plan)
-    {
-        var failures = new List<string>();
-        var actions = plan.Proposals.Select(p => p.Action).ToList();
-        var answer = plan.Answer ?? "";
-
-        if (e.Understood is { } understood && plan.Understood != understood)
-            failures.Add(understood ? $"Expected the request to be understood; the planner said: {plan.Summary}" : "Expected the request not to be understood, but a plan was produced.");
-        if (e.Actions is { } expected)
-        {
-            var want = expected.OrderBy(a => a, StringComparer.Ordinal).ToList();
-            var got = actions.OrderBy(a => a, StringComparer.Ordinal).ToList();
-            if (!want.SequenceEqual(got, StringComparer.Ordinal)) failures.Add($"Expected proposals [{string.Join(", ", want)}] but got [{string.Join(", ", got)}].");
-        }
-        foreach (var forbidden in e.ForbiddenActions ?? [])
-            if (actions.Contains(forbidden, StringComparer.Ordinal)) failures.Add($"'{forbidden}' must not be proposed here.");
-        foreach (var fragment in e.AnswerContains ?? [])
-            if (!answer.Contains(fragment, StringComparison.OrdinalIgnoreCase)) failures.Add($"The answer does not mention '{fragment}'.");
-        foreach (var fragment in e.AnswerAvoids ?? [])
-            if (answer.Contains(fragment, StringComparison.OrdinalIgnoreCase)) failures.Add($"The answer must not mention '{fragment}'.");
-        if (e.MaxAnswerChars is { } max && answer.Length > max) failures.Add($"The answer is {answer.Length} characters; at most {max} were allowed.");
-        var knowledge = plan.Knowledge ?? KnowledgeState.Empty;
-        var gap = knowledge.Missing.Count > 0 || knowledge.CapabilityGap;
-        if (e.KnowledgeGap is { } wantGap && gap != wantGap) failures.Add(wantGap ? "Expected a stated knowledge gap (missing facts or a capability gap); none was stated." : $"No knowledge gap was expected, but the plan states one: {knowledge.Summary}");
-        if (e.CapabilityGap is { } wantCapability && knowledge.CapabilityGap != wantCapability) failures.Add($"Expected capabilityGap={wantCapability.ToString().ToLowerInvariant()} but the plan says {knowledge.CapabilityGap.ToString().ToLowerInvariant()}.");
-        if (e.Consistent is { } wantConsistent && plan.Consistent != wantConsistent) failures.Add($"Expected consistent={wantConsistent.ToString().ToLowerInvariant()} but the plan says {(plan.Consistent is null ? "undetermined" : plan.Consistent.Value.ToString().ToLowerInvariant())}.");
-        foreach (var assertion in e.Targets ?? [])
-        {
-            var (action, key, value) = ParseTargetAssertion(assertion);
-            if (action is null || key is null) { failures.Add($"Malformed target assertion '{assertion}' (use action.key or action.key=value)."); continue; }
-            var candidates = plan.Proposals.Where(p => p.Action == action).ToList();
-            if (candidates.Count == 0) { failures.Add($"Target assertion '{assertion}': no '{action}' proposal."); continue; }
-            var holds = candidates.Any(p => p.Target.TryGetValue(key, out var v) && v.Length > 0 && (value is null || string.Equals(v, value, StringComparison.OrdinalIgnoreCase)));
-            if (!holds) failures.Add($"Target assertion '{assertion}' does not hold; {action} targets: {string.Join(" | ", candidates.Select(p => Render(p.Target)))}.");
-        }
-        if (e.Contract == true)
-        {
-            foreach (var p in plan.Proposals.Where(p => p.Action is Actions.UpdatePreference or Actions.UpdatePrompt))
-            {
-                var missing = PolicyEngine.ContractKeys.Where(k => string.IsNullOrWhiteSpace(p.Target.GetValueOrDefault(k))).ToList();
-                if (missing.Count > 0) failures.Add($"{p.Action} lacks the improvement contract field(s): {string.Join(", ", missing)}.");
-            }
-        }
-        return failures;
-    }
-
-    private static (string? Action, string? Key, string? Value) ParseTargetAssertion(string assertion)
-    {
-        var eq = assertion.IndexOf('=');
-        var path = eq < 0 ? assertion : assertion[..eq];
-        var value = eq < 0 ? null : assertion[(eq + 1)..];
-        var dot = path.IndexOf('.');
-        if (dot <= 0 || dot == path.Length - 1) return (null, null, null);
-        // "model.request.profile" has a dot inside the action name: the key is the last segment.
-        var lastDot = path.LastIndexOf('.');
-        return (path[..lastDot], path[(lastDot + 1)..], value);
-    }
-
-    private static string Observe(TurnPlan plan)
-    {
-        var sb = new StringBuilder();
-        sb.Append(plan.Understood ? "understood" : "not understood").Append("; ");
-        sb.Append(plan.Proposals.Count == 0 ? "no proposals" : "proposals: " + string.Join(", ", plan.Proposals.Select(p => p.Action + Render(p.Target, 3))));
-        if (plan.Answer is not null) sb.Append("; answer(").Append(plan.Answer.Length).Append("): ").Append(plan.Answer.Length > 160 ? plan.Answer[..159] + "…" : plan.Answer);
-        if (plan.Knowledge is { IsEmpty: false } k) sb.Append("; knowledge: missing=").Append(k.Missing.Count).Append(" capabilityGap=").Append(k.CapabilityGap.ToString().ToLowerInvariant());
-        if (plan.Consistent is { } consistent) sb.Append("; consistent=").Append(consistent.ToString().ToLowerInvariant());
-        if (plan.Steps.Count > 0) sb.Append("; steps: ").Append(string.Join(" | ", plan.Steps.Take(8).Select(s => s.Length > 120 ? s[..119] + "…" : s)));
-        return sb.ToString();
-    }
-
-    private static string Render(IReadOnlyDictionary<string, string> target, int max = int.MaxValue)
-        => "{" + string.Join(", ", target.Take(max).Select(kv => $"{kv.Key}={(kv.Value.Length > 40 ? kv.Value[..39] + "…" : kv.Value)}")) + (target.Count > max ? ", …" : "") + "}";
 }

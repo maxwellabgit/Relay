@@ -28,13 +28,13 @@ public sealed class RelaySettings
     public IReadOnlyList<string> Validate()
     {
         var problems = new List<string>();
-        if (Orchestrator.Mode is not (OrchestratorSettings.Off or OrchestratorSettings.Rules or OrchestratorSettings.RulesAndModel or OrchestratorSettings.Mind))
-            problems.Add($"orchestrator.mode must be one of off, rules, rules+model, mind (was '{Orchestrator.Mode}').");
+        if (Orchestrator.Mode is not (OrchestratorSettings.Off or OrchestratorSettings.Mind))
+            problems.Add($"orchestrator.mode must be one of off, mind (was '{Orchestrator.Mode}').");
         if (Orchestrator.MaxSteps is < 2 or > 100) problems.Add("orchestrator.maxSteps must be 2–100.");
         if (Orchestrator.AutoRouteThreshold is < 0 or > 1) problems.Add("orchestrator.autoRouteThreshold must be between 0 and 1.");
         if (Orchestrator.ReviewThreshold is < 0 or > 1 || Orchestrator.ReviewThreshold > Orchestrator.AutoRouteThreshold)
             problems.Add("orchestrator.reviewThreshold must be between 0 and autoRouteThreshold.");
-        if (Orchestrator.PlanningTimeoutMs < 1000) problems.Add("orchestrator.planningTimeoutMs must be at least 1000.");
+        if (Orchestrator.StepTimeoutMs < 1000) problems.Add("orchestrator.stepTimeoutMs must be at least 1000.");
         if (Model.Enabled)
         {
             if (!ModelSettings.IsAllowedEndpoint(Model.Endpoint, out var why)) problems.Add("model.endpoint: " + why);
@@ -115,23 +115,19 @@ public sealed class DiagnosticsSettings
 public sealed class OrchestratorSettings
 {
     public const string Off = "off";
-    public const string Rules = "rules";
-    public const string RulesAndModel = "rules+model";
-    /// <summary>The rebuilt orchestrator: one mind, one self-observing loop per task (docs/09). Needs the model enabled.</summary>
+    /// <summary>One mind, one self-observing loop per task (docs/09). Needs the model enabled.</summary>
     public const string Mind = "mind";
 
-    /// <summary>
-    /// mind (the default): one local mind runs every task and reads every conversation. off: instructions are recorded only.
-    /// rules and rules+model are the older pipeline, kept only until the Alpha removes them (docs/10).
-    /// </summary>
+    /// <summary>mind (the default): one local mind runs every task and reads every conversation. off: instructions are recorded only.</summary>
     [JsonPropertyName("mode")] public string Mode { get; set; } = Mind;
-    /// <summary>Mind mode: the most steps one task may take before it is ended visibly.</summary>
+    /// <summary>The most steps one task may take before it is ended visibly.</summary>
     [JsonPropertyName("maxSteps")] public int MaxSteps { get; set; } = 12;
     /// <summary>Notes routed at or above this confidence are filed into the project automatically.</summary>
     [JsonPropertyName("autoRouteThreshold")] public double AutoRouteThreshold { get; set; } = 0.75;
     /// <summary>Notes between this and the auto threshold go to Review; below it they stay unrouted in staging.</summary>
     [JsonPropertyName("reviewThreshold")] public double ReviewThreshold { get; set; } = 0.35;
-    [JsonPropertyName("planningTimeoutMs")] public int PlanningTimeoutMs { get; set; } = 60_000;
+    /// <summary>The stall guard: one step of the loop that takes longer than this ends the task.</summary>
+    [JsonPropertyName("stepTimeoutMs")] public int StepTimeoutMs { get; set; } = 60_000;
     [JsonPropertyName("maxToolCalls")] public int MaxToolCalls { get; set; } = 8;
 }
 

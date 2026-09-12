@@ -1,28 +1,41 @@
 using Relay.Core.Config;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
-using Relay.Core.Model;
 using Relay.Core.Notes;
-using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Preferences;
-using Relay.Core.Projects;
-using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
-using TaskStatus = Relay.Core.Tasks.TaskStatus;
+using static Relay.Core.Mind.ScriptedMind;
 
 namespace Relay.Tests;
 
 /// <summary>
-/// Preferences are typed and compiled: a request about how Relay should behave becomes proposals
-/// with closed keys, approved by the user, applied as reversible change sets, and compiled into the
-/// prompt fragment, the generation limits, the display policy, and the standing grants.
+/// Preferences are typed and compiled: a request about how Relay should behave becomes proposals with
+/// closed keys, each arguing for itself, approved by the user, applied as reversible change sets, and
+/// compiled into the prompt the mind is given, the answer limits, the display policy, and the standing grants.
 /// </summary>
 public class PreferenceTests : IDisposable
 {
     private readonly TempRoot _tmp = new();
+
+    /// <summary>The mind runs every task; nothing here leaves the machine.</summary>
+    private static void MindMode(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+    }
+
+    /// <summary>The user's own wording, kept as an approved instruction beside the typed preference.</summary>
+    private const string ConciseLine = "Always display concise text.";
+
+    /// <summary>
+    /// The improvement contract every self-change carries: what the user gains, what it may write, how far it
+    /// reaches, and how to tell afterwards that it worked. Policy requires all four of an improve task.
+    /// </summary>
+    private static (string Key, string Value)[] Contract(string benefit, string permissions, string scope, string acceptance)
+        => [("benefit", benefit), ("permissions", permissions), ("scope", scope), ("acceptance", acceptance)];
 
     // ----------------------------------------------------------------------------------------
     // Compilation
@@ -91,185 +104,178 @@ public class PreferenceTests : IDisposable
     }
 
     // ----------------------------------------------------------------------------------------
-    // The grammar
+    // The improvement contract
     // ----------------------------------------------------------------------------------------
 
-    [Theory]
-    [InlineData("update our preferences to always display concise text", ResponsePreferences.Concise)]
-    [InlineData("keep responses concise", ResponsePreferences.Concise)]
-    [InlineData("be brief", ResponsePreferences.Concise)]
-    [InlineData("make your answers shorter", ResponsePreferences.Concise)]
-    [InlineData("from now on, keep it short", ResponsePreferences.Concise)]
-    [InlineData("answer minimally", ResponsePreferences.Minimalist)]
-    [InlineData("give me one-liners", ResponsePreferences.Minimalist)]
-    [InlineData("set the response style to minimalist", ResponsePreferences.Minimalist)]
-    [InlineData("respond normally", ResponsePreferences.Normal)]
-    [InlineData("answer in detail", ResponsePreferences.Normal)]
-    [InlineData("change my settings to full answers", ResponsePreferences.Normal)]
-    public void AStyleRequestYieldsTheTypedPreferenceAndThePromptLine(string instruction, string verbosity)
-    {
-        using var h = new Harness(_tmp.Root).Start();
-        var plan = Plan(h, instruction);
-        Assert.True(plan.Understood);
-        Assert.Equal("rules", plan.Producer);
-        Assert.Equal(2, plan.Proposals.Count);
-        var pref = Assert.Single(plan.Proposals, p => p.Action == Actions.UpdatePreference);
-        Assert.Equal("response.verbosity", pref.Target["key"]);
-        Assert.Equal(verbosity, pref.Target["value"]);
-        var prompt = Assert.Single(plan.Proposals, p => p.Action == Actions.UpdatePrompt);
-        Assert.Equal("planner", prompt.Target["name"]);
-        Assert.Equal(RuleBasedOrchestrator.PromptLine(instruction), prompt.Target["content"]);
-        Assert.All(plan.Proposals, p => Assert.True(p.RequiresApproval));
-    }
-
-    [Theory]
-    [InlineData("update our preferences to always display concise text", "Always display concise text.")]
-    [InlineData("keep responses concise", "Keep responses concise.")]
-    [InlineData("From now on, be brief!", "Be brief.")]
-    [InlineData("please set my style to minimalist.", "Minimalist.")]
-    public void ThePromptLineIsTheUsersOwnWordingCleaned(string instruction, string line)
-        => Assert.Equal(line, RuleBasedOrchestrator.PromptLine(instruction));
-
+    /// <summary>
+    /// A change Relay proposes to itself is an argument, not a setting: it says what the user gains, what it may
+    /// write, how far it reaches, and how to tell afterwards that it worked. An improve task refuses a self-change
+    /// that leaves any of the four unsaid; the user changing their own setting owes no argument, and neither does
+    /// any other kind of task, where the four are optional but still bounded.
+    /// </summary>
     [Fact]
-    public void ThePlannerFragmentGrowsByOneLineAndNeverRepeatsItself()
-    {
-        Assert.Equal("Keep responses concise.", RuleBasedOrchestrator.ComposeFragment(null, "Keep responses concise."));
-        Assert.Equal("Cite ids.\nKeep responses concise.", RuleBasedOrchestrator.ComposeFragment("Cite ids.\n", "Keep responses concise."));
-        Assert.Null(RuleBasedOrchestrator.ComposeFragment("Cite ids.\nkeep responses concise.", "Keep responses concise."));   // already there
-        Assert.Null(RuleBasedOrchestrator.ComposeFragment(new string('x', 1995), "Keep responses concise."));                 // over the policy limit
-    }
-
-    [Theory]
-    [InlineData("always show what CAD means", "CAD")]
-    [InlineData("always show CAD", "CAD")]
-    [InlineData("pin the definition of SLA", "SLA")]
-    [InlineData("always display what OKR stands for", "OKR")]
-    [InlineData("always tell me what \"TTFB\" means when it comes up", "TTFB")]
-    public void PinningATermProposesTheDisplayPreference(string instruction, string term)
+    public void AnImprovementMustStateItsBenefitPermissionsScopeAndAcceptance()
     {
         using var h = new Harness(_tmp.Root).Start();
-        var plan = Plan(h, instruction);
-        Assert.True(plan.Understood);
-        var p = Assert.Single(plan.Proposals);
-        Assert.Equal(Actions.UpdatePreference, p.Action);
-        Assert.Equal("display.alwaysShow", p.Target["key"]);
-        Assert.Equal(term, p.Target["value"]);
-    }
+        Decision Decide(TaskKind kind, string proposedBy, params (string Key, string Value)[] target)
+            => PolicyEngine.Decide(
+                new Proposal("01PROPOSAL0000000000000000", Actions.UpdatePreference, "shorter answers are quicker to read",
+                    target.ToDictionary(t => t.Key, t => t.Value, StringComparer.Ordinal), ["01SOURCE000000000000000000"], [], Risks.ControlledWrite, true, proposedBy),
+                new PolicyWorld
+                {
+                    Registry = h.Registry, Roots = h.Roots, DataRoot = h.Root,
+                    DraftNoteExists = _ => false, ProjectNoteExists = (_, _) => false,
+                    Origin = TaskOrigin.Direct, Kind = kind,
+                });
+        (string Key, string Value)[] concise = [("key", "response.verbosity"), ("value", ResponsePreferences.Concise)];
+        var contract = Contract("Answers are shorter to read", "Writes config\\preferences.json (change set)",
+            "One typed preference: response.verbosity", "Compiled preferences report 'concise'");
 
-    [Theory]
-    [InlineData("create project Concise", Actions.CreateProject)]
-    [InlineData("remember that the concise version ships first", Actions.CreateDraftNote)]
-    public void TheShapingGrammarDoesNotCaptureOrdinaryCommands(string instruction, string action)
-    {
-        using var h = new Harness(_tmp.Root).Start();
-        var plan = Plan(h, instruction);
-        Assert.Equal(action, Assert.Single(plan.Proposals).Action);
-    }
+        var unargued = Decide(TaskKind.Improve, Producers.Mind, concise);
+        Assert.Equal(DecisionOutcome.Deny, unargued.Outcome);
+        Assert.All(PolicyEngine.ContractKeys, key => Assert.Contains(unargued.Reasons, r => r.Contains("target." + key, StringComparison.Ordinal)));
 
-    [Fact]
-    public void AnObservedTaskCannotShapeRelayEvenIfAPlannerProposesIt()
-    {
-        var mind = new ListeningMind().When("concise", "improve", "Keep responses concise from now on.", topic: "style");
-        var planner = new CannedOrchestrator().Otherwise((request, _) => new TurnPlan(true, "Make responses concise", [], null, [],
-            [new Proposal(Relay.Core.Ids.Ulid.NewUlid(request.At), Actions.UpdatePreference, "overheard", new Dictionary<string, string> { ["key"] = "response.verbosity", ["value"] = "concise" }, [request.SourceEventId], [], Risks.ControlledWrite, true, Producers.Model)],
-            "canned"));
-        using var s = Scenario.New(_tmp, x => { x.Orchestrator.Mode = OrchestratorSettings.Rules; x.Listening.Enabled = true; },
-                mind: mind, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
-            .Do("Start from normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
-            .StartListening()
-            .Listen("Honestly I wish these answers were more concise.")
-            .ExpectTask(TaskKind.Improve, TaskStatus.Completed, TaskOrigin.Observed)
-            .ExpectAnyProposal(Actions.UpdatePreference, "denied")
-            .ExpectPreference("response.verbosity", "normal");
-        var task = s.FindTask(TaskKind.Improve)!;
-        Assert.Contains(task.Proposals[0].Reasons, r => r.Contains("only be proposed from a direct request"));
-        Assert.Equal("canned", task.Producer);                                                          // the rules grammar declined an observed request; the fallback planned it
+        Assert.Equal(DecisionOutcome.NeedsApproval, Decide(TaskKind.Improve, Producers.Mind, [.. concise, .. contract]).Outcome);
+        Assert.Equal(DecisionOutcome.NeedsApproval, Decide(TaskKind.Improve, Producers.User, concise).Outcome);      // the user's own setting is configuration
+        Assert.Equal(DecisionOutcome.NeedsApproval, Decide(TaskKind.Answer, Producers.Mind, concise).Outcome);       // only an improvement owes the argument
+
+        var wordy = Decide(TaskKind.Answer, Producers.Mind, [.. concise, .. Contract(new string('b', 401), "p", "s", "a")]);
+        Assert.Equal(DecisionOutcome.Deny, wordy.Outcome);
+        Assert.Contains(wordy.Reasons, r => r.Contains("target.benefit is longer than 400 characters", StringComparison.Ordinal));
     }
 
     // ----------------------------------------------------------------------------------------
     // The scenarios
     // ----------------------------------------------------------------------------------------
 
-    /// <summary>The README's "concise" scenario: two proposals, two change sets, both compiled in, both revertible.</summary>
+    /// <summary>
+    /// The README's "concise" scenario: the typed preference and the user's own wording are two self-changes,
+    /// each argued for, each approved on its own, each a change set that can be reverted without the other.
+    /// </summary>
     [Fact]
     public void UpdatingPreferencesToConciseTextIsTwoApprovedRevertibleChangeSets()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
+        var mind = new ScriptedMind()
+            .Step(Propose(Actions.UpdatePreference, "You asked for concise answers; the typed preference sets the length limits and the style line.",
+                    [("key", "response.verbosity"), ("value", ResponsePreferences.Concise),
+                     .. Contract("Answers are shorter to read and cost fewer tokens per task",
+                         "Writes config\\preferences.json (change set)",
+                         "One typed preference: response.verbosity; the answer limits and the style line follow from it",
+                         "Compiled preferences report 'concise' and the next answer stays within its character limit")]),
+                "Proposing concise answers", Read(0.2))
+            .Step(Propose(Actions.UpdatePrompt, "Your own wording is kept as an approved instruction, so answers follow it verbatim and not only as a setting.",
+                    [("name", MindPrompt.PromptName), ("content", ConciseLine),
+                     .. Contract("Relay is told the style in your own words",
+                         "Writes config\\prompts\\mind.md (change set)",
+                         $"One added line: \"{ConciseLine}\"",
+                         "The system prompt carries the line; reverting the change set removes it")]),
+                "Proposing the instruction in your own words")
+            .Step(Say("Answers are concise from now on, in your own words."), "Concise from now on");
+
+        using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Do("Start from normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
             .ExpectPreference("response.verbosity", "normal")
             .Command("update our preferences to always display concise text")
             .ExpectState(RelayState.AwaitingApproval)
-            .ExpectProposal(Actions.UpdatePreference, "pending")
-            .ExpectProposal(Actions.UpdatePrompt, "pending");
+            .ExpectProposal(Actions.UpdatePreference, "pending");
 
         var pref = Assert.Single(s.Response.Proposals, p => p.Action == Actions.UpdatePreference);
-        var prompt = Assert.Single(s.Response.Proposals, p => p.Action == Actions.UpdatePrompt);
         Assert.Equal("Change preference response.verbosity", pref.Title);
         Assert.Contains("concise", pref.Detail);
         Assert.Contains("reversible change set", pref.Detail);
-        Assert.Equal("Change the 'planner' prompt fragment", prompt.Title);
-        Assert.Contains("Always display concise text.", prompt.Detail);
+        Assert.Contains("Benefit: Answers are shorter to read", pref.Detail);              // the card states the whole argument, not only the new value
+        Assert.Contains("Acceptance: Compiled preferences report 'concise'", pref.Detail);
         Assert.True(pref.Editable);
-        Assert.True(prompt.Editable);
 
         var before = s.H.ChangeSets.All().Count;
-        s.ApproveAll()
-            .ExpectState(RelayState.Completed)
+        s.Approve(Actions.UpdatePreference)
             .ExpectProposal(Actions.UpdatePreference, "executed")
+            .ExpectPreference("response.verbosity", ResponsePreferences.Concise)
+            .ExpectState(RelayState.AwaitingApproval)                                       // one approval at a time: the second self-change is put on its own
+            .ExpectProposal(Actions.UpdatePrompt, "pending");
+
+        var prompt = Assert.Single(s.Response.Proposals, p => p.Action == Actions.UpdatePrompt);
+        Assert.Equal($"Change the '{MindPrompt.PromptName}' prompt fragment", prompt.Title);
+        Assert.Contains(ConciseLine, prompt.Detail);
+        Assert.True(prompt.Editable);
+
+        s.Approve(Actions.UpdatePrompt)
+            .ExpectState(RelayState.Completed)
             .ExpectProposal(Actions.UpdatePrompt, "executed")
-            .ExpectPreference("response.verbosity", "concise")
             .ExpectEvent(EventTypes.ChangeSetApplied, before + 2);
+        Assert.Equal(mind.Name, s.Response.Producer);
 
         // Compiled in: limits, the style line, the approved wording.
         var compiled = s.H.Preferences.Compiled();
         Assert.Equal(700, compiled.MaxAnswerChars);
         Assert.Contains("at most three short sentences", compiled.PromptFragment);
-        var fragmentPath = Path.Combine(s.H.Root.PromptsDirectory, "planner.md");
-        Assert.Equal("Always display concise text.", File.ReadAllText(fragmentPath).Trim());
-        Assert.Equal("Always display concise text.", s.H.SelfChange.PromptFragment("planner"));
-        var systemPrompt = ModelOrchestrator.SystemPrompt(s.H.PlannerContext());
+        var fragmentPath = Path.Combine(s.H.Root.PromptsDirectory, MindPrompt.PromptName + ".md");
+        Assert.Equal(ConciseLine, File.ReadAllText(fragmentPath).Trim());
+        Assert.Equal(ConciseLine, s.H.SelfChange.PromptFragment(MindPrompt.PromptName));
+        var systemPrompt = MindPrompt.System(s.H.MindContext());
         Assert.Contains("at most three short sentences", systemPrompt);
-        Assert.Contains("Additional instructions approved by the user: Always display concise text.", systemPrompt);
+        Assert.Contains("Additional instructions approved by the user: " + ConciseLine, systemPrompt);
 
         // Both are change sets with a before image, listed in the snapshot, and revertible one at a time.
         var sets = s.Snap.ChangeSets.Where(c => !c.Reverted).OrderBy(c => c.AppliedAt).ToList();
-        Assert.Equal(3, sets.Count);                                                                     // normal (setup), concise, planner line
+        Assert.Equal(3, sets.Count);                                                        // normal (setup), concise, the approved line
         var preferenceSet = sets.Single(c => c.Kind == "preference" && c.TaskId == s.Response.TaskId);
         var promptSet = sets.Single(c => c.Kind == "prompt");
-        Assert.Equal("planner.md", promptSet.File);
+        Assert.Equal(MindPrompt.PromptName + ".md", promptSet.File);
         Assert.Equal("preferences.json", preferenceSet.File);
 
-        s.Do("Revert the prompt line", c => Assert.True(c.RevertChangeSet(promptSet.ChangeSetId)))
+        s.Do("Revert the approved line", c => Assert.True(c.RevertChangeSet(promptSet.ChangeSetId)))
             .ExpectEvent(EventTypes.ChangeSetReverted);
-        Assert.False(File.Exists(fragmentPath));                                                        // there was no fragment before: reverting removes it
-        Assert.Null(s.H.SelfChange.PromptFragment("planner"));
-        Assert.DoesNotContain("Additional instructions", ModelOrchestrator.SystemPrompt(s.H.PlannerContext()));
-        s.ExpectPreference("response.verbosity", "concise");                                             // the other change set stands
+        Assert.False(File.Exists(fragmentPath));                                            // there was no fragment before: reverting removes it
+        Assert.Null(s.H.SelfChange.PromptFragment(MindPrompt.PromptName));
+        Assert.DoesNotContain("Additional instructions", MindPrompt.System(s.H.MindContext()));
+        s.ExpectPreference("response.verbosity", ResponsePreferences.Concise);               // the other change set stands
 
         s.Do("Revert the preference", c => Assert.True(c.RevertChangeSet(preferenceSet.ChangeSetId)))
             .ExpectPreference("response.verbosity", "normal")
             .ExpectEvent(EventTypes.ChangeSetReverted, 2);
         Assert.Equal(2000, s.H.Preferences.Compiled().MaxAnswerChars);
-        Assert.False(s.C.RevertChangeSet(preferenceSet.ChangeSetId));                                     // twice is refused
+        Assert.False(s.C.RevertChangeSet(preferenceSet.ChangeSetId));                        // twice is refused
         Assert.Contains("Already reverted", s.Snap.Notice);
     }
 
+    /// <summary>
+    /// The verbosity preference is not advice: whatever the mind writes, the answer the user reads is cut to the
+    /// length they chose, and the feed says it was cut rather than leaving a sentence to end mid-word unexplained.
+    /// </summary>
     [Fact]
-    public void RepeatingAStyleAlreadyInThePromptProposesOnlyThePreference()
+    public void AnAnswerLongerThanThePreferredLengthIsCutAndTheFeedSaysSo()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("keep responses concise").ApproveAll().ExpectState(RelayState.Completed).Dismiss()
-            .Do("Back to normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
-            .Command("keep responses concise")
-            .ExpectProposal(Actions.UpdatePreference, "pending");
-        Assert.DoesNotContain(s.Response.Proposals, p => p.Action == Actions.UpdatePrompt);               // the line is already in the fragment
-        Assert.Contains("Current style", s.Response.Answer);
+        var mind = new ScriptedMind().Step(Say(new string('a', 900)), "Answered at length", Read(0.1));
+        using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
+            .Do("Ask for one-liners", c => Assert.True(c.UpdatePreference("response.verbosity", ResponsePreferences.Minimalist)))
+            .Command("what do you know about the beta?")
+            .ExpectState(RelayState.Completed);
+        Assert.Equal(241, s.Response.Answer!.Length);                                        // 240 characters and the ellipsis that says there was more
+        Assert.EndsWith("…", s.Response.Answer);
+        Assert.Contains(s.Response.Steps, step => step.Contains("240 chars"));
     }
 
     [Fact]
     public void PinningAndUnpinningATermGoThroughApprovedChangeSets()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
+        var mind = new ScriptedMind()
+            .Step(Propose(Actions.UpdatePreference, "You asked for CAD to be explained whenever it comes up.",
+                    [("key", "display.alwaysShow"), ("value", "CAD"),
+                     .. Contract("'CAD' is defined on screen the moment it is heard, without asking",
+                         "Writes config\\preferences.json (change set); reads local sources only",
+                         "One watched term; the pinned card refreshes in place",
+                         "Hearing 'CAD' while listening shows a pinned definition within one pass")]),
+                "Proposing to pin CAD", Read(0.2))
+            .Step(Say("CAD is pinned: its definition is refreshed in place whenever it comes up."), "Pinned CAD")
+            .Step(Propose(Actions.UpdatePreference, "You asked to stop pinning CAD.",
+                    [("key", "display.stopShowing"), ("value", "CAD"),
+                     .. Contract("One less thing on screen", "Writes config\\preferences.json (change set)",
+                         "Removes one watched term", "Hearing 'CAD' no longer produces a pinned result")]),
+                "Proposing to unpin CAD", Read(0.2))
+            .Step(Say("CAD is no longer pinned."), "Unpinned CAD");
+
+        using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Command("always show what CAD means")
             .ExpectProposal(Actions.UpdatePreference, "pending")
             .Approve()
@@ -277,21 +283,14 @@ public class PreferenceTests : IDisposable
             .ExpectPreference("display.alwaysShow", "CAD")
             .ExpectEvent(EventTypes.ChangeSetApplied)
             .Dismiss()
-            .Command("always show CAD")                                                                 // already pinned: an answer, nothing proposed
-            .ExpectState(RelayState.Completed)
-            .ExpectNoProposals()
-            .ExpectAnswerContains("already pinned")
-            .Dismiss()
-            .Command("stop showing SLA")                                                                // not pinned: an answer that lists what is
-            .ExpectNoProposals()
-            .ExpectAnswerContains("Pinned terms: CAD")
-            .Dismiss()
             .Command("stop showing CAD")
             .ExpectProposal(Actions.UpdatePreference, "pending")
             .Approve()
+            .ExpectState(RelayState.Completed)
             .ExpectPreference("display.alwaysShow", "");
         Assert.Equal(2, s.Snap.ChangeSets.Count);
         Assert.Empty(s.H.Preferences.Compiled().WatchedTerms);
+        Assert.Equal(mind.Name, s.Response.Producer);
     }
 
     /// <summary>"File Atlas decisions without asking": a standing grant files at the Review threshold; revoking it restores the question.</summary>
@@ -299,15 +298,26 @@ public class PreferenceTests : IDisposable
     public void AStandingGrantFilesWithoutAskingAndIsRevocable()
     {
         // Nothing files automatically in this session unless a grant says so.
-        using var s = Scenario.New(_tmp, configure: x => x.Orchestrator.AutoRouteThreshold = 0.99).WithWorkspace()
-            .Command("create project Atlas").Approve().Dismiss()
+        var mind = new ScriptedMind();
+        using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); cfg.Orchestrator.AutoRouteThreshold = 0.99; }, mind: mind).WithWorkspace()
+            .Project("Atlas")
             .Note("Decision: the Atlas beta ships on October 14.")
             .Dismiss();
-        Assert.Empty(ProjectNoteStore.ReadAll(s.H.Registry.FindActive("atlas")!.RootPath).Notes);
-        var waiting = Assert.Single(s.Snap.Inbox);                                                        // moderately confident routing waits for the user
+        var atlas = s.H.Registry.FindActive("atlas")!;
+        Assert.Empty(ProjectNoteStore.ReadAll(atlas.RootPath).Notes);
+        var waiting = Assert.Single(s.Snap.Inbox);                                            // moderately confident routing waits for the user
         Assert.True(waiting.HasSuggestions);
         Assert.Equal("atlas", waiting.Candidates[0].Slug);
         var routingBefore = s.Snap.Inbox.Count;
+
+        mind.Step(Propose(Actions.UpdatePreference, "You asked Relay to file Atlas decisions on its own.",
+                    [("key", "filing.grant"), ("value", Actions.RouteNote), ("action", Actions.RouteNote), ("projectId", atlas.Id), ("noteType", NoteTypes.Decision),
+                     .. Contract("Atlas decisions stop waiting in Review; fewer approvals for a filing that repeats",
+                         $"Standing approval for {Actions.RouteNote} into atlas ({NoteTypes.Decision} notes); additive writes only",
+                         "One standing grant recorded in preferences; revocable in one step",
+                         "A decision routed to atlas with moderate confidence is filed and the ledger names the grant")]),
+                "Proposing a standing grant for Atlas decisions", Read(0.3))
+            .Step(Say("Atlas decisions are filed without asking from now on."), "Granted");
 
         s.Command("file Atlas decisions without asking")
             .ExpectProposal(Actions.UpdatePreference, "pending");
@@ -315,7 +325,7 @@ public class PreferenceTests : IDisposable
         Assert.Equal("filing.grant", p.Target["key"]);
         Assert.Equal(Actions.RouteNote, p.Target["value"]);
         Assert.Equal(NoteTypes.Decision, p.Target["noteType"]);
-        Assert.Equal(s.H.Registry.FindActive("atlas")!.Id, p.Target["projectId"]);
+        Assert.Equal(atlas.Id, p.Target["projectId"]);
         s.Approve().ExpectState(RelayState.Completed).ExpectEvent(EventTypes.GrantApplied).Dismiss();
         var grant = Assert.Single(s.H.Preferences.Compiled().Grants);
         Assert.Equal(NoteTypes.Decision, grant.NoteType);
@@ -325,21 +335,30 @@ public class PreferenceTests : IDisposable
         s.Note("Decision: the Atlas launch review is on October 10.")
             .ExpectEvent(EventTypes.GrantApplied, 2)
             .Dismiss();
-        var notes = ProjectNoteStore.ReadAll(s.H.Registry.FindActive("atlas")!.RootPath).Notes.Select(n => n.Note).ToList();
+        var notes = ProjectNoteStore.ReadAll(atlas.RootPath).Notes.Select(n => n.Note).ToList();
         var filed = Assert.Single(notes);
         Assert.Equal(NoteTypes.Decision, filed.Type);
         Assert.Contains("launch review", filed.Body);
         var applied = s.H.Last(EventTypes.GrantApplied)!;
         Assert.Equal(grant.GrantId, applied.DataString("grantId"));
         Assert.Equal(filed.Id, applied.DataString("noteId"));
-        Assert.Equal(routingBefore, s.Snap.Inbox.Count);                                                  // nothing new waits in the inbox
+        Assert.Equal(routingBefore, s.Snap.Inbox.Count);                                     // nothing new waits in the inbox
 
         // A different note type is not covered: it still waits.
         s.Note("Idea: an Atlas onboarding video with subtitles for new customers.").Dismiss();
         Assert.Equal(routingBefore + 1, s.Snap.Inbox.Count);
-        Assert.Single(ProjectNoteStore.ReadAll(s.H.Registry.FindActive("atlas")!.RootPath).Notes);
+        Assert.Single(ProjectNoteStore.ReadAll(atlas.RootPath).Notes);
 
         // Revoke: the grant is removed by an approved change set and decisions wait again.
+        mind.Step(Propose(Actions.UpdatePreference, "You asked Relay to stop filing Atlas decisions on its own.",
+                    [("key", "filing.revoke"), ("value", grant.GrantId), ("projectId", atlas.Id),
+                     .. Contract("Atlas decisions wait for your decision again",
+                         "Writes config\\preferences.json (change set); removes a standing grant, adds none",
+                         $"Removes grant {grant.GrantId}",
+                         "The next decision routed to atlas appears in Review instead of being filed")]),
+                "Proposing to revoke the standing grant", Read(0.3))
+            .Step(Say("Atlas decisions wait for your decision again."), "Revoked");
+
         s.Command("stop filing Atlas decisions without asking")
             .ExpectProposal(Actions.UpdatePreference, "pending");
         Assert.Equal("filing.revoke", Assert.Single(s.Response.Proposals).Target["key"]);
@@ -347,27 +366,8 @@ public class PreferenceTests : IDisposable
         s.Approve().ExpectState(RelayState.Completed).ExpectPreference("filing.grant", "").Dismiss()
             .Note("Decision: Atlas pricing goes public next spring with three tiers.").Dismiss();
         Assert.Equal(routingBefore + 2, s.Snap.Inbox.Count);
-        Assert.Single(ProjectNoteStore.ReadAll(s.H.Registry.FindActive("atlas")!.RootPath).Notes);
+        Assert.Single(ProjectNoteStore.ReadAll(atlas.RootPath).Notes);
         Assert.Empty(s.H.Preferences.Compiled().Grants);
-
-        s.Command("stop filing Atlas decisions without asking").ExpectNoProposals().ExpectAnswerContains("already asks");
-    }
-
-    [Fact]
-    public void AGrantForAnUnknownProjectOrTheWrongPhrasingIsAnsweredNotProposed()
-    {
-        using var s = Scenario.New(_tmp).WithWorkspace()
-            .Command("file Backyard decisions without asking")
-            .ExpectNoProposals()
-            .ExpectAnswerContains("No active project matches 'Backyard'");
-    }
-
-    // ----------------------------------------------------------------------------------------
-
-    private static TurnPlan Plan(Harness h, string instruction)
-    {
-        var request = new TurnRequest("T1", "C1", "E1", instruction, h.Clock.UtcNow);
-        return new RuleBasedOrchestrator().PlanAsync(request, h.PlannerContext(), CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public void Dispose() => _tmp.Dispose();

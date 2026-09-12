@@ -451,16 +451,14 @@ public sealed partial class MainWindow
         var current = _coordinator.CurrentSettings;
         var panel = new StackPanel { Spacing = 12, MinWidth = 460 };
 
-        var mode = new ComboBox { Header = "Planner", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var mode = new ComboBox { Header = "Mind", HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var (value, label) in new[]
         {
-            (OrchestratorSettings.Mind, "Mind — one local model runs every task and reads every conversation (needs the model)"),
+            (OrchestratorSettings.Mind, "On — one local model runs every task and reads every conversation (needs the model)"),
             (OrchestratorSettings.Off, "Off — instructions are recorded only"),
-            (OrchestratorSettings.Rules, "Rules — deterministic command grammar, no model (being removed)"),
-            (OrchestratorSettings.RulesAndModel, "Rules + model — grammar first, RELAY0's model for the rest (being removed)"),
         })
             mode.Items.Add(new ComboBoxItem { Content = label, Tag = value });
-        mode.SelectedIndex = current.Orchestrator.Mode switch { OrchestratorSettings.Off => 1, OrchestratorSettings.Rules => 2, OrchestratorSettings.RulesAndModel => 3, _ => 0 };
+        mode.SelectedIndex = current.Orchestrator.Mode == OrchestratorSettings.Off ? 1 : 0;
         panel.Children.Add(mode);
 
         var listening = new ToggleSwitch { Header = $"Listening (what {current.Hotkeys.NoteKey} does)", IsOn = current.Listening.Enabled, OnContent = "listen — Relay's mind reads the conversation and raises what needs it", OffContent = "dictate — the chord takes one silent note and nothing is read" };

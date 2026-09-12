@@ -180,14 +180,13 @@ public sealed partial class SessionCoordinator
             _staticReview.Add(new ReviewItem(ReviewItemKind.SettingsProblem, "Setting rejected, default in effect", problem));
         }
 
-        // Relay is the mind. When it cannot be reached, say so once and plainly rather than letting the older
-        // grammar answer in its place and look like Relay working.
+        // Relay is the mind. Nothing answers in its place, so when it cannot be reached, say so once and plainly.
         if (_settings.Orchestrator.Mode == OrchestratorSettings.Mind && _services.Mind is null)
         {
             var why = _settings.Model.Enabled ? $"the model at {_settings.Model.Endpoint} could not be reached" : "the model is switched off in Settings";
             Append(EventTypes.MindUnavailable, new { reason = _settings.Model.Enabled ? "unreachable" : "disabled", endpoint = _settings.Model.Endpoint, model = _settings.Model.Model });
             _staticReview.Add(new ReviewItem(ReviewItemKind.MindUnavailable, "Relay has no mind",
-                $"Relay runs on one local model and {why}. Until it is on, Relay records what you say and handles only the fixed commands; it will not read conversations or answer anything."));
+                $"Relay runs on one local model and {why}. Until it is on, Relay records what you say and nothing else: it will not read conversations, answer, or act."));
         }
 
         foreach (var crashed in report.CrashedSessions)
@@ -1038,7 +1037,7 @@ public sealed partial class SessionCoordinator
                 WorkspaceViews(),
                 InboxViews(),
                 _settings.Orchestrator.Mode,
-                _services.Orchestrator.Name,
+                PlannerName,
                 _settings.Model.Enabled,
                 _settings.Model.Enabled ? _settings.Model.Endpoint : null,
                 _settings.Model.Enabled ? _settings.Model.Model : null,

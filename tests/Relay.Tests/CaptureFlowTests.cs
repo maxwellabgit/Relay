@@ -185,7 +185,8 @@ public class CaptureFlowTests : IDisposable
     [Fact]
     public void SubmitNowShortCircuitsTheWait()
     {
-        using var h = new Harness(_tmp.Root).Start();
+        // About the capture surface, not about what the instruction means: with the orchestrator off nothing interprets it.
+        using var h = new Harness(_tmp.Root, configure: s => s.Orchestrator.Mode = OrchestratorSettings.Off).Start();
         h.Coordinator.PressCommandKey();
         h.Coordinator.TextChanged("do the thing");
         h.Coordinator.PressCommandKey();
