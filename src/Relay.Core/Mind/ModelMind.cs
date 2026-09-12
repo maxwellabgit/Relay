@@ -99,4 +99,6 @@ public sealed class ScriptedMind : IMind
     public static RaiseMove Raise(string kind, string objective, string segments = "#1", string? note = null, string? noteType = null, string? project = null)
         => new(kind, objective, segments.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), "it matters", note, noteType, project);
     public static MindRead Read(double complexity, params string[] needs) => new("", complexity, needs.Length == 0 ? [MindRead.NeedNone] : needs, 0, 0, RiskRead.None);
+    /// <summary>The read of a task that has now seen enough to say whether the claim agrees with the record.</summary>
+    public static MindRead Verdict(bool consistent) => new("checking a claim against the record", 0.3, [MindRead.NeedLocalNotes], 0, 0, RiskRead.None, consistent);
 }

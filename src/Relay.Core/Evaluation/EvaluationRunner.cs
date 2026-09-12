@@ -188,7 +188,11 @@ public sealed class EvaluationRunner
         foreach (var fragment in e.AnswerAvoids ?? [])
             if (answer.Contains(fragment, StringComparison.OrdinalIgnoreCase)) failures.Add($"The answer must not mention '{fragment}'.");
         if (e.MaxAnswerChars is { } maxChars && answer.Length > maxChars) failures.Add($"The answer is {answer.Length} characters; at most {maxChars} were allowed.");
+        if (e.Consistent is { } wantVerdict && loop.Consistent != wantVerdict)
+            failures.Add($"Expected the verdict consistent={Word(wantVerdict)} but the mind said {(loop.Consistent is null ? "nothing" : Word(loop.Consistent.Value))}.");
         return failures;
+
+        static string Word(bool consistent) => consistent ? MindRead.Agrees : MindRead.Conflicts;
     }
 
     /// <summary>"type" or "type:name" — the name is the tool, action, profile or tool-to-build; a name of "*" matches any.</summary>

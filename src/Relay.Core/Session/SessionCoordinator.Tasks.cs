@@ -104,6 +104,12 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public List<ProposalState> Proposals { get; } = new();
         public List<ToolCallRecord> ToolCalls { get; } = new();
         public List<ModelCallRecord> ModelCalls { get; } = new();
+        /// <summary>
+        /// What the mind opened and read, in the order it read it: one entry per note, excerpt or artifact it
+        /// fetched by id. A search returns candidates, which is not grounding; opening one of them is. These
+        /// become the answer's citations, so an answer is sourced by what was actually looked at.
+        /// </summary>
+        public List<Citation> Read { get; } = new();
         public CancellationTokenSource Cts { get; } = new();
         public IDisposable? Timeout { get; set; }
         public bool StopRequested { get; set; }

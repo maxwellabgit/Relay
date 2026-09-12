@@ -140,9 +140,10 @@ public sealed record RiskRead(double Core, double Security, double Loop, double 
 /// <summary>
 /// The mind's own triage of the task, produced on every step: what is being asked, how complex it is
 /// (0 trivial … 1 beyond a local model), what it needs, how significant and how sensitive the material
-/// is, and the risk of its next move. Features for the <see cref="Decisions.Decider"/>; never a verdict.
+/// is, and the risk of its next move. Features for the <see cref="Decisions.Decider"/>; never a verdict
+/// — except <see cref="Consistent"/>, which decides nothing and only says what the mind has found so far.
 /// </summary>
-public sealed record MindRead(string Intent, double Complexity, IReadOnlyList<string> Needs, double Significance, double Sensitivity, RiskRead Risk)
+public sealed record MindRead(string Intent, double Complexity, IReadOnlyList<string> Needs, double Significance, double Sensitivity, RiskRead Risk, bool? Consistent = null)
 {
     public const string NeedNone = "none";
     public const string NeedLocalNotes = "local_notes";
@@ -152,10 +153,15 @@ public sealed record MindRead(string Intent, double Complexity, IReadOnlyList<st
     public const string NeedUserInput = "user_input";
     public static readonly string[] KnownNeeds = [NeedNone, NeedLocalNotes, NeedWorldKnowledge, NeedNewTool, NeedExternalReasoning, NeedUserInput];
 
+    /// <summary>The wire words of a verdict, and what each means for <see cref="Consistent"/>.</summary>
+    public const string Agrees = "consistent";
+    public const string Conflicts = "conflicts";
+
     public bool Has(string need) => Needs.Contains(need, StringComparer.Ordinal);
 
     public string Brief()
-        => $"intent \"{Intent}\" · complexity {Complexity.ToString("0.##", CultureInfo.InvariantCulture)} · needs {string.Join(",", Needs)} · significance {Significance.ToString("0.##", CultureInfo.InvariantCulture)} · sensitivity {Sensitivity.ToString("0.##", CultureInfo.InvariantCulture)} · risk max {Risk.Max.ToString("0.##", CultureInfo.InvariantCulture)}";
+        => $"intent \"{Intent}\" · complexity {Complexity.ToString("0.##", CultureInfo.InvariantCulture)} · needs {string.Join(",", Needs)} · significance {Significance.ToString("0.##", CultureInfo.InvariantCulture)} · sensitivity {Sensitivity.ToString("0.##", CultureInfo.InvariantCulture)} · risk max {Risk.Max.ToString("0.##", CultureInfo.InvariantCulture)}"
+           + Consistent switch { true => " · agrees with the record", false => " · conflicts with the record", _ => "" };
 }
 
 /// <summary>

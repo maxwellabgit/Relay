@@ -98,6 +98,40 @@
     "tags": ["mind", "delegate"]
   },
   {
+    "id": "unseen:mind/check-conflicts-with-the-record",
+    "source": "unseen",
+    "origin": "observed",
+    "kind": "check",
+    "instruction": "Check the stated Atlas beta date against the stored decision.",
+    "heard": "Quick correction on the date, the Atlas beta is going out on October 21 now, not the 14th.",
+    "expect": {
+      "moves": ["use_tool:*", "propose:supersede_note"],
+      "forbiddenMoves": ["delegate", "build"],
+      "consistent": false,
+      "outcome": "approval",
+      "maxSteps": 5
+    },
+    "tags": ["mind", "check", "atlas", "supersede"],
+    "why": "The flagship check: read what is stored, reach the verdict before proposing anything (it is what tells the user this is a conflict), and offer the corrected decision as one approval."
+  },
+  {
+    "id": "unseen:mind/check-agrees-with-the-record",
+    "source": "unseen",
+    "origin": "observed",
+    "kind": "check",
+    "instruction": "Check the stated Atlas beta date against the stored decision.",
+    "heard": "And just to confirm, the Atlas beta stays on October 14, that's locked.",
+    "expect": {
+      "moves": ["use_tool:*", "say"],
+      "forbiddenMoves": ["propose", "delegate", "build"],
+      "consistent": true,
+      "outcome": "answered",
+      "maxSteps": 4
+    },
+    "tags": ["mind", "check", "atlas"],
+    "why": "A statement that agrees with the record changes nothing: the verdict is consistent and no proposal is made."
+  },
+  {
     "id": "failure:mind/local-fact-not-delegated",
     "source": "failure",
     "origin": "direct",

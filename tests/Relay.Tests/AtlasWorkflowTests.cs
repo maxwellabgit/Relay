@@ -28,54 +28,78 @@ public class AtlasWorkflowTests : IDisposable
     private const string Decision = "We decided the Atlas beta ships on October 14.";
     private const string Contradiction = "Marketing wants the Atlas beta out on the 21st.";
 
-    /// <summary>Listening on with the deterministic grammar still planning what is raised (docs/10, step 1c).</summary>
+    /// <summary>The mind runs everything, with the note chord listening: a mind and the setting on.</summary>
     private static void Listening(RelaySettings s)
     {
-        s.Orchestrator.Mode = OrchestratorSettings.Rules;
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
         s.Listening.Enabled = true;
     }
 
+    /// <summary>What the mind hears: it keeps the decision, and checks the later claim against it.</summary>
     private static ListeningMind AtlasMind() => new ListeningMind()
         .When("We decided", "remember", "Keep this decision.", note: "Atlas beta ships on October 14.", noteType: "decision", project: "Atlas", topic: "atlas beta")
         .When("21st", "check", "Check the stated Atlas beta date against the stored decision.", project: "Atlas", topic: "atlas beta", mergeKey: "check:atlas:beta-date");
 
     /// <summary>
-    /// A planner that does what RELAY0's model does for a check task: searches, reads the excerpt, and when
-    /// the stored decision disagrees, cites both and proposes the one-step record update.
+    /// What the mind does with the work it is given. A raised check searches for what is stored, opens the note
+    /// and the excerpt so the answer stands on both, proposes the one-step record update, and ends with the
+    /// verdict. A direct ask searches, opens every note it found, and answers from them. Scripted so the
+    /// workflow is deterministic; every move after it goes through the production path.
     /// </summary>
-    private static CannedOrchestrator CheckPlanner() => new CannedOrchestrator().Otherwise((request, context) =>
+    private static ScriptedMind AtlasWorking(string projectId) => new ScriptedMind().Always(request =>
     {
-        if (request.Kind != TaskKind.Check) return TurnPlan.NotUnderstood("canned", "only check tasks are scripted");
-        var search = context.Tools.Call("search", new Dictionary<string, string> { ["query"] = "Atlas beta ships", ["project"] = "atlas", ["limit"] = "3" });
-        var stored = search.Hits!.First(h => h.Kind == SearchIndex.NoteKind && h.Status == NoteStatus.Active);
-        var excerpt = context.Tools.Call("read_excerpt", new Dictionary<string, string> { ["excerptId"] = request.ExcerptId! });
-        var heard = excerpt.Hits![0];
-        var atlas = context.Registry.FindActive("atlas")!;
-        var proposal = new Proposal(Relay.Core.Ids.Ulid.NewUlid(request.At), Actions.SupersedeNote,
-            "The date heard (the 21st) contradicts the stored decision (October 14); updating the record keeps the earlier text as superseded.",
-            new Dictionary<string, string>
-            {
-                ["projectId"] = atlas.Id,
-                ["noteId"] = stored.Id,
-                ["newText"] = "Atlas beta ships on October 21.",
-                ["type"] = NoteTypes.Decision,
-                ["sourceExcerptId"] = heard.Id,
-                ["spanStart"] = "0",
-                ["spanEnd"] = heard.Text.Length.ToString(),
-            },
-            [request.SourceEventId], ["A new decision note records October 21", "The October 14 note is kept with status superseded"], Risks.ControlledWrite, true, Producers.Model);
-        return new TurnPlan(true, "Heard the 21st; the stored decision says October 14", ["Searched atlas for the beta ship date", "Read the excerpt", "The dates disagree"],
-            "Stored decision: Atlas beta ships on October 14. Heard now: out on the 21st. These conflict.",
-            [new Citation(stored.Kind, stored.Id, stored.ProjectId, stored.ProjectSlug, stored.Excerpt, stored.Span), new Citation(heard.Kind, heard.Id, null, null, heard.Excerpt, heard.Span)],
-            [proposal], "canned", Consistent: false);
+        var asked = request.Transcript.OfType<InputObserved>().First().Source == InputObserved.Ask;
+        var read = request.Transcript.OfType<ToolObserved>().ToList();
+        if (read.Count == 0)
+            return MindStep.Of(ScriptedMind.Tool("search", ("query", "Atlas beta ships"), ("project", "atlas"), ("limit", "5")),
+                asked ? "Looking up what was decided about the beta date." : "Looking for what is stored about the beta date.");
+
+        // One read per note the search listed: a search returns candidates, opening one of them is what grounds the answer.
+        var notes = Found(request);
+        if (read.Count - 1 < notes.Count)
+            return MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", projectId), ("noteId", notes[read.Count - 1])), "Reading the record.");
+
+        if (asked)
+            return MindStep.Of(ScriptedMind.Say("We decided the Atlas beta ships on October 21. The earlier decision of October 14 is kept beside it (superseded)."),
+                "Answering from the record.");
+
+        if (read.All(t => t.Tool != "read_excerpt"))
+            return MindStep.Of(ScriptedMind.Tool("read_excerpt", ("excerptId", Heard(request)!)), "Reading back what was just said.");
+
+        // Both sides read: the verdict is reached here, before the proposal, so the card says what it is about.
+        if (!request.Transcript.OfType<PolicyObserved>().Any())
+            return MindStep.Of(ScriptedMind.Propose(Actions.SupersedeNote,
+                    "The date heard (the 21st) contradicts the stored decision (October 14); updating the record keeps the earlier text as superseded.",
+                    ("projectId", projectId), ("noteId", notes[0]), ("newText", "Atlas beta ships on October 21."),
+                    ("type", NoteTypes.Decision), ("sourceExcerptId", Heard(request)!), ("spanStart", "0"), ("spanEnd", Contradiction.Length.ToString())),
+                "Proposing the record update.", ScriptedMind.Verdict(consistent: false));
+        return MindStep.Of(ScriptedMind.Say("Stored decision: Atlas beta ships on October 14. Heard now: out on the 21st. These conflict."),
+            "Heard the 21st; the stored decision says October 14.");
     });
+
+    /// <summary>The notes the search listed, what is current first.</summary>
+    private static List<string> Found(MindRequest request)
+    {
+        using var hits = JsonDocument.Parse(request.Transcript.OfType<ToolObserved>().First(t => t.Tool == "search").Data!);
+        return hits.RootElement.EnumerateArray()
+            .Where(h => h.GetProperty("kind").GetString() == SearchIndex.NoteKind)
+            .Select(h => (Id: h.GetProperty("id").GetString()!, Current: h.GetProperty("status").GetString() == NoteStatus.Active))
+            .OrderByDescending(n => n.Current).Select(n => n.Id).ToList();
+    }
+
+    /// <summary>The excerpt the raise anchored to: the words being checked.</summary>
+    private static string? Heard(MindRequest request) => request.Transcript.OfType<InputObserved>().First().ExcerptId;
 
     [Fact]
     public void TheReadmeWorkflowHolds()
     {
-        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .StartListening()
+        var mind = AtlasMind();
+        using var s = Scenario.New(_tmp, Listening, mind: mind).WithWorkspace()
+            .Do("create project Atlas", c => Assert.True(c.CreateProject("Atlas")));
+        mind.Works(AtlasWorking(s.H.Registry.FindActive("atlas")!.Id));
+
+        s.StartListening()
             .Listen(Decision)                                                        // observed → remember → filed (ambient)
             .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Ambient, "Note filed")
@@ -90,9 +114,7 @@ public class AtlasWorkflowTests : IDisposable
         Assert.Equal(2, check.Citations.Count);                                       // both sources: the stored note and the excerpt
         Assert.Contains(check.Citations, c => c.Kind == SearchIndex.NoteKind);
         Assert.Contains(check.Citations, c => c.Kind == SearchIndex.ExcerptKind && c.Id == check.ExcerptId);
-        Assert.Equal(2, check.ToolCalls.Count);                                       // the diagnostics show how the planner got there
-        Assert.Equal("search", check.ToolCalls[0].Tool);
-        Assert.Equal("read_excerpt", check.ToolCalls[1].Tool);
+        Assert.Equal(["search", "read_note", "read_excerpt"], check.ToolCalls.Select(c => c.Tool));   // the diagnostics show how the mind got there
         var pending = Assert.Single(check.Proposals);
         Assert.Equal(Presentation.Proposal, check.Presentation);
         Assert.Contains("Update the decision", pending.Title);
@@ -143,7 +165,7 @@ public class AtlasWorkflowTests : IDisposable
         var approval = s.H.Last(EventTypes.ApprovalGranted)!;
         var received = s.H.Records().Last(r => r.Type == EventTypes.ProposalReceived && r.DataString("action") == Actions.SupersedeNote);
         Assert.Equal(received.DataString("hash"), approval.DataString("proposalHash"));
-        Assert.Equal("model", received.DataString("proposedBy"));
+        Assert.Equal(check.Producer, received.DataString("proposedBy"));            // the mind that ran the task is on record as having proposed it
         Assert.Equal(check.TaskId, received.DataString("taskId"));
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExecutionCompleted && r.DataString("action") == Actions.SupersedeNote);
 
@@ -151,24 +173,27 @@ public class AtlasWorkflowTests : IDisposable
         var diagnostics = JsonDocument.Parse(File.ReadAllText(Path.Combine(s.H.Root.TasksDirectory, check.TaskId + ".json"))).RootElement;
         Assert.Equal("observed", diagnostics.GetProperty("origin").GetString());
         Assert.Equal("check", diagnostics.GetProperty("kind").GetString());
-        Assert.Equal(2, diagnostics.GetProperty("toolCalls").GetArrayLength());
+        Assert.Equal(3, diagnostics.GetProperty("toolCalls").GetArrayLength());
         Assert.Equal("ambient", diagnostics.GetProperty("presentation").GetString());   // final presentation: the approved update ran
         Assert.Equal("approved", diagnostics.GetProperty("userResponse").GetString());
-        // The words of the room never reach the ledger: the check task's plan (which quoted the excerpt) is recorded as
-        // a fingerprint, and the answer to the direct ask cites the corrected decision, whose text was approved — the
-        // excerpt it came from is not repeated beside it.
+        // The words of the room never reach the ledger: every move of the check task (which quoted the excerpt) is
+        // recorded as a fingerprint, while the direct ask's are in the clear — it cites the corrected decision, whose
+        // text was approved, and the excerpt it came from is not repeated beside it.
         Assert.DoesNotContain(s.H.Records(), r => r.Data.GetRawText().Contains("Marketing wants", StringComparison.Ordinal));
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && r.DataString("taskId") == check.TaskId && (r.DataString("answer") ?? "").StartsWith("withheld: ", StringComparison.Ordinal));
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && r.DataString("taskId") == answer.TaskId && (r.DataString("answer") ?? "").Contains("October 21", StringComparison.Ordinal));
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.MindStepped && r.DataString("taskId") == check.TaskId && (r.DataString("brief") ?? "").StartsWith("withheld: ", StringComparison.Ordinal));
+        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.MindStepped && r.DataString("taskId") == answer.TaskId && (r.DataString("brief") ?? "").Contains("October 21", StringComparison.Ordinal));
         Assert.DoesNotContain(answer.Citations, c => c.Id == check.ExcerptId);          // the note cites the excerpt as its source; the passage is not listed twice
     }
 
     [Fact]
     public void RejectingTheUpdateLeavesTheRecordAloneAndDoesNotReAlert()
     {
-        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .StartListening()
+        var mind = AtlasMind();
+        using var s = Scenario.New(_tmp, Listening, mind: mind).WithWorkspace()
+            .Do("create project Atlas", c => Assert.True(c.CreateProject("Atlas")));
+        mind.Works(AtlasWorking(s.H.Registry.FindActive("atlas")!.Id));
+
+        s.StartListening()
             .Listen(Decision)
             .Listen(Contradiction)
             .ExpectAttention(Presentation.Proposal)
@@ -192,9 +217,12 @@ public class AtlasWorkflowTests : IDisposable
     [Fact]
     public void EditingTheProposedTextBeforeApprovingChangesWhatIsRecorded()
     {
-        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .StartListening()
+        var mind = AtlasMind();
+        using var s = Scenario.New(_tmp, Listening, mind: mind).WithWorkspace()
+            .Do("create project Atlas", c => Assert.True(c.CreateProject("Atlas")));
+        mind.Works(AtlasWorking(s.H.Registry.FindActive("atlas")!.Id));
+
+        s.StartListening()
             .Listen(Decision)
             .Listen(Contradiction)
             .Edit(Actions.SupersedeNote, ("newText", "Atlas beta ships on October 21 (marketing's request; engineering to confirm)."))

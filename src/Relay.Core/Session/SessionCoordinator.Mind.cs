@@ -183,7 +183,8 @@ public sealed partial class SessionCoordinator
             steps.Add($"Answer cut to the preferred length ({Preferences.MaxAnswerChars} chars)");
         }
         var knowledge = read is null ? null : new KnowledgeState([], [], read.Has(MindRead.NeedNewTool), read.Intent);
-        task.Plan = new TurnPlan(result.Status != LoopStatus.Failed, steps.Count > 0 ? steps[^1] : result.Summary, steps, answer, [], [], loop.MindName, null, knowledge);
+        task.Plan = new TurnPlan(result.Status != LoopStatus.Failed, steps.Count > 0 ? steps[^1] : result.Summary, steps, answer,
+            task.Read.ToList(), [], loop.MindName, null, knowledge, loop.Consistent);
 
         Append(EventTypes.LoopEnded, new
         {
@@ -248,12 +249,12 @@ public sealed partial class SessionCoordinator
         Append(EventTypes.MindStepped, new
         {
             taskId = task.TaskId, step = loop.Steps, move = move.Type, name = MoveName(move), brief = Guarded(task, move.Brief()), feed = Guarded(task, step.Feed),
-            read = read is null ? null : new { intent = Guarded(task, read.Intent), complexity = read.Complexity, needs = read.Needs, significance = read.Significance, sensitivity = read.Sensitivity, risk = new { core = read.Risk.Core, security = read.Risk.Security, loop = read.Risk.Loop, destructive = read.Risk.Destructive } },
+            read = read is null ? null : new { intent = Guarded(task, read.Intent), complexity = read.Complexity, needs = read.Needs, significance = read.Significance, sensitivity = read.Sensitivity, risk = new { core = read.Risk.Core, security = read.Risk.Security, loop = read.Risk.Loop, destructive = read.Risk.Destructive }, consistent = read.Consistent },
             promptTokens = step.PromptTokens, completionTokens = step.CompletionTokens, elapsedMs = step.ElapsedMs,
         });
         Append(EventTypes.TurnProgress, new { taskId = task.TaskId, text = Guarded(task, step.Feed) });
-        // The plan is the live feed: what the mind has told the user so far, updated every step.
-        task.Plan = new TurnPlan(true, step.Feed, loop.Feed.ToList(), task.Plan?.Answer, [], [], loop.MindName);
+        // The plan is the live feed: what the mind has told the user so far, and what it has read, updated every step.
+        task.Plan = new TurnPlan(true, step.Feed, loop.Feed.ToList(), task.Plan?.Answer, task.Read.ToList(), [], loop.MindName, null, task.Plan?.Knowledge, loop.Consistent);
         Notify();
     }
 
@@ -291,8 +292,15 @@ public sealed partial class SessionCoordinator
             catch (NotSupportedException) { data = null; }
         }
         var ids = result.Hits?.Select(h => h.Id).Distinct(StringComparer.Ordinal).ToList() ?? [];
+        if (result.Ok && ReadTools.Contains(move.Tool, StringComparer.Ordinal))
+            foreach (var hit in result.Hits ?? [])
+                if (task.Read.All(c => c.Id != hit.Id))
+                    task.Read.Add(new Citation(hit.Kind, hit.Id, hit.ProjectId, hit.ProjectSlug, hit.Text.Length > 0 ? hit.Text : hit.Excerpt, hit.Span));
         return MoveOutcome.Of(new ToolObserved(_clock.UtcNow, move.Tool, move.Args, result.Ok, result.Ok ? result.Summary : result.Error ?? "failed", data, ids));
     }
+
+    /// <summary>The tools that fetch one named thing rather than searching for candidates; what they return is what the answer stands on.</summary>
+    private static readonly string[] ReadTools = ["read_note", "read_excerpt", "read_artifact"];
 
     /// <summary>
     /// A proposal from the mind: decided by policy exactly like any other producer's, with the filing and fundamental-operation decisions layered

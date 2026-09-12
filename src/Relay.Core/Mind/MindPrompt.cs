@@ -61,7 +61,7 @@ public static class MindPrompt
 
         sb.Append("\n\nReply with one JSON object of this shape and nothing else:\n");
         sb.Append("{\"read\":{\"intent\":\"<one line>\",\"complexity\":0.0,\"needs\":[\"none|local_notes|world_knowledge|new_tool|external_reasoning|user_input\"],\"significance\":0.0,\"sensitivity\":0.0,");
-        sb.Append("\"risk\":{\"core\":0.0,\"security\":0.0,\"loop\":0.0,\"destructive\":0.0}},");
+        sb.Append("\"risk\":{\"core\":0.0,\"security\":0.0,\"loop\":0.0,\"destructive\":0.0},\"consistent\":null},");
         sb.Append("\"move\":{\"type\":\"<move>\",\"text\":\"\",\"name\":\"\",\"args\":{},\"done\":false},\"feed\":\"<one sentence>\"}\n\n");
 
         if (observing)
@@ -107,6 +107,9 @@ public static class MindPrompt
         sb.Append("read.complexity: 0.1 answer from context or one lookup · 0.3 a few tool calls · 0.6 needs a new tool or several sources · 0.9 research or reasoning beyond a local model. ");
         sb.Append("read.significance 0–1 (for overheard talk: worth acting on or keeping?); read.sensitivity 0–1 (personal or secret content); ");
         sb.Append("read.risk 0–1 per axis for your next move: core (changes how Relay itself works), security (secrets, network, files outside projects), loop (could run without end), destructive (deletes or overwrites).\n");
+        sb.Append("read.consistent: only when the task is checking a claim against what Relay holds — \"").Append(MindRead.Agrees).Append("\" once you have read enough to see they agree, \"")
+          .Append(MindRead.Conflicts).Append("\" once you have read enough to see they do not. Leave it out until then, and leave it out for every other kind of task. ");
+        sb.Append("Set it on the step you reach it, before you propose anything about it: it is how the user is told this is a conflict, and it stands for the rest of the task.\n");
         }
         sb.Append("feed: one plain sentence, present tense, at most 20 words, about what is happening now, written for the user.\n");
 

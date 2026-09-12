@@ -36,6 +36,16 @@ public class ListeningTests : IDisposable
 
     private static Action<RelaySettings> Planned(Action<RelaySettings> also) => s => { Planned(s); also(s); };
 
+    /// <summary>
+    /// The mind runs everything, which is where this is going (docs/10, step 1). Listening stays off here too,
+    /// so the note chord dictates while the world is built and <see cref="Scenario.WithListening"/> turns it on.
+    /// </summary>
+    private static void Mind(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Mind;
+        s.Model.Enabled = true;
+    }
+
     // ----------------------------------------------------------------------------------------
     // Units: segmenter, buffer, guard
     // ----------------------------------------------------------------------------------------
@@ -278,18 +288,21 @@ public class ListeningTests : IDisposable
         var mind = new ListeningMind().When("November 2", line => new RaiseMove("check",
             $"Check the Atlas ship date claimed in line {line.Label} against stored decisions.", [line.Label],
             "a dated claim about a known project", Project: "Atlas", MergeKey: "check:atlas:ship-date"));
-        var planner = new CannedOrchestrator();
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
-            .Command("create project Atlas").Approve()
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Do("create project Atlas", c => Assert.True(c.CreateProject("Atlas")))
             .Note("We decided the Atlas beta ships on October 14.")
             .Note("The Atlas launch email goes out on October 7.");
         var atlas = s.H.Registry.FindActive("atlas")!;
         var stored = ProjectNoteStore.ReadAll(atlas.RootPath).Notes.Select(n => n.Note).ToList();
         Assert.Equal(2, stored.Count);
-        planner.Otherwise((req, _) => req.Kind == TaskKind.Check
-            ? new TurnPlan(true, "The claim conflicts with two stored decisions", ["Read atlas decisions"], "Stored: beta ships October 14 (email October 7); heard: November 2.",
-                stored.Select(n => new Citation("note", n.Id, atlas.Id, atlas.Slug, n.Body, null)).ToList(), [], "canned", Consistent: false)
-            : TurnPlan.NotUnderstood("canned", "not scripted"));
+        // Each raised check opens both stored notes and answers with the verdict: the citations are what it opened.
+        mind.Works(new ScriptedMind().Always(req => req.Transcript.OfType<ToolObserved>().Count() switch
+        {
+            0 => MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", atlas.Id), ("noteId", stored[0].Id)), "Reading the stored decision."),
+            1 => MindStep.Of(ScriptedMind.Tool("read_note", ("projectId", atlas.Id), ("noteId", stored[1].Id)), "Reading the launch date."),
+            _ => MindStep.Of(ScriptedMind.Say("Stored: beta ships October 14 (email October 7); heard: November 2."),
+                "The claim conflicts with two stored decisions.", ScriptedMind.Verdict(consistent: false)),
+        }));
 
         s.WithListening().StartListening()
             .Hear(Chatter)
@@ -303,7 +316,7 @@ public class ListeningTests : IDisposable
         Assert.False(task.Foreground);
         Assert.Equal(TaskOrigin.Observed, task.Origin);
         Assert.False(task.Consistent);
-        Assert.Equal(2, task.Citations.Count);
+        Assert.Equal(stored.Select(n => n.Id), task.Citations.Select(c => c.Id));
         Assert.Equal(Presentation.Alert, task.Presentation);
         Assert.NotNull(task.ExcerptId);
         Assert.Equal(RelayState.NoteCapture, s.Snap.State);                          // the stream is untouched by the task
@@ -326,11 +339,11 @@ public class ListeningTests : IDisposable
         Assert.Equal("alert", shown.DataString("level"));
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExcerptStored && r.DataString("excerptId") == excerpt.ExcerptId);
 
-        // The planner was asked the raise's objective, in the observed lane, with the excerpt in hand.
-        var request = Assert.Single(planner.Requests, r => r.Kind == TaskKind.Check);
-        Assert.Equal(TaskOrigin.Observed, request.Origin);
-        Assert.Equal(excerpt.ExcerptId, request.ExcerptId);
-        Assert.StartsWith("Check the Atlas ship date", request.Instruction);
+        // The task was handed the raise's objective, in the observed lane, with the excerpt in hand.
+        var input = Assert.Single(mind.Requests.Where(r => !r.Observing).Select(r => r.Transcript.OfType<InputObserved>().First()).Distinct());
+        Assert.Equal(InputObserved.Heard, input.Source);
+        Assert.Equal(excerpt.ExcerptId, input.ExcerptId);
+        Assert.StartsWith("Check the Atlas ship date", input.Text);
 
         // Said again inside the cool-down: the card refreshes rather than multiplying; dismissed, it stays away.
         s.Hear("Yes, Atlas ships on November 2, I am sure.").Observe();
@@ -349,9 +362,9 @@ public class ListeningTests : IDisposable
     [Fact]
     public void AConsistentClaimIsRecordedAndShowsNothing()
     {
-        var mind = new ListeningMind().When("October 14", "check", "Check the Atlas ship date.", project: "Atlas");
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Agrees with the stored decision", [], "Stored and heard agree: October 14.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+        var mind = new ListeningMind().When("October 14", "check", "Check the Atlas ship date.", project: "Atlas")
+            .Works(new ScriptedMind().Always(_ => MindStep.Of(ScriptedMind.Say("Stored and heard agree: October 14."), "Agrees with the stored decision.", ScriptedMind.Verdict(consistent: true))));
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)

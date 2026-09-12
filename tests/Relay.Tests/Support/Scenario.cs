@@ -600,8 +600,9 @@ public sealed class ThrowingOrchestrator : IOrchestrator
 
 /// <summary>
 /// A mind that reads conversations by phrase: a pass raises the work paired with every phrase that appears in a
-/// line it has not raised on yet, then waits. Tasks the raises start are handled by whatever plans them.
-/// Stands in for RELAY0 so listening scenarios are deterministic and say exactly what was heard.
+/// line it has not raised on yet, then waits. Stands in for RELAY0 so listening scenarios are deterministic and
+/// say exactly what was heard. The tasks its raises start are handled by <see cref="Working"/>, or by whatever
+/// plans them when the scenario runs the older pipeline beside it.
 /// </summary>
 public sealed class ListeningMind : Relay.Core.Mind.IMind
 {
@@ -615,6 +616,11 @@ public sealed class ListeningMind : Relay.Core.Mind.IMind
     public Exception? Throws { get; set; }
     /// <summary>The significance every read reports. Below the decider's bar a raise is refused.</summary>
     public double Significance { get; set; } = 0.8;
+    /// <summary>What runs the tasks the raises start. Without one a raised task waits, which is all a listening scenario needs.</summary>
+    public ScriptedMind? Working { get; set; }
+
+    /// <summary>Sets <see cref="Working"/> and returns this mind, so a scenario reads as one expression.</summary>
+    public ListeningMind Works(ScriptedMind working) { Working = working; return this; }
 
     /// <summary>When a line contains the phrase, the raise is built from it.</summary>
     public ListeningMind When(string phrase, Func<WindowLine, RaiseMove> raise) { _rules.Add((phrase, raise)); return this; }
@@ -633,7 +639,10 @@ public sealed class ListeningMind : Relay.Core.Mind.IMind
     {
         Requests.Add(request);
         if (Throws is not null) throw Throws;
-        if (!request.Observing) return Task.FromResult(MindStep.Of(ScriptedMind.Wait("this task is not mine to run"), "Not mine."));
+        if (!request.Observing)
+            return Working is null
+                ? Task.FromResult(MindStep.Of(ScriptedMind.Wait("this task is not mine to run"), "Not mine."))
+                : Working.StepAsync(request, cancellationToken);
 
         var window = request.Transcript.OfType<WindowObserved>().LastOrDefault();
         var lines = window?.Lines.ToList() ?? [];

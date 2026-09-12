@@ -9,8 +9,10 @@ namespace Relay.Core.Mind;
 /// The one contract the mind answers with on every step, and its parser. The schema is sent as
 /// <c>response_format</c> so a llama.cpp host constrains generation with a grammar; the move is flat
 /// (five fields, always present) so the same schema is small for the grammar and usable by hosts
-/// that require every property. <see cref="Parse"/> is tolerant of what does not matter (a missing
-/// read, a number as a string) and strict about what does (an unknown move type, a say without text).
+/// that require every property. The read's verdict is one of two words or null, for the same reason:
+/// a grammar that can only write those cannot invent a third. <see cref="Parse"/> is tolerant of what
+/// does not matter (a missing read, a number as a string) and strict about what does (an unknown move
+/// type, a say without text).
 /// </summary>
 public static partial class MoveSchema
 {
@@ -29,8 +31,9 @@ public static partial class MoveSchema
         "needs":{"type":"array","items":{"type":"string","enum":["none","local_notes","world_knowledge","new_tool","external_reasoning","user_input"]}},
         "significance":{"type":"number"},
         "sensitivity":{"type":"number"},
-        "risk":{"type":"object","properties":{"core":{"type":"number"},"security":{"type":"number"},"loop":{"type":"number"},"destructive":{"type":"number"}},"required":["core","security","loop","destructive"],"additionalProperties":false}},
-        "required":["intent","complexity","needs","significance","sensitivity","risk"],"additionalProperties":false},
+        "risk":{"type":"object","properties":{"core":{"type":"number"},"security":{"type":"number"},"loop":{"type":"number"},"destructive":{"type":"number"}},"required":["core","security","loop","destructive"],"additionalProperties":false},
+        "consistent":{"type":["string","null"],"enum":["consistent","conflicts",null]}},
+        "required":["intent","complexity","needs","significance","sensitivity","risk","consistent"],"additionalProperties":false},
         "move":{"type":"object","properties":{
         "type":{"type":"string","enum":["say","use_tool","propose","delegate","build","ask_user","wait","stop"]},
         "text":{"type":"string"},
@@ -207,7 +210,23 @@ public static partial class MoveSchema
             needs,
             Unit(r["significance"]),
             Unit(r["sensitivity"]),
-            risk is null ? RiskRead.None : new RiskRead(Unit(risk["core"]), Unit(risk["security"]), Unit(risk["loop"]), Unit(risk["destructive"])));
+            risk is null ? RiskRead.None : new RiskRead(Unit(risk["core"]), Unit(risk["security"]), Unit(risk["loop"]), Unit(risk["destructive"])),
+            Verdict(r["consistent"] ?? r["verdict"]));
+    }
+
+    /// <summary>
+    /// Whether what is being checked agrees with what Relay holds. Anything the mind did not write as one of the
+    /// two words is no verdict — a task that is checking nothing, or has not read enough yet, says nothing here.
+    /// </summary>
+    private static bool? Verdict(JsonNode? node)
+    {
+        if (node is JsonValue v && v.TryGetValue<bool>(out var b)) return b;
+        return Str(node).Trim().ToLowerInvariant() switch
+        {
+            MindRead.Agrees or "true" or "agrees" or "matches" or "yes" => true,
+            MindRead.Conflicts or "false" or "conflict" or "inconsistent" or "contradicts" or "disagrees" or "no" => false,
+            _ => null,
+        };
     }
 
     /// <summary>An argument that carries something, or null: an empty string, a placeholder and a word for nothing are all nothing.</summary>

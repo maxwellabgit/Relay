@@ -47,7 +47,7 @@ public sealed class Expectation
     [JsonPropertyName("knowledgeGap")] public bool? KnowledgeGap { get; init; }
     /// <summary>The plan's capability-gap axis must have this value.</summary>
     [JsonPropertyName("capabilityGap")] public bool? CapabilityGap { get; init; }
-    /// <summary>For check tasks: the consistency verdict the plan must reach.</summary>
+    /// <summary>For check tasks, in either stage: the consistency verdict that must be reached.</summary>
     [JsonPropertyName("consistent")] public bool? Consistent { get; init; }
     /// <summary>Target assertions of the form <c>action.key=value</c> (exact) or <c>action.key</c> (present, non-empty); each must hold for at least one proposal of that action.</summary>
     [JsonPropertyName("targets")] public IReadOnlyList<string>? Targets { get; init; }
@@ -98,9 +98,9 @@ public sealed class EvaluationCase
     /// <summary>The direct ask verbatim, or the objective of an observed or dialogue task.</summary>
     [JsonPropertyName("instruction")] public string Instruction { get; init; } = "";
     /// <summary>
-    /// Observed plan cases: the overheard words that were kept. The runner hands the planner an excerpt holding exactly these
-    /// words (its id is <see cref="EvaluationRunner.ExcerptIdFor"/>), so the planner reads them with read_excerpt as it does
-    /// in the application instead of finding them pasted into the instruction.
+    /// Observed cases: the overheard words that were kept. The runner stores an excerpt holding exactly these words (its id
+    /// is <see cref="EvaluationRunner.ExcerptIdFor"/>) and puts its id on the task, so the words are read with read_excerpt
+    /// as they are in the application instead of being found pasted into the instruction.
     /// </summary>
     [JsonPropertyName("heard")] public string? Heard { get; init; }
     /// <summary>
@@ -214,8 +214,8 @@ public sealed class EvaluationSet
             if (c.Kind is not null && !KnownKinds.Contains(c.Kind.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown kind '{c.Kind}'.");
             if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': no instruction.");
             if (!c.Expect.ChecksSomething) problems.Add($"Case '{c.Id}': the expectation checks nothing.");
-            if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Consistent is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
-                problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids); it cannot also expect plan output.");
+            if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
+                problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids, consistent); it cannot also expect plan output.");
             foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
                 if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move ({string.Join(", ", Mind.Move.Types)}).");
             foreach (var need in c.Expect.Needs ?? [])
@@ -232,7 +232,7 @@ public sealed class EvaluationSet
                 }
             }
             if (c.Heard is not null && (c.ParsedOrigin != TaskOrigin.Observed || string.IsNullOrWhiteSpace(c.Heard)))
-                problems.Add($"Case '{c.Id}': heard is the excerpt of an observed plan case; it needs origin=observed, an instruction, and words.");
+                problems.Add($"Case '{c.Id}': heard is the excerpt of an observed case; it needs origin=observed, an instruction, and words.");
             if (string.Equals(c.Source, CaseSources.Failure, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(c.Why))
                 problems.Add($"Case '{c.Id}': a failure case must say which mistake it guards against (why).");
             foreach (var action in (c.Expect.Actions ?? []).Concat(c.Expect.ForbiddenActions ?? []))

@@ -117,6 +117,8 @@ public sealed class TaskLoop
     public MindRead? FirstRead { get; private set; }
     public DecisionRecord? Route { get; private set; }
     public string? Answer { get; private set; }
+    /// <summary>The verdict the mind reached, when the task was checking a claim against what Relay holds.</summary>
+    public bool? Consistent { get; private set; }
     public LoopResult? Result { get; private set; }
     public IReadOnlyList<DecisionRecord> Decisions => _decider.Made;
 
@@ -167,6 +169,8 @@ public sealed class TaskLoop
                 Steps++;
                 var move = step.Move!;
                 if (step.Read is not null) { LastRead = step.Read; FirstRead ??= step.Read; }
+                // A verdict, once reached, stands for the task: the mind need not repeat it on every step after.
+                if (step.Read?.Consistent is not null) Consistent = step.Read.Consistent;
                 _transcript.Add(new MoveObserved(now, move, step.Feed));
                 _feed.Add(step.Feed);
                 _host.Stepped(this, step);

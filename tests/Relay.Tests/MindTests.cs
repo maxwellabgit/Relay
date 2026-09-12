@@ -81,6 +81,27 @@ public class MoveSchemaTests
         Assert.Null(bare.Read);
     }
 
+    /// <summary>
+    /// The verdict of a check: two words on the read, and no verdict at all for every other task. A word the
+    /// grammar does not allow, or none, is no verdict — never a guess, because it is what titles a conflict.
+    /// </summary>
+    [Fact]
+    public void TheVerdictOfACheckIsReadFromTheTwoWordsAndNothingElse()
+    {
+        Assert.False(Read("""{"intent":"x","consistent":"conflicts"}""").Consistent);
+        Assert.True(Read("""{"intent":"x","consistent":"consistent"}""").Consistent);
+        Assert.Null(Read("""{"intent":"x","consistent":null}""").Consistent);
+        Assert.Null(Read("""{"intent":"x"}""").Consistent);
+        Assert.Null(Read("""{"intent":"x","consistent":"maybe"}""").Consistent);
+        // What a model writes instead of the two words, when it writes something recognisable.
+        Assert.True(Read("""{"intent":"x","consistent":true}""").Consistent);
+        Assert.False(Read("""{"intent":"x","verdict":"contradicts"}""").Consistent);
+        Assert.Contains("conflicts with the record", Read("""{"intent":"x","consistent":"conflicts"}""").Brief());
+        Assert.DoesNotContain("record", Read("""{"intent":"x"}""").Brief());
+    }
+
+    private static MindRead Read(string readJson) => MoveSchema.ParseRead(System.Text.Json.Nodes.JsonNode.Parse(readJson)!.AsObject());
+
     [Fact]
     public void TheSchemaIsValidJsonAndCoversTheContract()
     {
@@ -90,6 +111,9 @@ public class MoveSchemaTests
         Assert.Equal(Relay.Core.Mind.Move.TaskTypes.OrderBy(t => t), types.OrderBy(t => t));
         var needs = schema["properties"]!["read"]!["properties"]!["needs"]!["items"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
         Assert.Equal(MindRead.KnownNeeds.OrderBy(t => t), needs.OrderBy(t => t));
+        // The verdict a grammar may write: the two words, or nothing.
+        Assert.Equal([MindRead.Agrees, MindRead.Conflicts, null],
+            schema["properties"]!["read"]!["properties"]!["consistent"]!["enum"]!.AsArray().Select(n => n?.GetValue<string>()));
 
         // Listening has its own grammar over the same read: the model cannot emit a move that only a task may make.
         var observing = System.Text.Json.Nodes.JsonNode.Parse(MoveSchema.ObservingJson)!.AsObject();
@@ -98,6 +122,8 @@ public class MoveSchemaTests
         Assert.Equal(Relay.Core.Mind.Move.ObservingTypes.OrderBy(t => t), listening.OrderBy(t => t));
         Assert.Equal(MindRead.KnownNeeds.OrderBy(t => t),
             observing["properties"]!["read"]!["properties"]!["needs"]!["items"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).OrderBy(t => t));
+        // Listening checks no claims, so its grammar carries no verdict: one fewer thing a pass can spend a step on.
+        Assert.Null(observing["properties"]!["read"]!["properties"]!["consistent"]);
     }
 
     private static Relay.Core.Mind.Move Move(string moveJson) => MoveSchema.ParseMove(System.Text.Json.Nodes.JsonNode.Parse(moveJson)!.AsObject());

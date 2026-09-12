@@ -419,7 +419,7 @@ public class EvaluationTests : IDisposable
             new EvaluationCase { Id = "unseen:h2", Source = CaseSources.Unseen, Origin = "direct", Instruction = "x", Heard = words, Expect = new Expectation { Understood = true } },
             new EvaluationCase { Id = "unseen:h3", Source = CaseSources.Unseen, Origin = "observed", Instruction = "x", Heard = "  ", Expect = new Expectation { Understood = true } },
         ]).Validate();
-        Assert.Equal(2, problems.Count(p => p.Contains("heard is the excerpt of an observed plan case")));
+        Assert.Equal(2, problems.Count(p => p.Contains("heard is the excerpt of an observed case")));
     }
 
     /// <summary>A planner that does what the model planner does first for an observed task: read_excerpt through the broker, then answer with the words.</summary>
@@ -511,7 +511,9 @@ public class EvaluationTests : IDisposable
     /// <summary>A scripted mind that makes the right moves for every case: reads notes with a tool before answering, builds when no tool can answer, proposes and delegates where those belong.</summary>
     private static ScriptedMind CorrectMind() => new ScriptedMind().Always(req =>
     {
-        var ask = req.Transcript.OfType<InputObserved>().First().Text;
+        var input = req.Transcript.OfType<InputObserved>().First();
+        var ask = input.Text;
+        if (ask.StartsWith("Check the stated", StringComparison.OrdinalIgnoreCase)) return Checking(req, input);
         var last = req.Transcript[^1];
         if (last is ToolObserved tool)
         {
@@ -535,6 +537,28 @@ public class EvaluationTests : IDisposable
             return MindStep.Of(ScriptedMind.Delegate("research", "Summarise how UK councils license scheduling software pilots for restaurants."), "Asking research", ScriptedMind.Read(0.8, MindRead.NeedWorldKnowledge, MindRead.NeedExternalReasoning));
         return MindStep.Of(ScriptedMind.Tool("search", ("query", ask.Contains("fence", StringComparison.OrdinalIgnoreCase) ? "backyard fence" : "Atlas beta")), "Searching your notes", ScriptedMind.Read(0.2, MindRead.NeedLocalNotes));
     });
+
+    /// <summary>
+    /// A check task done right: read what is stored, read back the words that were heard, then reach the verdict —
+    /// on the read of the step that reaches it, before any proposal, because the verdict is what tells the user the
+    /// card is about a conflict. Agreement changes nothing; a conflict offers the record update as one approval.
+    /// </summary>
+    private static MindStep Checking(MindRequest request, InputObserved input)
+    {
+        var read = request.Transcript.OfType<ToolObserved>().ToList();
+        if (read.Count == 0)
+            return MindStep.Of(ScriptedMind.Tool("search", ("query", "Atlas beta ships"), ("project", "atlas")), "Looking up the stored decision", ScriptedMind.Read(0.3, MindRead.NeedLocalNotes));
+        if (read.Count == 1)
+            return MindStep.Of(ScriptedMind.Tool("read_excerpt", ("excerptId", input.ExcerptId!)), "Reading back what was said", ScriptedMind.Read(0.3, MindRead.NeedLocalNotes));
+
+        var stored = read.First(t => t.Tool == "search");
+        if ((read[^1].Data ?? read[^1].Summary).Contains("October 14", StringComparison.Ordinal))
+            return MindStep.Of(ScriptedMind.Say("The stored decision and what was said agree: the Atlas beta ships on October 14."),
+                "Agrees with the stored decision", ScriptedMind.Verdict(consistent: true));
+        return MindStep.Of(ScriptedMind.Propose(Actions.SupersedeNote, "The date heard contradicts the stored decision of October 14.",
+                [("projectId", "atlas"), ("noteId", stored.Ids[0]), ("newText", "Atlas beta ships on October 21."), ("type", Relay.Core.Notes.NoteTypes.Decision)]),
+            "Proposing the record update", ScriptedMind.Verdict(consistent: false));
+    }
 
     [Fact]
     public void ASearchFilteredToTheWrongProjectWidensAndSaysSo()
