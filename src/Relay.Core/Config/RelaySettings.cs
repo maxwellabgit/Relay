@@ -195,6 +195,12 @@ public sealed class StreamSettings
     [JsonPropertyName("minIngestSeconds")] public int MinIngestSeconds { get; set; } = 20;
     [JsonPropertyName("excerptMaxSeconds")] public int ExcerptMaxSeconds { get; set; } = 30;
     [JsonPropertyName("maxRetainedFraction")] public double MaxRetainedFraction { get; set; } = 0.25;
+    /// <summary>Mind mode: the most moves one listening pass may take. Almost every pass takes one (wait).</summary>
+    [JsonPropertyName("maxMovesPerPass")] public int MaxMovesPerPass { get; set; } = 3;
+    /// <summary>Mind mode: read-only checks the mind may make in one pass before raising work or waiting.</summary>
+    [JsonPropertyName("maxToolCallsPerPass")] public int MaxToolCallsPerPass { get; set; } = 2;
+    /// <summary>Mind mode: pieces of work one pass may raise, so one stretch of talk cannot fill the queue.</summary>
+    [JsonPropertyName("maxRaisesPerPass")] public int MaxRaisesPerPass { get; set; } = 2;
 }
 
 public sealed class JudgeSettings

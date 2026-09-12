@@ -15,6 +15,7 @@ namespace Relay.Core.Mind;
 public static partial class MoveSchema
 {
     public const string SchemaName = "mind_step";
+    public const string ObservingSchemaName = "mind_observe";
     public const int MaxFeedChars = 200;
     public const int DefaultDelegateBudget = 2_000;
     /// <summary>The least a delegate may be given: a small local mind tends to write tiny budgets, and a research reply cut at 200 tokens is worthless.</summary>
@@ -41,7 +42,38 @@ public static partial class MoveSchema
         "required":["read","move","feed"],"additionalProperties":false}
         """;
 
+    /// <summary>
+    /// The same shape for a listening pass, with the move enum cut to what the observing loop may do. The narrower
+    /// enum is the point: a grammar that cannot emit <c>propose</c> or <c>delegate</c> spares the loop from refusing
+    /// them and the user from a pass that spends its steps being corrected.
+    /// </summary>
+    public const string ObservingJson = """
+        {"type":"object","properties":{
+        "read":{"type":"object","properties":{
+        "intent":{"type":"string"},
+        "complexity":{"type":"number"},
+        "needs":{"type":"array","items":{"type":"string","enum":["none","local_notes","world_knowledge","new_tool","external_reasoning","user_input"]}},
+        "significance":{"type":"number"},
+        "sensitivity":{"type":"number"},
+        "risk":{"type":"object","properties":{"core":{"type":"number"},"security":{"type":"number"},"loop":{"type":"number"},"destructive":{"type":"number"}},"required":["core","security","loop","destructive"],"additionalProperties":false}},
+        "required":["intent","complexity","needs","significance","sensitivity","risk"],"additionalProperties":false},
+        "move":{"type":"object","properties":{
+        "type":{"type":"string","enum":["wait","say","use_tool","raise"]},
+        "text":{"type":"string"},
+        "name":{"type":"string"},
+        "args":{"type":"object","additionalProperties":{"type":"string"}},
+        "done":{"type":"boolean"}},
+        "required":["type","text","name","args","done"],"additionalProperties":false},
+        "feed":{"type":"string"}},
+        "required":["read","move","feed"],"additionalProperties":false}
+        """;
+
+    /// <summary>The kinds of work a raise may name; anything else is read as the nearest sensible one.</summary>
+    public static readonly string[] RaiseKinds = ["remember", "check", "resolve", "answer", "organize", "research", "improve"];
+
     [GeneratedRegex("[^a-z0-9_]+", RegexOptions.CultureInvariant)] private static partial Regex NotIdentifier();
+    /// <summary>The digits of a window line's label, however the mind wrote it: <c>#3</c>, <c>3</c>, <c>[#3]</c>, <c>s3</c>, <c>segment 3</c>.</summary>
+    [GeneratedRegex("[0-9]+", RegexOptions.CultureInvariant)] private static partial Regex Digits();
     /// <summary>A schema placeholder copied into a value ("&lt;ids returned by tools&gt;").</summary>
     [GeneratedRegex("<[^>]*>", RegexOptions.CultureInvariant)] private static partial Regex Placeholder();
 
@@ -77,6 +109,30 @@ public static partial class MoveSchema
         var t = token.Trim().Trim('"', '\'', '[', ']');
         if (t.Length == 0 || t.Contains('<') || t.Contains('>')) return true;
         return t.ToLowerInvariant() is "none" or "null" or "nil" or "n/a" or "na" or "no" or "nothing" or "empty" or "-" or "--" or "undefined" or "refs" or "ids" or "id";
+    }
+
+    /// <summary>A window line's label as the transcript showed it, or empty when the token names no line.</summary>
+    public static string SegmentLabel(string token)
+    {
+        if (IsNoRef(token)) return "";
+        var digits = Digits().Match(token);
+        return digits.Success ? "#" + digits.Value.TrimStart('0').PadLeft(1, '0') : "";
+    }
+
+    /// <summary>The kind of work a raise names. An unrecognised word with note text is a thing to remember; without it, a thing to answer.</summary>
+    public static string RaiseKind(string name, bool hasNote)
+    {
+        var kind = name.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
+        if (RaiseKinds.Contains(kind, StringComparer.Ordinal)) return kind;
+        return kind switch
+        {
+            "note" or "fact" or "decision" or "remember_this" or "keep" or "record" or "memory" => "remember",
+            "question" or "open_question" or "unresolved" or "conflict" or "dispute" or "correction" => "resolve",
+            "todo" or "task" or "commitment" or "action" or "follow_up" or "followup" or "reminder" => "check",
+            "look_up" or "lookup" or "find_out" or "investigate" => "research",
+            "file" or "sort" or "tidy" => "organize",
+            _ => hasNote ? "remember" : "answer",
+        };
     }
 
     public static Move ParseMove(JsonObject m)
@@ -119,6 +175,15 @@ public static partial class MoveSchema
                 if (text.Length == 0) throw new FormatException("an ask_user move needs the question in 'text'");
                 var options = (args.GetValueOrDefault("options") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
                 return new AskUserMove(text, options);
+            case Move.Raise:
+                if (text.Length == 0) throw new FormatException("a raise move needs the objective — what Relay should do about what it heard — in 'text'");
+                var note = Trimmed(args, "note") ?? Trimmed(args, "note_text") ?? Trimmed(args, "text");
+                var labels = Placeholder().Replace(args.GetValueOrDefault("segments") ?? args.GetValueOrDefault("segment") ?? args.GetValueOrDefault("lines") ?? "", " ")
+                    .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(SegmentLabel).Where(l => l.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+                return new RaiseMove(RaiseKind(name.Length > 0 ? name : args.GetValueOrDefault("kind") ?? "", note is not null), text, labels,
+                    Trimmed(args, "why") ?? "", note, Trimmed(args, "note_type") ?? Trimmed(args, "type"), Trimmed(args, "project") ?? Trimmed(args, "project_id"),
+                    Trimmed(args, "topic"), Trimmed(args, "merge_key"));
             case Move.Wait:
                 return new WaitMove(text);
             default:
@@ -143,6 +208,14 @@ public static partial class MoveSchema
             Unit(r["significance"]),
             Unit(r["sensitivity"]),
             risk is null ? RiskRead.None : new RiskRead(Unit(risk["core"]), Unit(risk["security"]), Unit(risk["loop"]), Unit(risk["destructive"])));
+    }
+
+    /// <summary>An argument that carries something, or null: an empty string, a placeholder and a word for nothing are all nothing.</summary>
+    private static string? Trimmed(IReadOnlyDictionary<string, string> args, string key)
+    {
+        var value = (args.GetValueOrDefault(key) ?? "").Trim();
+        if (value.Length == 0 || Placeholder().Replace(value, "").Trim().Length == 0) return null;
+        return IsNoRef(value) ? null : value;
     }
 
     private static IReadOnlyDictionary<string, string> Args(JsonObject? o)

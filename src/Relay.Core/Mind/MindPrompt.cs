@@ -39,16 +39,49 @@ public static class MindPrompt
         "the contents of the web, or the result of a calculation; searching notes for such things is a wasted step and finds nothing. " +
         "You have no clock: the transcript shows today's date only. The current time anywhere needs a tool.";
 
-    public static string System(MindContext context)
+    /// <summary>
+    /// What changes when the mind is listening rather than working: nobody is asking it anything, the usual answer is
+    /// that the talk needs nothing, and the only thing it can do about what matters is raise work that runs on its own.
+    /// </summary>
+    private const string ObservingPreamble =
+        "Right now you are listening to a conversation the user is having. You are not in it: nobody is asking you anything and nothing is owed. " +
+        "Every few seconds you are shown what was just said, with the earlier part of the window for context, and you take one move.\n\n" +
+        "Almost always the right move is wait. Ordinary talk — greetings, opinions, thinking aloud, plans still being argued — needs nothing from Relay, " +
+        "and raising work for it wastes the user's attention, which is the one thing you can spend without asking. Raise work only for something that clearly matters: " +
+        "a decision actually taken, a commitment made to do something, a question left open that Relay could settle, a fact worth keeping, " +
+        "or a correction of something Relay already holds. When in doubt, wait: the conversation continues and you will see it again.\n\n" +
+        "You cannot act here. You do not propose actions, delegate, build tools, or ask the user anything while listening — those belong to the task you raise, " +
+        "which gets its own loop, its own budget and its own approvals and runs while you keep listening. You never wait on anything and you are never finished.";
+
+    public static string System(MindContext context, bool observing = false)
     {
         var sb = new StringBuilder();
         sb.Append(string.IsNullOrWhiteSpace(context.Constitution) ? DefaultConstitution : context.Constitution!.Trim());
+        if (observing) sb.Append("\n\n").Append(ObservingPreamble);
 
         sb.Append("\n\nReply with one JSON object of this shape and nothing else:\n");
         sb.Append("{\"read\":{\"intent\":\"<one line>\",\"complexity\":0.0,\"needs\":[\"none|local_notes|world_knowledge|new_tool|external_reasoning|user_input\"],\"significance\":0.0,\"sensitivity\":0.0,");
         sb.Append("\"risk\":{\"core\":0.0,\"security\":0.0,\"loop\":0.0,\"destructive\":0.0}},");
         sb.Append("\"move\":{\"type\":\"<move>\",\"text\":\"\",\"name\":\"\",\"args\":{},\"done\":false},\"feed\":\"<one sentence>\"}\n\n");
 
+        if (observing)
+        {
+            sb.Append("Moves while listening (exactly one per step; unused fields stay empty):\n");
+            sb.Append("- wait: this talk needs nothing. text=why in a few words. This is the usual move.\n");
+            sb.Append("- raise: this matters and should become work. name=").Append(string.Join(" | ", MoveSchema.RaiseKinds)).Append(", ");
+            sb.Append("text=the objective (what Relay should do about it, one line, written as an instruction), ");
+            sb.Append("args={\"segments\":\"#3,#4\" (the labels of the lines that substantiate it — only those are kept), \"why\":\"why it matters, one line\", ");
+            sb.Append("\"note\":\"<the note exactly as it should be filed>\" and \"note_type\":\"decision|fact|question|todo|idea\" when the whole of the work is something worth keeping, ");
+            sb.Append("\"project\":\"<name or id of one of the user's projects>\" when you know which it belongs to, \"topic\":\"<a few words>\"}. ");
+            sb.Append("The raised task runs on its own and you go back to listening.\n");
+            sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only. For checking what Relay already holds before raising work — whether this decision is already filed, which project a name belongs to. Use it only when the answer changes what you raise.\n");
+            sb.Append("- say: one line for the user about what you heard. It creates nothing and files nothing; raise work instead when something matters.\n\n");
+            sb.Append("read.significance is the number that matters here: 0 ordinary talk · 0.3 mildly interesting · 0.6 clearly worth acting on or keeping · 0.9 a decision or commitment that must not be lost. ");
+            sb.Append("A raise below the bar is not accepted, and you are told so. read.sensitivity 0–1 for personal or secret content. ");
+            sb.Append("read.intent: one line on what the conversation is about. read.needs and read.complexity describe the work you would raise, not this pass; read.risk stays 0 (you act on nothing here).\n");
+        }
+        else
+        {
         sb.Append("Moves (exactly one per step; unused fields stay empty):\n");
         sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer. done=false only narrates: it does nothing and costs a step, so act instead (the feed sentence already tells the user what you are doing).\n");
         sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only; the result is the next observation.\n");
@@ -74,12 +107,23 @@ public static class MindPrompt
         sb.Append("read.complexity: 0.1 answer from context or one lookup · 0.3 a few tool calls · 0.6 needs a new tool or several sources · 0.9 research or reasoning beyond a local model. ");
         sb.Append("read.significance 0–1 (for overheard talk: worth acting on or keeping?); read.sensitivity 0–1 (personal or secret content); ");
         sb.Append("read.risk 0–1 per axis for your next move: core (changes how Relay itself works), security (secrets, network, files outside projects), loop (could run without end), destructive (deletes or overwrites).\n");
+        }
         sb.Append("feed: one plain sentence, present tense, at most 20 words, about what is happening now, written for the user.\n");
 
         sb.Append("\nTools (read-only):\n");
         foreach (var d in context.Tools) sb.Append("- ").Append(d.Name).Append('(').Append(string.Join(", ", d.Arguments)).Append("): ").Append(d.Description).Append('\n');
         sb.Append(ToolLimits).Append('\n');
 
+        if (observing)
+        {
+            sb.Append("\nWhat a raised task can go on to do, so you raise work Relay can finish: read the user's notes and projects, file and correct notes, ");
+            sb.Append("create and organise projects, run a sandboxed worker over a project's files");
+            if (context.CanBuild) sb.Append(", build itself a new tool");
+            if (context.DelegateProfiles.Count > 0) sb.Append(", hand research to an external AI once the user approves the package");
+            sb.Append(". Everything that changes anything is put to the user by the task, not by you.\n");
+        }
+        else
+        {
         sb.Append("\nActions you may propose (policy decides; the user approves anything that changes a project or Relay itself):\n");
         foreach (var a in context.Actions)
         {
@@ -96,6 +140,7 @@ public static class MindPrompt
                 : " (none can search online: a delegate answers from the package you send and its own knowledge, so allow_search is never true)");
             sb.Append(". Delegate only when local sources and your own knowledge cannot settle the request; write the prompt yourself.\n");
         }
+        }
 
         if (!string.IsNullOrWhiteSpace(context.ResponseStyle)) sb.Append("\nResponse style (the user's preference; obey it): ").Append(context.ResponseStyle).Append('\n');
         sb.Append("Answers longer than ").Append(context.MaxAnswerChars).Append(" characters are cut.\n");
@@ -108,21 +153,32 @@ public static class MindPrompt
         var sb = new StringBuilder();
         // The date only: the mind has no clock. Deterministic code stamps every observation; a mind that never sees the time cannot pretend to know it.
         sb.Append("Date: ").Append(request.At.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(" (UTC)\n");
-        sb.Append("Task ").Append(request.TaskId).Append(" · origin: ").Append(request.Origin).Append(" · step ").Append(request.StepIndex + 1);
-        if (request.MaxSteps > 0) sb.Append(" of ").Append(request.MaxSteps);
-        sb.Append('\n');
-        if (request.StepsLeftAfterThis == 0) sb.Append("This is the last step: finish now with say and done=true, stating what you found and what you could not do.\n");
-        else if (request.StepsLeftAfterThis == 1) sb.Append("One step remains after this one.\n");
-        sb.Append("Projects (the user's active projects; answer from this list without a tool): ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
+        if (request.Observing)
+        {
+            sb.Append("Listening to conversation ").Append(request.TaskId).Append(" · move ").Append(request.StepIndex + 1);
+            if (request.MaxSteps > 0) sb.Append(" of at most ").Append(request.MaxSteps).Append(" this pass");
+            sb.Append('\n');
+            if (request.StepsLeftAfterThis == 0) sb.Append("This is the last move of this pass: raise what matters now, or wait. Either way you will see the conversation again in a few seconds.\n");
+            sb.Append("Projects (the user's active projects; a raise may name one): ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
+        }
+        else
+        {
+            sb.Append("Task ").Append(request.TaskId).Append(" · origin: ").Append(request.Origin).Append(" · step ").Append(request.StepIndex + 1);
+            if (request.MaxSteps > 0) sb.Append(" of ").Append(request.MaxSteps);
+            sb.Append('\n');
+            if (request.StepsLeftAfterThis == 0) sb.Append("This is the last step: finish now with say and done=true, stating what you found and what you could not do.\n");
+            else if (request.StepsLeftAfterThis == 1) sb.Append("One step remains after this one.\n");
+            sb.Append("Projects (the user's active projects; answer from this list without a tool): ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
+        }
         if (request.Context.Recall.Count > 0)
         {
-            sb.Append("Related on this machine:\n");
+            sb.Append(request.Observing ? "Already on this machine (do not raise work to keep what is already kept):\n" : "Related on this machine:\n");
             foreach (var line in request.Context.Recall) sb.Append("- ").Append(line).Append('\n');
         }
-        sb.Append("\nTranscript:\n");
+        sb.Append(request.Observing ? "\nThis conversation so far (the passes you have already seen, and what you did):\n" : "\nTranscript:\n");
         for (var i = 0; i < request.Transcript.Count; i++)
             sb.Append('[').Append(i + 1).Append("] ").Append(request.Transcript[i].Render()).Append('\n');
-        sb.Append("\nReply with the next step as one JSON object.");
+        sb.Append(request.Observing ? "\nReply with your next move as one JSON object." : "\nReply with the next step as one JSON object.");
         return sb.ToString();
     }
 }

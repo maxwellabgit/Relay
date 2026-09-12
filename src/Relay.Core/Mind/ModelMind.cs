@@ -30,11 +30,13 @@ public sealed class ModelMind : IMind
         var watch = Stopwatch.StartNew();
         var messages = new List<ModelMessage>
         {
-            new("system", MindPrompt.System(request.Context)),
+            new("system", MindPrompt.System(request.Context, request.Observing)),
             new("user", MindPrompt.Transcript(request)),
         };
         var promptChars = messages.Sum(m => m.Content.Length);
-        var response = await _client.CompleteAsync(new ModelRequest(_client.Model, messages, _maxOutputTokens, JsonObject: true, JsonSchema: MoveSchema.Json, SchemaName: MoveSchema.SchemaName), cancellationToken).ConfigureAwait(false);
+        var schema = request.Observing ? MoveSchema.ObservingJson : MoveSchema.Json;
+        var schemaName = request.Observing ? MoveSchema.ObservingSchemaName : MoveSchema.SchemaName;
+        var response = await _client.CompleteAsync(new ModelRequest(_client.Model, messages, _maxOutputTokens, JsonObject: true, JsonSchema: schema, SchemaName: schemaName), cancellationToken).ConfigureAwait(false);
         if (!response.Ok) return MindStep.Failed("Model unavailable: " + response.Error, null, promptChars, watch.ElapsedMilliseconds, response.PromptTokens, response.CompletionTokens);
         var raw = response.Content ?? "";
         try
@@ -93,5 +95,8 @@ public sealed class ScriptedMind : IMind
     public static AskUserMove Ask(string question, params string[] options) => new(question, options);
     public static WaitMove Wait(string reason = "nothing to do") => new(reason);
     public static StopMove Stop(string reason = "stop") => new(reason);
+    /// <summary>A listening pass that found something: the labels are the window's, resolved by the host.</summary>
+    public static RaiseMove Raise(string kind, string objective, string segments = "#1", string? note = null, string? noteType = null, string? project = null)
+        => new(kind, objective, segments.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), "it matters", note, noteType, project);
     public static MindRead Read(double complexity, params string[] needs) => new("", complexity, needs.Length == 0 ? [MindRead.NeedNone] : needs, 0, 0, RiskRead.None);
 }

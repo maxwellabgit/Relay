@@ -53,20 +53,28 @@ public sealed partial class SessionCoordinator
 
     /// <summary>A remember finding: the judge's restatement is the note; the excerpt is its source; the project hint raises routing confidence.</summary>
     private void RememberFromFinding(TaskState task, JudgeFinding finding, Excerpt? excerpt)
+        => Remember(task, finding.NoteText!, finding.NoteType, finding.Topic, finding.ProjectHint, excerpt, Producers.Judge);
+
+    /// <summary>
+    /// The whole of a piece of work is a note worth keeping: file it and finish, without a planning turn. Whoever
+    /// heard it (the judge, or the mind on a listening pass) wrote the text; the excerpt is its source and the
+    /// project hint raises routing confidence.
+    /// </summary>
+    private void Remember(TaskState task, string noteText, string? noteType, string? topic, string? projectHint, Excerpt? excerpt, string producer)
     {
-        var type = finding.NoteType is not null && NoteTypes.All.Contains(finding.NoteType) ? finding.NoteType : NoteExtractor.Classify(finding.NoteText!);
-        var span = excerpt is not null ? new SourceSpan(excerpt.ExcerptId, 0, excerpt.Text.Length) : new SourceSpan(task.SourceEventId, 0, finding.NoteText!.Length);
-        var outcome = FileNote(type, finding.NoteText!, finding.Topic, task.CaptureId, task.SourceEventId, span, finding.ProjectHint, task.TaskId, Producers.Judge);
+        var type = noteType is not null && NoteTypes.All.Contains(noteType) ? noteType : NoteExtractor.Classify(noteText);
+        var span = excerpt is not null ? new SourceSpan(excerpt.ExcerptId, 0, excerpt.Text.Length) : new SourceSpan(task.SourceEventId, 0, noteText.Length);
+        var outcome = FileNote(type, noteText, topic, task.CaptureId, task.SourceEventId, span, projectHint, task.TaskId, producer);
         if (outcome is null) return; // locked
-        var steps = new List<string> { $"Judge ({task.Why}) kept a {type} note", outcome.Filed ? $"Filed under {outcome.ProjectSlug}" : outcome.Pending ? "Routing needs your decision (Review)" : "No project matched; kept in the inbox" };
+        var steps = new List<string> { $"Heard ({task.Why}) and kept a {type} note", outcome.Filed ? $"Filed under {outcome.ProjectSlug}" : outcome.Pending ? "Routing needs your decision (Review)" : "No project matched; kept in the inbox" };
         if (outcome.Disputes > 0) steps.Add($"{outcome.Disputes} earlier decision(s) may conflict (Review)");
         if (outcome.Error is not null) steps.Add("Filing refused: " + outcome.Error);
         task.Plan = new TurnPlan(true, outcome.Filed ? $"Filed {type} note under {outcome.ProjectSlug}" : $"Kept {type} note in the inbox", steps, null,
-            excerpt is null ? [] : [new Citation(Search.SearchIndex.ExcerptKind, excerpt.ExcerptId, null, null, Truncate(excerpt.Text, 120), span)], [], Producers.Judge);
+            excerpt is null ? [] : [new Citation(Search.SearchIndex.ExcerptKind, excerpt.ExcerptId, null, null, Truncate(excerpt.Text, 120), span)], [], producer);
         // The filing already ran through proposal → policy → executor; the task records the outcome without re-proposing.
         task.Proposals.Add(new ProposalState
         {
-            Proposal = new Proposal(outcome.NoteId, Actions.RouteNote, "recorded by the remember lane", new Dictionary<string, string> { ["noteId"] = outcome.NoteId }, [task.SourceEventId], [], Risks.StagingWrite, false, Producers.Judge),
+            Proposal = new Proposal(outcome.NoteId, Actions.RouteNote, "recorded by the remember lane", new Dictionary<string, string> { ["noteId"] = outcome.NoteId }, [task.SourceEventId], [], Risks.StagingWrite, false, producer),
             Decision = new Decision(DecisionOutcome.Allow, Tier.Automatic, [outcome.Filed ? "filed automatically" : "left in the inbox"], new Dictionary<string, string>()),
             Status = outcome.Filed ? "executed" : outcome.Error is not null ? "denied" : "skipped",
             Result = outcome.Filed ? ExecutionResult.Ok($"Note {outcome.NoteId} filed under {outcome.ProjectSlug}") : null,

@@ -87,9 +87,17 @@ public class MoveSchemaTests
         var schema = System.Text.Json.Nodes.JsonNode.Parse(MoveSchema.Json)!.AsObject();
         Assert.Equal(["read", "move", "feed"], schema["required"]!.AsArray().Select(n => n!.GetValue<string>()));
         var types = schema["properties"]!["move"]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
-        Assert.Equal(Relay.Core.Mind.Move.Types.OrderBy(t => t), types.OrderBy(t => t));
+        Assert.Equal(Relay.Core.Mind.Move.TaskTypes.OrderBy(t => t), types.OrderBy(t => t));
         var needs = schema["properties"]!["read"]!["properties"]!["needs"]!["items"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
         Assert.Equal(MindRead.KnownNeeds.OrderBy(t => t), needs.OrderBy(t => t));
+
+        // Listening has its own grammar over the same read: the model cannot emit a move that only a task may make.
+        var observing = System.Text.Json.Nodes.JsonNode.Parse(MoveSchema.ObservingJson)!.AsObject();
+        Assert.Equal(["read", "move", "feed"], observing["required"]!.AsArray().Select(n => n!.GetValue<string>()));
+        var listening = observing["properties"]!["move"]!["properties"]!["type"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.Equal(Relay.Core.Mind.Move.ObservingTypes.OrderBy(t => t), listening.OrderBy(t => t));
+        Assert.Equal(MindRead.KnownNeeds.OrderBy(t => t),
+            observing["properties"]!["read"]!["properties"]!["needs"]!["items"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).OrderBy(t => t));
     }
 
     private static Relay.Core.Mind.Move Move(string moveJson) => MoveSchema.ParseMove(System.Text.Json.Nodes.JsonNode.Parse(moveJson)!.AsObject());

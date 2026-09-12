@@ -41,25 +41,31 @@ public sealed partial class SessionCoordinator
     // Starting, driving and ending the loop
     // ----------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// What every mind prompt shares, whether the mind is working a task or listening: the tools, the delegates, the
+    /// user's projects and style, the approved prompt fragment, and the constitution if the user has replaced it.
+    /// </summary>
+    private MindContext MindContextOf(IReadOnlyList<ActionDescriptor> actions, IReadOnlyList<string> recall) => new()
+    {
+        Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors,
+        Actions = actions,
+        DelegateProfiles = _services.External?.ProfileNames ?? [],
+        SearchProfiles = _services.External?.SearchProfileNames ?? [],
+        CanBuild = _services.Tools?.CanBuild == true,
+        Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList(),
+        ResponseStyle = Preferences.PromptFragment,
+        MaxAnswerChars = Preferences.MaxAnswerChars,
+        PromptFragment = SelfChange?.PromptFragment(MindPrompt.PromptName),
+        Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(_root.PromptsDirectory, MindPrompt.PromptName + ".md")),
+        Recall = recall,
+    };
+
     private void BeginMindLoop(TaskState task)
     {
         var mind = _services.Mind!;
         var sink = new TaskSink(this, task);
         var tools = new ToolBroker(ToolSources, sink, int.MaxValue); // the loop's own budget governs; the broker just serves
-        var context = new MindContext
-        {
-            Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors,
-            Actions = task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved,
-            DelegateProfiles = _services.External?.ProfileNames ?? [],
-            SearchProfiles = _services.External?.SearchProfileNames ?? [],
-            CanBuild = _services.Tools?.CanBuild == true,
-            Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList(),
-            ResponseStyle = Preferences.PromptFragment,
-            MaxAnswerChars = Preferences.MaxAnswerChars,
-            PromptFragment = SelfChange?.PromptFragment(MindPrompt.PromptName),
-            Constitution = AtomicFile.ReadAllTextIfExists(Path.Combine(_root.PromptsDirectory, MindPrompt.PromptName + ".md")),
-            Recall = RecallFor(task),
-        };
+        var context = MindContextOf(task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved, RecallFor(task));
         var decider = new Decider(_services.Decisions, d => RecordDecision(task, d));
         var host = new MindHost(this, task, sink, tools);
         var loop = new TaskLoop(task.TaskId, LoopOrigin(task), mind, host, context, decider,

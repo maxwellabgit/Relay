@@ -317,6 +317,11 @@ public sealed class TaskLoop
                 WaitingFor = null;
                 return await _host.StopAsync(this, stop, waited, cancellationToken).ConfigureAwait(false);
 
+            // Raising belongs to listening: this task is already the work, so there is nothing to hand over to.
+            case RaiseMove raise:
+                return MoveOutcome.Of(new SystemObserved(now, $"You are working on this task, not listening: raise has nothing to hand the work to. " +
+                    $"Do it here — {(raise.Note is null ? "propose the action" : "propose create_draft_note with the text, then route_note to file it")} — or answer with say and done=true."));
+
             default:
                 return MoveOutcome.Of(new SystemObserved(now, $"The move '{move.Type}' has no handler."));
         }

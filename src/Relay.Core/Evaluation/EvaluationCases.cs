@@ -259,7 +259,7 @@ public sealed class EvaluationSet
             if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Consistent is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
                 problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids); it cannot also expect plan output.");
             foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
-                if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move (say, use_tool, propose, delegate, build, ask_user, wait, stop).");
+                if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move ({string.Join(", ", Mind.Move.Types)}).");
             foreach (var need in c.Expect.Needs ?? [])
                 if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
             if (!c.IsJudgeCase && c.NewSegments is not null)

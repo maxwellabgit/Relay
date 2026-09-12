@@ -116,9 +116,16 @@ public sealed class ExcerptStore
     }
 
     public Excerpt Build(string streamId, JudgeFinding finding, string judgeName, ConversationBuffer buffer, RetentionGuard guard, double elapsedSeconds, DateTimeOffset now)
+        => Build(streamId, finding.SegmentIds, finding.Summary, judgeName, buffer, guard, elapsedSeconds, now);
+
+    /// <summary>
+    /// The words of the named segments, anchored on the last of them, bounded by the guard. <paramref name="selectedBy"/>
+    /// is whoever chose them and <paramref name="reason"/> is why, both kept on the excerpt for the diagnostics drawer.
+    /// </summary>
+    public Excerpt Build(string streamId, IReadOnlyList<string> segmentIds, string reason, string selectedBy, ConversationBuffer buffer, RetentionGuard guard, double elapsedSeconds, DateTimeOffset now)
     {
-        var wanted = finding.SegmentIds.Select(buffer.Find).Where(s => s is not null).Select(s => s!).OrderBy(s => s.At).ToList();
-        if (wanted.Count == 0) throw new InvalidOperationException("The finding names no segment still in the buffer.");
+        var wanted = segmentIds.Select(buffer.Find).Where(s => s is not null).Select(s => s!).OrderBy(s => s.At).ToList();
+        if (wanted.Count == 0) throw new InvalidOperationException("No named segment is still in the buffer.");
         var trigger = wanted[^1];
         var seconds = Math.Max(1, (wanted[^1].At - wanted[0].At).TotalSeconds);
         var decision = guard.Decide(seconds, RetainedSeconds, elapsedSeconds);
@@ -140,8 +147,8 @@ public sealed class ExcerptStore
             ExcerptId = Ulid.NewUlid(now),
             StreamId = streamId,
             TriggerSegmentId = trigger.SegmentId,
-            SelectedBy = judgeName,
-            Reason = finding.Summary,
+            SelectedBy = selectedBy,
+            Reason = reason,
             Segments = copy,
             References = references.Select(kv => new ExcerptReference(kv.Key, kv.Value)).ToList(),
             From = wanted[0].At,

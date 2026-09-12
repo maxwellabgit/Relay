@@ -46,6 +46,8 @@ public static class Producers
     public const string Canned = "canned";
     public const string Judge = "judge";
     public const string Engine = "engine";
+    /// <summary>The mind, whether it was working a task or listening to a conversation.</summary>
+    public const string Mind = "mind";
 }
 
 public static class Risks

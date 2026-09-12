@@ -21,8 +21,8 @@ public sealed class MindContext
     public IReadOnlyList<string> SearchProfiles { get; init; } = [];
     /// <summary>Whether the build move is available in this build. When false the mind is told to name the gap instead.</summary>
     public bool CanBuild { get; init; }
-    /// <summary>"Name (id …, slug …)" per active project.</summary>
-    public IReadOnlyList<string> Projects { get; init; } = [];
+    /// <summary>"Name (id …, slug …)" per active project. Settable because a long listening pass outlives the project list it started with.</summary>
+    public IReadOnlyList<string> Projects { get; set; } = [];
     /// <summary>The user's response style (compiled preferences).</summary>
     public string? ResponseStyle { get; init; }
     public int MaxAnswerChars { get; init; } = 1_200;
@@ -31,14 +31,17 @@ public sealed class MindContext
     /// <summary>When set, replaces the built-in constitution (the text of config\prompts\mind.md).</summary>
     public string? Constitution { get; init; }
     /// <summary>Related notes, excerpts or tasks found before the first step ("this connects to…"), one line each.</summary>
-    public IReadOnlyList<string> Recall { get; init; } = [];
+    public IReadOnlyList<string> Recall { get; set; } = [];
 }
 
 /// <summary>Everything one step is decided from: the task's transcript so far and the context.</summary>
-public sealed record MindRequest(string TaskId, string Origin, IReadOnlyList<Observation> Transcript, MindContext Context, DateTimeOffset At, int StepIndex, int MaxSteps = 0)
+public sealed record MindRequest(string TaskId, string Origin, IReadOnlyList<Observation> Transcript, MindContext Context, DateTimeOffset At, int StepIndex, int MaxSteps = 0, bool Observing = false)
 {
     /// <summary>Steps the loop will still grant after this one; null when the budget is unknown.</summary>
     public int? StepsLeftAfterThis => MaxSteps > 0 ? Math.Max(0, MaxSteps - StepIndex - 1) : null;
+
+    /// <summary>The origin of a listening pass: no objective, no budget to spend, nothing asked of Relay.</summary>
+    public const string WindowOrigin = "window";
 }
 
 /// <summary>

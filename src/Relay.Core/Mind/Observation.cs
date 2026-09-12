@@ -64,6 +64,55 @@ public sealed record InputObserved(DateTimeOffset At, string Source, string Text
     }
 }
 
+/// <summary>
+/// One line of a conversation Relay is listening to, labelled for the pass that shows it. The label
+/// (<c>#1</c>, <c>#2</c>, …) is what a raise names: a 26-character segment id is copied wrongly by a small
+/// model, and a label the deterministic code resolves cannot name a line that was not shown.
+/// </summary>
+public sealed record WindowLine(string Label, string SegmentId, string Text);
+
+/// <summary>
+/// A stretch of the conversation, handed to the observing loop. <see cref="Fresh"/> is what arrived since the
+/// last pass; <see cref="Earlier"/> is the rest of the held window, for context — both are labelled and either
+/// may be named by a raise. The words live in the rolling buffer and in raised excerpts only; the ledger sees
+/// counts and hashes.
+/// </summary>
+public sealed record WindowObserved(DateTimeOffset At, string StreamId, IReadOnlyList<WindowLine> Fresh, IReadOnlyList<WindowLine> Earlier, double HeldSeconds) : Observation(At)
+{
+    public override string Kind => "window";
+
+    /// <summary>Every line the pass showed, so a raise's labels can be resolved and an unknown one refused.</summary>
+    public IEnumerable<WindowLine> Lines => Earlier.Concat(Fresh);
+
+    public override string Render()
+    {
+        var sb = new StringBuilder();
+        if (Earlier.Count > 0)
+        {
+            sb.Append("earlier in this conversation (").Append(Num(HeldSeconds)).Append("s held):\n");
+            foreach (var line in Earlier) sb.Append("  ").Append(line.Label).Append(" \"").Append(Clip(line.Text, 600)).Append("\"\n");
+        }
+        sb.Append("just heard:\n");
+        if (Fresh.Count == 0) sb.Append("  (nothing new)\n");
+        foreach (var line in Fresh) sb.Append("  ").Append(line.Label).Append(" \"").Append(Clip(line.Text, 1_200)).Append("\"\n");
+        return sb.ToString().TrimEnd('\n');
+    }
+}
+
+/// <summary>
+/// What a raise came to: a task of its own with the lines that substantiate it kept as an excerpt, or a refusal
+/// with the reason (a line that was not shown, work already raised for the same thing, below the significance bar).
+/// </summary>
+public sealed record RaisedObserved(DateTimeOffset At, string? TaskId, string RaisedKind, string Objective, string? ExcerptId, string? Refused = null) : Observation(At)
+{
+    public override string Kind => "raised";
+
+    public override string Render() => Refused is not null
+        ? $"not raised: {Clip(Refused, 600)}"
+        : $"raised {RaisedKind} task {TaskId} \"{Clip(Objective, 200)}\"" + (ExcerptId is null ? " (no excerpt: the lines had expired)" : $" · excerpt {ExcerptId}") +
+          " · it runs on its own from here, with its own budget and its own approvals. Keep listening.";
+}
+
 /// <summary>The mind's own step, kept in the transcript so it sees what it did and what it told the user.</summary>
 public sealed record MoveObserved(DateTimeOffset At, Move Move, string Feed) : Observation(At)
 {

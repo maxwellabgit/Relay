@@ -41,6 +41,13 @@ public sealed partial class SessionCoordinator
         public DateTimeOffset? LastCheckAt { get; set; }
         public string? LastError { get; set; }
         public string? LastJudge { get; set; }
+        /// <summary>Mind mode: the conversation's own loop, one pass per ingest. Null when the judge reads the stream.</summary>
+        public Mind.ObservingLoop? Loop { get; set; }
+        /// <summary>segmentId → the label (<c>#1</c>, <c>#2</c>, …) the mind has been shown for it, kept for the life of the stream.</summary>
+        public Dictionary<string, string> Labels { get; } = new(StringComparer.Ordinal);
+        public int Labelled { get; set; }
+        /// <summary>The mind's last line about what it heard, for the listening view. Never in the ledger unguarded.</summary>
+        public string? LastSaid { get; set; }
     }
 
     private StreamState? _stream;
@@ -65,10 +72,14 @@ public sealed partial class SessionCoordinator
             Buffer = new ConversationBuffer(window),
         };
         Excerpts.BeginStream();
+        // Mind mode: the mind reads the conversation itself and the judge is not used at all (the Alpha, step 1).
+        if (ObservingWithMind) BeginObserving(_stream);
+        _stream.LastJudge = _stream.Loop?.MindName;
         Append(EventTypes.StreamStarted, new
         {
             streamId = draft.CaptureId, bufferSeconds = window.TotalSeconds, wholeConversation = window == TimeSpan.Zero, observeIntervalMs = _settings.Stream.ObserveIntervalMs,
-            minIngestChars = _settings.Stream.MinIngestChars, minIngestSeconds = _settings.Stream.MinIngestSeconds, judge = _services.Judge.Name, judgeMode = _settings.Judge.Mode, previousForegroundProcess = draft.PreviousForegroundProcess,
+            minIngestChars = _settings.Stream.MinIngestChars, minIngestSeconds = _settings.Stream.MinIngestSeconds,
+            judge = _stream.Loop is null ? _services.Judge.Name : null, mind = _stream.Loop?.MindName, judgeMode = _settings.Judge.Mode, previousForegroundProcess = draft.PreviousForegroundProcess,
         });
         ScheduleObserve();
     }
@@ -180,6 +191,7 @@ public sealed partial class SessionCoordinator
         }
         // Not yet: let the conversation run on. The final pass and a watched term never wait.
         if (!final && !urgent && !EnoughToIngest(stream, now)) return;
+        if (stream.Loop is not null) { ObservePass(stream, final); return; }
         stream.Judging = true;
         stream.Passes++;
         var window = stream.Buffer.Segments.ToList();
@@ -310,7 +322,8 @@ public sealed partial class SessionCoordinator
         Append(EventTypes.StreamStopped, new
         {
             streamId = stream.StreamId, reason, seconds, segments = stream.Segments, chars = stream.Chars, expired = stream.Buffer.ExpiredSegments, heldAtStop = stream.Buffer.Segments.Count,
-            passes = stream.Passes, findings = stream.Findings, excerpts = stream.Excerpts, tasks = stream.Tasks, retainedSeconds = Excerpts.RetainedSeconds, judge = stream.LastJudge ?? _services.Judge.Name,
+            passes = stream.Passes, findings = stream.Findings, excerpts = stream.Excerpts, tasks = stream.Tasks, retainedSeconds = Excerpts.RetainedSeconds,
+            judge = stream.Loop is null ? stream.LastJudge ?? _services.Judge.Name : null, mind = stream.Loop?.MindName,
         });
         stream.Buffer.Clear();
         ClearWindowFile();

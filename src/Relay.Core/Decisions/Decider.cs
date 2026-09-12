@@ -50,6 +50,7 @@ public sealed class DecisionSet
                 Thresholds = new() { ["approval"] = 0.4, ["refuse"] = 0.8 },
             },
             [Decider.Filing] = new() { Thresholds = new() { ["auto"] = 0.75, ["ask"] = 0.35 } },
+            [Decider.Raise] = new() { Thresholds = new() { ["significance"] = 0.45 } },
             [Decider.Retry] = new() { Thresholds = new() { ["contract"] = 2, ["model"] = 1 } },
             [Decider.Narrate] = new() { Thresholds = new() { ["minChars"] = 400, ["minSeconds"] = 8 } },
         },
@@ -112,6 +113,7 @@ public sealed class Decider
     public const string Filing = "filing";
     public const string Retry = "retry";
     public const string Narrate = "narrate";
+    public const string Raise = "raise";
 
     // route outcomes
     public const string Local = "local";
@@ -130,6 +132,9 @@ public sealed class Decider
     public const string GiveUp = "fail";
     public const string Surface = "surface";
     public const string Hold = "hold";
+    // raise outcomes
+    public const string RaiseWork = "raise";
+    public const string Ignore = "ignore";
 
     private readonly DecisionSet _set;
     private readonly Action<DecisionRecord>? _sink;
@@ -201,6 +206,22 @@ public sealed class Decider
         if (confidence >= spec.T("auto", 0.75)) return Record(Filing, features, spec, confidence, Auto, $"confidence {F(confidence)} ≥ {F(spec.T("auto", 0.75))}");
         if (confidence >= spec.T("ask", 0.35)) return Record(Filing, features, spec, confidence, Ask, $"confidence {F(confidence)} ≥ {F(spec.T("ask", 0.35))}");
         return Record(Filing, features, spec, confidence, Inbox, $"confidence {F(confidence)} < {F(spec.T("ask", 0.35))}");
+    }
+
+    /// <summary>
+    /// Whether something the mind heard while listening is significant enough to become work. The mind's choice to
+    /// raise is the judgment; this is the floor under it, so a mind that raises everything cannot spend the user's
+    /// attention freely. A read the mind did not give (a scripted step) is taken at its word.
+    /// </summary>
+    public DecisionRecord RaiseFor(MindRead? read)
+    {
+        var spec = _set.Spec(Raise);
+        var significance = read?.Significance ?? 1;
+        var features = new Dictionary<string, double>(StringComparer.Ordinal) { ["significance"] = significance, ["sensitivity"] = read?.Sensitivity ?? 0 };
+        var threshold = spec.T("significance", 0.45);
+        return significance >= threshold
+            ? Record(Raise, features, spec, significance, RaiseWork, $"significance {F(significance)} ≥ {F(threshold)}")
+            : Record(Raise, features, spec, significance, Ignore, $"significance {F(significance)} < {F(threshold)}");
     }
 
     /// <summary>After a failed step: try again or give up. <paramref name="kind"/> is "contract" (the reply broke the schema) or "model" (unavailable, timed out).</summary>

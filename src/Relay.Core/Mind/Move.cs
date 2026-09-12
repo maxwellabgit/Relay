@@ -18,8 +18,16 @@ public abstract record Move(string Type)
     public const string AskUser = "ask_user";
     public const string Wait = "wait";
     public const string Stop = "stop";
+    public const string Raise = "raise";
 
-    public static readonly string[] Types = [Say, UseTool, Propose, Delegate, Build, AskUser, Wait, Stop];
+    /// <summary>Every move that exists, in either grammar.</summary>
+    public static readonly string[] Types = [Say, UseTool, Propose, Delegate, Build, AskUser, Wait, Stop, Raise];
+
+    /// <summary>The moves a task may make. It is already the work, so it has nothing to raise to.</summary>
+    public static readonly string[] TaskTypes = [Say, UseTool, Propose, Delegate, Build, AskUser, Wait, Stop];
+
+    /// <summary>The moves the observing loop may make while Relay is listening: it interprets and raises work, it never acts and never waits on anything.</summary>
+    public static readonly string[] ObservingTypes = [Wait, Say, UseTool, Raise];
 
     /// <summary>One line for the transcript and the ledger: the type and what it names, never long prose.</summary>
     public abstract string Brief();
@@ -92,6 +100,34 @@ public sealed record WaitMove(string Reason) : Move(Wait)
 public sealed record StopMove(string Reason) : Move(Stop)
 {
     public override string Brief() => $"stop \"{Clip(Reason, 160)}\"";
+}
+
+/// <summary>
+/// Listening only: something in the conversation matters enough to become work. <see cref="Objective"/> is what
+/// Relay should do about it; <see cref="Segments"/> names the lines that substantiate it by the labels the window
+/// showed (<c>#3</c>), and only those lines are kept. <see cref="Note"/> is set when the whole of the work is a
+/// note worth filing, so the simple case costs one move. The raised task gets its own loop, budget and approvals:
+/// the observing loop hands work over and returns to listening, so it never waits on anything.
+/// </summary>
+public sealed record RaiseMove(
+    string Kind,
+    string Objective,
+    IReadOnlyList<string> Segments,
+    string Why,
+    string? Note = null,
+    string? NoteType = null,
+    string? Project = null,
+    string? Topic = null,
+    string? MergeKey = null) : Move(Raise)
+{
+    public override string Brief()
+    {
+        var sb = new StringBuilder($"raise {Kind} \"{Clip(Objective, 160)}\" (");
+        sb.Append(Segments.Count == 0 ? "latest line" : string.Join(",", Segments));
+        if (Note is not null) sb.Append(", note ").Append(NoteType ?? "note").Append(' ').Append(Note.Length).Append(" chars");
+        if (Project is not null) sb.Append(", project ").Append(Clip(Project, 60));
+        return sb.Append(')').ToString();
+    }
 }
 
 /// <summary>How risky the mind believes its own next move is, per axis, 0–1. The deterministic fundamental-operation flag reads these; it can only raise the bar the hard rules set.</summary>

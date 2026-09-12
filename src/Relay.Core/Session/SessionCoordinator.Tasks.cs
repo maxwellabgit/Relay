@@ -318,7 +318,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         return task;
     }
 
-    private object TaskCreatedPayload(TaskState task, int chars, string? judge = null) => new
+    /// <summary><paramref name="raisedBy"/> is the mind that raised the task from a listening pass; <paramref name="judge"/> is the judge that found it, on the older path.</summary>
+    private object TaskCreatedPayload(TaskState task, int chars, string? judge = null, string? raisedBy = null) => new
     {
         taskId = task.TaskId,
         origin = task.Origin.Wire(),
@@ -336,6 +337,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         mergeKey = Guarded(task, task.MergeKey),
         chars,
         judge,
+        raisedBy,
         planner = PlannerName,
     };
 

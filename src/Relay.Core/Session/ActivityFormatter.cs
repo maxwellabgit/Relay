@@ -103,13 +103,18 @@ public static class ActivityFormatter
             EventTypes.LockReleased => "Unlocked by user",
 
             // Listening (ids, sizes and timings only)
-            EventTypes.StreamStarted => $"Listening started ({(r.DataInt64("bufferSeconds") is > 0 and var b ? $"{b}s buffer" : "whole conversation held")}, judge {r.DataString("judge")})",
+            EventTypes.StreamStarted => $"Listening started ({(r.DataInt64("bufferSeconds") is > 0 and var b ? $"{b}s buffer" : "whole conversation held")}, read by {Reader(r)})",
             EventTypes.StreamSegment => $"Heard a segment ({r.DataInt64("chars")} chars, {r.DataInt64("held")} held)",
             EventTypes.StreamStopped => $"Listening {r.DataString("reason")} after {Seconds(r)}: {r.DataInt64("segments")} segment(s), {r.DataInt64("passes")} check(s), {r.DataInt64("findings")} finding(s), {r.DataInt64("excerpts")} excerpt(s) kept",
             EventTypes.StreamInterruptedFound => $"A buffer window from a previous session was found and discarded ({r.DataInt64("segments")} segment(s), {r.DataInt64("chars")} chars)",
-            EventTypes.ObserveChecked => $"{r.DataString("judge")} checked {Count(r, "segments")} new segment(s): nothing significant" + Tokens(r),
-            EventTypes.ObserveFound => $"{r.DataString("judge")} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
-            EventTypes.ObserveFailed => $"Judge {r.DataString("judge")} failed: {r.DataString("error")}",
+            EventTypes.ObserveChecked => $"{Reader(r)} read {Count(r, "segments")} new segment(s): nothing that needs Relay" + Tokens(r),
+            EventTypes.ObserveFound => $"{Reader(r)} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
+            EventTypes.ObserveFailed => $"{Reader(r)} could not read the conversation: {r.DataString("error")}",
+            // The objective and the line would quote the room, so these name the move, the kind and the decision only.
+            EventTypes.ObserveStepped => $"{Reader(r)} chose {r.DataString("move")} on pass {r.DataInt64("pass")}" + Tokens(r),
+            EventTypes.ObserveRaised => r.DataString("refused") is { } no
+                ? $"Nothing raised ({r.DataString("kind")}): {no}"
+                : $"Raised {r.DataString("kind")} work from {Count(r, "segments")} line(s) of the conversation ({FormatDouble(r, "significance")})",
             EventTypes.ExcerptStored => $"Kept excerpt {Short(r.DataString("excerptId"))} ({FormatDouble(r, "seconds")}s, {r.DataInt64("chars")} chars{(r.DataBool("shrunkByGuard") == true ? ", trimmed by the retention guard" : "")}) for a {r.DataString("kind") ?? "finding"} finding" + Cue(r),
             EventTypes.AskRecorded => $"You asked ({r.DataInt64("chars")} chars)" + (r.DataBool("whileListening") == true ? " while listening" : ""),
 
@@ -158,6 +163,9 @@ public static class ActivityFormatter
     }
 
     private static string Short(string? id) => id is null ? "?" : id.Length > 10 ? id[^8..] : id;
+
+    /// <summary>Whatever read the conversation on this record: the mind in mind mode, a judge on the older path.</summary>
+    private static string Reader(LedgerRecord r) => r.DataString("mind") ?? r.DataString("judge") ?? "Relay";
 
     /// <summary>The judge's cue for a finding, when the ledger still carries it readably (older records); a fingerprint is not shown.</summary>
     private static string Cue(LedgerRecord r)
