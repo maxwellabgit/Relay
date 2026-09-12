@@ -153,7 +153,8 @@ public class MemoryTests : IDisposable
     [Fact]
     public void NoteModeLeavesUnmentionedNotesInTheInboxAndAttachesCandidatesToAmbiguousOnes()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
+        // The deterministic grammar, named explicitly: mind is the default, and a mindless default has a Review notice of its own.
+        using var s = Scenario.New(_tmp, x => x.Orchestrator.Mode = OrchestratorSettings.Rules).WithWorkspace()
             .Command("create project Atlas").Approve()
             .Command("create project Garden").Approve()
             .Note("Buy compost and a new rake at the hardware store this weekend.")

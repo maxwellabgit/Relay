@@ -20,6 +20,7 @@ public static class ActivityFormatter
             EventTypes.LedgerIntegrityFailed => $"Ledger integrity failure at record {r.DataInt64("brokenSeq")}: {r.DataString("reason")}",
             EventTypes.SettingsLoaded => r.DataBool("createdDefault") == true ? "Created default settings" : "Loaded settings",
             EventTypes.SettingsInvalid => $"Settings problem: {r.DataString("problem")}",
+            EventTypes.MindUnavailable => $"No mind: {r.DataString("model")} at {r.DataString("endpoint")} is {r.DataString("reason")}",
             EventTypes.StorageAclApplied => "Restricted data folder to this user and SYSTEM",
             EventTypes.StorageAclFailed => $"Could not restrict data folder permissions: {r.DataString("error")}",
             EventTypes.HotkeyRegistered => $"Registered {r.DataString("name")} as {r.DataString("chord")}" + (r.DataString("scope") == "window" ? " (this window only)" : ""),

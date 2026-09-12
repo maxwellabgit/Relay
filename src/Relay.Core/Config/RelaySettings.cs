@@ -122,8 +122,11 @@ public sealed class OrchestratorSettings
     /// <summary>The rebuilt orchestrator: one mind, one self-observing loop per task (docs/09). Needs the model enabled.</summary>
     public const string Mind = "mind";
 
-    /// <summary>off: instructions are recorded only. rules: deterministic command grammar only. rules+model: RELAY0's model plans first, the grammar is its fallback. mind: the loop of docs/09 runs every task.</summary>
-    [JsonPropertyName("mode")] public string Mode { get; set; } = RulesAndModel;
+    /// <summary>
+    /// mind (the default): one local mind runs every task and reads every conversation. off: instructions are recorded only.
+    /// rules and rules+model are the older pipeline, kept only until the Alpha removes them (docs/10).
+    /// </summary>
+    [JsonPropertyName("mode")] public string Mode { get; set; } = Mind;
     /// <summary>Mind mode: the most steps one task may take before it is ended visibly.</summary>
     [JsonPropertyName("maxSteps")] public int MaxSteps { get; set; } = 12;
     /// <summary>Notes routed at or above this confidence are filed into the project automatically.</summary>

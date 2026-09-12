@@ -19,6 +19,8 @@ public static class EventTypes
     // Configuration and storage
     public const string SettingsLoaded = "settings.loaded";
     public const string SettingsInvalid = "settings.invalid";
+    /// <summary>Mind mode is selected and no mind could be built: the model is off or unreachable. Relay can do almost nothing until it is on.</summary>
+    public const string MindUnavailable = "mind.unavailable";
     public const string StorageAclApplied = "storage.acl_applied";
     public const string StorageAclFailed = "storage.acl_failed";
 

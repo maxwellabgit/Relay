@@ -24,7 +24,8 @@ public class OrchestratorTurnTests : IDisposable
     [Fact]
     public void CreateProjectNeedsApprovalThenExecutesThroughTheFullPath()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
+        // The deterministic grammar, named explicitly: mind is the default, and a mindless default has a Review notice of its own.
+        using var s = Scenario.New(_tmp, x => x.Orchestrator.Mode = OrchestratorSettings.Rules).WithWorkspace()
             .Command("Create a project called Market Study")
             .ExpectState(RelayState.AwaitingApproval)
             .ExpectProposal(Actions.CreateProject, "pending")

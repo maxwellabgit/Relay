@@ -2,6 +2,7 @@ using Relay.Core.Config;
 using Relay.Core.Decisions;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
+using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
@@ -301,6 +302,32 @@ public class ObservingTests : IDisposable
         Assert.Contains("withheld:", ledger);
         // The words are in the excerpt on disk, under the retention the guard sets.
         Assert.Contains("October 14", Assert.Single(s.H.Excerpts.All()).Text);
+    }
+
+    [Fact]
+    public void MindIsThePipelineByDefault()
+    {
+        Assert.Equal(OrchestratorSettings.Mind, new RelaySettings().Orchestrator.Mode);
+        Assert.Empty(new RelaySettings().Validate());
+    }
+
+    [Fact]
+    public void TheDefaultWithNoModelSaysRelayHasNoMindInsteadOfQuietlyFallingBack()
+    {
+        // No mind is supplied and the model is off: the default mode is still mind, and Relay says what that costs.
+        using (var s = Scenario.New(_tmp).WithWorkspace().ExpectEvent(EventTypes.MindUnavailable))
+        {
+            _output.WriteLine(s.Transcript());
+            var notice = Assert.Single(s.Snap.Review, r => r.Kind == ReviewItemKind.MindUnavailable);
+            Assert.Contains("switched off in Settings", notice.Detail);
+            Assert.Equal("disabled", s.H.Last(EventTypes.MindUnavailable)!.DataString("reason"));
+        }
+
+        // With a mind in place there is nothing to say.
+        using var second = new TempRoot();
+        using var ok = Scenario.New(second, Listening, mind: new ScriptedMind()).WithWorkspace();
+        Assert.DoesNotContain(ok.Snap.Review, r => r.Kind == ReviewItemKind.MindUnavailable);
+        Assert.Equal(0, ok.H.Count(EventTypes.MindUnavailable));
     }
 
     [Fact]

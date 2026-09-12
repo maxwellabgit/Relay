@@ -31,6 +31,8 @@ public enum ReviewItemKind
     DisputedNotes,
     /// <summary>Content that could not be indexed or read (e.g. a hand-edited note file).</summary>
     IndexProblem,
+    /// <summary>Relay runs on one local mind and it could not be reached. Almost nothing works until it is. Informational.</summary>
+    MindUnavailable,
 }
 
 public sealed record ReviewItem(ReviewItemKind Kind, string Title, string Detail, string? Payload = null);
