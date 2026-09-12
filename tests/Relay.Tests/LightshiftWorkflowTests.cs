@@ -244,8 +244,8 @@ public class LightshiftWorkflowTests : IDisposable
     [Fact]
     public void AnObservedTaskCanNeverSendAnythingOutside()
     {
-        // The judge raises a research task from something overheard; a planner that proposes model.request is denied by policy.
-        var judge = new ScriptedJudge().When("competitors", TaskKind.Research, "Research Lightshift's competitors.", projectHint: "Lightshift", topic: "lightshift");
+        // The mind raises a research task from something overheard; a planner that proposes model.request is denied by policy.
+        var mind = new ListeningMind().When("competitors", "research", "Research Lightshift's competitors.", project: "Lightshift", topic: "lightshift");
         var planner = new CannedOrchestrator().Otherwise((request, context) =>
         {
             if (request.Origin != TaskOrigin.Observed) return TurnPlan.NotUnderstood("canned", "only observed tasks are scripted");
@@ -255,9 +255,10 @@ public class LightshiftWorkflowTests : IDisposable
             return new TurnPlan(true, "Research overheard", ["Proposed an external task"], null, [], [p], "canned", Knowledge: new KnowledgeState([], ["competitors"], true, "gap"));
         });
         var client = new ScriptedModelClient().Reply(Answer);
-        using var s = Scenario.New(_tmp, configure: st => WithResearchProfile(st), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner), judge: judge, externalClients: _ => client, inlinePost: false).WithWorkspace()
+        using var s = Scenario.New(_tmp, configure: st => { WithResearchProfile(st); st.Orchestrator.Mode = Relay.Core.Config.OrchestratorSettings.Rules; st.Listening.Enabled = true; },
+                orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner), mind: mind, externalClients: _ => client, inlinePost: false).WithWorkspace()
             .Command("create project Lightshift").Approve()
-            .WithListening().StartListening()
+            .StartListening()
             .Listen("Someone should look at Lightshift's competitors before the beta.")
             .ExpectTask(TaskKind.Research, TaskStatus.Completed, TaskOrigin.Observed);
         var task = s.FindTask(TaskKind.Research, origin: TaskOrigin.Observed)!;

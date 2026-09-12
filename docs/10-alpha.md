@@ -12,7 +12,9 @@ The durable half. The append-only hash-chained ledger with verify, repair and `L
 
 ### G1 · Two pipelines, and the local model still has two contracts
 
-`orchestrator.mode` defaults to `rules+model`; the mind loop is opt-in. Conversation windows are read by `IJudge` — a separate model role with its own contract and its own prompt — which creates observed tasks that the mind then plans. The README commits to one interpreter and one action vocabulary for every origin. While two pipelines stand, every capability below has to be built twice, and the live tuning the mind has had does not govern what happens when Relay is listening.
+*Closing: three of the five commits below have landed. `mind` is the default and the mind reads the stream itself; `IJudge` and both its implementations are gone. The grammar still plans what a raise turns into.*
+
+`orchestrator.mode` defaulted to `rules+model` and the mind loop was opt-in. Conversation windows were read by `IJudge` — a separate model role with its own contract and its own prompt — which created observed tasks that the mind then planned. The README commits to one interpreter and one action vocabulary for every origin. While two pipelines stand, every capability below has to be built twice, and the live tuning the mind has had does not govern what happens when Relay is listening.
 
 Present and unreachable from the target: `RuleBasedOrchestrator`, `CompositeOrchestrator`, `ModelOrchestrator`, `HeuristicJudge`, `ModelJudge`, the direct classifier, the `NoteExtractor` cue regexes and the `NoteRouter` weighting.
 
@@ -63,7 +65,9 @@ No `split`, `prioritize`, `defer` or revise-objective (cancel and stop exist). N
 
 `mind` becomes the default. The mind reads conversation windows itself: a window closes into an observation and the loop decides, with the same moves and the same action vocabulary it has for a typed instruction. The grammar, both judges, the model orchestrator and the classifier are deleted and their scenarios re-expressed over `ScriptedMind`. `RelayState` collapses to `Starting`, `Ready`, `Failed`, `Locked`, with listening and capture as flags of the surface rather than states of the machine; per-task status carries what the old turn states carried.
 
-Lands in four commits, each green: the mind over the stream (judge still in tree, unused); the default flip; the deletions and the test migration; the state collapse.
+Lands in five commits, each green: the mind over the stream (judge still in tree, unused); the default flip; the judge deleted and its scenarios re-expressed over the mind; the grammar and the model orchestrator deleted with them; the state collapse.
+
+Two things the judge's deletion hands to the gate. The authored evaluation sets no longer score listening at all: the judge stage had its own cases and its own expectations, and the mind's stage scores a task loop, not a pass over a window. An observing stage — one pass against a recorded host, scored on what it raised — is the gate's to add, and until it exists listening is held only by the scenario tests. And `tools\ui-smoke.ps1` and `tools\acceptance-run.ps1` can no longer exercise listening without a model, because there is no heuristic reader behind the chord any more; both are rewritten at the gate against a local mind.
 
 *Proves:* a messy conversation window produces a useful, source-linked note or task through the loop that has been tuned, and every step below is written once.
 

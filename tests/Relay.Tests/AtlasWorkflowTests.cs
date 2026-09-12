@@ -1,7 +1,8 @@
 using System.Text.Json;
 using Relay.Core.Attention;
-using Relay.Core.Judge;
+using Relay.Core.Config;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
@@ -17,8 +18,8 @@ namespace Relay.Tests;
 /// The README's flagship workflow, end to end against the real executor: a decision overheard and
 /// filed, a later statement that contradicts it, an alert with both sources and an editable proposal
 /// to update the record, the approval, and a direct question while still listening that is answered
-/// from the corrected record. The judge is scripted (it stands in for RELAY0); everything after it is
-/// the production path.
+/// from the corrected record. The mind reading the conversation is scripted (it stands in for RELAY0);
+/// everything after it is the production path.
 /// </summary>
 public class AtlasWorkflowTests : IDisposable
 {
@@ -27,9 +28,16 @@ public class AtlasWorkflowTests : IDisposable
     private const string Decision = "We decided the Atlas beta ships on October 14.";
     private const string Contradiction = "Marketing wants the Atlas beta out on the 21st.";
 
-    private static ScriptedJudge AtlasJudge() => new ScriptedJudge()
-        .When("We decided", TaskKind.Remember, "Keep this decision.", projectHint: "Atlas", noteText: "Atlas beta ships on October 14.", topic: "atlas beta")
-        .When("21st", TaskKind.Check, "Check the stated Atlas beta date against the stored decision.", projectHint: "Atlas", topic: "atlas beta", mergeKey: "check:atlas:beta-date");
+    /// <summary>Listening on with the deterministic grammar still planning what is raised (docs/10, step 1c).</summary>
+    private static void Listening(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Rules;
+        s.Listening.Enabled = true;
+    }
+
+    private static ListeningMind AtlasMind() => new ListeningMind()
+        .When("We decided", "remember", "Keep this decision.", note: "Atlas beta ships on October 14.", noteType: "decision", project: "Atlas", topic: "atlas beta")
+        .When("21st", "check", "Check the stated Atlas beta date against the stored decision.", project: "Atlas", topic: "atlas beta", mergeKey: "check:atlas:beta-date");
 
     /// <summary>
     /// A planner that does what RELAY0's model does for a check task: searches, reads the excerpt, and when
@@ -65,9 +73,9 @@ public class AtlasWorkflowTests : IDisposable
     [Fact]
     public void TheReadmeWorkflowHolds()
     {
-        using var s = Scenario.New(_tmp, judge: AtlasJudge(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
+        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
             .Command("create project Atlas").Approve()
-            .WithListening().StartListening()
+            .StartListening()
             .Listen(Decision)                                                        // observed → remember → filed (ambient)
             .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Ambient, "Note filed")
@@ -158,9 +166,9 @@ public class AtlasWorkflowTests : IDisposable
     [Fact]
     public void RejectingTheUpdateLeavesTheRecordAloneAndDoesNotReAlert()
     {
-        using var s = Scenario.New(_tmp, judge: AtlasJudge(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
+        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
             .Command("create project Atlas").Approve()
-            .WithListening().StartListening()
+            .StartListening()
             .Listen(Decision)
             .Listen(Contradiction)
             .ExpectAttention(Presentation.Proposal)
@@ -184,9 +192,9 @@ public class AtlasWorkflowTests : IDisposable
     [Fact]
     public void EditingTheProposedTextBeforeApprovingChangesWhatIsRecorded()
     {
-        using var s = Scenario.New(_tmp, judge: AtlasJudge(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
+        using var s = Scenario.New(_tmp, Listening, mind: AtlasMind(), orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), CheckPlanner())).WithWorkspace()
             .Command("create project Atlas").Approve()
-            .WithListening().StartListening()
+            .StartListening()
             .Listen(Decision)
             .Listen(Contradiction)
             .Edit(Actions.SupersedeNote, ("newText", "Atlas beta ships on October 21 (marketing's request; engineering to confirm)."))

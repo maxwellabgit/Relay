@@ -9,7 +9,9 @@
   does what a person would do at the keyboard and records what the app did; it does not score the run.
 
     1. builds and launches Relay.exe against a throwaway data root, in the suite's deterministic mode:
-       the heuristic judge and the rule grammar, no model, no network;
+       the rule grammar, no model, no network. A "listen" scenario needs more than that: reading a
+       conversation is the mind's, so point model.endpoint at a local gateway and enable it, or the
+       chord will dictate and nothing will be read (docs\10, step 1);
     2. creates every project the scenario's standing grants name (project_memory.read:<Name>);
     3. seeds the frozen adapters as notes ("remember that <fact> -- <Project>", approved) so the app has
        the same project memory the fixture assumes; a branch's frozen history adapter is seeded the same way;
@@ -22,7 +24,7 @@
     5. takes screenshots of the window at the regions the suite's views ask for, scrolling through UI
        Automation, and dumps every UIA name next to each screenshot;
     6. closes the window and derives the artifacts from the ledger and the records on disk:
-         run_manifest.json        what ran, with what judge and planner, against which build
+         run_manifest.json        what ran, with what mind and planner, against which build
          input_transcript.json    the turns as given and as typed, each with its segment ids (matched by SHA-256)
          detected_tasks.json      every task record with its excerpt and the turn ids the excerpt covers
          state_transitions.jsonl  state.changed records
@@ -357,7 +359,7 @@ function Ui-CaptureBox {
 # Dictation delivers an utterance as one chunk when the speaker lets go of the key, not as keystrokes; so
 # does this. The capture surface's text is extended through UI Automation, which raises the same
 # TextChanged the app sees from Flow or a paste. (Per-character SendKeys dropped runs of characters
-# whenever the app was busy with a judge pass, which is exactly when the text matters.)
+# whenever the app was busy with a listening pass, which is exactly when the text matters.)
 function Enter-Text($text) {
     $deadline = (Get-Date).AddSeconds(10)
     while ((Get-Date) -lt $deadline) {
@@ -472,8 +474,8 @@ try {
     Note "window is foreground" (Focus-Relay)
     Note "session.started" ($null -ne (Wait-Event "session.started" 10))
     Note "state IDLE" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "IDLE" }))
-    $judgeChip = Ui-WaitMatch "^Judge " 5
-    Log "  judge chip: $judgeChip"
+    $listeningChip = Ui-WaitMatch "^(Listening|No mind)" 5
+    Log "  listening chip: $listeningChip"
 
     foreach ($name in $projectNames) {
         Run-Command "create project $name" "project $name created" | Out-Null
@@ -520,7 +522,7 @@ try {
         Press-NoteKey
         Note "NOTE_CAPTURE entered" ($null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "NOTE_CAPTURE" }))
         $streamStarted = Wait-Event "stream.started" 5
-        Note "stream started" ($null -ne $streamStarted) $(if ($streamStarted) { "judge $($streamStarted.data.judge), observe every $($streamStarted.data.observeIntervalMs) ms" } else { "" })
+        Note "stream started" ($null -ne $streamStarted) $(if ($streamStarted) { "mind $($streamStarted.data.mind), observe every $($streamStarted.data.observeIntervalMs) ms" } else { "needs a mind: enable the model gateway" })
         Note "UI shows LISTENING" ($null -ne (Ui-WaitMatch "^LISTENING" 5))
         foreach ($turn in $turns) {
             $typed = Normalize-Typed $turn.text
@@ -531,12 +533,12 @@ try {
             Start-Sleep -Milliseconds 1700   # longer than segmentQuietMs: the turn closes before the next one starts
         }
         $inputEnded = [DateTimeOffset]::UtcNow
-        # Wait for a judge pass after the last segment (the observe timer fires every observeIntervalMs).
+        # Wait for a listening pass after the last segment (the observe timer fires every observeIntervalMs).
         $lastSegment = @(Read-Ledger | Where-Object { $_.type -eq "stream.segment" })[-1]
-        $judged = Wait-Until { @(Read-Ledger | Where-Object { ($_.type -eq "observe.checked" -or $_.type -eq "observe.found" -or $_.type -eq "observe.failed") -and [DateTimeOffset]$_.ts -gt [DateTimeOffset]$lastSegment.ts }).Count -gt 0 } 20
-        Note "judge passed over the last segment" $judged
+        $read = Wait-Until { @(Read-Ledger | Where-Object { ($_.type -eq "observe.checked" -or $_.type -eq "observe.raised" -or $_.type -eq "observe.failed") -and [DateTimeOffset]$_.ts -gt [DateTimeOffset]$lastSegment.ts }).Count -gt 0 } 20
+        Note "the mind read the last segment" $read
         Start-Sleep -Seconds 3   # let tasks raised by the last pass finish
-        Shot-At "06a-listening" "the listening view: buffer, segments, judge passes, findings, excerpts" $null
+        Shot-At "06a-listening" "the listening view: buffer, segments, passes, raises, excerpts" $null
         Shot-At "06b-attention-while-listening" "what the arbiter surfaced while listening" "^ATTENTION$"
         Focus-CaptureBox   # scrolling through UIA moves keyboard focus; give it back to the surface before stopping
         Press-NoteKey
@@ -665,7 +667,7 @@ Write-Jsonl "tool_calls.jsonl" @($records | Where-Object { $_.type -like "tool.*
 Write-Jsonl "approval_events.jsonl" @($records | Where-Object { $_.type -like "proposal.*" -or $_.type -like "approval.*" -or $_.type -like "execution.*" -or $_.type -like "changeset.*" })
 Write-Jsonl "mutations.jsonl" @($records | Where-Object { $_.type -like "project.*" -or $_.type -like "note.*" -or $_.type -like "patch.*" -or $_.type -like "artifact.*" -or $_.type -eq "settings.changed" -or $_.type -like "workspace.*" })
 
-# evidence.json: excerpts (with turn ids), notes in staging and in projects, and the judge's passes.
+# evidence.json: excerpts (with turn ids), notes in staging and in projects, and the listening passes.
 $excerptEntries = @()
 if (Test-Path $excerptsDir) {
     foreach ($f in (Get-ChildItem $excerptsDir -Filter "*.json" -File | Sort-Object Name)) {
@@ -685,7 +687,7 @@ Write-Json "evidence.json" @{
     excerpts = $excerptEntries
     staging_notes = $stagingNotes
     project_files = $projectFiles
-    judge_passes = @($records | Where-Object { $_.type -like "observe.*" })
+    listening_passes = @($records | Where-Object { $_.type -like "observe.*" })
     excerpt_events = @($records | Where-Object { $_.type -eq "stream.excerpt_stored" })
 }
 
@@ -741,7 +743,7 @@ Write-Json "final_output.json" @{
 
 # Plain scalars, computed before the literal: Windows PowerShell 5.1 fails with "Argument types do not match" when a
 # pipeline result from the ledger records is indexed inside this hashtable literal.
-$judgeName = $null; foreach ($r in $records) { if (($r.type -eq "stream.started" -or $r.type -eq "session.started") -and $r.data.judge) { $judgeName = [string]$r.data.judge; break } }
+$mindName = $null; foreach ($r in $records) { if (($r.type -eq "stream.started" -or $r.type -eq "session.started") -and $r.data.mind) { $mindName = [string]$r.data.mind; break } }
 $plannerName = $null; foreach ($r in $records) { if ($r.type -eq "task.created" -and $r.data.planner) { $plannerName = [string]$r.data.planner; break } }
 Write-Json "run_manifest.json" @{
     suite = @{ id = $suiteDoc.suite_id; schema_version = $suiteDoc.schema_version; file = (Resolve-Path -LiteralPath $Suite).Path }
@@ -749,7 +751,7 @@ Write-Json "run_manifest.json" @{
     test_mode = "deterministic"
     started = $runStarted.ToString("o"); finished = (Get-Date).ToUniversalTime().ToString("o")
     app = @{ exe = $exe.FullName; built = $exe.LastWriteTime.ToUniversalTime().ToString("o"); commit = $commit }
-    judge = $judgeName
+    mind = $mindName
     planner = $plannerName
     data_root = $dataRoot; project_folder = $projects; copied_to = @{ data_root = "data-root"; projects = "projects" }
     # .ToArray(), not @($list): Windows PowerShell 5.1's ConvertTo-Json fails with "Argument types do not match" on @() around a List[object].

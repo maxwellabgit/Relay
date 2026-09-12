@@ -97,7 +97,7 @@ public sealed partial class RuleBasedOrchestrator
                 [Propose(request, Actions.UpdatePreference, $"Instruction asked to always show what '{term}' means.",
                     Contract(new() { ["key"] = "display.alwaysShow", ["value"] = term },
                         $"'{term}' is defined on screen the moment it comes up, without asking", "Writes config\\preferences.json (change set); listening reads local sources only",
-                        "One watched term; the pinned card refreshes in place and bypasses the result budget", $"Hearing '{term}' while listening shows a pinned result within one judge pass"),
+                        "One watched term; the pinned card refreshes in place and bypasses the result budget", $"Hearing '{term}' while listening shows a pinned result within one listening pass"),
                     [$"'{term}' becomes a watched term: resolved as soon as it is heard, shown as a pinned card, refreshed in place"], Risks.ControlledWrite, true)], "rules");
         }
         if ((m = StopShowing().Match(text)).Success)

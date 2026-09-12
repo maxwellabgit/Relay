@@ -180,7 +180,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         sb.Append("- model.request {profile, objective, refs:\"<comma-separated ids returned by tools>\", budgetTokens, allowSearch} to delegate bounded work to a named external model");
         if (context is { ExternalProfiles.Count: > 0 }) sb.Append(" (profiles: ").Append(string.Join(", ", context.ExternalProfiles)).Append(')');
         sb.Append("\n- update_preference {key, value, benefit, permissions, scope, acceptance} for response.verbosity | response.promptLine | display.alwaysShow | display.stopShowing | display.maxAlertsPer10Minutes | display.maxResultsPer5Minutes | display.cooldownSeconds | filing.grant | filing.revoke | sources.allowOnlineSearch | retention.bufferSeconds | retention.excerptMaxSeconds\n");
-        sb.Append("- update_prompt {name:\"planner\"|\"judge\", content, benefit, permissions, scope, acceptance}\n");
+        sb.Append("- update_prompt {name:\"planner\"|\"mind\", content, benefit, permissions, scope, acceptance}\n");
         sb.Append("  (benefit, permissions, scope, acceptance form the improvement contract: the concrete benefit to the user, what the change is allowed to touch, how much changes, and how the user can tell it worked; an improve task without all four is denied)\n\n");
         sb.Append("Rules: cite only ids that a tool returned in this task; never invent ids, paths, or facts; prefer tool results over guessing; ");
         sb.Append("for a check task, search first, set consistent, cite both the stored note and the excerpt, and when the stated fact conflicts with a stored decision propose supersede_note with newText (the corrected decision in one sentence) so the user can update the record with one approval; ");
@@ -201,7 +201,7 @@ public sealed class ModelOrchestrator : IOrchestrator
         var active = context.Registry.Active;
         sb.Append(active.Any() ? string.Join("; ", active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})")) : "none").Append('\n');
         sb.Append("Task origin: ").Append(request.Origin.Wire()).Append(" · kind: ").Append(request.Kind.Wire()).Append('\n');
-        if (request.Origin == TaskOrigin.Observed) sb.Append("This task was raised by the judge from something overheard, not asked. Read the excerpt first (read_excerpt) if you need the exact words. Do not propose deletions, preference changes, or external requests.\n");
+        if (request.Origin == TaskOrigin.Observed) sb.Append("This task was raised by the mind from something overheard, not asked. Read the excerpt first (read_excerpt) if you need the exact words. Do not propose deletions, preference changes, or external requests.\n");
         if (request.ExcerptId is not null) sb.Append("Excerpt id: ").Append(request.ExcerptId).Append('\n');
         if (request.ArtifactId is not null) sb.Append("Artifact id: ").Append(request.ArtifactId).Append(" (read it with read_artifact; cite it; propose create_draft_note for findings worth keeping)\n");
         if (request.CaptureId.Length > 0) sb.Append("Current capture id: ").Append(request.CaptureId).Append('\n');

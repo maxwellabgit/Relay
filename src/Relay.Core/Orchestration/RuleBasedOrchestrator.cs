@@ -36,6 +36,31 @@ public sealed partial class RuleBasedOrchestrator : IOrchestrator
     [GeneratedRegex(@"^(?:please\s+)?(?:what\s+did\s+(?:i|we)\s+(?:say|decide|agree)\s+(?:about|on)|what\s+(?:have|did)\s+(?:i|we)\s+(?:decided?|agreed?)\s+(?:about|on)|what\s+do\s+(?:i|we)\s+know\s+about|what\s+have\s+i\s+(?:noted|said|written)\s+about|recall|find|search(?:\s+for)?|look\s+up|remind\s+me\s+about|show\s+me\s+(?:notes|everything)\s+about|anything\s+about|do\s+i\s+have\s+(?:any\s+)?notes\s+(?:about|on))\s+(?<q>.+?)\??$", Opts)] private static partial Regex Recall();
     [GeneratedRegex(@"^(?:what|when|where|who|why|how|did|do|does|is|are|have|has|was|were|which|can|could|should)\b", Opts)] private static partial Regex Question();
 
+    [GeneratedRegex(@"\b(research|look into|find out|investigate|compare (the )?competitors|competitor analysis|implementation plan|deep dive)\b", Opts)] private static partial Regex ResearchCue();
+    [GeneratedRegex(@"\b(always (show|display)|from now on|prefer|keep (responses|answers|replies)|be (more )?(concise|brief|terse|verbose)|stop (showing|asking)|without asking|don't ask|update (our|my) preferences?)\b", Opts)] private static partial Regex PreferenceCue();
+    [GeneratedRegex(@"\b(move|rename|archive|delete|remove|reorganize|reorganise|merge|split|consolidate|clean up|tidy|file (this|that|these|those|it))\b", Opts)] private static partial Regex OrganizeCue();
+    [GeneratedRegex(@"\b(what does|what's|what is|stands? for|meaning of|define)\b", Opts)] private static partial Regex DefineCue();
+    [GeneratedRegex(@"\b(?<term>[A-Z][A-Z0-9]{1,5})\b", RegexOptions.CultureInvariant)] private static partial Regex Acronym();
+
+    private static readonly HashSet<string> AcronymStopList = new(StringComparer.Ordinal) { "I", "OK", "TODO", "FYI", "ASAP", "AM", "PM", "US", "UK", "EU", "IT", "AI", "CEO", "CTO" };
+
+    /// <summary>
+    /// What lane a direct ask belongs to, decided from its words alone. The grammar plans from the
+    /// text either way; the kind is what the card is labelled and filed under. Deterministic on
+    /// purpose, and only for this pipeline: the mind works the kind out for itself (docs/09).
+    /// </summary>
+    public static Tasks.TaskKind DirectKind(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return Tasks.TaskKind.Answer;
+        var asked = Question().IsMatch(text.TrimStart()) || text.TrimEnd().EndsWith('?');
+        if (PreferenceCue().IsMatch(text)) return Tasks.TaskKind.Improve;
+        if (ResearchCue().IsMatch(text)) return Tasks.TaskKind.Research;
+        if (OrganizeCue().IsMatch(text) && !asked) return Tasks.TaskKind.Organize;
+        if (DefineCue().IsMatch(text) && Acronym().Matches(text).Any(m => !AcronymStopList.Contains(m.Groups["term"].Value))) return Tasks.TaskKind.Resolve;
+        if (!asked && Memory.NoteExtractor.Classify(text) is NoteTypes.Decision or NoteTypes.Task) return Tasks.TaskKind.Remember;
+        return Tasks.TaskKind.Answer;
+    }
+
     public Task<TurnPlan> PlanAsync(TurnRequest request, TurnContext context, CancellationToken cancellationToken)
     {
         var text = Normalize(request.Instruction);

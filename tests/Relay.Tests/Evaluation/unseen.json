@@ -84,23 +84,5 @@
     "instruction": "always display what OKR stands for",
     "expect": { "understood": true, "actions": ["update_preference"], "targets": ["update_preference.key=display.alwaysShow", "update_preference.value=OKR"], "contract": true },
     "tags": ["preferences", "contract"]
-  },
-  {
-    "id": "unseen:judge-decision-about-known-project",
-    "source": "unseen",
-    "origin": "observed",
-    "kind": "remember",
-    "segments": ["We decided the Home kitchen gets repainted before the holidays."],
-    "expect": { "significant": true, "findingKind": "remember" },
-    "tags": ["judge", "remember"]
-  },
-  {
-    "id": "unseen:judge-watched-term",
-    "source": "unseen",
-    "origin": "observed",
-    "kind": "resolve",
-    "segments": ["The CAD export still breaks on the new build."],
-    "expect": { "significant": true, "findingKind": "resolve" },
-    "tags": ["judge", "watched-term"]
   }
 ]

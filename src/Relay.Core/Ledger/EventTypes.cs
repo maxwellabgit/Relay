@@ -121,9 +121,9 @@ public static class EventTypes
     public const string StreamStopped = "stream.stopped";
     /// <summary>A buffer window file survived a crash; it is discarded (it expired with the buffer) and only its size is recorded.</summary>
     public const string StreamInterruptedFound = "stream.interrupted_found";
-    /// <summary>A pass that found nothing: segment ids, hashes, tokens, latency. No words.</summary>
+    /// <summary>A pass that raised nothing — the usual outcome: segment ids, hashes, tokens, latency. No words.</summary>
     public const string ObserveChecked = "observe.checked";
-    /// <summary>A pass that found something; what it found becomes tasks and excerpts.</summary>
+    /// <summary>Historical: a judge pass that found something. Nothing writes it now; it is here so old ledgers still read.</summary>
     public const string ObserveFound = "observe.found";
     public const string ObserveFailed = "observe.failed";
     /// <summary>One move of a listening pass by the mind: type, read scores, feed (fingerprinted), tokens, latency. No words.</summary>

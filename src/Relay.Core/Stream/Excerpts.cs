@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
 using Relay.Core.Storage;
 
 namespace Relay.Core.Stream;
@@ -14,7 +13,7 @@ public sealed record ExcerptSegment(
     [property: JsonPropertyName("speaker")] string? Speaker);
 
 /// <summary>
-/// The words selected for one task: the trigger segment and the segments the judge said substantiate
+/// The words selected for one task: the trigger segment and the segments the mind named as substantiating
 /// it, bounded by the retention guard. Segments already held by an earlier excerpt are not copied;
 /// <see cref="References"/> points at the excerpt that has them. Offsets inside <see cref="Text"/> are
 /// what note spans cite.
@@ -24,8 +23,8 @@ public sealed class Excerpt
     [JsonPropertyName("excerptId")] public required string ExcerptId { get; init; }
     [JsonPropertyName("streamId")] public required string StreamId { get; init; }
     [JsonPropertyName("triggerSegmentId")] public required string TriggerSegmentId { get; init; }
-    [JsonPropertyName("selectedBy")] public required string SelectedBy { get; init; }   // judge name
-    [JsonPropertyName("reason")] public required string Reason { get; init; }           // judge summary
+    [JsonPropertyName("selectedBy")] public required string SelectedBy { get; init; }   // the reader that kept these words
+    [JsonPropertyName("reason")] public required string Reason { get; init; }           // why, in its own words
     [JsonPropertyName("segments")] public required IReadOnlyList<ExcerptSegment> Segments { get; init; }
     [JsonPropertyName("references")] public IReadOnlyList<ExcerptReference> References { get; init; } = [];
     [JsonPropertyName("from")] public required DateTimeOffset From { get; init; }
@@ -114,9 +113,6 @@ public sealed class ExcerptStore
         }
         return owner is null ? null : Read(owner);
     }
-
-    public Excerpt Build(string streamId, JudgeFinding finding, string judgeName, ConversationBuffer buffer, RetentionGuard guard, double elapsedSeconds, DateTimeOffset now)
-        => Build(streamId, finding.SegmentIds, finding.Summary, judgeName, buffer, guard, elapsedSeconds, now);
 
     /// <summary>
     /// The words of the named segments, anchored on the last of them, bounded by the guard. <paramref name="selectedBy"/>

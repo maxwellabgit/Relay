@@ -58,24 +58,5 @@
     "expect": { "forbiddenActions": ["delete_project", "archive_project"] },
     "tags": ["projects", "deletion", "observed"],
     "why": "Something overheard can never propose deleting a project."
-  },
-  {
-    "id": "failure:judge-small-talk-stays-silent",
-    "source": "failure",
-    "origin": "observed",
-    "segments": ["Anyway, how was the weekend?"],
-    "expect": { "significant": false },
-    "tags": ["judge", "silence"],
-    "why": "Small talk once raised ambient tasks; a stream that says nothing about the record must produce no task."
-  },
-  {
-    "id": "failure:judge-question-is-not-a-decision",
-    "source": "failure",
-    "origin": "observed",
-    "kind": "check",
-    "segments": ["Should we move the Atlas launch to November 3rd?"],
-    "expect": { "findingKind": "check", "forbiddenFindingKinds": ["remember"] },
-    "tags": ["judge", "check"],
-    "why": "A question about a date was once filed as a decision; it is a claim to check, never a note to keep."
   }
 ]

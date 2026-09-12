@@ -27,12 +27,12 @@ public class ObservingTests : IDisposable
     private const string Chatter = "Anyway, how was the weekend, did you get out at all?";
     private const string Launch = "Marketing wants the launch email out a week before.";
 
-    /// <summary>Mind mode with the note chord listening: the mind reads the stream and the judge is never called.</summary>
+    /// <summary>Mind mode with the note chord listening, which is all listening now needs: a mind and the setting on.</summary>
     private static void Listening(RelaySettings s)
     {
         s.Orchestrator.Mode = OrchestratorSettings.Mind;
         s.Model.Enabled = true;
-        s.Judge.Mode = JudgeSettings.Heuristic;
+        s.Listening.Enabled = true;
     }
 
     /// <summary>A read whose significance clears the raise bar, so a scripted raise is not refused for being trivial.</summary>
@@ -170,9 +170,8 @@ public class ObservingTests : IDisposable
             .ExpectState(RelayState.Completed);
         _output.WriteLine(s.Transcript());
 
-        // No judge was involved: the mind read the stream.
+        // The mind read the stream, and every request it took was a listening pass.
         Assert.Equal("mind:scripted", s.H.Last(EventTypes.StreamStarted)!.DataString("mind"));
-        Assert.Null(s.H.Last(EventTypes.StreamStarted)!.DataString("judge"));
         Assert.True(mind.Requests.All(r => r.Observing));
     }
 
@@ -251,7 +250,7 @@ public class ObservingTests : IDisposable
 
         // The conversation was still being read while the first task sat on the user's approval: that is the point.
         Assert.Contains(s.Snap.Tasks, t => t.Status == TaskStatus.AwaitingApproval);
-        Assert.True(s.Snap.Listening!.JudgePasses >= 2, $"{s.Snap.Listening.JudgePasses} pass(es)");
+        Assert.True(s.Snap.Listening!.Passes >= 2, $"{s.Snap.Listening.Passes} pass(es)");
         Assert.Equal(2, s.H.Count(EventTypes.ObserveRaised));
         Assert.Equal(2, s.Snap.PendingProposals.Count());
     }
@@ -330,8 +329,9 @@ public class ObservingTests : IDisposable
         Assert.Equal(0, ok.H.Count(EventTypes.MindUnavailable));
     }
 
+    /// <summary>A mind in place is not enough: with listening off the note chord still dictates and nothing is read.</summary>
     [Fact]
-    public void WithTheJudgeOffTheNoteChordStillDictatesANoteInMindMode()
+    public void WithListeningOffTheNoteChordStillDictatesANote()
     {
         var mind = new ScriptedMind().Always(_ => MindStep.Of(ScriptedMind.Wait("not used"), "Not used."));
         using var s = Scenario.New(_tmp, x => { x.Orchestrator.Mode = OrchestratorSettings.Mind; x.Model.Enabled = true; }, mind: mind).WithWorkspace()

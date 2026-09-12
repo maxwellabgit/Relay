@@ -1,6 +1,7 @@
 using Relay.Core.Attention;
-using Relay.Core.Judge;
+using Relay.Core.Config;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Orchestration;
 using Relay.Core.Preferences;
 using Relay.Core.Search;
@@ -73,9 +74,9 @@ public class AttentionTests : IDisposable
     public void TheModelsSuggestionNeverOverridesTheEvidence()
     {
         var arbiter = new AttentionArbiter(() => Prefs());
-        // The judge suggested an alert; one source is not enough evidence for one.
+        // The model suggested an alert; one source is not enough evidence for one.
         Assert.Equal(Presentation.Result, arbiter.RankOnly(Input("t1", consistent: false, sources: 1, suggested: Presentation.Alert)).Level);
-        // The judge suggested nothing; a consistent statement is nothing regardless.
+        // The model suggested nothing; a consistent statement is nothing regardless.
         Assert.Equal(Presentation.None, arbiter.RankOnly(Input("t2", consistent: true, suggested: Presentation.Alert)).Level);
         // A direct ask is answered even if the model suggested silence.
         Assert.Equal(Presentation.Result, arbiter.RankOnly(Input("t3", TaskOrigin.Direct, consistent: true, suggested: Presentation.None)).Level);
@@ -280,6 +281,17 @@ public class AttentionTests : IDisposable
 
     private const string Chatter = "Anyway the coffee machine is broken again.";
 
+    /// <summary>Listening on with the deterministic grammar still planning what is raised (docs/10, step 1c).</summary>
+    private static void Listening(RelaySettings s)
+    {
+        s.Orchestrator.Mode = OrchestratorSettings.Rules;
+        s.Listening.Enabled = true;
+    }
+
+    /// <summary>A raise over one line, under the topic and merge key these scenarios share.</summary>
+    private static RaiseMove Check(string objective, WindowLine line)
+        => new("check", objective, [line.Label], "a dated claim about a known project", Topic: "atlas beta date", MergeKey: "check:atlas:date");
+
     /// <summary>A planner that reports a conflict with two sources for every check task, and proposes nothing.</summary>
     private static CannedOrchestrator ConflictPlanner() => new CannedOrchestrator().Otherwise((request, _) =>
         request.Kind == TaskKind.Check
@@ -292,12 +304,12 @@ public class AttentionTests : IDisposable
     [Fact]
     public void RepeatedConflictsOnOneTopicShareOneCardAndADismissedCardStaysAway()
     {
-        var judge = new ScriptedJudge()
-            .When("21st", TaskKind.Check, "Check the stated date.", topic: "atlas beta date", mergeKey: "check:atlas:date")
-            .When("22nd", TaskKind.Check, "Check the stated date.", topic: "atlas beta date", mergeKey: "check:atlas:date")
-            .When("23rd", TaskKind.Check, "Check the stated date.", topic: "atlas beta date", mergeKey: "check:atlas:date");
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: ConflictPlanner()).WithWorkspace()
-            .WithListening().StartListening()
+        // One merge key over three mentions; each objective differs, because the loop refuses a repeat of one.
+        var mind = new ListeningMind();
+        foreach (var date in new[] { "21st", "22nd", "23rd" })
+            mind.When(date, line => Check($"Check the date stated in line {line.Label}.", line));
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
+            .StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Alert, "Conflict");
@@ -313,7 +325,7 @@ public class AttentionTests : IDisposable
         Assert.Equal(2, card.TaskIds.Count);
         Assert.Equal(2, s.Snap.Tasks.Count(t => t.Kind == TaskKind.Check));                                 // both tasks exist and are diagnosed
         var merged = s.H.Last(EventTypes.TaskMerged)!;
-        // A merge key is the judge's words about the room, so the ledger holds its fingerprint — the same one on every task that shares it.
+        // A merge key is the mind's words about the room, so the ledger holds its fingerprint — the same one on every task that shares it.
         Assert.StartsWith("withheld: ", merged.DataString("key"));
         Assert.All(s.H.Records().Where(r => r.Type == EventTypes.TaskCreated && r.DataString("kind") == "check"), r => Assert.Equal(merged.DataString("key"), r.DataString("mergeKey")));
         Assert.Equal(card.TaskIds[0], merged.DataString("into"));
@@ -336,14 +348,13 @@ public class AttentionTests : IDisposable
     [Fact]
     public void TheAlertBudgetFromPreferencesTurnsTheThirdAlertIntoAResult()
     {
-        var judge = new ScriptedJudge()
-            .When("Atlas", TaskKind.Check, "Check.", topic: "atlas", mergeKey: "check:atlas")
-            .When("Backyard", TaskKind.Check, "Check.", topic: "backyard", mergeKey: "check:backyard")
-            .When("Lightshift", TaskKind.Check, "Check.", topic: "lightshift", mergeKey: "check:lightshift");
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: ConflictPlanner()).WithWorkspace()
+        var mind = new ListeningMind();
+        foreach (var project in new[] { "Atlas", "Backyard", "Lightshift" })
+            mind.When(project, "check", $"Check what was said about {project}.", topic: project.ToLowerInvariant(), mergeKey: "check:" + project.ToLowerInvariant());
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
             .Do("Two alerts per ten minutes", c => Assert.True(c.UpdatePreference("display.maxAlertsPer10Minutes", "2")))
             .ExpectPreference("display.maxAlertsPer10Minutes", "2")
-            .WithListening().StartListening()
+            .StartListening()
             .Listen("Atlas slipped a week.")
             .Listen("Backyard is over budget.")
             .Listen("Lightshift lost its sponsor.");
@@ -360,11 +371,11 @@ public class AttentionTests : IDisposable
     [Fact]
     public void AConsistentObservationShowsNothingButIsFullyRecorded()
     {
-        var judge = new ScriptedJudge().When("October 14", TaskKind.Check, "Check the stated date.", topic: "atlas beta date", mergeKey: "check:atlas:date");
+        var mind = new ListeningMind().When("October 14", line => Check("Check the stated date.", line));
         var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Agrees with the stored decision", ["Searched"], "Consistent with the decision of October 14.",
             [new Citation(SearchIndex.NoteKind, "01NOTE00000ATLAS", null, "atlas", "Atlas beta ships on October 14.", null)], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace()
-            .WithListening().StartListening()
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: planner).WithWorkspace()
+            .StartListening()
             .Listen("So the beta still ships October 14, right?")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectNoAttention()
@@ -380,11 +391,11 @@ public class AttentionTests : IDisposable
     [Fact]
     public void AThinConflictIsAResultNotAnAlert()
     {
-        var judge = new ScriptedJudge().When("21st", TaskKind.Check, "Check the stated date.", confidence: 0.9, topic: "atlas beta date", mergeKey: "check:atlas:date");
+        var mind = new ListeningMind { Significance = 0.9 }.When("21st", line => Check("Check the stated date.", line));
         var planner = new CannedOrchestrator().Otherwise((request, _) => new TurnPlan(true, "Possibly disagrees", ["Searched"], "One note says October 14; the room said the 21st.",
             [new Citation(SearchIndex.NoteKind, "01NOTE00000ATLAS", null, "atlas", "Atlas beta ships on October 14.", null)], [], "canned", Consistent: false));   // one source only
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace()
-            .WithListening().StartListening()
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: planner).WithWorkspace()
+            .StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectAttention(Presentation.Result, "Conflict")
             .ExpectNoAttention(Presentation.Alert);
@@ -392,11 +403,11 @@ public class AttentionTests : IDisposable
     }
 
     [Fact]
-    public void ALowConfidenceJudgeFindingCannotAlert()
+    public void SomethingTheMindBarelyRatedCannotAlert()
     {
-        var judge = new ScriptedJudge().When("21st", TaskKind.Check, "Check the stated date.", confidence: 0.58, topic: "atlas beta date", mergeKey: "check:atlas:date");
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: ConflictPlanner()).WithWorkspace()
-            .WithListening().StartListening()
+        var mind = new ListeningMind { Significance = 0.58 }.When("21st", line => Check("Check the stated date.", line));
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
+            .StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Result)
@@ -407,9 +418,9 @@ public class AttentionTests : IDisposable
     [Fact]
     public void TheUsersReactionToACardIsRecordedOnTheTask()
     {
-        var judge = new ScriptedJudge().When("21st", TaskKind.Check, "Check the stated date.", topic: "atlas beta date", mergeKey: "check:atlas:date");
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: ConflictPlanner()).WithWorkspace()
-            .WithListening().StartListening()
+        var mind = new ListeningMind().When("21st", line => Check("Check the stated date.", line));
+        using var s = Scenario.New(_tmp, Listening, mind: mind, orchestrator: ConflictPlanner()).WithWorkspace()
+            .StartListening()
             .Listen("Marketing wants the beta out on the 21st.")
             .ExpectAttention(Presentation.Alert)
             .Respond("not needed, marketing does not set dates")

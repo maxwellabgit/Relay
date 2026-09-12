@@ -123,14 +123,14 @@ public sealed record ListeningStatus(
     int HeldSegments,
     int TotalSegments,
     double WindowSeconds,
-    int JudgePasses,
-    int Findings,
+    int Passes,
+    int Raised,
     int Excerpts,
     int Tasks,
     double RetainedSeconds,
-    string Judge,
+    string Mind,
     DateTimeOffset? LastCheckAt,
-    bool Judging,
+    bool Reading,
     bool Finishing,
     string? LastError);
 
@@ -190,12 +190,13 @@ public sealed record RelaySnapshot(
     string? ModelEndpoint,
     string? ModelName,
     bool ModelKeyStored,
+    /// <summary>A mind answered at startup (or at the last settings change). Without one Relay records and nothing else.</summary>
+    bool MindReady,
     IReadOnlyList<TaskView> Tasks,
     IReadOnlyList<AttentionItem> Attention,
     ListeningStatus? Listening,
+    /// <summary>The note chord opens a conversation the mind reads. False: it dictates one silent note, because listening is switched off or there is no mind.</summary>
     bool ListeningEnabled,
-    string JudgeMode,
-    string JudgeName,
     CompiledPreferences Preferences,
     IReadOnlyList<ChangeSetView> ChangeSets,
     IReadOnlyList<string> ExternalProfiles)

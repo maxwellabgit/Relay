@@ -187,11 +187,12 @@ public class OrchestratorTurnTests : IDisposable
     [Fact]
     public void DeletionCanNeverComeFromSomethingOverheard()
     {
-        // The grammar handles the direct command; the canned planner stands in for the model on the judge's focused prompt.
+        // The grammar handles the direct command; the canned planner stands in for the model on the objective the mind raised.
         var canned = new CannedOrchestrator().Otherwise((req, ctx) => new TurnPlan(true, "Overheard deletion", [], null, [],
             [new Proposal("P-del", Actions.DeleteProject, "they said to delete it", new Dictionary<string, string> { ["projectId"] = ctx.Registry.FindActive("atlas")!.Id, ["confirm"] = "delete" }, [req.SourceEventId], [], Risks.ControlledWrite, true, Producers.Model)], "canned"));
-        var judge = new ScriptedJudge().When("scrap the atlas project", Relay.Core.Tasks.TaskKind.Organize, "The user wants project Atlas deleted.");
-        using var s = Scenario.New(_tmp, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), canned), judge: judge, configure: x => x.Judge.Mode = JudgeSettings.Heuristic).WithWorkspace()
+        var mind = new ListeningMind().When("scrap the atlas project", "organize", "The user wants project Atlas deleted.");
+        using var s = Scenario.New(_tmp, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), canned), mind: mind,
+                configure: x => { x.Orchestrator.Mode = OrchestratorSettings.Rules; x.Listening.Enabled = true; }).WithWorkspace()
             .Command("create project Atlas").Approve()
             .StartListening()
             .Hear("Honestly we should just scrap the atlas project.")

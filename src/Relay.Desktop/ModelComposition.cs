@@ -9,7 +9,7 @@ namespace Relay.Desktop;
 /// <summary>
 /// Builds model clients for the runtime: RELAY0's own endpoint (loopback http or https) and any
 /// external profile (https only). API keys live only in the DPAPI store and are read per request.
-/// An invalid endpoint yields no client, so the grammar and the heuristic judge carry on and the UI says so.
+/// An invalid endpoint yields no client, so Relay has no mind and the UI says so plainly.
 /// </summary>
 public static class ModelComposition
 {

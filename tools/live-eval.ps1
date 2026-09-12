@@ -1,19 +1,22 @@
 <#
 .SYNOPSIS
-  Scores a real model as RELAY0 - the model judge and the model planner as the primary tools - against the
+  Scores a real model as RELAY0 - the mind and the model planner as the primary tools - against the
   authored evaluation sets and the live listening scenario, and keeps the reports.
 
 .DESCRIPTION
-  The deterministic suite (`dotnet test`) scores the rule grammar and the heuristic judge. This runner turns
-  on the live tests instead, which put a model in both seats with nothing in front of it:
+  The deterministic suite (`dotnet test`) scores the rule grammar and a scripted mind. This runner turns
+  on the live tests instead, which put a model in every seat with nothing in front of it:
 
-    EvaluationTests.LiveModelJudgeAndPlannerAreScoredAsThePrimaryTools
-        every case in tests\Relay.Tests\Evaluation (unseen + failure) and tests\Relay.Tests\Evaluation\model
-        (multi-segment windows, project attribution, grounding, selectivity, delegation to workers and
-        external profiles) scored by the ModelJudge and the ModelOrchestrator.
-    EvaluationTests.LiveModelJudgeRaisesObservedTasksAndTheModelPlannerActsOnThem
-        the live chain: words overheard -> model judge -> observed tasks -> model planner -> policy -> approval,
-        then a direct research ask delegated to a named external profile (scripted counterparty).
+    EvaluationTests.TheLiveModelPlannerIsScoredAsThePrimaryTool
+        every plan case in tests\Relay.Tests\Evaluation (unseen + failure) and tests\Relay.Tests\Evaluation\model
+        (project attribution, grounding, selectivity, delegation to workers and external profiles),
+        planned by the ModelOrchestrator with no grammar in front of it.
+    EvaluationTests.LiveModelMindIsScoredOnItsMoves
+        every mind case in tests\Relay.Tests\Evaluation\mind, stepped by the schema-constrained model,
+        scored on the moves it makes.
+    EvaluationTests.TheLiveMindRaisesObservedTasksAndTheModelPlannerActsOnThem
+        the live chain: words overheard -> the mind's listening pass -> observed tasks -> model planner ->
+        policy -> approval, then a direct research ask delegated to a named external profile (scripted counterparty).
 
   The model is any OpenAI-compatible chat endpoint. The default is the README's reference model, Ministral 8B
   Instruct (Q4_K_M), served locally by Ollama on the loopback interface; the runner starts Ollama and pulls
@@ -22,7 +25,8 @@
 
   Output (default %TEMP%\relay-live-eval\<timestamp>):
     evaluation-live.json / .txt     the EvaluationReport: every case, pass/fail, reasons, what the model produced
-    listening-live.txt              the scenario transcript: segments, judge passes, tasks, tool calls, proposals
+    mind-live.json / .txt           the same report for the mind cases: the moves the model made, pass/fail, reasons
+    listening-live.txt              the scenario transcript: segments, listening passes, tasks, tool calls, proposals
     listening-live.ledger.jsonl     the ledger of that session (fingerprints, never the words)
     dotnet-test.log                 the test runner's output
     run.json                        endpoint, model, timings, exit code
@@ -40,7 +44,7 @@
 .PARAMETER OutDir
   Where the reports go. Default: %TEMP%\relay-live-eval\<timestamp>.
 .PARAMETER Filter
-  dotnet test filter. Default: both live tests. Use "FullyQualifiedName~LiveModelJudgeAndPlanner" for the evaluation set only.
+  dotnet test filter. Default: every live test. Use "FullyQualifiedName~LiveModelMind" for the mind cases only.
 .PARAMETER SkipBuild
   Use the existing Debug build.
 
@@ -54,7 +58,7 @@ param(
     [string]$Model = "hf.co/bartowski/Ministral-8B-Instruct-2410-GGUF:Q4_K_M",
     [string]$Key = "",
     [string]$OutDir = "",
-    [string]$Filter = "FullyQualifiedName~EvaluationTests.LiveModel",
+    [string]$Filter = "FullyQualifiedName~EvaluationTests.TheLive|FullyQualifiedName~EvaluationTests.LiveModel",
     [int]$ContextTokens = 8192,
     [switch]$SkipBuild
 )

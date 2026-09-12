@@ -463,15 +463,10 @@ public sealed partial class MainWindow
         mode.SelectedIndex = current.Orchestrator.Mode switch { OrchestratorSettings.Off => 1, OrchestratorSettings.Rules => 2, OrchestratorSettings.RulesAndModel => 3, _ => 0 };
         panel.Children.Add(mode);
 
-        var judge = new ComboBox { Header = "Judge (what Ctrl+Alt does)", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var (value, label) in new[] { (JudgeSettings.Off, "Off — Ctrl+Alt dictates a silent note, nothing is judged"), (JudgeSettings.Heuristic, "Heuristic — listen with the labeled rule-based judge, no model"), (JudgeSettings.Model, "Model — listen with RELAY0's model; the heuristic takes any pass the model misses") })
-            judge.Items.Add(new ComboBoxItem { Content = label, Tag = value });
-        judge.SelectedIndex = current.Judge.Mode switch { JudgeSettings.Off => 0, JudgeSettings.Heuristic => 1, _ => 2 };
-        panel.Children.Add(judge);
-        var minConfidence = new NumberBox { Header = "Judge: act on findings at confidence ≥", Value = current.Judge.MinConfidence, Minimum = 0, Maximum = 1, SmallChange = 0.05, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
-        panel.Children.Add(minConfidence);
+        var listening = new ToggleSwitch { Header = $"Listening (what {current.Hotkeys.NoteKey} does)", IsOn = current.Listening.Enabled, OnContent = "listen — Relay's mind reads the conversation and raises what needs it", OffContent = "dictate — the chord takes one silent note and nothing is read" };
+        panel.Children.Add(listening);
 
-        var modelEnabled = new ToggleSwitch { Header = "RELAY0 model gateway", IsOn = current.Model.Enabled, OnContent = "enabled — one endpoint (loopback http or https), no other network", OffContent = "disabled — no network at all; grammar and heuristic judge only" };
+        var modelEnabled = new ToggleSwitch { Header = "RELAY0 model gateway", IsOn = current.Model.Enabled, OnContent = "enabled — one endpoint (loopback http or https), no other network", OffContent = "disabled — no network at all, and so no mind" };
         var endpoint = new TextBox { Header = "Endpoint (OpenAI-compatible chat completions; http only on 127.0.0.1 / localhost)", Text = current.Model.Endpoint };
         var modelName = new TextBox { Header = "Model", Text = current.Model.Model };
         var key = new PasswordBox { Header = _coordinator.ModelKeyStored ? "API key (stored · DPAPI, this Windows account) — enter a new one to replace" : "API key (not stored — a local llama.cpp server needs none)", PlaceholderText = "sk-…" };
@@ -490,7 +485,7 @@ public sealed partial class MainWindow
         panel.Children.Add(auto);
         panel.Children.Add(review);
         var scopeText = current.Hotkeys.IsWindowScoped ? "active only while this window is focused" : "registered system-wide";
-        panel.Children.Add(new TextBlock { Text = $"Chords: {current.Hotkeys.NoteKey} to listen (or dictate a note when the judge is off), {current.Hotkeys.CommandKey} for an instruction ({scopeText}). Chords, capture timing and the stream window are edited in settings.json and need a restart; preferences (response style, pinned terms, grants, retention) change through approved change sets. Everything here applies to the next task or judge pass.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
+        panel.Children.Add(new TextBlock { Text = $"Chords: {current.Hotkeys.NoteKey} to listen (or dictate a note when listening is off), {current.Hotkeys.CommandKey} for an instruction ({scopeText}). Chords, capture timing and the stream window are edited in settings.json and need a restart; preferences (response style, pinned terms, grants, retention) change through approved change sets. Everything here applies to the next task or listening pass.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary() });
 
         var dialog = Dialog("Settings", new ScrollViewer { Content = panel, MaxHeight = 560 }, "Save");
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
@@ -501,8 +496,7 @@ public sealed partial class MainWindow
         _coordinator.UpdateSettings(s =>
         {
             s.Orchestrator.Mode = (mode.SelectedItem as ComboBoxItem)?.Tag as string ?? s.Orchestrator.Mode;
-            s.Judge.Mode = (judge.SelectedItem as ComboBoxItem)?.Tag as string ?? s.Judge.Mode;
-            if (!double.IsNaN(minConfidence.Value)) s.Judge.MinConfidence = Math.Round(minConfidence.Value, 2);
+            s.Listening.Enabled = listening.IsOn;
             s.Model.Enabled = modelEnabled.IsOn;
             s.Model.Endpoint = endpoint.Text.Trim();
             s.Model.Model = modelName.Text.Trim();

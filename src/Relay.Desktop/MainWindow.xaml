@@ -117,8 +117,8 @@
                             </Border>
                             <Border Style="{StaticResource Chip}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Ellipse x:Name="JudgeDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="JudgeChip" Style="{StaticResource ChipText}" Text="Judge" />
+                                    <Ellipse x:Name="ListeningDot" Width="6" Height="6" Fill="Gray" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="ListeningChip" Style="{StaticResource ChipText}" Text="Listening" />
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource Chip}">
@@ -151,7 +151,7 @@
                                 <Button Content="Refocus" Click="Refocus_Click" />
                             </InfoBar.ActionButton>
                         </InfoBar>
-                        <!-- The rolling buffer while listening: how much of the window is held, what the judge has done, never the words. -->
+                        <!-- The rolling buffer while listening: how much of the window is held, what the mind has done, never the words. -->
                         <StackPanel x:Name="ListeningPanel" Spacing="6" Visibility="Collapsed">
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>

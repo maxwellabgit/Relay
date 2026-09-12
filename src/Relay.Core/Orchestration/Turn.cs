@@ -10,7 +10,7 @@ namespace Relay.Core.Orchestration;
 
 /// <summary>
 /// What a planner is asked to work on: for a direct ask the instruction verbatim; for an observed
-/// task the judge's focused prompt, which quotes the words that triggered it. <see cref="Origin"/>
+/// task the objective it was raised with, which quotes the words that triggered it. <see cref="Origin"/>
 /// and <see cref="Kind"/> tell the planner which lane it is in and therefore what it may propose.
 /// </summary>
 public sealed record TurnRequest(

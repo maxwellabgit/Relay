@@ -20,7 +20,7 @@
   <ItemGroup>
     <!-- Authored evaluation cases (the unseen and failure sets); recorded cases are derived from task diagnostics at run time. -->
     <Content Include="Evaluation\*.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- The model-primary set: multi-segment windows and delegation cases only a model judge and planner can pass; scored by the live run, not by the grammar. -->
+    <!-- The model-primary set: delegation cases only a model planner can pass; scored by the live run, not by the grammar. -->
     <Content Include="Evaluation\model\*.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The mind set (docs/09): cases scored on the loop's moves — the world clock build, local-first answers, delegation as a package. -->
     <Content Include="Evaluation\mind\*.json" CopyToOutputDirectory="PreserveNewest" />

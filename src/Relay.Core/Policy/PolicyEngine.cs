@@ -22,7 +22,7 @@ public sealed class PolicyWorld
     /// <summary>Whether a reference (note id, excerpt id, capture id) resolves to something Relay holds; external packages may only carry these.</summary>
     public Func<string, bool>? ReferenceExists { get; init; }
     /// <summary>Prompt fragment names that may be changed through change sets.</summary>
-    public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "judge", "mind", "build", "digest"];
+    public IReadOnlyList<string> PromptFragments { get; init; } = ["planner", "mind", "build", "digest"];
     /// <summary>Origin of the task the proposal belongs to. Some actions may only be proposed from a direct request; null means unknown and is treated as direct.</summary>
     public Tasks.TaskOrigin? Origin { get; init; }
     /// <summary>Kind of the task the proposal belongs to. An improve task's self-changes must carry the improvement contract.</summary>

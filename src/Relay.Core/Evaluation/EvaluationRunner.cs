@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Relay.Core.Decisions;
-using Relay.Core.Judge;
 using Relay.Core.Mind;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
@@ -33,16 +32,15 @@ public sealed record SourceScore(
 }
 
 /// <summary>
-/// The result of evaluating a set: which set (by hash), against which planner and judge, and every
-/// case's verdict. A report over an incomplete set has <see cref="Problems"/> and no results; it never
-/// passes. Written as JSON so an improve task can cite it as the acceptance evidence for a change set.
+/// The result of evaluating a set: which set (by hash), against which planner, and every case's verdict.
+/// A report over an incomplete set has <see cref="Problems"/> and no results; it never passes. Written as
+/// JSON so an improve task can cite it as the acceptance evidence for a change set.
 /// </summary>
 public sealed class EvaluationReport
 {
     [JsonPropertyName("setSha256")] public required string SetSha256 { get; init; }
     [JsonPropertyName("ranAt")] public required DateTimeOffset RanAt { get; init; }
     [JsonPropertyName("planner")] public required string Planner { get; init; }
-    [JsonPropertyName("judge")] public string? Judge { get; init; }
     /// <summary>The completeness guard's findings; non-empty means nothing was run.</summary>
     [JsonPropertyName("problems")] public IReadOnlyList<string> Problems { get; init; } = [];
     [JsonPropertyName("results")] public IReadOnlyList<CaseResult> Results { get; init; } = [];
@@ -64,7 +62,6 @@ public sealed class EvaluationReport
     {
         var sb = new StringBuilder();
         sb.Append("Evaluation of set ").Append(SetSha256[..12]).Append(" with ").Append(Planner);
-        if (Judge is not null) sb.Append(" and judge ").Append(Judge);
         sb.Append(": ").Append(Passed ? "PASS" : "FAIL").Append('\n');
         foreach (var p in Problems) sb.Append("  guard: ").Append(p).Append('\n');
         foreach (var s in Scores) sb.Append("  ").Append(s.Source).Append(": ").Append(s.Passed).Append('/').Append(s.Total).Append('\n');
@@ -79,28 +76,24 @@ public sealed class EvaluationReport
 }
 
 /// <summary>
-/// Runs an evaluation set against a planner (and a judge, for cases with segments) and scores each case
-/// against its expectation. The planner is called exactly as the coordinator calls it, with a context
+/// Runs an evaluation set against a planner (and the mind, for cases that expect moves) and scores each case
+/// against its expectation. Each is called exactly as the coordinator calls it, with a context
 /// the caller supplies per case, so the same cases score the deterministic grammar, a scripted model,
-/// or a live model. Nothing here executes proposals; only plans and findings are judged.
+/// or a live model. Nothing here executes proposals; only the plan or the moves are scored.
 /// </summary>
 public sealed class EvaluationRunner
 {
     private readonly IOrchestrator _planner;
     private readonly Func<EvaluationCase, TurnContext> _context;
-    private readonly IJudge? _judge;
-    private readonly Func<EvaluationCase, JudgeContext>? _judgeContext;
     private readonly IMind? _mind;
     private readonly Func<EvaluationCase, MindContext>? _mindContext;
     private readonly Func<DateTimeOffset> _clock;
 
-    public EvaluationRunner(IOrchestrator planner, Func<EvaluationCase, TurnContext> context, IJudge? judge = null, Func<EvaluationCase, JudgeContext>? judgeContext = null, Func<DateTimeOffset>? clock = null,
+    public EvaluationRunner(IOrchestrator planner, Func<EvaluationCase, TurnContext> context, Func<DateTimeOffset>? clock = null,
         IMind? mind = null, Func<EvaluationCase, MindContext>? mindContext = null)
     {
         _planner = planner;
         _context = context;
-        _judge = judge;
-        _judgeContext = judgeContext;
         _mind = mind;
         _mindContext = mindContext;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -115,17 +108,16 @@ public sealed class EvaluationRunner
     {
         var problems = set.Validate();
         if (problems.Count > 0)
-            return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Judge = _judge?.Name, Problems = problems };
+            return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Problems = problems };
 
         var results = new List<CaseResult>(set.Cases.Count);
         foreach (var c in set.Cases)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(c.IsJudgeCase ? await RunJudgeCaseAsync(c, cancellationToken).ConfigureAwait(false)
-                : c.IsMindCase ? await RunMindCaseAsync(c, cancellationToken).ConfigureAwait(false)
+            results.Add(c.IsMindCase ? await RunMindCaseAsync(c, cancellationToken).ConfigureAwait(false)
                 : await RunPlanCaseAsync(c, cancellationToken).ConfigureAwait(false));
         }
-        return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Judge = _judge?.Name, Results = results };
+        return new EvaluationReport { SetSha256 = set.Sha256, RanAt = _clock(), Planner = _planner.Name, Results = results };
     }
 
     // ----------------------------------------------------------------------------------------
@@ -333,51 +325,6 @@ public sealed class EvaluationRunner
         return new CaseResult(c.Id, c.Source, "plan", failures.Count == 0, failures, Observe(plan), plan.Producer, watch.ElapsedMilliseconds);
     }
 
-    private async Task<CaseResult> RunJudgeCaseAsync(EvaluationCase c, CancellationToken cancellationToken)
-    {
-        var watch = Stopwatch.StartNew();
-        if (_judge is null) return new CaseResult(c.Id, c.Source, "judge", false, ["No judge was given to the runner; the case has segments."], "(no judge)", "-", 0);
-        var at = _clock();
-        var segments = c.Segments!.Select((text, i) => new StreamSegment($"eval-{c.Id}-s{i + 1}", at.AddSeconds(i * 3), text)).ToList();
-        var ids = segments.Select(s => s.SegmentId).ToList();
-        var fresh = c.NewSegments is null ? ids : c.NewSegments.Where(p => p >= 1 && p <= ids.Count).Select(p => ids[p - 1]).Distinct().ToList();
-        var request = new JudgeRequest(TaskOrigin.Observed, segments, fresh, null, _judgeContext?.Invoke(c) ?? JudgeContext.Empty, at.AddSeconds(segments.Count * 3));
-        JudgeDecision decision;
-        try
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(CaseTimeout);
-            decision = await _judge.JudgeAsync(request, timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new CaseResult(c.Id, c.Source, "judge", false, [$"The judge did not answer within {CaseTimeout.TotalSeconds:0}s."], "(timeout)", _judge.Name, watch.ElapsedMilliseconds);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return new CaseResult(c.Id, c.Source, "judge", false, [$"The judge threw {ex.GetType().Name}: {ex.Message}"], "(exception)", _judge.Name, watch.ElapsedMilliseconds);
-        }
-        var failures = Score(c.Expect, decision, ids);
-        var observed = decision.Error is not null ? "error: " + decision.Error
-            : decision.Findings.Count == 0 ? "no findings"
-            : string.Join("; ", decision.Findings.Select(f => Describe(f, ids)));
-        if (decision.PromptTokens > 0 || decision.CompletionTokens > 0) observed += $" · {decision.PromptTokens}+{decision.CompletionTokens} tok · {decision.ElapsedMs} ms";
-        return new CaseResult(c.Id, c.Source, "judge", failures.Count == 0, failures, observed, decision.Producer, watch.ElapsedMilliseconds);
-    }
-
-    /// <summary>One finding on one line: kind, confidence, the project it named, the window positions it cited, its summary, and the prompt it wrote for the planner.</summary>
-    private static string Describe(JudgeFinding f, IReadOnlyList<string> ids)
-    {
-        var positions = f.SegmentIds.Select(id => PositionOf(ids, id)).Where(p => p > 0).OrderBy(p => p).Select(p => "s" + p);
-        var sb = new StringBuilder();
-        sb.Append(f.Kind.Wire()).Append(" (").Append(f.Confidence.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)).Append(')');
-        if (f.ProjectHint is not null) sb.Append(" @").Append(f.ProjectHint);
-        sb.Append(" [").Append(string.Join(",", positions)).Append("]: ").Append(f.Summary);
-        if (f.FocusedPrompt.Length > 0 && f.FocusedPrompt != f.Summary) sb.Append(" | prompt: ").Append(f.FocusedPrompt.Length > 160 ? f.FocusedPrompt[..159] + "…" : f.FocusedPrompt);
-        if (f.NoteText is not null) sb.Append(" | note: ").Append(f.NoteText.Length > 120 ? f.NoteText[..119] + "…" : f.NoteText);
-        return sb.ToString();
-    }
-
     /// <summary>Every way the plan falls short of the expectation, in plain words.</summary>
     public static IReadOnlyList<string> Score(Expectation e, TurnPlan plan)
     {
@@ -423,76 +370,6 @@ public sealed class EvaluationRunner
             }
         }
         return failures;
-    }
-
-    /// <summary>
-    /// Every way the judge's decision falls short of the expectation. <paramref name="windowIds"/> are the window's
-    /// segment ids in order, so 1-based positions in the expectation can be compared with the ids the judge cited.
-    /// Per-finding assertions (project, grounding, prompt, note) are checked against the findings of the expected kind
-    /// when one is named, otherwise against every finding; each must hold for at least one of them.
-    /// </summary>
-    public static IReadOnlyList<string> Score(Expectation e, JudgeDecision decision, IReadOnlyList<string>? windowIds = null)
-    {
-        var failures = new List<string>();
-        if (decision.Error is not null) failures.Add($"The judge failed: {decision.Error}");
-        var findings = decision.Findings;
-        if (e.Significant is { } significant && decision.Significant != significant)
-            failures.Add(significant ? "Expected a significant finding; the judge found nothing." : $"Expected nothing significant, but the judge found: {string.Join("; ", findings.Select(f => f.Kind.Wire() + ": " + f.Summary))}");
-        var candidates = findings;
-        if (e.FindingKind is { } kind)
-        {
-            var want = TaskLanes.ParseKind(kind);
-            candidates = findings.Where(f => f.Kind == want).ToList();
-            if (candidates.Count == 0) failures.Add($"Expected a '{want.Wire()}' finding; got [{string.Join(", ", findings.Select(f => f.Kind.Wire()))}].");
-        }
-        foreach (var forbidden in e.ForbiddenFindingKinds ?? [])
-        {
-            var kindValue = TaskLanes.ParseKind(forbidden);
-            if (findings.Any(f => f.Kind == kindValue)) failures.Add($"A '{kindValue.Wire()}' finding must not be raised here.");
-        }
-        if (e.MinFindings is { } min && findings.Count < min) failures.Add($"Expected at least {min} finding(s); got {findings.Count}.");
-        if (e.MaxFindings is { } max && findings.Count > max) failures.Add($"Expected at most {max} finding(s); got {findings.Count}: {string.Join("; ", findings.Select(f => f.Kind.Wire() + ": " + f.Summary))}");
-        var scope = e.FindingKind is null ? "finding" : $"'{TaskLanes.ParseKind(e.FindingKind).Wire()}' finding";
-        if (e.FindingProject is { } project && candidates.Count > 0 && !candidates.Any(f => NamesProject(f.ProjectHint, project)))
-            failures.Add($"No {scope} names the project '{project}'; named: [{string.Join(", ", candidates.Select(f => f.ProjectHint ?? "null"))}].");
-        if (e.FindingNoProject == true && findings.Any(f => !string.IsNullOrWhiteSpace(f.ProjectHint)))
-            failures.Add($"No finding may name a project here; named: [{string.Join(", ", findings.Select(f => f.ProjectHint ?? "null"))}].");
-        if (e.FindingSegments is { Count: > 0 } positions && candidates.Count > 0)
-        {
-            if (windowIds is null) failures.Add("findingSegments cannot be checked without the window's segment ids.");
-            else
-            {
-                var wanted = positions.Where(p => p >= 1 && p <= windowIds.Count).Select(p => windowIds[p - 1]).ToList();
-                if (!candidates.Any(f => wanted.All(id => f.SegmentIds.Contains(id, StringComparer.Ordinal))))
-                    failures.Add($"No {scope} cites segment(s) [{string.Join(",", positions.Select(p => "s" + p))}]; cited: [{string.Join(" | ", candidates.Select(f => string.Join(",", f.SegmentIds.Select(id => "s" + PositionOf(windowIds, id)))))}].");
-            }
-        }
-        foreach (var fragment in e.PromptContains ?? [])
-            if (candidates.Count > 0 && !candidates.Any(f => f.FocusedPrompt.Contains(fragment, StringComparison.OrdinalIgnoreCase)))
-                failures.Add($"No {scope} has a focused prompt mentioning '{fragment}'; prompts: [{string.Join(" | ", candidates.Select(f => f.FocusedPrompt))}].");
-        foreach (var fragment in e.NoteContains ?? [])
-            if (candidates.Count > 0 && !candidates.Any(f => (f.NoteText ?? "").Contains(fragment, StringComparison.OrdinalIgnoreCase)))
-                failures.Add($"No {scope} has a note text mentioning '{fragment}'; notes: [{string.Join(" | ", candidates.Select(f => f.NoteText ?? "null"))}].");
-        return failures;
-    }
-
-    /// <summary>1-based position of a segment id in the window; 0 when the judge cited an id that is not in it.</summary>
-    private static int PositionOf(IReadOnlyList<string> ids, string id)
-    {
-        for (var i = 0; i < ids.Count; i++) if (string.Equals(ids[i], id, StringComparison.Ordinal)) return i + 1;
-        return 0;
-    }
-
-    /// <summary>The judge names projects as it sees them listed ("Atlas" or "Atlas (atlas)"); the expectation gives a name or a slug.</summary>
-    private static bool NamesProject(string? hint, string expected)
-    {
-        if (string.IsNullOrWhiteSpace(hint)) return false;
-        var h = hint.Trim();
-        if (string.Equals(h, expected, StringComparison.OrdinalIgnoreCase)) return true;
-        var paren = h.IndexOf('(');
-        var name = paren > 0 ? h[..paren].Trim() : h;
-        var slug = paren > 0 ? h[(paren + 1)..].TrimEnd(')').Trim() : h;
-        return string.Equals(name, expected, StringComparison.OrdinalIgnoreCase) || string.Equals(slug, expected, StringComparison.OrdinalIgnoreCase);
     }
 
     private static (string? Action, string? Key, string? Value) ParseTargetAssertion(string assertion)

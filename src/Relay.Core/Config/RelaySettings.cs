@@ -18,7 +18,7 @@ public sealed class RelaySettings
     [JsonPropertyName("hotkeys")] public HotkeySettings Hotkeys { get; set; } = new();
     [JsonPropertyName("capture")] public CaptureSettings Capture { get; set; } = new();
     [JsonPropertyName("stream")] public StreamSettings Stream { get; set; } = new();
-    [JsonPropertyName("judge")] public JudgeSettings Judge { get; set; } = new();
+    [JsonPropertyName("listening")] public ListeningSettings Listening { get; set; } = new();
     [JsonPropertyName("diagnostics")] public DiagnosticsSettings Diagnostics { get; set; } = new();
     [JsonPropertyName("orchestrator")] public OrchestratorSettings Orchestrator { get; set; } = new();
     [JsonPropertyName("model")] public ModelSettings Model { get; set; } = new();
@@ -49,9 +49,7 @@ public sealed class RelaySettings
             if (string.IsNullOrWhiteSpace(profile.SecretName)) problems.Add($"externalModels[{profile.Name}].secretName is required.");
         }
         if (ExternalModels.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != ExternalModels.Count) problems.Add("externalModels names must be unique.");
-        if (Judge.Mode is not (JudgeSettings.Off or JudgeSettings.Heuristic or JudgeSettings.Model)) problems.Add("judge.mode must be off, heuristic, or model.");
-        if (Judge.MinConfidence is < 0 or > 1) problems.Add("judge.minConfidence must be between 0 and 1.");
-        if (Judge.TimeoutMs < 1000) problems.Add("judge.timeoutMs must be at least 1000.");
+        if (Listening.PassTimeoutMs < 1000) problems.Add("listening.passTimeoutMs must be at least 1000.");
         if (Stream.BufferSeconds != StreamSettings.WholeConversation && Stream.BufferSeconds is < 15 or > 600) problems.Add("stream.bufferSeconds must be 0 (whole conversation) or 15–600.");
         if (Stream.SegmentQuietMs is < 200 or > 10000) problems.Add("stream.segmentQuietMs must be 200–10000.");
         if (Stream.ObserveIntervalMs is < 500 or > 60000) problems.Add("stream.observeIntervalMs must be 500–60000.");
@@ -137,7 +135,7 @@ public sealed class OrchestratorSettings
     [JsonPropertyName("maxToolCalls")] public int MaxToolCalls { get; set; } = 8;
 }
 
-/// <summary>RELAY0's model: the local judge and planner. Loopback http (llama.cpp on this machine) or https.</summary>
+/// <summary>RELAY0's model: the one local mind. Loopback http (llama.cpp on this machine) or https.</summary>
 public sealed class ModelSettings
 {
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
@@ -177,7 +175,7 @@ public sealed class ExternalModelProfile
     public ModelSettings AsModelSettings() => new() { Enabled = true, Endpoint = Endpoint, Model = Model, SecretName = SecretName, TimeoutMs = TimeoutMs, MaxOutputTokens = MaxOutputTokens };
 }
 
-/// <summary>Listening: how the stream is cut, how long it is held, how often RELAY0 judges it, how much may be retained.</summary>
+/// <summary>Listening: how the stream is cut, how long it is held, how often the mind reads it, how much may be retained.</summary>
 public sealed class StreamSettings
 {
     /// <summary>Whole conversation: nothing heard is dropped until the stream stops.</summary>
@@ -190,11 +188,11 @@ public sealed class StreamSettings
     [JsonPropertyName("bufferSeconds")] public int BufferSeconds { get; set; } = WholeConversation;
     /// <summary>Text without a sentence end becomes a segment after this much quiet.</summary>
     [JsonPropertyName("segmentQuietMs")] public int SegmentQuietMs { get; set; } = 1_200;
-    /// <summary>How often the judge is offered new segments (watched terms and acronyms are judged at once).</summary>
+    /// <summary>How often the mind is offered new segments (a watched term is read at once).</summary>
     [JsonPropertyName("observeIntervalMs")] public int ObserveIntervalMs { get; set; } = 12_000;
     /// <summary>A pass over new talk waits until at least this many new characters have arrived…</summary>
     [JsonPropertyName("minIngestChars")] public int MinIngestChars { get; set; } = 240;
-    /// <summary>…or until the oldest unjudged segment is this old, so a lone sentence is still judged after a pause. Watched terms and stopping the stream never wait. 0 for both judges every fragment.</summary>
+    /// <summary>…or until the oldest unread segment is this old, so a lone sentence is still read after a pause. Watched terms and stopping the stream never wait. 0 reads every fragment.</summary>
     [JsonPropertyName("minIngestSeconds")] public int MinIngestSeconds { get; set; } = 20;
     [JsonPropertyName("excerptMaxSeconds")] public int ExcerptMaxSeconds { get; set; } = 30;
     [JsonPropertyName("maxRetainedFraction")] public double MaxRetainedFraction { get; set; } = 0.25;
@@ -206,17 +204,13 @@ public sealed class StreamSettings
     [JsonPropertyName("maxRaisesPerPass")] public int MaxRaisesPerPass { get; set; } = 2;
 }
 
-public sealed class JudgeSettings
+/// <summary>What the note chord does: open a conversation the mind reads, or dictate one silent note.</summary>
+public sealed class ListeningSettings
 {
-    public const string Off = "off";
-    public const string Heuristic = "heuristic";
-    public const string Model = "model";
-
-    /// <summary>off: streams are buffered and discarded, nothing is judged. heuristic: cue words (labeled as such). model: RELAY0 judges; falls back to heuristic when the model is unavailable.</summary>
-    [JsonPropertyName("mode")] public string Mode { get; set; } = Model;
-    [JsonPropertyName("minConfidence")] public double MinConfidence { get; set; } = 0.55;
-    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 8_000;
-    [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 600;
+    /// <summary>True: the note chord listens and the mind reads what it hears. False: the chord dictates a note and nothing is read.</summary>
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+    /// <summary>How long one listening pass may take before it is abandoned and the next stretch of talk gets a clean one.</summary>
+    [JsonPropertyName("passTimeoutMs")] public int PassTimeoutMs { get; set; } = 8_000;
 }
 
 public sealed class WorkerSettings
@@ -273,7 +267,7 @@ public static class SettingsStore
             if (validation.Any(p => p.StartsWith("orchestrator", StringComparison.Ordinal))) settings.Orchestrator = defaults.Orchestrator;
             if (validation.Any(p => p.StartsWith("model", StringComparison.Ordinal))) settings.Model = defaults.Model;
             if (validation.Any(p => p.StartsWith("externalModels", StringComparison.Ordinal))) settings.ExternalModels = defaults.ExternalModels;
-            if (validation.Any(p => p.StartsWith("judge", StringComparison.Ordinal))) settings.Judge = defaults.Judge;
+            if (validation.Any(p => p.StartsWith("listening", StringComparison.Ordinal))) settings.Listening = defaults.Listening;
             if (validation.Any(p => p.StartsWith("stream", StringComparison.Ordinal))) settings.Stream = defaults.Stream;
             if (validation.Any(p => p.StartsWith("workers", StringComparison.Ordinal))) settings.Workers = defaults.Workers;
         }

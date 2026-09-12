@@ -9,25 +9,24 @@ using Relay.Core.Tasks;
 namespace Relay.Core.Session;
 
 /// <summary>
-/// Listening in mind mode (the Alpha, step 1): the mind reads the conversation itself instead of a separate
-/// judge with a contract of its own. One <see cref="ObservingLoop"/> per stream, one pass per stretch of talk,
-/// the same moves and the same read the mind uses for everything else — and one move the loop only has here,
-/// <c>raise</c>, which hands work to a task with its own loop, budget and approvals. The observing loop never
-/// waits on anything, which is what lets observation continue while what it raised is in flight.
+/// Listening: the mind reads the conversation itself. One <see cref="ObservingLoop"/> per stream, one pass per
+/// stretch of talk, the same moves and the same read the mind uses for everything else — and one move the loop
+/// only has here, <c>raise</c>, which hands work to a task with its own loop, budget and approvals. The observing
+/// loop never waits on anything, which is what lets observation continue while what it raised is in flight.
 /// </summary>
 public sealed partial class SessionCoordinator
 {
-    /// <summary>Whether the mind reads the stream. When false the judge does, on the older path.</summary>
-    private bool ObservingWithMind => MindMode && ListeningEnabled;
-
-    private void BeginObserving(StreamState stream)
+    /// <summary>
+    /// The conversation's loop. Built before the stream state exists, so the host is given the state after it is
+    /// constructed — the loop cannot run until <see cref="ObservePass"/>, which only happens once the stream is set.
+    /// </summary>
+    private ObservingLoop NewObservingLoop(string streamId)
     {
-        var mind = _services.Mind!;
-        var host = new ObserveHost(this, stream);
+        var host = new ObserveHost(this);
         // No actions: the observing loop proposes nothing. What a raised task can go on to do is stated in the prompt instead.
         var context = MindContextOf([], []);
-        var decider = new Decider(_services.Decisions, d => RecordStreamDecision(stream, d));
-        stream.Loop = new ObservingLoop(stream.StreamId, mind, host, context, decider,
+        var decider = new Decider(_services.Decisions, RecordStreamDecision);
+        return new ObservingLoop(streamId, _services.Mind!, host, context, decider,
             new ObservingBudget(_settings.Stream.MaxMovesPerPass, _settings.Stream.MaxToolCallsPerPass, _settings.Stream.MaxRaisesPerPass), _clock);
     }
 
@@ -37,7 +36,7 @@ public sealed partial class SessionCoordinator
     /// </summary>
     private static WindowObserved? WindowFor(StreamState stream, DateTimeOffset now)
     {
-        var fresh = stream.Buffer.UnjudgedIds().ToHashSet(StringComparer.Ordinal);
+        var fresh = stream.Buffer.UnreadIds().ToHashSet(StringComparer.Ordinal);
         var freshLines = new List<WindowLine>();
         var earlierLines = new List<WindowLine>();
         foreach (var segment in stream.Buffer.Segments)
@@ -62,16 +61,17 @@ public sealed partial class SessionCoordinator
             if (final) CompleteStream(stream, "stopped");
             return;
         }
-        var loop = stream.Loop!;
+        var loop = stream.Loop;
         // The project list and the tools can both have changed since the stream opened (a task raised earlier created a project).
         loop.Context.Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList();
         loop.Context.Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors;
-        stream.Judging = true;
+        stream.Reading = true;
         stream.Passes++;
         var fresh = window.Fresh.Select(l => l.SegmentId).ToList();
         var cts = new CancellationTokenSource();
-        stream.JudgeCts = cts;
-        stream.JudgeTimeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Judge.TimeoutMs), () => cts.Cancel());
+        stream.PassCts = cts;
+        stream.PassTimedOut = false;
+        stream.PassTimeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Listening.PassTimeoutMs), () => { stream.PassTimedOut = true; cts.Cancel(); });
         Task<PassResult> passing;
         try { passing = loop.ObserveAsync(window, cts.Token); }
         catch (Exception ex) { passing = Task.FromException<PassResult>(ex); }
@@ -81,19 +81,25 @@ public sealed partial class SessionCoordinator
     private void OnObserved(StreamState stream, WindowObserved window, IReadOnlyList<string> fresh, Task<PassResult> passing, bool final)
     {
         if (_stream != stream) return;
-        stream.JudgeTimeout?.Dispose();
-        stream.JudgeTimeout = null;
-        stream.JudgeCts?.Dispose();
-        stream.JudgeCts = null;
-        stream.Judging = false;
+        stream.PassTimeout?.Dispose();
+        stream.PassTimeout = null;
+        stream.PassCts?.Dispose();
+        stream.PassCts = null;
+        stream.Reading = false;
         stream.LastCheckAt = _clock.UtcNow;
-        stream.LastJudge = stream.Loop!.MindName;
-        stream.Buffer.MarkJudged(fresh);
+        stream.Buffer.MarkRead(fresh);
+
+        var timedOut = stream.PassTimedOut;
+        stream.PassTimedOut = false;
 
         PassResult pass;
-        if (passing.IsCanceled) pass = new PassResult(0, 0, 0, 0, 0, 0, $"the pass timed out after {_settings.Judge.TimeoutMs} ms");
-        else if (passing.IsFaulted) pass = new PassResult(0, 0, 0, 0, 0, 0, passing.Exception?.GetBaseException().Message ?? "the pass failed");
+        if (passing.IsFaulted) pass = new PassResult(0, 0, 0, 0, 0, 0, passing.Exception?.GetBaseException().Message ?? "the pass failed");
+        else if (passing.IsCanceled) pass = new PassResult(0, 0, 0, 0, 0, 0, TimedOut());
         else pass = passing.Result;
+        // The loop reports a cancelled pass without knowing why; only the coordinator's clock does.
+        if (timedOut && pass.Error is not null) pass = pass with { Error = TimedOut() };
+
+        string TimedOut() => $"the pass timed out after {_settings.Listening.PassTimeoutMs} ms";
 
         if (pass.Error is not null)
         {
@@ -221,7 +227,6 @@ public sealed partial class SessionCoordinator
             }
         }
 
-        stream.Findings++;
         stream.Tasks++;
         var task = StartRaisedTask(move, kind, excerpt, stream.StreamId, sourceEventId, loop.MindName, raise.Score);
         return MoveOutcome.Of(new RaisedObserved(now, task?.TaskId, move.Kind, move.Objective, excerpt?.ExcerptId,
@@ -268,8 +273,8 @@ public sealed partial class SessionCoordinator
     };
 
     /// <summary>A decision taken on a listening pass. It belongs to the conversation, not to a task, so it is recorded against the stream.</summary>
-    private void RecordStreamDecision(StreamState stream, DecisionRecord decision)
-        => Append(EventTypes.DecisionMade, new { streamId = stream.StreamId, decision = decision.Name, outcome = decision.Outcome, score = decision.Score, features = decision.Features, weights = decision.Weights, rationale = decision.Rationale });
+    private void RecordStreamDecision(DecisionRecord decision)
+        => Append(EventTypes.DecisionMade, new { streamId = _stream?.StreamId, decision = decision.Name, outcome = decision.Outcome, score = decision.Score, features = decision.Features, weights = decision.Weights, rationale = decision.Rationale });
 
     // ----------------------------------------------------------------------------------------
     // The host the observing loop talks to: marshals every call onto the coordinator thread
@@ -302,26 +307,30 @@ public sealed partial class SessionCoordinator
         public void ModelResponded(bool ok, int chars, long elapsedMs, string? error, int promptTokens = 0, int completionTokens = 0) { }
     }
 
+    /// <summary>
+    /// The loop identifies its own stream: a consequence that arrives after the conversation ended, or while a
+    /// different one is open, belongs to nothing and is dropped.
+    /// </summary>
     private sealed class ObserveHost : IObservingHost
     {
         private readonly SessionCoordinator _owner;
-        private readonly StreamState _stream;
 
-        public ObserveHost(SessionCoordinator owner, StreamState stream)
+        public ObserveHost(SessionCoordinator owner) => _owner = owner;
+
+        private void OnCoordinator(ObservingLoop loop, Action<StreamState> consequence) => _owner._scheduler.Post(() =>
         {
-            _owner = owner;
-            _stream = stream;
-        }
+            if (_owner.StreamOf(loop) is { } stream) consequence(stream);
+        });
 
-        private Task<MoveOutcome> OnCoordinator(Func<MoveOutcome> consequence)
+        private Task<MoveOutcome> OnCoordinator(ObservingLoop loop, Func<StreamState, MoveOutcome> consequence)
         {
             var tcs = new TaskCompletionSource<MoveOutcome>();
             _owner._scheduler.Post(() =>
             {
                 try
                 {
-                    if (_owner._stream != _stream) { tcs.SetCanceled(); return; }
-                    tcs.SetResult(consequence());
+                    if (_owner.StreamOf(loop) is not { } stream) { tcs.SetCanceled(); return; }
+                    tcs.SetResult(consequence(stream));
                     _owner.Notify();
                 }
                 catch (Exception ex) { tcs.SetException(ex); }
@@ -329,12 +338,14 @@ public sealed partial class SessionCoordinator
             return tcs.Task;
         }
 
-        public void Stepped(ObservingLoop loop, MindStep step) => _owner._scheduler.Post(() => _owner.OnObserveStepped(_stream, loop, step));
-        public void Said(ObservingLoop loop, SayMove move) => _owner._scheduler.Post(() => _owner.OnObserveSaid(_stream, move));
+        public void Stepped(ObservingLoop loop, MindStep step) => OnCoordinator(loop, stream => _owner.OnObserveStepped(stream, loop, step));
+        public void Said(ObservingLoop loop, SayMove move) => OnCoordinator(loop, stream => _owner.OnObserveSaid(stream, move));
         public void Waited(ObservingLoop loop, WaitMove move) { /* the usual outcome; the pass record says the talk needed nothing */ }
-        public void Refused(ObservingLoop loop, RaiseMove move, string reason) => _owner._scheduler.Post(() => _owner.OnObserveRefused(_stream, loop, move, reason));
-        public Task<MoveOutcome> UseToolAsync(ObservingLoop loop, UseToolMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.OnObserveUseTool(_stream, loop, move));
+        public void Refused(ObservingLoop loop, RaiseMove move, string reason) => OnCoordinator(loop, stream => _owner.OnObserveRefused(stream, loop, move, reason));
+        public Task<MoveOutcome> UseToolAsync(ObservingLoop loop, UseToolMove move, CancellationToken cancellationToken) => OnCoordinator(loop, stream => _owner.OnObserveUseTool(stream, loop, move));
         public Task<MoveOutcome> RaiseAsync(ObservingLoop loop, RaiseMove move, IReadOnlyList<WindowLine> lines, DecisionRecord raise, CancellationToken cancellationToken)
-            => OnCoordinator(() => _owner.OnObserveRaise(_stream, loop, move, lines, raise));
+            => OnCoordinator(loop, stream => _owner.OnObserveRaise(stream, loop, move, lines, raise));
     }
+
+    private StreamState? StreamOf(ObservingLoop loop) => _stream is { } stream && stream.Loop == loop ? stream : null;
 }

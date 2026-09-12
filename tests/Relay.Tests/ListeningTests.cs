@@ -1,16 +1,12 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Relay.Core.Attention;
 using Relay.Core.Config;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
-using Relay.Core.Model;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
 using Relay.Core.Session;
 using Relay.Core.State;
-using Relay.Core.Storage;
 using Relay.Core.Stream;
 using Relay.Core.Tasks;
 using Relay.Tests.Support;
@@ -19,10 +15,10 @@ using TaskStatus = Relay.Core.Tasks.TaskStatus;
 namespace Relay.Tests;
 
 /// <summary>
-/// Listening: the note chord with the judge on. What these tests hold Relay to is the README's
-/// contract — a rolling window that expires continuously, excerpts anchored to the words that
-/// triggered them, overlap kept by reference, a ledger that never holds the words, and findings that
-/// become observed tasks presented by the attention arbiter, not dumped on the screen.
+/// Listening: the note chord opening a conversation the mind reads. What these tests hold Relay to is the
+/// README's contract — a rolling window that expires continuously, excerpts anchored to the words that
+/// triggered them, overlap kept by reference, a ledger that never holds the words, and raised work presented
+/// by the attention arbiter, not dumped on the screen. The mind's own moves are held to in ObservingTests.
 /// </summary>
 public class ListeningTests : IDisposable
 {
@@ -32,8 +28,16 @@ public class ListeningTests : IDisposable
     private const string Chatter = "Anyway, how was the weekend, did you get out at all?";
     private const string LaunchEmail = "Marketing wants the launch email out a week before.";
 
+    /// <summary>
+    /// The deterministic grammar still plans what the mind raises (docs/10, step 1c). Listening stays off
+    /// here so the note chord dictates while the world is built; <see cref="Scenario.WithListening"/> turns it on.
+    /// </summary>
+    private static void Planned(RelaySettings s) => s.Orchestrator.Mode = OrchestratorSettings.Rules;
+
+    private static Action<RelaySettings> Planned(Action<RelaySettings> also) => s => { Planned(s); also(s); };
+
     // ----------------------------------------------------------------------------------------
-    // Units: segmenter, buffer, guard, judges
+    // Units: segmenter, buffer, guard
     // ----------------------------------------------------------------------------------------
 
     [Fact]
@@ -62,7 +66,7 @@ public class ListeningTests : IDisposable
     }
 
     [Fact]
-    public void BufferHoldsOnlyTheWindowAndForgetsWhatItJudged()
+    public void BufferHoldsOnlyTheWindowAndForgetsWhatWasRead()
     {
         var t0 = new DateTimeOffset(2026, 9, 5, 10, 0, 0, TimeSpan.Zero);
         var buffer = new ConversationBuffer(TimeSpan.FromSeconds(90));
@@ -72,9 +76,9 @@ public class ListeningTests : IDisposable
 
         buffer.Append(a, t0);
         buffer.Append(b, t0.AddSeconds(50));
-        Assert.Equal(new[] { "A", "B" }, buffer.UnjudgedIds());
-        buffer.MarkJudged(["A"]);
-        Assert.Equal(new[] { "B" }, buffer.UnjudgedIds());
+        Assert.Equal(new[] { "A", "B" }, buffer.UnreadIds());
+        buffer.MarkRead(["A"]);
+        Assert.Equal(new[] { "B" }, buffer.UnreadIds());
 
         buffer.Append(c, t0.AddSeconds(100));                                           // A is 100 s old: gone on touch
         Assert.Equal(new[] { "B", "C" }, buffer.Segments.Select(s => s.SegmentId));
@@ -99,135 +103,43 @@ public class ListeningTests : IDisposable
         Assert.False(guard.Decide(requestedSeconds: 5, retainedSecondsSoFar: 20, elapsedSeconds: 120).Shrunk);  // 25/120 < 25 %
     }
 
-    [Fact]
-    public void HeuristicJudgeNamesTheLanesFromCuesAndSaysSo()
-    {
-        var judge = new HeuristicJudge();
-        var t0 = new DateTimeOffset(2026, 9, 5, 10, 0, 0, TimeSpan.Zero);
-        var context = new JudgeContext(["Atlas (atlas)"], ["SLA"], [], null);
-        var window = new List<StreamSegment>
-        {
-            new("S1", t0, Decision),
-            new("S2", t0.AddSeconds(3), Chatter),
-            new("S3", t0.AddSeconds(6), "The OKR review is on Thursday."),
-            new("S4", t0.AddSeconds(9), "Our SLA promises four nines."),
-        };
-        var decision = judge.JudgeAsync(new JudgeRequest(TaskOrigin.Observed, window, window.Select(s => s.SegmentId).ToList(), null, context, t0.AddSeconds(10)), CancellationToken.None).Result;
-
-        Assert.Equal(HeuristicJudge.ProducerName, decision.Producer);
-        var kinds = decision.Findings.Select(f => (f.Kind, f.SegmentIds[0])).ToList();
-        Assert.Contains((TaskKind.Check, "S1"), kinds);                    // dated claim about a known project
-        Assert.Contains((TaskKind.Remember, "S1"), kinds);                 // and a decision worth keeping
-        Assert.DoesNotContain(kinds, k => k.Item2 == "S2");                // chatter is not a finding
-        Assert.Contains((TaskKind.Resolve, "S3"), kinds);                  // an acronym
-        var watched = Assert.Single(decision.Findings, f => f.SegmentIds[0] == "S4");
-        Assert.Equal(TaskKind.Resolve, watched.Kind);
-        Assert.Equal("SLA", watched.Topic);
-        Assert.Equal("define:sla", watched.MergeKey);
-        Assert.True(watched.Confidence > 0.8);                             // watched terms are near-certain
-
-        var direct = judge.JudgeAsync(new JudgeRequest(TaskOrigin.Direct, [], [], "from now on keep answers brief", context, t0), CancellationToken.None).Result;
-        Assert.Equal(TaskKind.Improve, Assert.Single(direct.Findings).Kind);
-    }
-
-    [Fact]
-    public void ModelJudgeAsksForSchemaConstrainedJsonAndKeepsOnlyGroundedFindings()
-    {
-        var t0 = new DateTimeOffset(2026, 9, 5, 10, 0, 0, TimeSpan.Zero);
-        var client = new ScriptedModelClient().Reply(new JsonObject
-        {
-            ["findings"] = new JsonArray(
-                Finding("check", 0.82, "Atlas ship date stated", ["S1"], project: "Atlas", mergeKey: "check:atlas:oct-14"),
-                Finding("remember", 0.40, "too unsure", ["S1"]),                      // below the judge's floor
-                Finding("resolve", 0.90, "points at nothing in the window", ["Z9"]),   // hallucinated segment id
-                Finding("banana", 0.95, "not a kind we know", ["S2"])),
-        });
-        var judge = new ModelJudge(client, maxOutputTokens: 600, minConfidence: 0.55);
-        var window = new List<StreamSegment> { new("S1", t0, Decision), new("S2", t0.AddSeconds(3), Chatter) };
-        var context = new JudgeContext(["Atlas (atlas)"], [], ["beta"], "Answer briefly.");
-
-        var decision = judge.JudgeAsync(new JudgeRequest(TaskOrigin.Observed, window, ["S2", "S1"], null, context, t0.AddSeconds(4)), CancellationToken.None).Result;
-
-        var request = Assert.Single(client.Requests);
-        Assert.True(request.JsonObject);
-        Assert.Equal(ModelJudge.Schema, request.JsonSchema);
-        Assert.Equal("judge_decision", request.SchemaName);
-        Assert.Equal(600, request.MaxOutputTokens);
-        Assert.Contains("NEW [S1", request.Messages[1].Content);
-        Assert.Contains("Active projects: Atlas (atlas)", request.Messages[1].Content);
-        Assert.Contains("User preferences: Answer briefly.", request.Messages[0].Content);
-        Assert.DoesNotContain("file", request.Messages[0].Content.Split(' ').Select(w => w.Trim('.', ',')).Where(w => w == "files")); // the judge never sees files
-
-        Assert.Null(decision.Error);
-        Assert.Equal("model:test-model", decision.Producer);
-        Assert.Equal(100, decision.PromptTokens);
-        Assert.Equal(2, decision.Findings.Count);
-        var check = decision.Findings[0];
-        Assert.Equal(TaskKind.Check, check.Kind);
-        Assert.Equal("Atlas", check.ProjectHint);
-        Assert.Equal("check:atlas:oct-14", check.MergeKey);
-        Assert.Equal(["S1"], check.SegmentIds);
-        Assert.Equal(TaskKind.Answer, decision.Findings[1].Kind);          // an unknown kind degrades to answer, it is not dropped
-
-        var broken = new ModelJudge(new ScriptedModelClient().Reply("this is not json"));
-        var failed = broken.JudgeAsync(new JudgeRequest(TaskOrigin.Observed, window, ["S1"], null, context, t0), CancellationToken.None).Result;
-        Assert.Empty(failed.Findings);
-        Assert.StartsWith("Judge returned something other than the contract", failed.Error);
-        Assert.Equal("this is not json", failed.Raw);
-
-        var down = new ModelJudge(new ScriptedModelClient().Fail("connection refused", 0));
-        Assert.Equal("connection refused", down.JudgeAsync(new JudgeRequest(TaskOrigin.Observed, window, ["S1"], null, context, t0), CancellationToken.None).Result.Error);
-    }
-
-    private static JsonObject Finding(string kind, double confidence, string summary, string[] segments, string? project = null, string? mergeKey = null)
-        => new()
-        {
-            ["kind"] = kind,
-            ["confidence"] = confidence,
-            ["summary"] = summary,
-            ["why"] = "test",
-            ["focused_prompt"] = "Check: " + summary,
-            ["segment_ids"] = new JsonArray(segments.Select(s => (JsonNode?)s).ToArray()),
-            ["project"] = project,
-            ["merge_key"] = mergeKey,
-        };
-
     // ----------------------------------------------------------------------------------------
     // Scenarios: the stream end to end
     // ----------------------------------------------------------------------------------------
 
     /// <summary>
     /// The shipped default while the architecture is built (docs/09): the whole conversation is held until listening
-    /// stops, and the judge reads stretches of it — a pass waits for enough new talk or for the oldest of it to age —
-    /// instead of judging every fragment. Words still never reach the ledger.
+    /// stops, and the mind reads stretches of it — a pass waits for enough new talk or for the oldest of it to age —
+    /// instead of reading every fragment. Words still never reach the ledger.
     /// </summary>
     [Fact]
     public void WholeConversationIsHeldAndIngestedInStretchesNotFragments()
     {
-        var judge = new ScriptedJudge().When("launch email", TaskKind.Remember, "Remember the launch email timing.");
-        using var s = Scenario.New(_tmp, cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 240; cfg.Stream.MinIngestSeconds = 20; }, judge: judge)
-            .WithWorkspace().WithListening()
-            .StartListening().ExpectListening()
-            .Hear(Decision).Observe();                                                  // one short sentence, seconds old: held, not judged yet
+        var mind = new ListeningMind().When("launch email", "remember", "Keep the launch email timing.", note: "The launch email goes out a week before the beta.", noteType: "decision");
+        using var s = Scenario.New(_tmp, Planned(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 240; cfg.Stream.MinIngestSeconds = 20; }), mind: mind)
+            .WithWorkspace()
+            .WithListening().StartListening().ExpectListening()
+            .Hear(Decision).Observe();                                                  // one short sentence, seconds old: held, not read yet
         var live = s.Snap.Listening!;
         Assert.Equal(0, live.WindowSeconds);
-        Assert.Equal(0, live.JudgePasses);
+        Assert.Equal(0, live.Passes);
         Assert.Equal(1, live.HeldSegments);
-        Assert.Empty(judge.Requests);
+        Assert.Empty(mind.Passes);
 
         s.Silence(TimeSpan.FromSeconds(25));                                             // …until it has waited long enough
-        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
-        Assert.Single(judge.Requests);
+        Assert.Equal(1, s.Snap.Listening!.Passes);
+        Assert.Single(mind.Passes);
 
         s.Hear(Chatter).Hear(LaunchEmail).Observe();                                     // two more short sentences: under both thresholds again
-        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
-        s.Silence(TimeSpan.FromSeconds(200));                                            // nothing expired, and the stretch was judged as one
+        Assert.Equal(1, s.Snap.Listening!.Passes);
+        s.Silence(TimeSpan.FromSeconds(200));                                            // nothing expired, and the stretch was read as one
         live = s.Snap.Listening!;
         Assert.Equal(3, live.HeldSegments);
-        Assert.Equal(2, live.JudgePasses);
-        Assert.Equal(2, judge.Requests[^1].NewSegmentIds.Count);                         // Chatter and LaunchEmail arrived in one pass
-        Assert.Equal(3, judge.Requests[^1].Window.Count);                               // over the whole conversation so far
-        Assert.Equal(1, live.Findings);
+        Assert.Equal(2, live.Passes);
+        var window = mind.Passes[^1].Transcript.OfType<WindowObserved>().Last();
+        Assert.Equal(2, window.Fresh.Count);                                             // Chatter and LaunchEmail arrived in one pass
+        Assert.Equal(3, window.Lines.Count());                                           // over the whole conversation so far
+        Assert.Equal(1, live.Raised);
 
         s.StopListening().ExpectListening(false);
         Assert.False(File.Exists(s.H.Root.CurrentStreamPath));
@@ -238,26 +150,25 @@ public class ListeningTests : IDisposable
 
     /// <summary>A watched term does not wait for the slow ingest.</summary>
     [Fact]
-    public void WatchedTermsAreJudgedAtOnceEvenWithSlowIngest()
+    public void WatchedTermsAreReadAtOnceEvenWithSlowIngest()
     {
-        var judge = new ScriptedJudge();
-        using var s = Scenario.New(_tmp, cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 5000; cfg.Stream.MinIngestSeconds = 300; }, judge: judge)
+        var mind = new ListeningMind();
+        using var s = Scenario.New(_tmp, Planned(cfg => { cfg.Stream.BufferSeconds = StreamSettings.WholeConversation; cfg.Stream.MinIngestChars = 5000; cfg.Stream.MinIngestSeconds = 300; }), mind: mind)
             .WithWorkspace()
             .Do("Always show Atlas", c => Assert.True(c.UpdatePreference("display.alwaysShow", "Atlas")))
-            .WithListening()
-            .StartListening().Hear(Chatter).Observe();
-        Assert.Equal(0, s.Snap.Listening!.JudgePasses);
+            .WithListening().StartListening().Hear(Chatter).Observe();
+        Assert.Equal(0, s.Snap.Listening!.Passes);
         s.Hear(Decision);
-        Assert.Equal(1, s.Snap.Listening!.JudgePasses);
+        Assert.Equal(1, s.Snap.Listening!.Passes);
     }
 
     /// <summary>The README's retention promise: words live in the buffer, expire on their own, and never reach the ledger.</summary>
     [Fact]
     public void ListeningKeepsNoWordsExpiresTheBufferAndLeavesOnlyMetadataBehind()
     {
-        var judge = new ScriptedJudge(); // hears everything, finds nothing
-        using var s = Scenario.New(_tmp, judge: judge).WithWorkspace().WithListening()
-            .StartListening().ExpectState(RelayState.NoteCapture).ExpectListening()
+        var mind = new ListeningMind();   // hears everything, raises nothing
+        using var s = Scenario.New(_tmp, Planned, mind: mind).WithWorkspace()
+            .WithListening().StartListening().ExpectState(RelayState.NoteCapture).ExpectListening()
             .Hear(Decision)
             .Hear(Chatter)
             .Hear(LaunchEmail)
@@ -267,8 +178,8 @@ public class ListeningTests : IDisposable
         Assert.Equal(3, live.TotalSegments);
         Assert.Equal(3, live.HeldSegments);
         Assert.Equal(90, live.WindowSeconds);
-        Assert.True(live.JudgePasses >= 1);
-        Assert.Equal(0, live.Findings);
+        Assert.True(live.Passes >= 1);
+        Assert.Equal(0, live.Raised);
 
         s.Silence(TimeSpan.FromSeconds(100));
         live = s.Snap.Listening!;
@@ -299,49 +210,6 @@ public class ListeningTests : IDisposable
     }
 
     /// <summary>
-    /// The desktop smoke scenario with the real heuristic judge: a decision about a known project is filed, a task
-    /// with no project waits in the inbox, and not one word of either sentence reaches the ledger — the judge's
-    /// titles, the routing records and the tool calls carry fingerprints; the task records carry the text.
-    /// </summary>
-    [Fact]
-    public void TheHeuristicJudgeLeavesNoWordsOfWhatItHeardInTheLedger()
-    {
-        const string Errand = "Remember to buy compost for the garden this weekend.";
-        using var s = Scenario.New(_tmp, judge: new HeuristicJudge()).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .WithListening().StartListening()
-            .Hear(Decision).Observe()
-            .Hear(Errand).Observe()
-            .ExpectEvent(EventTypes.NoteRouted)                                       // the decision named Atlas
-            .ExpectEvent(EventTypes.NoteRoutingDeferred)                              // the errand named nothing
-            .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
-            .StopListening().ExpectState(RelayState.Completed);
-
-        var ledger = s.H.LedgerText();
-        foreach (var words in new[] { Decision, Errand, "October 14", "compost", "garden", "beta ships" })
-            Assert.DoesNotContain(words, ledger, StringComparison.OrdinalIgnoreCase);
-
-        var created = s.H.Records().Where(r => r.Type == EventTypes.TaskCreated && r.DataString("origin") == "observed").ToList();
-        Assert.NotEmpty(created);
-        Assert.All(created, r =>
-        {
-            Assert.Equal(true, r.DataBool("overheard"));
-            Assert.StartsWith("withheld: ", r.DataString("title"));                   // length and hash, never the words
-            Assert.StartsWith("withheld: ", r.DataString("why"));                     // the judge's rationale too: a model judge's quotes the room
-        });
-        Assert.All(s.H.Records().Where(r => r.Type == EventTypes.ObserveFound), r => Assert.DoesNotContain("Remember to", r.Data.GetRawText()));
-        Assert.All(s.H.Records().Where(r => r.Type is EventTypes.ObserveFound or EventTypes.ExcerptStored), r => Assert.DoesNotContain("\"why\":\"" + "d", r.Data.GetRawText()));   // no readable rationale ("decision …") in either event
-
-        // The words live where the diagnostics drawer reads them: the task record and the excerpt, both under retention.
-        var errand = s.Snap.Tasks.Single(t => t.Kind == TaskKind.Remember && t.Title!.Contains("compost"));
-        Assert.Contains("compost", File.ReadAllText(Path.Combine(s.H.Root.TasksDirectory, errand.TaskId + ".json")));
-        Assert.Equal(Errand, s.H.Excerpts.Read(errand.ExcerptId!)!.Text);
-        Assert.Contains(s.Snap.Inbox, i => i.Text.Contains("compost"));
-        // A typed instruction is the user's own words and stays in the ledger verbatim.
-        Assert.Contains("create project Atlas", ledger);
-    }
-
-    /// <summary>
     /// Found by the live model run: a model planner quotes the overheard sentence in a proposal's reason and in the note
     /// text it proposes. Proposal events are ledger events, so for an overheard task the reason, the expected effects and
     /// the prose in the target are fingerprinted like the plan's answer; ids, slugs, types and confidences stay legible.
@@ -350,13 +218,13 @@ public class ListeningTests : IDisposable
     public void APlannerThatQuotesTheOverheardWordsInAProposalLeavesNoWordsInTheLedger()
     {
         const string Heard = "Someone needs to find out whether Hull council requires a separate licence for the Lightshift pilot.";
-        // The judge's why is a category, as the model judge is told to write it (it is ledgered); the focused prompt quotes the words.
-        var judge = new ScriptedJudge().When("Hull council", seg => new JudgeFinding(TaskKind.Research, 0.9, "Licence question for the Lightshift pilot", "open question about a licence",
-            "Find out whether Hull council requires a separate licence for the Lightshift pilot.", [seg.SegmentId], "licensing", "Lightshift"));
+        // The raise's why is a category, as the mind is told to write it (it is ledgered); the objective quotes the words.
+        var mind = new ListeningMind().When("Hull council", "research",
+            "Find out whether Hull council requires a separate licence for the Lightshift pilot.", project: "Lightshift", topic: "licensing");
         // The grammar builds the world (direct asks); the overheard task is planned by a stand-in for the model that quotes the words everywhere it can.
-        var rules = new Relay.Core.Orchestration.RuleBasedOrchestrator();
+        var rules = new RuleBasedOrchestrator();
         var planner = new CannedOrchestrator();
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace();
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace();
         planner.Otherwise((req, ctx) => req.Origin != TaskOrigin.Observed
             ? rules.PlanAsync(req, ctx, CancellationToken.None).GetAwaiter().GetResult()
             : new TurnPlan(true, "Someone must check with Hull council about the Lightshift pilot licence", ["Read the excerpt: " + Heard], "The room said: " + Heard, [],
@@ -402,13 +270,16 @@ public class ListeningTests : IDisposable
         Assert.Contains("create project Lightshift", ledger);
     }
 
-    /// <summary>A check finding that conflicts with two stored decisions is the one thing that earns an alert.</summary>
+    /// <summary>Work raised over a claim that conflicts with two stored decisions is the one thing that earns an alert.</summary>
     [Fact]
     public void AConflictingClaimKeepsAnExcerptRaisesAnObservedTaskAndAlerts()
     {
-        var judge = new ScriptedJudge().When("November 2", TaskKind.Check, "Check the claimed Atlas ship date against stored decisions.", projectHint: "Atlas", mergeKey: "check:atlas:ship-date");
+        // Each mention is its own objective (the loop refuses a repeat of one), and one merge key ties the cards together.
+        var mind = new ListeningMind().When("November 2", line => new RaiseMove("check",
+            $"Check the Atlas ship date claimed in line {line.Label} against stored decisions.", [line.Label],
+            "a dated claim about a known project", Project: "Atlas", MergeKey: "check:atlas:ship-date"));
         var planner = new CannedOrchestrator();
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: new CompositeOrchestrator(new Relay.Core.Orchestration.RuleBasedOrchestrator(), planner)).WithWorkspace()
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
             .Command("create project Atlas").Approve()
             .Note("We decided the Atlas beta ships on October 14.")
             .Note("The Atlas launch email goes out on October 7.");
@@ -438,7 +309,7 @@ public class ListeningTests : IDisposable
         Assert.Equal(RelayState.NoteCapture, s.Snap.State);                          // the stream is untouched by the task
 
         var excerpt = s.H.Excerpts.Read(task.ExcerptId!)!;
-        Assert.Single(excerpt.Segments);                                              // anchored to the trigger sentence only
+        Assert.Single(excerpt.Segments);                                              // anchored to the line the raise named
         Assert.Equal("Actually Atlas ships on November 2 now.", excerpt.Text);
         Assert.Equal(excerpt.TriggerSegmentId, excerpt.Segments[0].SegmentId);
         Assert.Equal("scripted", excerpt.SelectedBy);
@@ -448,18 +319,18 @@ public class ListeningTests : IDisposable
         Assert.Equal("observed", created.DataString("origin"));
         Assert.Equal("check", created.DataString("kind"));
         Assert.Equal(excerpt.ExcerptId, created.DataString("excerptId"));
-        Assert.Equal("scripted", created.DataString("judge"));
-        var found = s.H.Last(EventTypes.ObserveFound)!;
-        Assert.Equal("scripted", found.DataString("judge"));
+        Assert.Equal("scripted", created.DataString("raisedBy"));
+        var raised = s.H.Last(EventTypes.ObserveRaised)!;
+        Assert.Equal("scripted", raised.DataString("by"));
         var shown = s.H.Last(EventTypes.AttentionShown)!;
         Assert.Equal("alert", shown.DataString("level"));
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExcerptStored && r.DataString("excerptId") == excerpt.ExcerptId);
 
-        // The planner was asked the judge's focused prompt, in the observed lane, with the excerpt in hand.
+        // The planner was asked the raise's objective, in the observed lane, with the excerpt in hand.
         var request = Assert.Single(planner.Requests, r => r.Kind == TaskKind.Check);
         Assert.Equal(TaskOrigin.Observed, request.Origin);
         Assert.Equal(excerpt.ExcerptId, request.ExcerptId);
-        Assert.StartsWith("Check the claimed Atlas ship date", request.Instruction);
+        Assert.StartsWith("Check the Atlas ship date", request.Instruction);
 
         // Said again inside the cool-down: the card refreshes rather than multiplying; dismissed, it stays away.
         s.Hear("Yes, Atlas ships on November 2, I am sure.").Observe();
@@ -471,17 +342,17 @@ public class ListeningTests : IDisposable
             .Hear("Atlas ships on November 2, as I said.").Observe()
             .ExpectNoAttention(Presentation.Alert);
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.AttentionSuppressed && r.DataString("reason")!.Contains("dismissed"));
-        Assert.Equal(3, s.Snap.Tasks.Count(t => t.Kind == TaskKind.Check));         // every finding is still a task with a record
+        Assert.Equal(3, s.Snap.Tasks.Count(t => t.Kind == TaskKind.Check));         // every raise is still a task with a record
     }
 
     /// <summary>A statement that agrees with what is stored produces a task, a record, and no card at all.</summary>
     [Fact]
     public void AConsistentClaimIsRecordedAndShowsNothing()
     {
-        var judge = new ScriptedJudge().When("October 14", TaskKind.Check, "Check the Atlas date.", projectHint: "Atlas");
+        var mind = new ListeningMind().When("October 14", "check", "Check the Atlas ship date.", project: "Atlas");
         var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Agrees with the stored decision", [], "Stored and heard agree: October 14.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace().WithListening()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectTask(TaskKind.Check, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectNoAttention();
@@ -495,53 +366,16 @@ public class ListeningTests : IDisposable
         Assert.True(File.Exists(Path.Combine(s.H.Root.TasksDirectory, task.TaskId + ".json")), "the diagnostics record is written even when nothing is shown");
     }
 
-    /// <summary>Remember findings skip the planner: the judge's restatement is filed as a note under the project it named, with the excerpt as its source.</summary>
-    [Fact]
-    public void ARememberFindingFilesTheNoteUnderTheNamedProjectWithTheExcerptAsSource()
-    {
-        var judge = new ScriptedJudge().When("ships on", TaskKind.Remember, "Keep this decision.", projectHint: "Atlas", noteText: "Atlas beta ships on October 14.", topic: "atlas beta");
-        using var s = Scenario.New(_tmp, judge: judge).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .WithListening().StartListening()
-            .Hear(Decision).Observe()
-            .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
-            .ExpectEvent(EventTypes.NoteRouted)
-            .ExpectAttention(Presentation.Ambient, "Note filed")
-            .ExpectExcerpts(1);
-
-        var task = s.FindTask(TaskKind.Remember)!;
-        Assert.Equal("executed", task.Outcome);
-        var routing = Assert.Single(task.Proposals);
-        Assert.Equal(Actions.RouteNote, routing.Action);
-        Assert.Equal("executed", routing.Status);
-
-        var atlas = s.H.Registry.FindActive("atlas")!;
-        var note = Assert.Single(ProjectNoteStore.ReadAll(atlas.RootPath).Notes).Note;
-        Assert.Equal("Atlas beta ships on October 14.", note.Body);
-        var span = Assert.Single(note.Spans);
-        Assert.Equal(task.ExcerptId, span.EventId);                                   // the source is the excerpt, not a ledger event
-        var excerpt = s.H.Excerpts.Read(task.ExcerptId!)!;
-        Assert.Equal(Decision, excerpt.Text[span.Start..span.End]);
-
-        Assert.Equal("Judge", s.H.Last(EventTypes.NoteDraftCreated)!.DataString("by"), ignoreCase: true);
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ProposalReceived && r.DataString("proposedBy") == "judge");
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.AttentionShown && r.DataString("level") == "ambient");
-        Assert.DoesNotContain(s.H.Records(), r => r.Type == EventTypes.TaskPlanned && r.DataString("taskId") == task.TaskId); // no planner
-        s.StopListening();
-        Assert.Contains("1 task(s) raised", s.Snap.Receipt);
-        Assert.Contains("1 excerpt(s) kept", s.Snap.Receipt);
-    }
-
-    /// <summary>Two findings over the same words keep the text once: the later excerpt points at the earlier one.</summary>
+    /// <summary>Two raises over the same words keep the text once: the later excerpt points at the earlier one.</summary>
     [Fact]
     public void OverlappingExcerptsReferenceEarlierSegmentsInsteadOfCopyingThem()
     {
-        var judge = new ScriptedJudge()
-            .When("ships on", TaskKind.Check, "Check the date.", projectHint: "Atlas")
-            .When("agreed", (seg, window) => new JudgeFinding(TaskKind.Check, 0.9, "email date agreed", "heard \"agreed\"", "Check the email date against the ship date.", window.Select(w => w.SegmentId).ToList(), "email", "Atlas"));
+        var mind = new ListeningMind()
+            .When("ships on", "check", "Check the ship date.", project: "Atlas")
+            .WhenWholeWindow("agreed", "check", "Check the email date against the ship date.", project: "Atlas");
         var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Checked", [], "Consistent.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace().WithListening()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectExcerpts(1)
             .Hear(LaunchEmail)
@@ -570,11 +404,10 @@ public class ListeningTests : IDisposable
     [Fact]
     public void TheRetentionGuardShrinksAnOverlongExcerptToTheTrigger()
     {
-        var judge = new ScriptedJudge()
-            .When("agreed", (seg, window) => new JudgeFinding(TaskKind.Check, 0.9, "agreed", "heard \"agreed\"", "Check what was agreed.", window.Select(w => w.SegmentId).ToList(), null, "Atlas"));
+        var mind = new ListeningMind().WhenWholeWindow("agreed", "check", "Check what was agreed.", project: "Atlas");
         var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Checked", [], "Consistent.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace().WithListening()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Decision)
             .Silence(TimeSpan.FromSeconds(40))                                        // 40 s apart: the pair would exceed the 30 s bound
             .Hear("So the email goes out on October 7, agreed.").Observe()
@@ -589,58 +422,50 @@ public class ListeningTests : IDisposable
         Assert.Equal(2, s.Snap.Listening!.HeldSegments);                              // the first sentence is still in the buffer, just not kept
     }
 
-    /// <summary>When the model judge fails, the heuristic judge takes the pass and is labelled as such; nothing is skipped silently.</summary>
+    /// <summary>A pass the mind cannot complete is reported and abandoned; the stretch it failed on is not retried, and listening goes on.</summary>
     [Fact]
-    public void AFailingJudgeFallsBackToTheHeuristicJudgeVisibly()
+    public void AFailedPassIsReportedAndListeningCarriesOn()
     {
-        var judge = new ScriptedJudge { Throws = new InvalidOperationException("llama.cpp is not running") };
-        var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Checked", [], "Consistent.", [], [], "canned", Consistent: true));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
-            .Command("create project Atlas").Approve()
-            .WithListening(JudgeSettings.Model).StartListening()
+        var mind = new ListeningMind { Throws = new InvalidOperationException("llama.cpp is not running") };
+        mind.When("launch email", "remember", "Keep the launch email timing.", note: "The launch email goes out a week before.", noteType: "decision");
+        using var s = Scenario.New(_tmp, Planned, mind: mind).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Decision).Observe()
             .ExpectEvent(EventTypes.ObserveFailed)
-            .ExpectTask(TaskKind.Check, origin: TaskOrigin.Observed)
-            .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
-            .ExpectEvent(EventTypes.NoteRouted)
-            .ExpectExcerpts(1);
+            .ExpectTaskCount(0)
+            .ExpectExcerpts(0);
 
         Assert.Equal("llama.cpp is not running", s.Snap.Listening!.LastError);
-        Assert.Equal("heuristic (fallback)", s.H.Last(EventTypes.ObserveFound)!.DataString("judge"));
-        Assert.Equal("heuristic (fallback)", s.H.Last(EventTypes.TaskCreated)!.DataString("judge"));
-        Assert.Equal("heuristic (fallback)", s.H.Excerpts.All()[0].SelectedBy);
         Assert.Equal("llama.cpp is not running", s.H.Last(EventTypes.ObserveFailed)!.DataString("error"));
-        // Two findings on one sentence share one excerpt; the remembered note cites the words themselves.
-        var excerpt = Assert.Single(s.H.Excerpts.All());
-        Assert.Equal(excerpt.ExcerptId, s.FindTask(TaskKind.Check)!.ExcerptId);
-        Assert.Equal(excerpt.ExcerptId, s.FindTask(TaskKind.Remember)!.ExcerptId);
-        var atlas = s.H.Registry.FindActive("atlas")!;
-        var note = Assert.Single(ProjectNoteStore.ReadAll(atlas.RootPath).Notes).Note;
-        Assert.Equal(Decision, excerpt.Text[note.Spans[0].Start..note.Spans[0].End]);
+        Assert.Equal(1, s.Snap.Listening!.Passes);
+        Assert.False(s.Snap.Listening!.Reading);
 
-        // The model comes back: the next pass is its own again and the error clears.
-        judge.Throws = null;
-        s.Hear(Chatter).Observe();
+        // The model comes back: the next pass is read, and the error clears.
+        mind.Throws = null;
+        s.Hear(LaunchEmail).Observe()
+            .ExpectTask(TaskKind.Remember, TaskStatus.Completed, TaskOrigin.Observed)
+            .ExpectEvent(EventTypes.NoteDraftCreated);
         Assert.Null(s.Snap.Listening!.LastError);
-        Assert.Equal("scripted", s.H.Last(EventTypes.ObserveChecked)!.DataString("judge"));
+        Assert.Equal("scripted", s.H.Last(EventTypes.ObserveRaised)!.DataString("by"));
+        Assert.DoesNotContain(Decision, s.H.LedgerText());
     }
 
     [Fact]
-    public void AJudgeThatNeverAnswersIsTimedOutAndTheStreamGoesOn()
+    public void AMindThatNeverAnswersIsTimedOutAndTheStreamGoesOn()
     {
-        var judge = new HangingJudge();
-        using var s = Scenario.New(_tmp, judge: judge, configure: x => x.Judge.TimeoutMs = 3_000).WithWorkspace().WithListening(JudgeSettings.Model)
-            .StartListening()
+        var mind = new HangingMind();
+        using var s = Scenario.New(_tmp, Planned(x => x.Listening.PassTimeoutMs = 3_000), mind: mind).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Chatter)
             .Silence(TimeSpan.FromSeconds(8))
             .ExpectEvent(EventTypes.ObserveFailed)
             .ExpectListening();
 
-        Assert.Equal("timed out after 3000 ms", s.H.Last(EventTypes.ObserveFailed)!.DataString("error"));
-        Assert.False(s.Snap.Listening!.Judging);
-        Assert.True(judge.Calls >= 1);
+        Assert.Equal("the pass timed out after 3000 ms", s.H.Last(EventTypes.ObserveFailed)!.DataString("error"));
+        Assert.False(s.Snap.Listening!.Reading);
+        Assert.True(mind.Calls >= 1);
         s.Hear(LaunchEmail).Silence(TimeSpan.FromSeconds(8));
-        Assert.True(s.Snap.Listening!.JudgePasses >= 2, "the stream keeps judging after a timeout");
+        Assert.True(s.Snap.Listening!.Passes >= 2, "the stream keeps reading after a timeout");
         s.StopListening().ExpectState(RelayState.Completed).ExpectListening(false);
     }
 
@@ -648,16 +473,17 @@ public class ListeningTests : IDisposable
     [Fact]
     public void AWatchedTermIsResolvedAtOnceAndPinned()
     {
-        var judge = new ScriptedJudge().When("SLA", TaskKind.Resolve, "Define SLA as used here.", topic: "SLA", mergeKey: "define:sla");
+        var mind = new ListeningMind().When("SLA", line => new RaiseMove("resolve",
+            $"Define SLA as it is used in line {line.Label}.", [line.Label], "an acronym the user watches", Topic: "SLA", MergeKey: "define:sla"));
         var planner = new CannedOrchestrator().Otherwise((_, _) => new TurnPlan(true, "Defined SLA", [], "SLA: service level agreement — the uptime and response commitments in the Atlas contract.", [], [], "canned"));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: planner).WithWorkspace()
+        using var s = Scenario.New(_tmp, Planned, mind: mind, orchestrator: planner).WithWorkspace()
             .Do("Always show SLA", c => Assert.True(c.UpdatePreference("display.alwaysShow", "SLA")))
             .ExpectPreference("display.alwaysShow", "SLA")
             .ExpectEvent(EventTypes.ChangeSetApplied)
             .WithListening().StartListening()
             .Hear("Our SLA promises four nines this quarter.");
 
-        // No observe interval was waited for: the watched term triggered the judge immediately.
+        // No observe interval was waited for: the watched term triggered a pass immediately.
         s.ExpectTask(TaskKind.Resolve, TaskStatus.Completed, TaskOrigin.Observed).ExpectAttention(Presentation.Result, "SLA");
         var card = Assert.Single(s.Snap.Attention);
         Assert.True(card.Pinned);
@@ -678,7 +504,7 @@ public class ListeningTests : IDisposable
     [Fact]
     public void ADirectAskWhileListeningRunsBesideTheStream()
     {
-        using var s = Scenario.New(_tmp, judge: new ScriptedJudge()).WithWorkspace()
+        using var s = Scenario.New(_tmp, Planned, mind: new ListeningMind()).WithWorkspace()
             .Command("create project Atlas").Approve()
             .Note(Decision)
             .WithListening().StartListening()
@@ -706,8 +532,8 @@ public class ListeningTests : IDisposable
     [Fact]
     public void ACrashWhileListeningDiscardsTheWindowAndRecordsOnlyItsSize()
     {
-        using var s = Scenario.New(_tmp, judge: new ScriptedJudge()).WithWorkspace().WithListening()
-            .StartListening()
+        using var s = Scenario.New(_tmp, Planned, mind: new ListeningMind()).WithWorkspace()
+            .WithListening().StartListening()
             .Hear(Decision)
             .Hear(Chatter)
             .Silence(TimeSpan.FromSeconds(1));                                        // past the persist debounce
@@ -727,19 +553,31 @@ public class ListeningTests : IDisposable
         Assert.DoesNotContain(s.Snap.Review, r => r.Kind == ReviewItemKind.InterruptedCapture);
     }
 
-    /// <summary>With the judge off the note chord is what it always was: dictation, organized when it settles.</summary>
+    /// <summary>With listening off the note chord is what it always was: dictation, organized when it settles.</summary>
     [Fact]
-    public void WithTheJudgeOffTheNoteChordDictates()
+    public void WithListeningOffTheNoteChordDictates()
     {
-        using var s = Scenario.New(_tmp).WithWorkspace()
+        using var s = Scenario.New(_tmp, Planned).WithWorkspace()
             .Command("create project Atlas").Approve()
             .StartListening();
         Assert.Null(s.Snap.Listening);
         Assert.False(s.Snap.ListeningEnabled);
-        Assert.Equal("off", s.Snap.JudgeName);
         s.Do("dictate", c => c.TextChanged(Decision)).StopListening()
             .ExpectEvent(EventTypes.NoteRouted)
             .ExpectNoEvent(EventTypes.StreamStarted);
+    }
+
+    /// <summary>Listening on with no mind to read with: the chord dictates, and Relay says why rather than pretending.</summary>
+    [Fact]
+    public void ListeningOnWithNoMindDictatesAndSaysSo()
+    {
+        using var s = Scenario.New(_tmp, s => { s.Orchestrator.Mode = OrchestratorSettings.Mind; s.Listening.Enabled = true; })
+            .WithWorkspace()
+            .StartListening();
+        Assert.Null(s.Snap.Listening);
+        Assert.False(s.Snap.ListeningEnabled);
+        Assert.False(s.Snap.MindReady);
+        Assert.Contains(s.Snap.Review, r => r.Kind == ReviewItemKind.MindUnavailable);
     }
 
     public void Dispose() => _tmp.Dispose();

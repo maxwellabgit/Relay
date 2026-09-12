@@ -5,7 +5,6 @@ using Relay.Core.Decisions;
 using Relay.Core.Execution;
 using Relay.Core.External;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Mind;
 using Relay.Core.Model;
@@ -40,8 +39,8 @@ public sealed class RuntimeOptions
 /// <summary>
 /// Composition root for one application run. Performs the startup sequence in the only safe
 /// order: lay out storage → load settings → verify and repair the ledger → open it for append
-/// (acquiring the single-writer lock) → build the projections, judge, planner, runtimes and the
-/// coordinator → let it record the findings.
+/// (acquiring the single-writer lock) → build the projections, mind, planner, runtimes and the
+/// coordinator → let it record what startup found.
 /// </summary>
 public sealed class RelayRuntime : IDisposable
 {
@@ -83,7 +82,6 @@ public sealed class RelayRuntime : IDisposable
         var index = SearchIndex.Build(recovery.Verification.Records, notes, registry, indexProblems, excerpts);
 
         var orchestrator = BuildOrchestrator(settings.Settings, options);
-        var judge = BuildJudge(settings.Settings, options);
 
         WorkerRuntime? workers = null;
         ToolRuntime? tools = null;
@@ -118,7 +116,6 @@ public sealed class RelayRuntime : IDisposable
             Registry = registry,
             Roots = roots,
             Orchestrator = orchestrator,
-            Judge = judge,
             Mind = BuildMind(settings.Settings, options),
             Decisions = decisions,
             Usage = new UsageRecorder(root),
@@ -143,12 +140,11 @@ public sealed class RelayRuntime : IDisposable
             external.Completed = coordinator.CompletePendingOperation;
             external.Progress = coordinator.ReportDelegateProgress;
         }
-        // Model, judge, mind and orchestrator settings changed in the UI take effect on the next task or judge pass.
+        // Model, mind and orchestrator settings changed in the UI take effect on the next task or listening pass.
         coordinator.SettingsChanged += changed =>
         {
             current = changed;
             services.Orchestrator = BuildOrchestrator(changed, options);
-            services.Judge = BuildJudge(changed, options);
             services.Mind = BuildMind(changed, options);
         };
 
@@ -157,7 +153,7 @@ public sealed class RelayRuntime : IDisposable
 
     /// <summary>
     /// The deterministic grammar plans first (instant, free, exact for the fixed commands); RELAY0's
-    /// model takes everything the grammar does not cover — prose asks, judge findings, follow-ups.
+    /// model takes everything the grammar does not cover — prose asks, overheard work, follow-ups.
     /// </summary>
     public static IOrchestrator BuildOrchestrator(RelaySettings settings, RuntimeOptions options)
     {
@@ -172,15 +168,6 @@ public sealed class RelayRuntime : IDisposable
     {
         if (settings.Orchestrator.Mode != OrchestratorSettings.Mind || !settings.Model.Enabled) return null;
         return options.ModelClientFactory?.Invoke(settings.Model) is { } client ? new ModelMind(client, settings.Model.MaxOutputTokens) : null;
-    }
-
-    /// <summary>The judge: off, the labeled heuristic, or RELAY0's model (which falls back to the heuristic per pass when unreachable).</summary>
-    public static IJudge BuildJudge(RelaySettings settings, RuntimeOptions options)
-    {
-        if (settings.Judge.Mode == JudgeSettings.Off) return new NullJudge();
-        if (settings.Judge.Mode == JudgeSettings.Model && settings.Model.Enabled && options.ModelClientFactory?.Invoke(settings.Model) is { } client)
-            return new ModelJudge(client, settings.Judge.MaxOutputTokens, settings.Judge.MinConfidence);
-        return new HeuristicJudge();
     }
 
     /// <summary>Worker results re-enter the coordinator as pending-operation completions; stop requests flow the other way.</summary>

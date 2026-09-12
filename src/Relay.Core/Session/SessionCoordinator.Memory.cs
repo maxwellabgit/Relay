@@ -1,7 +1,6 @@
 using Relay.Core.Captures;
 using Relay.Core.Execution;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Memory;
 using Relay.Core.Notes;
@@ -14,9 +13,9 @@ using Relay.Core.Tasks;
 namespace Relay.Core.Session;
 
 /// <summary>
-/// Remembering. Two paths feed one filing step: a dictated note capture (judge off) is cut into
-/// atomic notes with exact spans; a judge finding while listening arrives already cut, with the
-/// excerpt as its source. Each note is routed by confidence (file / Review / leave in the inbox),
+/// Remembering. Two paths feed one filing step: a dictated note capture (listening off) is cut into
+/// atomic notes with exact spans; a note the mind raised while listening arrives already written, with
+/// the excerpt as its source. Each note is routed by confidence (file / Review / leave in the inbox),
 /// checked for conflicting decisions, and every uncertain call is left to the user in Review.
 /// </summary>
 public sealed partial class SessionCoordinator
@@ -51,14 +50,9 @@ public sealed partial class SessionCoordinator
         return $"Saved {extracted.Count} note{(extracted.Count == 1 ? "" : "s")} · {string.Join(" · ", parts)}";
     }
 
-    /// <summary>A remember finding: the judge's restatement is the note; the excerpt is its source; the project hint raises routing confidence.</summary>
-    private void RememberFromFinding(TaskState task, JudgeFinding finding, Excerpt? excerpt)
-        => Remember(task, finding.NoteText!, finding.NoteType, finding.Topic, finding.ProjectHint, excerpt, Producers.Judge);
-
     /// <summary>
-    /// The whole of a piece of work is a note worth keeping: file it and finish, without a planning turn. Whoever
-    /// heard it (the judge, or the mind on a listening pass) wrote the text; the excerpt is its source and the
-    /// project hint raises routing confidence.
+    /// The whole of a piece of work is a note worth keeping: file it and finish, without a planning turn. The mind
+    /// wrote the text on the pass that heard it; the excerpt is its source and the project hint raises routing confidence.
     /// </summary>
     private void Remember(TaskState task, string noteText, string? noteType, string? topic, string? projectHint, Excerpt? excerpt, string producer)
     {
@@ -97,7 +91,7 @@ public sealed partial class SessionCoordinator
 
         var profiles = _services.Registry.Active.Select(ProjectProfile.Build).ToList();
         var routing = NoteRouter.Route(text, profiles);
-        // A project the judge heard named is strong evidence; it lifts that candidate rather than replacing the router.
+        // A project the mind heard named is strong evidence; it lifts that candidate rather than replacing the router.
         var best = routing.Best;
         if (projectHint is not null && _services.Registry.FindActive(projectHint) is { } hinted)
         {

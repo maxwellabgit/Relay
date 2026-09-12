@@ -2,8 +2,8 @@ using System.Text;
 using Relay.Core.Agents;
 using Relay.Core.Config;
 using Relay.Core.Execution;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Model;
 using Relay.Core.Orchestration;
 using Relay.Core.Session;
@@ -15,7 +15,7 @@ using TaskStatus = Relay.Core.Tasks.TaskStatus;
 namespace Relay.Tests.Support;
 
 /// <summary>
-/// Prompt-driven scenarios against the real coordinator, stores, judge, policy engine and executor.
+/// Prompt-driven scenarios against the real coordinator, stores, mind, policy engine and executor.
 /// Each step drives the same public surface the desktop UI uses (chords, surface text, the ask box,
 /// approve, reject, edit, cancel, respond) and records a transcript that shows exactly how RELAY0
 /// handled it: state, tasks, plans, tool calls, proposals, decisions, executions, attention, ledger lines.
@@ -25,7 +25,6 @@ public sealed class Scenario : IDisposable
     private readonly TempRoot _tmp;
     private readonly IOrchestrator? _orchestrator;
     private readonly IWorkerHost? _workerHost;
-    private readonly IJudge? _judge;
     private readonly Func<ExternalModelProfile, IModelClient>? _externalClients;
     private readonly Relay.Core.Mind.IMind? _mind;
     private readonly IModelClient? _toolDrafter;
@@ -39,31 +38,30 @@ public sealed class Scenario : IDisposable
     private long _activityFrom;
     private string _heard = "";
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, IJudge? judge, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IOrchestrator? orchestrator, IWorkerHost? workerHost, FixedClock? clock, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester)
     {
         _tmp = tmp;
         _orchestrator = orchestrator;
         _workerHost = workerHost;
-        _judge = judge;
         _externalClients = externalClients;
         _mind = mind;
         _toolDrafter = toolDrafter;
         _digester = digester;
         _inlinePost = inlinePost;
         _h = Open(configure, clock);
-        Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} judge {_h.Snap.JudgeName} ==");
+        Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} mind {(_h.Snap.MindReady ? "ready" : "none")} ==");
     }
 
     /// <param name="inlinePost">False when background threads (external requests, real workers) post completions; the test then drains them with <see cref="PumpUntil"/>.</param>
-    /// <param name="mind">The mind for <c>orchestrator.mode = "mind"</c> (docs/09); the mode itself is set through <paramref name="configure"/>.</param>
+    /// <param name="mind">Relay's mind: it runs every task in <c>orchestrator.mode = "mind"</c> and reads every conversation when listening is on.</param>
     /// <param name="toolDrafter">The model that drafts tools for the mind's build move (slice 6); needs <paramref name="workerHost"/> for the sandbox.</param>
     /// <param name="digester">The local model that digests delegate replies into feed lines (slice 5); null means the reply's own first lines.</param>
     public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
-        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
-        => new(tmp, configure, orchestrator, workerHost, clock, judge, externalClients, inlinePost, mind, toolDrafter, digester);
+        Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
+        => new(tmp, configure, orchestrator, workerHost, clock, externalClients, inlinePost, mind, toolDrafter, digester);
 
     private Harness Open(Action<RelaySettings>? configure, FixedClock? clock)
-        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, judge: _judge, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester).Start();
+        => new Harness(_tmp.Root, configure: configure, orchestrator: _orchestrator, workerHost: _workerHost, clock: clock, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester).Start();
 
     /// <summary>Drains work posted by background threads on this thread until the condition holds; fails the scenario on timeout.</summary>
     public Scenario PumpUntil(string what, Func<bool> condition, TimeSpan? timeout = null)
@@ -99,14 +97,14 @@ public sealed class Scenario : IDisposable
     }
 
     /// <summary>
-    /// Turns the judge on through the settings path the UI uses, so the note chord listens from here on.
-    /// The judge instance itself is whatever the scenario was built with (a scripted one, usually).
+    /// Turns listening on through the settings path the UI uses, so the note chord opens a conversation from here on.
+    /// Reading it needs a mind: build the scenario with one.
     /// </summary>
-    public Scenario WithListening(string mode = JudgeSettings.Heuristic)
+    public Scenario WithListening()
     {
-        var problems = C.UpdateSettings(x => x.Judge.Mode = mode);
+        var problems = C.UpdateSettings(x => x.Listening.Enabled = true);
         if (problems.Count > 0) throw Fail("Listening could not be enabled: " + string.Join(" ", problems));
-        Log($"-- judge mode {mode}: the note chord now listens");
+        Log("-- listening on: the note chord now opens a conversation" + (Snap.MindReady ? "" : " (but there is no mind to read it)"));
         return this;
     }
 
@@ -114,7 +112,7 @@ public sealed class Scenario : IDisposable
     // Direct input: the chords and the ask box
     // ----------------------------------------------------------------------------------------
 
-    /// <summary>Note chord with the judge off: a dictated note, organized when it settles.</summary>
+    /// <summary>Note chord with listening off: a dictated note, organized when it settles.</summary>
     public Scenario Note(string text) => Capture(CaptureMode.Note, text);
     /// <summary>Command chord: a direct instruction, planned by the orchestrator.</summary>
     public Scenario Command(string text) => Capture(CaptureMode.Command, text);
@@ -144,17 +142,17 @@ public sealed class Scenario : IDisposable
     }
 
     // ----------------------------------------------------------------------------------------
-    // Listening: the note chord with the judge on
+    // Listening: the note chord opening a conversation the mind reads
     // ----------------------------------------------------------------------------------------
 
-    /// <summary>Opens the stream. The judge must be on (configure <c>s.Judge.Mode</c>).</summary>
+    /// <summary>Opens the stream. Needs listening on (<c>s.Listening.Enabled</c>) and a mind.</summary>
     public Scenario StartListening()
     {
         Begin("Start listening");
         _heard = "";
         C.PressNoteKey();
         if (Snap.State != RelayState.NoteCapture) Log($"  rejected: {Snap.Notice}");
-        else if (Snap.Listening is null) Log("  WARNING: note capture opened as dictation, not as a stream (judge off?)");
+        else if (Snap.Listening is null) Log("  WARNING: note capture opened as dictation, not as a stream (listening off, or no mind?)");
         return End();
     }
 
@@ -172,18 +170,18 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
-    /// <summary>Hear one utterance and let the judge see it: <see cref="Hear"/> followed by <see cref="Observe"/>.</summary>
+    /// <summary>Hear one utterance and let the mind read it: <see cref="Hear"/> followed by <see cref="Observe"/>.</summary>
     public Scenario Listen(string text) => Hear(text).Observe();
 
-    /// <summary>Lets one observe interval elapse so the judge sees what is new.</summary>
+    /// <summary>Lets one observe interval elapse so the mind reads what is new.</summary>
     public Scenario Observe()
     {
-        Begin("Observe (judge pass)");
+        Begin("Observe (listening pass)");
         _h.Scheduler.Advance(TimeSpan.FromMilliseconds(Settings.Stream.ObserveIntervalMs + 10));
         return End();
     }
 
-    /// <summary>Silence: nothing new arrives for this long (the buffer keeps expiring and the judge keeps checking).</summary>
+    /// <summary>Silence: nothing new arrives for this long (the buffer keeps expiring and the mind keeps reading).</summary>
     public Scenario Silence(TimeSpan duration)
     {
         Begin($"Silence {duration.TotalSeconds:0}s");
@@ -191,7 +189,7 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
-    /// <summary>Closes the stream: a last judge pass over what is pending, then the receipt.</summary>
+    /// <summary>Closes the stream: one last pass over what is unread, then the receipt.</summary>
     public Scenario StopListening()
     {
         Begin("Stop listening");
@@ -475,7 +473,7 @@ public sealed class Scenario : IDisposable
         var s = Snap;
         Log($"  state: {s.State.Label()}" + (s.Notice is null ? "" : $"   notice: {s.Notice}") + (s.Receipt is null ? "" : $"   receipt: {s.Receipt}"));
         if (s.Listening is { } l)
-            Log($"  listening: {l.HeldSegments} held ({l.HeldSeconds:0}s of {l.WindowSeconds:0}s) · {l.TotalSegments} heard · {l.JudgePasses} pass(es) · {l.Findings} finding(s) · {l.Excerpts} excerpt(s) · {l.Tasks} task(s)" + (l.Judging ? " · judging" : "") + (l.LastError is null ? "" : $" · error: {l.LastError}"));
+            Log($"  listening: {l.HeldSegments} held ({l.HeldSeconds:0}s of {l.WindowSeconds:0}s) · {l.TotalSegments} heard · {l.Passes} pass(es) · {l.Raised} raised · {l.Excerpts} excerpt(s) · {l.Tasks} task(s)" + (l.Reading ? " · reading" : "") + (l.LastError is null ? "" : $" · error: {l.LastError}"));
         foreach (var t in s.Tasks.Where(t => t.Live || t.CompletedAt is null || t.CompletedAt >= _h.Clock.UtcNow - TimeSpan.FromSeconds(60)).OrderBy(t => t.StartedAt))
         {
             if (!t.Live && !s.Activity.Any(a => a.Seq > _activityFrom && a.Text.Contains(t.TaskId[^8..], StringComparison.Ordinal)) && s.Response?.TaskId != t.TaskId) continue;
@@ -601,58 +599,70 @@ public sealed class ThrowingOrchestrator : IOrchestrator
 }
 
 /// <summary>
-/// A judge driven by the test: findings are keyed by a phrase; a pass returns the findings of every
-/// phrase that appears in a new segment, anchored to that segment. Everything else is "nothing".
+/// A mind that reads conversations by phrase: a pass raises the work paired with every phrase that appears in a
+/// line it has not raised on yet, then waits. Tasks the raises start are handled by whatever plans them.
 /// Stands in for RELAY0 so listening scenarios are deterministic and say exactly what was heard.
 /// </summary>
-public sealed class ScriptedJudge : IJudge
+public sealed class ListeningMind : Relay.Core.Mind.IMind
 {
-    private readonly List<(string Phrase, Func<StreamSegment, IReadOnlyList<StreamSegment>, JudgeFinding> Finding)> _rules = new();
-    private Func<JudgeRequest, JudgeDecision>? _direct;
+    private readonly List<(string Phrase, Func<WindowLine, RaiseMove> Raise)> _rules = new();
+    private readonly HashSet<string> _done = new(StringComparer.Ordinal);
 
     public string Name => "scripted";
-    public List<JudgeRequest> Requests { get; } = new();
-    public int PromptTokens { get; init; } = 120;
-    public int CompletionTokens { get; init; } = 40;
+    public List<MindRequest> Requests { get; } = new();
+    /// <summary>Only the listening passes, which is what these scenarios are about.</summary>
+    public List<MindRequest> Passes => Requests.Where(r => r.Observing).ToList();
     public Exception? Throws { get; set; }
-    public TimeSpan? Delay { get; set; }
+    /// <summary>The significance every read reports. Below the decider's bar a raise is refused.</summary>
+    public double Significance { get; set; } = 0.8;
 
-    /// <summary>When a new segment contains the phrase, the finding is produced for it.</summary>
-    public ScriptedJudge When(string phrase, Func<StreamSegment, JudgeFinding> finding) { _rules.Add((phrase, (seg, _) => finding(seg))); return this; }
+    /// <summary>When a line contains the phrase, the raise is built from it.</summary>
+    public ListeningMind When(string phrase, Func<WindowLine, RaiseMove> raise) { _rules.Add((phrase, raise)); return this; }
 
-    /// <summary>Like <see cref="When(string, Func{StreamSegment, JudgeFinding})"/> but the rule also sees the whole window, so a finding can name several segments.</summary>
-    public ScriptedJudge When(string phrase, Func<StreamSegment, IReadOnlyList<StreamSegment>, JudgeFinding> finding) { _rules.Add((phrase, finding)); return this; }
+    public ListeningMind When(string phrase, string kind, string objective, string? note = null, string? noteType = null, string? project = null, string? topic = null, string? mergeKey = null)
+        => When(phrase, line => new RaiseMove(kind, objective, [line.Label], $"heard \"{phrase}\"", note, noteType, project, topic, mergeKey));
 
-    public ScriptedJudge When(string phrase, TaskKind kind, string focusedPrompt, double confidence = 0.9, string? topic = null, string? projectHint = null, string? noteText = null, Presentation? presentation = null, string? mergeKey = null)
-        => When(phrase, seg => new JudgeFinding(kind, confidence, $"{kind}: {phrase}", $"heard \"{phrase}\"", focusedPrompt, [seg.SegmentId], topic, projectHint, presentation, noteText, noteText is null ? null : "note", mergeKey));
+    /// <summary>Like <see cref="When(string, Func{WindowLine, RaiseMove})"/> but the raise also names every line held, so an excerpt can span the window.</summary>
+    public ListeningMind WhenWholeWindow(string phrase, string kind, string objective, string? project = null)
+        => When(phrase, line => new RaiseMove(kind, objective, [WholeWindow], $"heard \"{phrase}\"", Project: project));
 
-    public ScriptedJudge OnDirect(Func<JudgeRequest, JudgeDecision> direct) { _direct = direct; return this; }
+    /// <summary>A stand-in label the mind expands to every label the pass showed.</summary>
+    private const string WholeWindow = "*";
 
-    public Task<JudgeDecision> JudgeAsync(JudgeRequest request, CancellationToken cancellationToken)
+    public Task<Relay.Core.Mind.MindStep> StepAsync(MindRequest request, CancellationToken cancellationToken)
     {
         Requests.Add(request);
         if (Throws is not null) throw Throws;
-        if (request.Origin == TaskOrigin.Direct && _direct is not null) return Task.FromResult(_direct(request));
-        var findings = new List<JudgeFinding>();
-        foreach (var segment in request.Window.Where(s => request.NewSegmentIds.Contains(s.SegmentId)))
-            foreach (var (phrase, finding) in _rules)
-                if (segment.Text.Contains(phrase, StringComparison.OrdinalIgnoreCase)) findings.Add(finding(segment, request.Window));
-        var decision = new JudgeDecision(findings, Name, PromptTokens, CompletionTokens, (long)(Delay?.TotalMilliseconds ?? 30));
-        return Task.FromResult(decision);
+        if (!request.Observing) return Task.FromResult(MindStep.Of(ScriptedMind.Wait("this task is not mine to run"), "Not mine."));
+
+        var window = request.Transcript.OfType<WindowObserved>().LastOrDefault();
+        var lines = window?.Lines.ToList() ?? [];
+        foreach (var line in lines)
+            foreach (var (phrase, raise) in _rules)
+            {
+                if (!line.Text.Contains(phrase, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!_done.Add(line.SegmentId + "|" + phrase)) continue;
+                var move = raise(line);
+                if (move.Segments is [WholeWindow]) move = move with { Segments = lines.Select(l => l.Label).ToList() };
+                return Task.FromResult(MindStep.Of(move, $"Raising what was said in {line.Label}.", Read()));
+            }
+        return Task.FromResult(MindStep.Of(ScriptedMind.Wait("nothing that needs Relay"), "Listening on.", Read()));
     }
+
+    private MindRead Read() => new("a conversation", 0.3, [MindRead.NeedNone], Significance, 0, RiskRead.None);
 }
 
-/// <summary>A judge that never answers: it honours cancellation and nothing else, for the timeout path.</summary>
-public sealed class HangingJudge : IJudge
+/// <summary>A mind that never answers: it honours cancellation and nothing else, for the pass-timeout path.</summary>
+public sealed class HangingMind : Relay.Core.Mind.IMind
 {
     public string Name => "model:hanging";
     public int Calls { get; private set; }
 
-    public Task<JudgeDecision> JudgeAsync(JudgeRequest request, CancellationToken cancellationToken)
+    public Task<Relay.Core.Mind.MindStep> StepAsync(Relay.Core.Mind.MindRequest request, CancellationToken cancellationToken)
     {
         Calls++;
         // Continuations run synchronously on the cancelling (test) thread so the coordinator is never touched from elsewhere.
-        var tcs = new TaskCompletionSource<JudgeDecision>();
+        var tcs = new TaskCompletionSource<Relay.Core.Mind.MindStep>();
         cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
         return tcs.Task;
     }

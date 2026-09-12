@@ -26,7 +26,7 @@ public static class CaseSources
 }
 
 /// <summary>
-/// What a planner or judge is expected to do with one case. Every property is optional; a property
+/// What a planner or the mind is expected to do with one case. Every property is optional; a property
 /// that is null is not checked. An expectation with nothing to check is rejected by the completeness guard.
 /// </summary>
 public sealed class Expectation
@@ -53,27 +53,6 @@ public sealed class Expectation
     [JsonPropertyName("targets")] public IReadOnlyList<string>? Targets { get; init; }
     /// <summary>Every self-change proposal (update_preference, update_prompt) must carry the four improvement-contract fields.</summary>
     [JsonPropertyName("contract")] public bool? Contract { get; init; }
-    /// <summary>Judge stage: the judge must (or must not) find something significant in the segments.</summary>
-    [JsonPropertyName("significant")] public bool? Significant { get; init; }
-    /// <summary>Judge stage: at least one finding must be of this kind.</summary>
-    [JsonPropertyName("findingKind")] public string? FindingKind { get; init; }
-    /// <summary>Judge stage: no finding may be of any of these kinds.</summary>
-    [JsonPropertyName("forbiddenFindingKinds")] public IReadOnlyList<string>? ForbiddenFindingKinds { get; init; }
-    /// <summary>Judge stage: a finding (of <see cref="FindingKind"/> when set) must name this project, by name or slug (case-insensitive).</summary>
-    [JsonPropertyName("findingProject")] public string? FindingProject { get; init; }
-    /// <summary>Judge stage: no finding may name a project (the words concern nothing that is listed; a name must not be invented).</summary>
-    [JsonPropertyName("findingNoProject")] public bool? FindingNoProject { get; init; }
-    /// <summary>Judge stage: 1-based positions in the window of the segments a finding (of <see cref="FindingKind"/> when set) must cite; grounding.</summary>
-    [JsonPropertyName("findingSegments")] public IReadOnlyList<int>? FindingSegments { get; init; }
-    /// <summary>Judge stage: at least this many findings (several things happened in the window).</summary>
-    [JsonPropertyName("minFindings")] public int? MinFindings { get; init; }
-    /// <summary>Judge stage: at most this many findings; selectivity, so one sentence does not become three tasks.</summary>
-    [JsonPropertyName("maxFindings")] public int? MaxFindings { get; init; }
-    /// <summary>Judge stage: case-insensitive fragments the focused prompt of a finding (of <see cref="FindingKind"/> when set) must contain.</summary>
-    [JsonPropertyName("promptContains")] public IReadOnlyList<string>? PromptContains { get; init; }
-    /// <summary>Judge stage: case-insensitive fragments the note text of a remember finding must contain (the judge's restatement is what gets filed).</summary>
-    [JsonPropertyName("noteContains")] public IReadOnlyList<string>? NoteContains { get; init; }
-
     // Mind stage (docs/09): the case runs the loop until it ends or first needs the user; the moves are what is scored.
     // A move is written "type" or "type:name" — use_tool:list_projects, propose:create_project, delegate:research, build:world_clock, say, ask_user.
     /// <summary>Mind stage: the very first move must match.</summary>
@@ -91,12 +70,6 @@ public sealed class Expectation
     /// <summary>Mind stage: at most this many steps before the loop ends or waits.</summary>
     [JsonPropertyName("maxSteps")] public int? MaxSteps { get; init; }
 
-    /// <summary>True when at least one judge-stage property is set.</summary>
-    [JsonIgnore]
-    public bool ChecksJudge =>
-        Significant is not null || FindingKind is not null || ForbiddenFindingKinds is { Count: > 0 } || FindingProject is not null || FindingNoProject is not null
-        || FindingSegments is { Count: > 0 } || MinFindings is not null || MaxFindings is not null || PromptContains is { Count: > 0 } || NoteContains is { Count: > 0 };
-
     /// <summary>True when at least one mind-stage property is set.</summary>
     [JsonIgnore]
     public bool ChecksMind =>
@@ -107,32 +80,25 @@ public sealed class Expectation
     public bool ChecksSomething =>
         Understood is not null || Actions is not null || ForbiddenActions is { Count: > 0 } || AnswerContains is { Count: > 0 } || AnswerAvoids is { Count: > 0 }
         || MaxAnswerChars is not null || KnowledgeGap is not null || CapabilityGap is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null
-        || ChecksJudge || ChecksMind;
+        || ChecksMind;
 }
 
 /// <summary>
-/// One evaluation case: a request Relay is given and what should come of it. A case with
-/// <see cref="Segments"/> evaluates the judge (the words are heard while listening); otherwise it
-/// evaluates the planner with <see cref="Instruction"/> in the lane named by <see cref="Origin"/> and <see cref="Kind"/>.
+/// One evaluation case: a request Relay is given and what should come of it. A case that expects moves
+/// runs the mind's loop; otherwise it evaluates the planner with <see cref="Instruction"/> in the lane
+/// named by <see cref="Origin"/> and <see cref="Kind"/>.
 /// </summary>
 public sealed class EvaluationCase
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
     [JsonPropertyName("source")] public required string Source { get; init; }
     [JsonPropertyName("origin")] public string Origin { get; init; } = "direct";
-    /// <summary>The lane kind the planner is asked in (direct asks default to answer); for a judge case, informative only.</summary>
+    /// <summary>The lane kind the planner is asked in (direct asks default to answer); for a mind case, informative only.</summary>
     [JsonPropertyName("kind")] public string? Kind { get; init; }
-    /// <summary>The direct ask verbatim, or the judge's focused prompt for an observed or dialogue task.</summary>
+    /// <summary>The direct ask verbatim, or the objective of an observed or dialogue task.</summary>
     [JsonPropertyName("instruction")] public string Instruction { get; init; } = "";
-    /// <summary>When set, the case evaluates the judge: these are the segments heard, in order.</summary>
-    [JsonPropertyName("segments")] public IReadOnlyList<string>? Segments { get; init; }
     /// <summary>
-    /// Judge cases: 1-based positions of the segments that are NEW (not yet judged); the others are context the judge
-    /// has already seen and must not raise again. Null means every segment is new.
-    /// </summary>
-    [JsonPropertyName("newSegments")] public IReadOnlyList<int>? NewSegments { get; init; }
-    /// <summary>
-    /// Observed plan cases: the overheard words the judge kept. The runner hands the planner an excerpt holding exactly these
+    /// Observed plan cases: the overheard words that were kept. The runner hands the planner an excerpt holding exactly these
     /// words (its id is <see cref="EvaluationRunner.ExcerptIdFor"/>), so the planner reads them with read_excerpt as it does
     /// in the application instead of finding them pasted into the instruction.
     /// </summary>
@@ -149,9 +115,8 @@ public sealed class EvaluationCase
     /// <summary>For recorded cases: the task the case was derived from.</summary>
     [JsonPropertyName("recordedTaskId")] public string? RecordedTaskId { get; init; }
 
-    [JsonIgnore] public bool IsJudgeCase => Segments is { Count: > 0 };
     /// <summary>A case scored on the mind's moves (docs/09) rather than on a plan.</summary>
-    [JsonIgnore] public bool IsMindCase => !IsJudgeCase && Expect.ChecksMind;
+    [JsonIgnore] public bool IsMindCase => Expect.ChecksMind;
 
     public TaskOrigin ParsedOrigin => Origin.Trim().ToLowerInvariant() switch
     {
@@ -247,23 +212,14 @@ public sealed class EvaluationSet
             if (!CaseSources.All.Contains(c.Source, StringComparer.OrdinalIgnoreCase)) problems.Add($"Case '{c.Id}': unknown source '{c.Source}' (recorded, unseen, failure).");
             if (!KnownOrigins.Contains(c.Origin.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown origin '{c.Origin}' (direct, observed, dialogue).");
             if (c.Kind is not null && !KnownKinds.Contains(c.Kind.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown kind '{c.Kind}'.");
-            if (c.Expect.FindingKind is not null && !KnownKinds.Contains(c.Expect.FindingKind.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown finding kind '{c.Expect.FindingKind}'.");
-            if (!c.IsJudgeCase && string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': neither an instruction nor segments.");
+            if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': no instruction.");
             if (!c.Expect.ChecksSomething) problems.Add($"Case '{c.Id}': the expectation checks nothing.");
-            if (c.IsJudgeCase && (c.Expect.Actions is not null || c.Expect.AnswerContains is not null || c.Expect.Understood is not null))
-                problems.Add($"Case '{c.Id}': a judge case (segments) cannot expect planner output (actions, answer, understood).");
-            if (!c.IsJudgeCase && c.Expect.ChecksJudge)
-                problems.Add($"Case '{c.Id}': a planner case cannot expect judge findings; give it segments.");
-            if (c.IsJudgeCase && c.Expect.ChecksMind)
-                problems.Add($"Case '{c.Id}': a judge case (segments) cannot expect mind moves.");
             if (c.Expect.ChecksMind && (c.Expect.Actions is not null || c.Expect.Understood is not null || c.Expect.KnowledgeGap is not null || c.Expect.CapabilityGap is not null || c.Expect.Consistent is not null || c.Expect.Targets is { Count: > 0 } || c.Expect.Contract is not null))
                 problems.Add($"Case '{c.Id}': a mind case is scored on moves (firstMove, moves, forbiddenMoves, needs, route, outcome, maxSteps, answerContains/avoids); it cannot also expect plan output.");
             foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
                 if (!Mind.Move.Types.Contains(move.Split(':', 2)[0], StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{move}' is not a move ({string.Join(", ", Mind.Move.Types)}).");
             foreach (var need in c.Expect.Needs ?? [])
                 if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
-            if (!c.IsJudgeCase && c.NewSegments is not null)
-                problems.Add($"Case '{c.Id}': newSegments needs segments.");
             if (c.Tools is { Count: > 0 })
             {
                 if (!c.IsMindCase) problems.Add($"Case '{c.Id}': tools belong to a mind case (they are the tools the mind may call).");
@@ -275,18 +231,8 @@ public sealed class EvaluationSet
                     if (string.IsNullOrWhiteSpace(tool.Result)) problems.Add($"Case '{c.Id}': tool '{tool.Name}' needs the result a call returns.");
                 }
             }
-            if (c.Heard is not null && (c.IsJudgeCase || c.ParsedOrigin != TaskOrigin.Observed || string.IsNullOrWhiteSpace(c.Heard)))
+            if (c.Heard is not null && (c.ParsedOrigin != TaskOrigin.Observed || string.IsNullOrWhiteSpace(c.Heard)))
                 problems.Add($"Case '{c.Id}': heard is the excerpt of an observed plan case; it needs origin=observed, an instruction, and words.");
-            if (c.IsJudgeCase)
-            {
-                var count = c.Segments!.Count;
-                foreach (var position in (c.NewSegments ?? []).Concat(c.Expect.FindingSegments ?? []).Where(p => p < 1 || p > count).Distinct())
-                    problems.Add($"Case '{c.Id}': segment position {position} is outside the window (1..{count}).");
-                if (c.NewSegments is { Count: 0 }) problems.Add($"Case '{c.Id}': newSegments is empty; a judge pass with nothing new is not a case.");
-                if (c.Expect.FindingProject is not null && c.Expect.FindingNoProject == true) problems.Add($"Case '{c.Id}': findingProject and findingNoProject contradict each other.");
-                if (c.Expect.MinFindings is { } min && c.Expect.MaxFindings is { } max && min > max) problems.Add($"Case '{c.Id}': minFindings exceeds maxFindings.");
-                if (c.Expect.Significant == false && (c.Expect.FindingKind is not null || c.Expect.MinFindings > 0)) problems.Add($"Case '{c.Id}': significant=false contradicts an expected finding.");
-            }
             if (string.Equals(c.Source, CaseSources.Failure, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(c.Why))
                 problems.Add($"Case '{c.Id}': a failure case must say which mistake it guards against (why).");
             foreach (var action in (c.Expect.Actions ?? []).Concat(c.Expect.ForbiddenActions ?? []))
@@ -303,7 +249,7 @@ public sealed class EvaluationSet
             if (!unseen.Any(u => u.ParsedKind == kind)) problems.Add($"Recorded cases cover the '{kind.Wire()}' lane but no unseen case does; add a held-out case for it.");
 
         var recordedInstructions = recorded.Select(c => Normalize(c.Instruction)).Where(s => s.Length > 0).ToHashSet(StringComparer.Ordinal);
-        foreach (var u in unseen.Where(u => !u.IsJudgeCase && recordedInstructions.Contains(Normalize(u.Instruction))))
+        foreach (var u in unseen.Where(u => recordedInstructions.Contains(Normalize(u.Instruction))))
             problems.Add($"Unseen case '{u.Id}' repeats a recorded instruction verbatim; it is not held out.");
 
         return problems;
@@ -330,7 +276,7 @@ public static class RecordedCases
         if (string.IsNullOrWhiteSpace(d.FocusedPrompt)) return null;
         if (d.Status is not ("completed" or "failed")) return null;
         if (d.Planner is null || d.Outcome is "failed" or "cancelled") return null;             // no plan, or the task never reached the user: nothing to learn from
-        if (d.Planner is Producers.User or Producers.Engine or Producers.Judge or Producers.Router) return null;  // not a planner's work
+        if (d.Planner is Producers.User or Producers.Engine or Producers.Router) return null;  // not a planner's work
         var acceptedWhole = d.Proposals.Count > 0 && d.Proposals.All(p => Accepted.Contains(p.Status));
         var expected = acceptedWhole ? d.Proposals.Select(p => p.Action).OrderBy(a => a, StringComparer.Ordinal).ToList() : null;
         var denied = d.Proposals.Where(p => p.Status == "denied").Select(p => p.Action).Distinct(StringComparer.Ordinal)

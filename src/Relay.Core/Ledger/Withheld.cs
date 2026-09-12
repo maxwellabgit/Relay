@@ -5,7 +5,7 @@ namespace Relay.Core.Ledger;
 
 /// <summary>
 /// What the ledger may say about words that were only overheard. Segments enter the ledger as hashes and excerpts as
-/// ids; text that a judge, a planner or an executor writes about an overheard task (titles, answers, proposal reasons,
+/// ids; text that the mind, a planner or an executor writes about an overheard task (titles, answers, proposal reasons,
 /// note text in a target) can quote those words, so the ledger records a fingerprint (length and a SHA-256 prefix)
 /// and the task record, the excerpt and the execution journal keep the text under retention.
 /// </summary>

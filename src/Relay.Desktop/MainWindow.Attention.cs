@@ -365,7 +365,7 @@ public sealed partial class MainWindow
             ("Focused prompt", t.Instruction, null),
         };
         if (t.Origin != TaskOrigin.Direct || t.Why is not null)
-            rows.Add(("Why it started", string.Join("\n", new[] { t.Title, t.Why, t.Confidence is > 0 and < 1 ? $"judge confidence {t.Confidence:0.00}" : null, t.ExcerptId is null ? null : $"excerpt {t.ExcerptId} (only the selected sentences were kept)", t.ParentTaskId is null ? null : $"follows task {t.ParentTaskId}" }.Where(x => x is not null)), t.ExcerptId is null || _runtime is null ? null : Path.Combine(_runtime.Root.ExcerptsDirectory, t.ExcerptId + ".json")));
+            rows.Add(("Why it started", string.Join("\n", new[] { t.Title, t.Why, t.Confidence is > 0 and < 1 ? $"raised at {t.Confidence:0.00}" : null, t.ExcerptId is null ? null : $"excerpt {t.ExcerptId} (only the selected sentences were kept)", t.ParentTaskId is null ? null : $"follows task {t.ParentTaskId}" }.Where(x => x is not null)), t.ExcerptId is null || _runtime is null ? null : Path.Combine(_runtime.Root.ExcerptsDirectory, t.ExcerptId + ".json")));
         rows.Add(("Planner", $"{t.Producer}\n{t.Summary}", null));
         if (t.Steps.Count > 0) rows.Add(("Steps", string.Join("\n", t.Steps.Select((step, i) => $"{i + 1}. {step}")), null));
         if (!string.IsNullOrWhiteSpace(t.Answer)) rows.Add(("Answer", t.Answer!, null));

@@ -1,5 +1,6 @@
-using Relay.Core.Judge;
+using Relay.Core.Config;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Model;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
@@ -168,13 +169,14 @@ public class PreferenceTests : IDisposable
     [Fact]
     public void AnObservedTaskCannotShapeRelayEvenIfAPlannerProposesIt()
     {
-        var judge = new ScriptedJudge().When("concise", TaskKind.Improve, "keep responses concise", topic: "style");
+        var mind = new ListeningMind().When("concise", "improve", "Keep responses concise from now on.", topic: "style");
         var planner = new CannedOrchestrator().Otherwise((request, _) => new TurnPlan(true, "Make responses concise", [], null, [],
             [new Proposal(Relay.Core.Ids.Ulid.NewUlid(request.At), Actions.UpdatePreference, "overheard", new Dictionary<string, string> { ["key"] = "response.verbosity", ["value"] = "concise" }, [request.SourceEventId], [], Risks.ControlledWrite, true, Producers.Model)],
             "canned"));
-        using var s = Scenario.New(_tmp, judge: judge, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
+        using var s = Scenario.New(_tmp, x => { x.Orchestrator.Mode = OrchestratorSettings.Rules; x.Listening.Enabled = true; },
+                mind: mind, orchestrator: new CompositeOrchestrator(new RuleBasedOrchestrator(), planner)).WithWorkspace()
             .Do("Start from normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
-            .WithListening().StartListening()
+            .StartListening()
             .Listen("Honestly I wish these answers were more concise.")
             .ExpectTask(TaskKind.Improve, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectAnyProposal(Actions.UpdatePreference, "denied")

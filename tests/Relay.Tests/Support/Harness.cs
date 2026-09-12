@@ -5,7 +5,6 @@ using Relay.Core.Evaluation;
 using Relay.Core.Execution;
 using Relay.Core.External;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Model;
 using Relay.Core.Notes;
@@ -29,14 +28,14 @@ public sealed class Harness : IDisposable
     public static readonly DateTimeOffset T0 = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>
-    /// The test profile applied to a fresh data root: the judge is off, so the note chord dictates a
-    /// note (the path most tests exercise). Listening tests turn the judge on in <c>configure</c>.
+    /// The test profile applied to a fresh data root: listening is off, so the note chord dictates a
+    /// note (the path most tests exercise). Listening tests turn it back on in <c>configure</c> and pass a mind.
     /// Settings already on disk (restarts) are left alone.
     /// </summary>
     public static void TestProfile(RelaySettings s)
     {
-        s.Judge.Mode = JudgeSettings.Off;
-        // Listening scenarios are written against the rolling window judged every pass; the slower whole-conversation
+        s.Listening.Enabled = false;
+        // Listening scenarios are written against the rolling window read every pass; the slower whole-conversation
         // ingest (the shipped default) has its own tests that set these back.
         s.Stream.BufferSeconds = 90;
         s.Stream.ObserveIntervalMs = 4_000;
@@ -46,7 +45,7 @@ public sealed class Harness : IDisposable
 
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
         IOrchestrator? orchestrator = null, IWorkerHost? workerHost = null, bool inlinePost = true,
-        IJudge? judge = null, Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
+        Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
         Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
@@ -101,7 +100,6 @@ public sealed class Harness : IDisposable
             Registry = Registry,
             Roots = Roots,
             Orchestrator = orchestrator ?? new RuleBasedOrchestrator(),
-            Judge = judge ?? (SettingsLoad.Settings.Judge.Mode == JudgeSettings.Off ? new NullJudge() : new HeuristicJudge()),
             Mind = mind,
             Decisions = Relay.Core.Decisions.DecisionSet.Load(root, out _),
             Usage = new Relay.Core.Usage.UsageRecorder(root),
@@ -191,7 +189,7 @@ public sealed class Harness : IDisposable
     };
 
     /// <summary>
-    /// Stores overheard words as an excerpt under a known id, the way a judge finding would have kept them, so a planner
+    /// Stores overheard words as an excerpt under a known id, the way a raise would have kept them, so a planner
     /// driven directly (the evaluation runner) can read_excerpt an observed task exactly as it does in the application.
     /// </summary>
     public Harness Heard(string excerptId, string words, string selectedBy = "eval")

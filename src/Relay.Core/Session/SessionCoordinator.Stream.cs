@@ -1,20 +1,19 @@
 using System.Text.Json;
 using Relay.Core.Config;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.State;
 using Relay.Core.Storage;
 using Relay.Core.Stream;
-using Relay.Core.Tasks;
 
 namespace Relay.Core.Session;
 
 /// <summary>
 /// Listening. The note chord opens a stream instead of a recording: the surface text is cut into
-/// timestamped segments, held in a rolling buffer that expires continuously, and judged by RELAY0
-/// every few seconds. Findings persist an excerpt and become observed tasks; everything else is
-/// gone within the window. The ledger sees ids, hashes, sizes, tokens and timings — never the words.
-/// The full surface text stays in memory for the user to see and is dropped when the stream stops.
+/// timestamped segments, held in a rolling buffer that expires continuously, and read by the mind
+/// every few seconds. What the mind raises persists an excerpt and becomes a task of its own;
+/// everything else is gone within the window. The ledger sees ids, hashes, sizes, tokens and timings —
+/// never the words. The full surface text stays in memory for the user to see and is dropped when the
+/// stream stops. The pass itself is in <see cref="SessionCoordinator"/>'s Observe part.
 /// </summary>
 public sealed partial class SessionCoordinator
 {
@@ -27,22 +26,23 @@ public sealed partial class SessionCoordinator
         public IDisposable? ObserveTimer { get; set; }
         public IDisposable? QuietTimer { get; set; }
         public IDisposable? PersistTimer { get; set; }
-        public IDisposable? JudgeTimeout { get; set; }
-        public CancellationTokenSource? JudgeCts { get; set; }
-        public bool Judging { get; set; }
+        public IDisposable? PassTimeout { get; set; }
+        public CancellationTokenSource? PassCts { get; set; }
+        /// <summary>The pass in flight ran out of time. The loop only knows it was cancelled; this is why.</summary>
+        public bool PassTimedOut { get; set; }
+        /// <summary>A pass is in flight. One at a time per conversation; new talk waits for the next.</summary>
+        public bool Reading { get; set; }
         public bool Finishing { get; set; }
         public bool WindowDirty { get; set; }
         public int Passes { get; set; }
-        public int Findings { get; set; }
         public int Excerpts { get; set; }
         public int Tasks { get; set; }
         public int Segments { get; set; }
         public int Chars { get; set; }
         public DateTimeOffset? LastCheckAt { get; set; }
         public string? LastError { get; set; }
-        public string? LastJudge { get; set; }
-        /// <summary>Mind mode: the conversation's own loop, one pass per ingest. Null when the judge reads the stream.</summary>
-        public Mind.ObservingLoop? Loop { get; set; }
+        /// <summary>The conversation's own loop: the mind while Relay is listening, one pass per stretch of talk.</summary>
+        public required Mind.ObservingLoop Loop { get; init; }
         /// <summary>segmentId → the label (<c>#1</c>, <c>#2</c>, …) the mind has been shown for it, kept for the life of the stream.</summary>
         public Dictionary<string, string> Labels { get; } = new(StringComparer.Ordinal);
         public int Labelled { get; set; }
@@ -52,8 +52,8 @@ public sealed partial class SessionCoordinator
 
     private StreamState? _stream;
 
-    /// <summary>Whether the note chord listens (judge on) or dictates a note the old way (judge off).</summary>
-    public bool ListeningEnabled => _settings.Judge.Mode != JudgeSettings.Off;
+    /// <summary>Whether the note chord listens, or dictates one silent note. Listening needs a mind; without one there is nothing to read with.</summary>
+    public bool ListeningEnabled => _settings.Listening.Enabled && _services.Mind is not null;
 
     private bool IsStreaming(Captures.CaptureDraft? draft) => _stream is not null && draft is not null && _stream.StreamId == draft.CaptureId;
 
@@ -64,33 +64,33 @@ public sealed partial class SessionCoordinator
         var window = _settings.Stream.BufferSeconds == StreamSettings.WholeConversation
             ? TimeSpan.Zero
             : TimeSpan.FromSeconds(Math.Max(15, Math.Min(_settings.Stream.BufferSeconds, Preferences.Buffer.TotalSeconds > 0 ? Preferences.Buffer.TotalSeconds : _settings.Stream.BufferSeconds)));
+        var buffer = new ConversationBuffer(window);
+        var segmenter = new StreamSegmenter();
         _stream = new StreamState
         {
             StreamId = draft.CaptureId,
             StartedAt = now,
-            Segmenter = new StreamSegmenter(),
-            Buffer = new ConversationBuffer(window),
+            Segmenter = segmenter,
+            Buffer = buffer,
+            Loop = NewObservingLoop(draft.CaptureId),
         };
         Excerpts.BeginStream();
-        // Mind mode: the mind reads the conversation itself and the judge is not used at all (the Alpha, step 1).
-        if (ObservingWithMind) BeginObserving(_stream);
-        _stream.LastJudge = _stream.Loop?.MindName;
         Append(EventTypes.StreamStarted, new
         {
             streamId = draft.CaptureId, bufferSeconds = window.TotalSeconds, wholeConversation = window == TimeSpan.Zero, observeIntervalMs = _settings.Stream.ObserveIntervalMs,
             minIngestChars = _settings.Stream.MinIngestChars, minIngestSeconds = _settings.Stream.MinIngestSeconds,
-            judge = _stream.Loop is null ? _services.Judge.Name : null, mind = _stream.Loop?.MindName, judgeMode = _settings.Judge.Mode, previousForegroundProcess = draft.PreviousForegroundProcess,
+            mind = _stream.Loop.MindName, previousForegroundProcess = draft.PreviousForegroundProcess,
         });
         ScheduleObserve();
     }
 
     /// <summary>
     /// The slower ingest: a pass runs only once enough new talk has gathered (<c>minIngestChars</c>) or the oldest of it
-    /// has waited long enough (<c>minIngestSeconds</c>), so the judge reads a stretch of conversation rather than each fragment.
+    /// has waited long enough (<c>minIngestSeconds</c>), so the mind reads a stretch of conversation rather than each fragment.
     /// </summary>
     private bool EnoughToIngest(StreamState stream, DateTimeOffset now)
     {
-        var (chars, age) = stream.Buffer.Unjudged(now);
+        var (chars, age) = stream.Buffer.Unread(now);
         if (chars == 0) return false;
         var s = _settings.Stream;
         return chars >= s.MinIngestChars || age.TotalSeconds >= s.MinIngestSeconds;
@@ -107,7 +107,7 @@ public sealed partial class SessionCoordinator
             stream.ObserveTimer = null;
             stream.Buffer.Expire(_clock.UtcNow);
             if (stream.Segmenter.HasPendingSince(_clock.UtcNow, TimeSpan.FromMilliseconds(_settings.Stream.SegmentQuietMs))) AddSegments(stream, stream.Segmenter.FlushPending(_clock.UtcNow));
-            JudgeNow(stream, final: false);
+            ReadNow(stream, final: false);
             ScheduleObserve();
             Notify();
         });
@@ -148,7 +148,7 @@ public sealed partial class SessionCoordinator
             stream.PersistTimer = null;
             if (_stream == stream && stream.WindowDirty) PersistWindow(stream);
         });
-        if (urgent) JudgeNow(stream, final: false, urgent: true);
+        if (urgent) ReadNow(stream, final: false, urgent: true);
     }
 
     private void PersistWindow(StreamState stream)
@@ -171,133 +171,26 @@ public sealed partial class SessionCoordinator
         try { if (File.Exists(_root.CurrentStreamPath)) File.Delete(_root.CurrentStreamPath); } catch (IOException) { }
     }
 
-    private JudgeContext JudgeContextNow()
+    /// <summary>
+    /// One pass of the mind over what has arrived, if anything has and enough of it. A pass already in flight
+    /// holds the next: the conversation is read one stretch at a time, and nothing heard while a pass runs is lost.
+    /// </summary>
+    private void ReadNow(StreamState stream, bool final, bool urgent = false)
     {
-        var prefs = Preferences;
-        var recent = _tasks.Where(t => t.Topic is not null).Select(t => t.Topic!).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToList();
-        return new JudgeContext(_services.Registry.Active.Select(p => $"{p.Name} ({p.Slug})").ToList(), prefs.WatchedTerms, recent, prefs.PromptFragment);
-    }
-
-    private void JudgeNow(StreamState stream, bool final, bool urgent = false)
-    {
-        if (stream.Judging) { if (final) stream.Finishing = true; return; }
+        if (stream.Reading) { if (final) stream.Finishing = true; return; }
         var now = _clock.UtcNow;
         stream.Buffer.Expire(now);
-        var fresh = stream.Buffer.UnjudgedIds();
-        if (fresh.Count == 0)
+        if (stream.Buffer.UnreadIds().Count == 0)
         {
             if (final) CompleteStream(stream, "stopped");
             return;
         }
         // Not yet: let the conversation run on. The final pass and a watched term never wait.
         if (!final && !urgent && !EnoughToIngest(stream, now)) return;
-        if (stream.Loop is not null) { ObservePass(stream, final); return; }
-        stream.Judging = true;
-        stream.Passes++;
-        var window = stream.Buffer.Segments.ToList();
-        var request = new JudgeRequest(TaskOrigin.Observed, window, fresh, null, JudgeContextNow(), now);
-        var judge = _services.Judge;
-        var cts = new CancellationTokenSource();
-        stream.JudgeCts = cts;
-        stream.JudgeTimeout = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Judge.TimeoutMs), () => cts.Cancel());
-        Task<JudgeDecision> judging;
-        try { judging = judge.JudgeAsync(request, cts.Token); }
-        catch (Exception ex) { judging = Task.FromException<JudgeDecision>(ex); }
-        var passStarted = now;
-        judging.ContinueWith(t => _scheduler.Post(() => OnJudged(stream, judge, window, fresh, t, final, passStarted)), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        ObservePass(stream, final);
     }
 
-    private void OnJudged(StreamState stream, IJudge judge, IReadOnlyList<StreamSegment> window, IReadOnlyList<string> fresh, Task<JudgeDecision> judging, bool final, DateTimeOffset passStarted)
-    {
-        if (_stream != stream) return;
-        stream.JudgeTimeout?.Dispose();
-        stream.JudgeTimeout = null;
-        stream.JudgeCts?.Dispose();
-        stream.JudgeCts = null;
-        stream.Judging = false;
-        stream.LastCheckAt = _clock.UtcNow;
-        stream.LastJudge = judge.Name;
-        var hashes = window.Where(s => fresh.Contains(s.SegmentId)).Select(s => s.Sha256[..16]).ToList();
-
-        JudgeDecision decision;
-        if (judging.IsCanceled) decision = JudgeDecision.Failed(judge.Name, $"timed out after {_settings.Judge.TimeoutMs} ms");
-        else if (judging.IsFaulted) decision = JudgeDecision.Failed(judge.Name, judging.Exception?.GetBaseException().Message ?? "judge failed");
-        else decision = judging.Result;
-
-        if (decision.Error is not null)
-        {
-            stream.LastError = decision.Error;
-            Append(EventTypes.ObserveFailed, new { streamId = stream.StreamId, judge = judge.Name, segments = fresh, error = decision.Error, elapsedMs = decision.ElapsedMs });
-            // The model was unavailable: the heuristic judge takes this pass so nothing is silently skipped, and says so.
-            if (judge is not HeuristicJudge)
-            {
-                var fallback = new HeuristicJudge().JudgeAsync(new JudgeRequest(TaskOrigin.Observed, window, fresh, null, JudgeContextNow(), _clock.UtcNow), CancellationToken.None).GetAwaiter().GetResult();
-                decision = fallback with { Producer = HeuristicJudge.ProducerName + " (fallback)" };
-            }
-        }
-        else stream.LastError = null;
-
-        stream.Buffer.MarkJudged(fresh);
-        var accepted = decision.Findings.Where(f => f.Confidence >= _settings.Judge.MinConfidence).ToList();
-        var below = decision.Findings.Count - accepted.Count;
-        if (accepted.Count == 0)
-        {
-            Append(EventTypes.ObserveChecked, new { streamId = stream.StreamId, judge = decision.Producer, segments = fresh, hashes, held = window.Count, promptTokens = decision.PromptTokens, completionTokens = decision.CompletionTokens, elapsedMs = decision.ElapsedMs, belowThreshold = below });
-        }
-        else
-        {
-            stream.Findings += accepted.Count;
-            var found = Append(EventTypes.ObserveFound, new
-            {
-                streamId = stream.StreamId, judge = decision.Producer, segments = fresh, hashes, held = window.Count, promptTokens = decision.PromptTokens, completionTokens = decision.CompletionTokens, elapsedMs = decision.ElapsedMs, belowThreshold = below,
-                // A finding's summary, topic, merge key and rationale are the judge's words about the room and often quote it
-                // (a model judge's "why" did, in a live run); the ledger keeps fingerprints and the task record keeps the text.
-                findings = accepted.Select(f => new
-                {
-                    kind = f.Kind.Wire(), confidence = f.Confidence, why = Fingerprint(f.Why), segments = f.SegmentIds, projectHint = f.ProjectHint, presentation = f.Presentation?.Wire(),
-                    summary = Fingerprint(f.Summary), topic = f.Topic is null ? null : Fingerprint(f.Topic), mergeKey = f.MergeKey is null ? null : Fingerprint(f.MergeKey), noteChars = f.NoteText?.Length, noteType = f.NoteType,
-                }),
-            });
-            if (found is null) return;
-            var elapsed = (_clock.UtcNow - stream.StartedAt).TotalSeconds;
-            foreach (var finding in accepted)
-            {
-                Excerpt? excerpt = null;
-                var sourceEventId = found.Id;
-                var segmentIds = finding.SegmentIds.Count > 0 ? finding.SegmentIds : fresh.TakeLast(1).ToList();
-                if (Excerpts.Existing(segmentIds) is { } shared)
-                {
-                    // The same words already have an excerpt (two findings on one sentence): share it, keep nothing twice.
-                    excerpt = shared;
-                }
-                else if (segmentIds.Any(id => stream.Buffer.Find(id) is not null))
-                {
-                    try
-                    {
-                        var guard = new RetentionGuard(Preferences.ExcerptMaxSeconds, Preferences.MaxRetainedFraction);
-                        excerpt = Excerpts.Build(stream.StreamId, finding with { SegmentIds = segmentIds }, decision.Producer, stream.Buffer, guard, elapsed, _clock.UtcNow);
-                        var path = Excerpts.Persist(excerpt);
-                        stream.Excerpts++;
-                        _services.Index.IndexExcerpt(excerpt);
-                        var stored = Append(EventTypes.ExcerptStored, new { streamId = stream.StreamId, excerptId = excerpt.ExcerptId, triggerSegmentId = excerpt.TriggerSegmentId, segments = excerpt.Segments.Count, referenced = excerpt.References.Sum(r => r.SegmentIds.Count), seconds = excerpt.Seconds, chars = excerpt.Text.Length, shrunkByGuard = excerpt.ShrunkByGuard, retainedSeconds = Excerpts.RetainedSeconds, elapsedSeconds = elapsed, kind = finding.Kind.Wire(), why = Fingerprint(finding.Why), path });
-                        if (stored is not null) sourceEventId = stored.Id;
-                    }
-                    catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
-                    {
-                        _notice = "An excerpt could not be stored: " + ex.Message;
-                        excerpt = null;
-                    }
-                }
-                stream.Tasks++;
-                StartObservedTask(finding, excerpt, stream.StreamId, sourceEventId, decision.Producer);
-            }
-        }
-
-        if (final || stream.Finishing) CompleteStream(stream, "stopped");
-        Notify();
-    }
-
-    /// <summary>The user stopped listening: flush what is pending, judge it once more, then close the stream.</summary>
+    /// <summary>The user stopped listening: flush what is pending, read it once more, then close the stream.</summary>
     private void FinishStream(StreamState stream)
     {
         stream.Finishing = true;
@@ -306,7 +199,7 @@ public sealed partial class SessionCoordinator
         stream.QuietTimer?.Dispose();
         stream.QuietTimer = null;
         AddSegments(stream, stream.Segmenter.FlushPending(_clock.UtcNow));
-        JudgeNow(stream, final: true);
+        ReadNow(stream, final: true);
     }
 
     private void CompleteStream(StreamState stream, string reason)
@@ -316,14 +209,13 @@ public sealed partial class SessionCoordinator
         stream.ObserveTimer?.Dispose();
         stream.QuietTimer?.Dispose();
         stream.PersistTimer?.Dispose();
-        stream.JudgeTimeout?.Dispose();
-        stream.JudgeCts?.Cancel();
+        stream.PassTimeout?.Dispose();
+        stream.PassCts?.Cancel();
         var seconds = (_clock.UtcNow - stream.StartedAt).TotalSeconds;
         Append(EventTypes.StreamStopped, new
         {
             streamId = stream.StreamId, reason, seconds, segments = stream.Segments, chars = stream.Chars, expired = stream.Buffer.ExpiredSegments, heldAtStop = stream.Buffer.Segments.Count,
-            passes = stream.Passes, findings = stream.Findings, excerpts = stream.Excerpts, tasks = stream.Tasks, retainedSeconds = Excerpts.RetainedSeconds,
-            judge = stream.Loop is null ? stream.LastJudge ?? _services.Judge.Name : null, mind = stream.Loop?.MindName,
+            passes = stream.Passes, excerpts = stream.Excerpts, tasks = stream.Tasks, retainedSeconds = Excerpts.RetainedSeconds, mind = stream.Loop.MindName,
         });
         stream.Buffer.Clear();
         ClearWindowFile();
@@ -341,7 +233,7 @@ public sealed partial class SessionCoordinator
             var parts = new List<string>();
             if (stream.Tasks > 0) parts.Add($"{stream.Tasks} task(s) raised");
             if (stream.Excerpts > 0) parts.Add($"{stream.Excerpts} excerpt(s) kept");
-            parts.Add($"{stream.Segments} segment(s) heard, {stream.Passes} check(s)");
+            parts.Add($"{stream.Segments} segment(s) heard, {stream.Passes} pass(es)");
             ShowReceipt($"Listened {FormatSeconds(seconds)} · {string.Join(" · ", parts)}");
         }
     }
@@ -373,7 +265,7 @@ public sealed partial class SessionCoordinator
     {
         var s = _stream;
         if (s is null) return null;
-        return new ListeningStatus(s.StreamId, s.StartedAt, s.Buffer.HeldSeconds, s.Buffer.Segments.Count, s.Segments, s.Buffer.Window.TotalSeconds, s.Passes, s.Findings, s.Excerpts, s.Tasks,
-            Excerpts.RetainedSeconds, s.LastJudge ?? _services.Judge.Name, s.LastCheckAt, s.Judging, s.Finishing, s.LastError);
+        return new ListeningStatus(s.StreamId, s.StartedAt, s.Buffer.HeldSeconds, s.Buffer.Segments.Count, s.Segments, s.Buffer.Window.TotalSeconds, s.Passes, s.Loop.Raises, s.Excerpts, s.Tasks,
+            Excerpts.RetainedSeconds, s.Loop.MindName, s.LastCheckAt, s.Reading, s.Finishing, s.LastError);
     }
 }

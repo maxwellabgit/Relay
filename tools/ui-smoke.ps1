@@ -7,7 +7,7 @@
   user does (the window-scoped chords, typing into the capture surface, the ask box, clicking Approve),
   and checks both the ledger and the rendered UI after every step:
 
-    1. idle                      window up, both chords registered for this window, judge and planner chips
+    1. idle                      window up, both chords registered for this window, listening and planner chips
     2. Ctrl+X "create project"   plan -> proposal awaiting approval, nothing written yet
     3. Approve (UI Automation)   project folder created, task completed
     4. Ctrl+Alt listen           the stream opens; a decision about Atlas is filed (ambient), a task without a
@@ -18,7 +18,9 @@
 
   Screenshots and the ledger are written to the output folder. Exit code 0 means every check passed.
   Requires an interactive desktop session (the chords are real key presses) and nothing else stealing
-  focus while it runs (about 60 seconds). No model is needed: the heuristic judge and the grammar do it all.
+  focus while it runs (about 60 seconds). Steps 1-3 and 5-7 need no model: the grammar does them. Step 4
+  needs one — reading a conversation is the mind's, and nothing stands behind the chord without it
+  (docs\10, step 1). Point model.endpoint at a local gateway and enable it, or step 4 fails and says so.
   Caps Lock is left alone; typed text is case-compensated so it arrives exactly as written here.
   This file is deliberately ASCII-only: Windows PowerShell reads a BOM-less script as ANSI, so a non-ASCII
   character in a check string would silently never match the UI.
@@ -292,7 +294,7 @@ try {
     Check "COMMAND_KEY registered for this window" ($commandKey -and $commandKey.data.scope -eq "window") "$($commandKey.data.chord)"
     Check "state IDLE" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "IDLE" }))
     Check "UI shows the listen chord" ($null -ne (Ui-FindText "LISTEN"))
-    Check "UI shows the judge chip (heuristic without a model)" ($null -ne (Ui-FindText "Judge heuristic"))
+    Check "UI shows the listening chip" ($null -ne (Ui-WaitMatch "^(Listening|No mind)" 5))
     Check "UI shows the ask box" ($null -ne (Ui-Button "Ask"))
     Shot "1-idle"
 
@@ -325,6 +327,7 @@ try {
     Start-Sleep -Seconds 5   # let the COMPLETED receipt return to IDLE
 
     Log ""; Log "== 4. Ctrl+Alt: listen (one decision filed, one task to the Inbox, one ask answered while listening) =="
+    Log "   needs a mind: with the model gateway off the chord dictates instead, and every check here fails."
     Focus-Relay | Out-Null
     Press-NoteKey
     Check "NOTE_CAPTURE entered" ($null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "NOTE_CAPTURE" }))
@@ -332,7 +335,7 @@ try {
     Check "UI shows LISTENING" ($null -ne (Ui-WaitText "LISTENING" 5))
     Check "UI shows the Listening process tag" ($null -ne (Ui-FindText "Listening"))
     Type-Text "We decided the Atlas beta ships on October 14. Remember to buy compost for the garden this weekend."
-    Check "judge found something" ($null -ne (Wait-Event "observe.found" 15))
+    Check "the mind raised something from the window" ($null -ne (Wait-Event "observe.raised" 15))
     Check "decision filed under atlas (remember lane)" ($null -ne (Wait-Event "note.routed" 15 { $_.data.projectSlug -eq "atlas" }))
     Check "task without a project left unrouted" ($null -ne (Wait-Event "note.routing_deferred" 10))
     Check "excerpt kept for the finding" ($null -ne (Wait-Event "stream.excerpt_stored" 5))

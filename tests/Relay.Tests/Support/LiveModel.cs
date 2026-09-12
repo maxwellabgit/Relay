@@ -53,7 +53,7 @@ public sealed class LiveModel
         return new OpenAiCompatibleClient(Settings, secrets);
     }
 
-    /// <summary>Settings for a scenario that runs with this model as RELAY0. The judge mode is left to the test: dictation needs it off while the world is built.</summary>
+    /// <summary>Settings for a scenario that runs with this model as RELAY0. Listening is left to the test: dictation needs it off while the world is built.</summary>
     public void Configure(RelaySettings cfg)
     {
         cfg.Orchestrator.Mode = OrchestratorSettings.RulesAndModel;
@@ -62,7 +62,7 @@ public sealed class LiveModel
         cfg.Model.Endpoint = Endpoint;
         cfg.Model.Model = Model;
         cfg.Model.TimeoutMs = TimeoutMs;
-        cfg.Judge.TimeoutMs = TimeoutMs;
+        cfg.Listening.PassTimeoutMs = TimeoutMs;
     }
 
     /// <summary>Writes a report file into the report directory when one is configured; returns its path, or null when nothing was written.</summary>

@@ -4,7 +4,6 @@ using Relay.Core.Config;
 using Relay.Core.Execution;
 using Relay.Core.External;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
 using Relay.Core.Ledger;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
@@ -29,9 +28,10 @@ public sealed class CoordinatorServices
     public required WorkspaceRoots Roots { get; init; }
     /// <summary>The planner. Replaced when the user changes orchestrator/model settings; read at the start of each task.</summary>
     public required IOrchestrator Orchestrator { get; set; }
-    /// <summary>RELAY0 as judge of the stream and of direct asks. Replaced with settings; read per pass.</summary>
-    public IJudge Judge { get; set; } = new HeuristicJudge();
-    /// <summary>The mind of the rebuilt orchestrator (docs/09); used for every task when orchestrator.mode is "mind". Replaced with settings.</summary>
+    /// <summary>
+    /// Relay's one mind (docs/09): it runs every task and reads every conversation. Replaced when the user
+    /// changes model settings; read at the start of each task and each listening pass. Null when no model answers.
+    /// </summary>
     public Mind.IMind? Mind { get; set; }
     /// <summary>Weights and thresholds of every decision between paths; loaded from config\decisions.json.</summary>
     public Decisions.DecisionSet Decisions { get; set; } = Relay.Core.Decisions.DecisionSet.Default();
@@ -51,8 +51,8 @@ public sealed class CoordinatorServices
 }
 
 /// <summary>
-/// The task engine: one pipeline for every origin. A task is created from a direct ask, a judge
-/// finding, or a follow-up; it is planned with read-only tools, its proposals go through policy,
+/// The task engine: one pipeline for every origin. A task is created from a direct ask, something the
+/// mind raised while listening, or a follow-up; it is planned with read-only tools, its proposals go through policy,
 /// approvals (or standing grants), capabilities and the executor; it ends with a diagnostics record
 /// and a presentation decided by the attention arbiter. The foreground task (a command capture or a
 /// Projects-panel operation) also drives the global state machine so the primary surface follows it;
@@ -133,7 +133,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
     private readonly List<TaskState> _tasks = new();
     private TaskState? _lastForeground;
     private readonly List<ReviewItem> _recoveryReview = new();
-    private readonly HeuristicJudge _directClassifier = new();
     private ExcerptStore? _excerpts;
     private ChangeSetStore? _changeSets;
     private PreferenceStore? _preferences;
@@ -202,11 +201,16 @@ public sealed partial class SessionCoordinator : IExecutionSink
     // Creating tasks
     // ----------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// What lane a direct ask is filed under. The mind works this out for itself from the words, so
+    /// under it every ask starts as something to answer; the grammar needs the lane up front.
+    /// </summary>
+    private TaskKind DirectKind(string text) => MindMode ? TaskKind.Answer : Orchestration.RuleBasedOrchestrator.DirectKind(text);
+
     /// <summary>The command capture became a task: direct, foreground, drives the state machine.</summary>
     private void StartCommandTask(Captures.CaptureDraft draft, string sourceEventId)
     {
-        var kind = ClassifyDirect(draft.Text);
-        var task = NewTask(TaskOrigin.Direct, kind, "command", draft.CaptureId, sourceEventId, draft.Text, foreground: true, title: Truncate(draft.Text, 80));
+        var task = NewTask(TaskOrigin.Direct, DirectKind(draft.Text), "command", draft.CaptureId, sourceEventId, draft.Text, foreground: true, title: Truncate(draft.Text, 80));
         _lastForeground = task;
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: draft.Text.Length)) is null) return;
         PersistTask(task);
@@ -233,8 +237,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (foreground && Foreground is not null) foreground = false;
         var source = Append(EventTypes.AskRecorded, new { text, chars = text.Length, whileListening = _state == RelayState.NoteCapture, foreground });
         if (source is null) { Notify(); return false; }
-        var kind = ClassifyDirect(text);
-        var task = NewTask(TaskOrigin.Direct, kind, "ask", "", source.Id, text, foreground, title: Truncate(text, 80));
+        var task = NewTask(TaskOrigin.Direct, DirectKind(text), "ask", "", source.Id, text, foreground, title: Truncate(text, 80));
         if (foreground)
         {
             _receiptTimer?.Dispose();
@@ -251,29 +254,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         BeginPlanning(task);
         Notify();
         return true;
-    }
-
-    /// <summary>A judge finding becomes an observed task. Remember findings skip the planner: the judge already wrote the note.</summary>
-    private void StartObservedTask(JudgeFinding finding, Excerpt? excerpt, string streamId, string sourceEventId, string judgeName)
-    {
-        var watched = finding.Kind == TaskKind.Resolve && finding.Topic is not null && Preferences.WatchedTerms.Contains(finding.Topic, StringComparer.OrdinalIgnoreCase) ? finding.Topic : null;
-        var task = NewTask(TaskOrigin.Observed, finding.Kind, "observed", streamId, sourceEventId, finding.FocusedPrompt, foreground: false,
-            excerptId: excerpt?.ExcerptId, mergeKey: finding.MergeKey, topic: finding.Topic, projectHint: finding.ProjectHint, title: finding.Summary, why: finding.Why,
-            confidence: finding.Confidence, suggested: finding.Presentation, watchedTerm: watched);
-        if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: finding.FocusedPrompt.Length, judge: judgeName)) is null) return;
-        PersistTask(task);
-        if (finding.Kind == TaskKind.Remember && !string.IsNullOrWhiteSpace(finding.NoteText))
-        {
-            RememberFromFinding(task, finding, excerpt);
-            return;
-        }
-        if (!OrchestratorEnabled)
-        {
-            task.Plan = new TurnPlan(false, "Orchestrator is off; the finding was recorded and nothing was planned.", [], null, [], [], Producers.Engine);
-            FinishTask(task);
-            return;
-        }
-        BeginPlanning(task);
     }
 
     /// <summary>A follow-up inherits the parent's origin scope but is its own task with its own record.</summary>
@@ -318,8 +298,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         return task;
     }
 
-    /// <summary><paramref name="raisedBy"/> is the mind that raised the task from a listening pass; <paramref name="judge"/> is the judge that found it, on the older path.</summary>
-    private object TaskCreatedPayload(TaskState task, int chars, string? judge = null, string? raisedBy = null) => new
+    /// <summary><paramref name="raisedBy"/> is the mind that raised the task from a listening pass; it is null for everything the user asked for directly.</summary>
+    private object TaskCreatedPayload(TaskState task, int chars, string? raisedBy = null) => new
     {
         taskId = task.TaskId,
         origin = task.Origin.Wire(),
@@ -336,7 +316,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         confidence = task.Confidence,
         mergeKey = Guarded(task, task.MergeKey),
         chars,
-        judge,
         raisedBy,
         planner = PlannerName,
     };
@@ -346,8 +325,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
     // ----------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The ledger never carries the words of the room. Segments enter it as hashes and excerpts as ids; but what a
-    /// judge or planner writes about an overheard task (its title, summary, answer, tool arguments, raw model output)
+    /// The ledger never carries the words of the room. Segments enter it as hashes and excerpts as ids; but what the
+    /// mind or a planner writes about an overheard task (its title, summary, answer, tool arguments, raw model output)
     /// can quote those words, so for such tasks the ledger records a fingerprint (length and a SHA-256 prefix) and the
     /// task record under tasks\ keeps the text, under the same retention as the excerpt it cites. Tasks that began
     /// from something the user typed are recorded in full: those words are the user's own instruction.
@@ -364,12 +343,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
     /// <summary>A proposal target for the ledger: for an overheard task the prose is fingerprinted and the references kept (<see cref="Withheld.Target"/>).</summary>
     private static IReadOnlyDictionary<string, string> GuardedTarget(TaskState task, IReadOnlyDictionary<string, string> target)
         => task.Overheard ? Withheld.Target(target) : target;
-
-    private TaskKind ClassifyDirect(string text)
-    {
-        var decision = _directClassifier.JudgeAsync(new JudgeRequest(TaskOrigin.Direct, [], [], text, JudgeContextNow(), _clock.UtcNow), CancellationToken.None).GetAwaiter().GetResult();
-        return decision.Findings.FirstOrDefault()?.Kind ?? TaskKind.Answer;
-    }
 
     private void TrimTasks()
     {
@@ -1051,7 +1024,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
     // Settings changed through the UI
     // ----------------------------------------------------------------------------------------
 
-    /// <summary>Applies a settings change immediately for the orchestrator/model/judge/stream/worker sections and persists it. Hotkeys and capture timing still need a restart.</summary>
+    /// <summary>Applies a settings change immediately for the orchestrator/model/listening/stream/worker sections and persists it. Hotkeys and capture timing still need a restart.</summary>
     public IReadOnlyList<string> UpdateSettings(Action<RelaySettings> mutate)
     {
         var json = JsonSerializer.Serialize(_settings, RelayJson.Indented);
@@ -1066,13 +1039,13 @@ public sealed partial class SessionCoordinator : IExecutionSink
         }
         _settings.Orchestrator = copy.Orchestrator;
         _settings.Model = copy.Model;
-        _settings.Judge = copy.Judge;
+        _settings.Listening = copy.Listening;
         _settings.Stream = copy.Stream;
         _settings.ExternalModels = copy.ExternalModels;
         _settings.Workers = copy.Workers;
         _settings.Hotkeys = copy.Hotkeys;
         _settings.Capture = copy.Capture;
-        Append(EventTypes.SettingsChanged, new { hash = copy.ComputeHash(), orchestratorMode = copy.Orchestrator.Mode, modelEnabled = copy.Model.Enabled, endpoint = copy.Model.Endpoint, model = copy.Model.Model, judge = copy.Judge.Mode, externalProfiles = copy.ExternalModels.Select(p => p.Name) });
+        Append(EventTypes.SettingsChanged, new { hash = copy.ComputeHash(), orchestratorMode = copy.Orchestrator.Mode, modelEnabled = copy.Model.Enabled, endpoint = copy.Model.Endpoint, model = copy.Model.Model, listening = copy.Listening.Enabled, externalProfiles = copy.ExternalModels.Select(p => p.Name) });
         SettingsChanged?.Invoke(copy);
         Notify();
         return problems;

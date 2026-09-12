@@ -557,7 +557,7 @@ public sealed partial class SessionCoordinator
 
         if (_stream is { } stream && stream.StreamId == draft.CaptureId)
         {
-            // Listening ends with a last judge pass over what is still pending; the stream closes when it returns.
+            // Listening ends with one last pass over what is still unread; the stream closes when it returns.
             FinishStream(stream);
             return;
         }
@@ -1043,12 +1043,11 @@ public sealed partial class SessionCoordinator
                 _settings.Model.Enabled ? _settings.Model.Endpoint : null,
                 _settings.Model.Enabled ? _settings.Model.Model : null,
                 ModelKeyStored,
+                _services.Mind is not null,
                 TaskViews(),
                 Arbiter.Items,
                 ListeningView(),
                 ListeningEnabled,
-                _settings.Judge.Mode,
-                _services.Judge.Name,
                 Preferences,
                 ChangeSetViews(),
                 _services.External?.ProfileNames ?? []);

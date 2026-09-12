@@ -1,7 +1,5 @@
 using System.Text.RegularExpressions;
 using Relay.Core.Ids;
-using Relay.Core.Judge;
-
 namespace Relay.Core.Stream;
 
 /// <summary>
@@ -87,7 +85,7 @@ public sealed partial class StreamSegmenter
 public sealed class ConversationBuffer
 {
     private readonly List<StreamSegment> _segments = new();
-    private readonly HashSet<string> _judged = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _read = new(StringComparer.Ordinal);
 
     public ConversationBuffer(TimeSpan window) => Window = window < TimeSpan.Zero ? TimeSpan.Zero : window;
 
@@ -120,7 +118,7 @@ public sealed class ConversationBuffer
         var dropped = 0;
         while (_segments.Count > 0 && _segments[0].At < cutoff)
         {
-            _judged.Remove(_segments[0].SegmentId);
+            _read.Remove(_segments[0].SegmentId);
             _segments.RemoveAt(0);
             dropped++;
         }
@@ -128,25 +126,26 @@ public sealed class ConversationBuffer
         return dropped;
     }
 
-    public IReadOnlyList<string> UnjudgedIds() => _segments.Where(s => !_judged.Contains(s.SegmentId)).Select(s => s.SegmentId).ToList();
+    /// <summary>What is held but has not been through a pass yet.</summary>
+    public IReadOnlyList<string> UnreadIds() => _segments.Where(s => !_read.Contains(s.SegmentId)).Select(s => s.SegmentId).ToList();
 
-    /// <summary>How much unjudged talk is waiting: its characters, and the age of the oldest unjudged segment.</summary>
-    public (int Chars, TimeSpan Age) Unjudged(DateTimeOffset now)
+    /// <summary>How much unread talk is waiting: its characters, and the age of the oldest unread segment.</summary>
+    public (int Chars, TimeSpan Age) Unread(DateTimeOffset now)
     {
         var chars = 0;
         DateTimeOffset? oldest = null;
         foreach (var s in _segments)
         {
-            if (_judged.Contains(s.SegmentId)) continue;
+            if (_read.Contains(s.SegmentId)) continue;
             chars += s.Text.Length;
             if (oldest is null || s.At < oldest) oldest = s.At;
         }
         return (chars, oldest is null ? TimeSpan.Zero : now - oldest.Value);
     }
 
-    public void MarkJudged(IEnumerable<string> ids)
+    public void MarkRead(IEnumerable<string> ids)
     {
-        foreach (var id in ids) _judged.Add(id);
+        foreach (var id in ids) _read.Add(id);
     }
 
     public StreamSegment? Find(string segmentId) => _segments.FirstOrDefault(s => s.SegmentId == segmentId);
@@ -157,6 +156,6 @@ public sealed class ConversationBuffer
     public void Clear()
     {
         _segments.Clear();
-        _judged.Clear();
+        _read.Clear();
     }
 }

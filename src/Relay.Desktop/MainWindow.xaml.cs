@@ -235,13 +235,11 @@ public sealed partial class MainWindow : Window
         OrchestratorDot.Fill = new SolidColorBrush(s.OrchestratorMode == OrchestratorSettings.Off ? Palette.Neutral
             : s.OrchestratorMode == OrchestratorSettings.Rules || modelReady ? Palette.Good : Palette.Warn);
 
-        JudgeChip.Text = s.JudgeMode switch
-        {
-            JudgeSettings.Off => "Judge off · Ctrl+Alt dictates a note",
-            JudgeSettings.Heuristic => "Judge heuristic",
-            _ => s.ModelEnabled ? $"Judge {s.JudgeName}" : "Judge heuristic (model disabled)",
-        };
-        JudgeDot.Fill = new SolidColorBrush(s.JudgeMode == JudgeSettings.Off ? Palette.Neutral : s.JudgeMode == JudgeSettings.Model && !(s.ModelEnabled && modelReady) ? Palette.Warn : Palette.Good);
+        // What the note chord does: open a conversation the mind reads, or take one silent note. Without a mind there is nothing to read with.
+        ListeningChip.Text = s.ListeningEnabled ? "Listening · read by the mind"
+            : s.MindReady ? $"Listening off · {s.NoteKey.Chord} dictates a note"
+            : $"No mind · {s.NoteKey.Chord} dictates a note";
+        ListeningDot.Fill = new SolidColorBrush(s.ListeningEnabled ? Palette.Good : s.MindReady ? Palette.Neutral : Palette.Warn);
 
         TitleSubtitle.Text = $"session {Short(s.SessionId)} · pid {s.ProcessId} · v{s.AppVersion}";
         RenderProcessTags(s);
@@ -257,7 +255,7 @@ public sealed partial class MainWindow : Window
         _processSignature = signature;
 
         ProcessTags.Children.Clear();
-        if (s.Listening is not null) ProcessTags.Children.Add(ProcessChip("Listening", "judge reads the buffer · no writes", Palette.Note));
+        if (s.Listening is not null) ProcessTags.Children.Add(ProcessChip("Listening", "the mind reads the buffer · no writes", Palette.Note));
         foreach (var t in live)
         {
             var color = t.Status switch { TaskStatus.AwaitingApproval => Palette.Warn, TaskStatus.Executing => Palette.Good, _ => Palette.Command };
@@ -303,7 +301,7 @@ public sealed partial class MainWindow : Window
                     : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording.") + beside
                 : "The chords are not active. See Review for the reason and fix hotkeys in settings.json, then restart Relay.",
             RelayState.NoteCapture when s.Listening is { } l =>
-                $"Listening · {clock} · {l.HeldSegments} segment(s) held of {l.TotalSegments} heard · {l.JudgePasses} check(s) · {l.Findings} finding(s) · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. The buffer expires continuously; only excerpts are kept." + beside,
+                $"Listening · {clock} · {l.HeldSegments} segment(s) held of {l.TotalSegments} heard · {l.Passes} pass(es) · {l.Raised} raised · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. The buffer expires continuously; only excerpts are kept." + beside,
             RelayState.NoteCapture => $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply.",
             RelayState.CommandCapture => $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels.",
             RelayState.AwaitingTranscript => s.Awaiting?.TimedOut == true
@@ -332,7 +330,7 @@ public sealed partial class MainWindow : Window
         CaptureHeader.Text = listening ? "LISTENING" : "CAPTURE";
         CaptureBox.PlaceholderText = s.State switch
         {
-            RelayState.NoteCapture when listening => "Talk with Flow or type. Words land here, are cut into segments and judged; the buffer forgets them within the window.",
+            RelayState.NoteCapture when listening => "Talk with Flow or type. Words land here, are cut into lines and read; the buffer forgets them within the window.",
             RelayState.NoteCapture => "Dictate with Flow or type. Text arrives here and nowhere else.",
             RelayState.CommandCapture => "State your instruction. Relay records it exactly, then plans; nothing runs without approval.",
             RelayState.AwaitingTranscript => "Waiting for the transcript to be inserted…",
@@ -386,11 +384,11 @@ public sealed partial class MainWindow : Window
         BufferBar.Value = whole ? l.HeldSeconds : Math.Min(l.HeldSeconds, l.WindowSeconds);
         BufferBar.ShowPaused = l.Finishing;
         BufferText.Text = whole ? $"{l.HeldSeconds:0}s held (whole conversation)" : $"{l.HeldSeconds:0}s of {l.WindowSeconds:0}s held";
-        var last = l.LastCheckAt is { } at ? $"last check {(DateTimeOffset.UtcNow - at).TotalSeconds:0}s ago" : "no check yet";
-        ListeningText.Text = $"{l.Judge}{(l.Judging ? " is checking now" : $" · {last}")} · {l.JudgePasses} pass(es) · {l.Findings} finding(s) · {l.Excerpts} excerpt(s) kept ({l.RetainedSeconds:0}s retained) · {l.Tasks} task(s) raised"
+        var last = l.LastCheckAt is { } at ? $"last read {(DateTimeOffset.UtcNow - at).TotalSeconds:0}s ago" : "not read yet";
+        ListeningText.Text = $"{l.Mind}{(l.Reading ? " is reading now" : $" · {last}")} · {l.Passes} pass(es) · {l.Raised} raised · {l.Excerpts} excerpt(s) kept ({l.RetainedSeconds:0}s retained) · {l.Tasks} task(s) running"
             + (l.Finishing ? " · finishing" : "");
         ListeningError.Visibility = Vis(l.LastError is not null);
-        ListeningError.Text = l.LastError is null ? "" : $"Last check failed: {l.LastError} — the heuristic judge took that pass.";
+        ListeningError.Text = l.LastError is null ? "" : $"Last pass failed: {l.LastError} — that stretch of talk went unread; the next pass starts clean.";
     }
 
     private void RenderActivity(RelaySnapshot s)
@@ -429,8 +427,8 @@ public sealed partial class MainWindow : Window
             ("Session", $"{s.SessionId} · pid {s.ProcessId} · Relay {s.AppVersion}\n{s.Tasks.Count} task(s) this session · {cost.PromptTokens} prompt + {cost.CompletionTokens} completion tokens · {cost.ModelCalls} model call(s) · {cost.ToolCalls} tool call(s)", _runtime.Root.TasksDirectory),
             ("Settings", $"{_runtime.Root.SettingsPath}\nhash {Short(settings.ComputeHash())}" + (_runtime.Settings.Problems.Count > 0 ? $" · {_runtime.Settings.Problems.Count} problem(s) at startup" : ""), _runtime.Root.SettingsPath),
             ("Planner", $"mode {s.OrchestratorMode} · active {s.OrchestratorName}\nplanning timeout {settings.Orchestrator.PlanningTimeoutMs} ms · tool budget {settings.Orchestrator.MaxToolCalls} · auto-route ≥ {settings.Orchestrator.AutoRouteThreshold:0.00} · review ≥ {settings.Orchestrator.ReviewThreshold:0.00}", null),
-            ("Judge", $"mode {s.JudgeMode} · active {s.JudgeName}\nmin confidence {settings.Judge.MinConfidence:0.00} · timeout {settings.Judge.TimeoutMs} ms · max output {settings.Judge.MaxOutputTokens} tokens", null),
-            ("Stream", $"buffer {s.Preferences.Buffer.TotalSeconds:0}s (settings {settings.Stream.BufferSeconds}s) · segment quiet {settings.Stream.SegmentQuietMs} ms · check every {settings.Stream.ObserveIntervalMs} ms\nexcerpt ≤ {s.Preferences.ExcerptMaxSeconds:0}s · retained ≤ {s.Preferences.MaxRetainedFraction:P0} of elapsed · window file only in staging\\stream", _runtime.Root.ExcerptsDirectory),
+            ("Listening", settings.Listening.Enabled ? $"on — the note chord opens a conversation{(s.MindReady ? "" : ", but there is no mind to read it")}\npass timeout {settings.Listening.PassTimeoutMs} ms · ≤ {settings.Stream.MaxMovesPerPass} move(s), {settings.Stream.MaxToolCallsPerPass} tool call(s), {settings.Stream.MaxRaisesPerPass} raise(s) per pass" : "off — the note chord dictates one silent note and nothing is read", null),
+            ("Stream", $"buffer {s.Preferences.Buffer.TotalSeconds:0}s (settings {settings.Stream.BufferSeconds}s) · segment quiet {settings.Stream.SegmentQuietMs} ms · read every {settings.Stream.ObserveIntervalMs} ms\nexcerpt ≤ {s.Preferences.ExcerptMaxSeconds:0}s · retained ≤ {s.Preferences.MaxRetainedFraction:P0} of elapsed · window file only in staging\\stream", _runtime.Root.ExcerptsDirectory),
             ("Model", s.ModelEnabled ? $"{s.ModelName} at {s.ModelEndpoint}\nkey {(s.ModelKeyStored ? "stored (DPAPI, this account)" : IsLoopback(s.ModelEndpoint) ? "none (loopback)" : "NOT STORED")} · timeout {settings.Model.TimeoutMs} ms · max output {settings.Model.MaxOutputTokens} tokens" : "disabled — no network connection is ever opened", null),
             ("External profiles", s.ExternalProfiles.Count == 0 ? "none — research tasks state the knowledge gap and stop" : string.Join("\n", settings.ExternalModels.Select(p => $"{p.Name}: {p.Model} at {p.Endpoint}{(p.SupportsSearch ? " · search" : "")}")), _runtime.Root.ExternalArtifactsDirectory),
             ("Workers", settings.Workers.Enabled ? $"enabled · {settings.Workers.WallClockSeconds}s wall clock · {settings.Workers.MemoryMb} MB · {settings.Workers.MaxToolCalls} tool calls · job object sandbox" : "disabled (launch_worker is denied by policy)", _runtime.Root.AgentsDirectory),

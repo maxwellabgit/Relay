@@ -109,6 +109,7 @@ public static class ActivityFormatter
             EventTypes.StreamStopped => $"Listening {r.DataString("reason")} after {Seconds(r)}: {r.DataInt64("segments")} segment(s), {r.DataInt64("passes")} check(s), {r.DataInt64("findings")} finding(s), {r.DataInt64("excerpts")} excerpt(s) kept",
             EventTypes.StreamInterruptedFound => $"A buffer window from a previous session was found and discarded ({r.DataInt64("segments")} segment(s), {r.DataInt64("chars")} chars)",
             EventTypes.ObserveChecked => $"{Reader(r)} read {Count(r, "segments")} new segment(s): nothing that needs Relay" + Tokens(r),
+            // Historical (the judge's pass): nothing writes this now, but old ledgers are still read here.
             EventTypes.ObserveFound => $"{Reader(r)} found {Count(r, "findings")} significant thing(s) in {Count(r, "segments")} new segment(s)" + Tokens(r),
             EventTypes.ObserveFailed => $"{Reader(r)} could not read the conversation: {r.DataString("error")}",
             // The objective and the line would quote the room, so these name the move, the kind and the decision only.
@@ -121,7 +122,7 @@ public static class ActivityFormatter
 
             // Tasks
             EventTypes.TaskCreated => r.DataString("lane") == "user_operation" ? $"You requested: {r.DataString("title")}"
-                // Overheard tasks: the title and the judge's rationale would quote the room, so the ledger holds fingerprints; the line names the kind and confidence.
+                // Overheard tasks: the title and the mind's rationale would quote the room, so the ledger holds fingerprints; the line names the kind and confidence.
                 : r.DataString("origin") == "observed" ? $"Overheard → {r.DataString("kind")} task {Short(r.DataString("taskId"))}{Cue(r)} ({FormatDouble(r, "confidence")})"
                 : r.DataString("origin") == "dialogue" ? $"Follow-up → {r.DataString("kind")} task {Short(r.DataString("taskId"))}" + (r.DataBool("overheard") == true ? "" : $": {r.DataString("title")}")
                 : $"{Capitalize(r.DataString("kind"))} task {Short(r.DataString("taskId"))} started with {r.DataString("planner")}",
@@ -165,10 +166,10 @@ public static class ActivityFormatter
 
     private static string Short(string? id) => id is null ? "?" : id.Length > 10 ? id[^8..] : id;
 
-    /// <summary>Whatever read the conversation on this record: the mind in mind mode, a judge on the older path.</summary>
+    /// <summary>Whatever read the conversation on this record: the mind, or a judge on records written before it existed.</summary>
     private static string Reader(LedgerRecord r) => r.DataString("mind") ?? r.DataString("judge") ?? "Relay";
 
-    /// <summary>The judge's cue for a finding, when the ledger still carries it readably (older records); a fingerprint is not shown.</summary>
+    /// <summary>The cue for a raise, when the ledger still carries it readably (older records); a fingerprint is not shown.</summary>
     private static string Cue(LedgerRecord r)
     {
         var why = r.DataString("why") ?? r.DataString("reason");

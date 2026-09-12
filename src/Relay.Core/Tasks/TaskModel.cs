@@ -48,7 +48,7 @@ public enum TaskStatus
 
 /// <summary>
 /// What is needed to start a task. For a direct ask the text is the instruction verbatim; for an
-/// observed task it is the judge's focused prompt, and the excerpt ids point at the retained words.
+/// observed task it is the objective it was raised with, and the excerpt ids point at the retained words.
 /// </summary>
 public sealed record TaskSeed(
     TaskOrigin Origin,
