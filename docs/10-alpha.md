@@ -46,7 +46,9 @@ There is no task version and no record of which events a task has already applie
 
 ### G7 · Improvement only happens inside a task
 
-`UsageRecorder` writes a line per task; nothing in `src\` reads one. *Relay periodically reviews that evidence* is unimplemented, so friction becomes a proposal only when the user asks or the mind decides mid-task.
+*Closed with Step 6. On idle or at session end, `FrictionReview` reads recent usage lines; a repeated friction (≥3 similar events) becomes one Direct Improve task with a Tier B proposal (preference or prompt guidance) that still needs approval and is revertible as a change set. At most once per session and once per UTC day (`friction.reviewed` on the ledger).*
+
+~~`UsageRecorder` writes a line per task; nothing in `src\` reads one. *Relay periodically reviews that evidence* is unimplemented, so friction becomes a proposal only when the user asks or the mind decides mid-task.~~
 
 ### G8 · Named in the target, absent in the tree
 
@@ -60,7 +62,7 @@ No `split`, `prioritize`, `defer` or revise-objective (cancel and stop exist). N
 | G4 no versioning | scenario 4 |
 | G5 nominal search | scenario 2 |
 | G6 no workflows | *closed* |
-| G7 no friction review | scenario 3's *leads to* |
+| G7 no friction review | *closed* |
 | G8 the rest | nothing; post-Alpha |
 
 ## The steps
@@ -111,7 +113,7 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ### Step 6 — Friction review
 
-On idle or at session end, the usage lines are read and a repeated friction becomes one proposal — a tool, a workflow, or a preference — carrying the examples that motivated it, evaluated before activation and revertible after.
+*Closed.* On idle or at session end, the usage lines are read and a repeated friction becomes one proposal — a tool, a workflow, or a preference — carrying the examples that motivated it, evaluated before activation and revertible after.
 
 *Proves:* repeated friction *leads to* an improvement without the user having to ask for it.
 

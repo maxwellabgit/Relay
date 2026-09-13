@@ -884,6 +884,10 @@ public sealed partial class SessionCoordinator
     public void Shutdown(string reason)
     {
         if (_shutDown) return;
+        _frictionIdleTimer?.Dispose();
+        _frictionIdleTimer = null;
+        // Review before cancelling live work so a deferred finding can still be ledgered.
+        TryReviewFriction("shutdown");
         _shutDown = true;
         _timeoutTimer?.Dispose();
         _stabilizationTimer?.Dispose();

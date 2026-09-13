@@ -159,6 +159,12 @@ public static class ActivityFormatter
             EventTypes.AttentionShown => $"Shown [{r.DataString("level")}]: {r.DataString("title")}",
             EventTypes.AttentionSuppressed => $"Not shown ({r.DataString("reason")}) for task {Short(r.DataString("taskId"))}",
             EventTypes.AttentionDismissed => $"Dismissed card {Short(r.DataString("itemId"))}",
+
+            EventTypes.UsageRecorded => $"Usage recorded for task {Short(r.DataString("taskId"))}",
+            EventTypes.FrictionReviewed => r.DataBool("proposed") == true
+                ? $"Friction review ({r.DataString("trigger")}): proposed {r.DataString("action")} for {r.DataString("pattern")} ({r.DataInt64("examples")} example(s))"
+                : $"Friction review ({r.DataString("trigger")}): no repeated pattern",
+
             _ => r.Type,
         };
         return new ActivityEntry(r.Seq, r.Timestamp, r.Type, text);

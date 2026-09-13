@@ -559,6 +559,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         });
         PresentTask(task, interim: false);
         WriteDiagnostics(task);
+        if (task.Lane != "friction") ScheduleFrictionReview();
 
         if (!task.Foreground) return;
 
@@ -592,6 +593,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         Append(EventTypes.TaskFailed, new { taskId = task.TaskId, origin = task.Origin.Wire(), kind = task.Kind.Wire(), failure = kind, error = summary, pendingOperation = task.PendingOperation?.Proposal.ProposalId });
         PresentTask(task, interim: false);
         WriteDiagnostics(task);
+        if (task.Lane != "friction") ScheduleFrictionReview();
         if (!task.Foreground) return;
         _incident = new IncidentInfo(kind, summary, detail ?? summary, _clock.UtcNow, null);
         _retryable = false;

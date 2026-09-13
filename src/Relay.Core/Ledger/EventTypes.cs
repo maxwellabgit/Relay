@@ -184,6 +184,8 @@ public static class EventTypes
     public const string DecisionMade = "decision.made";
     /// <summary>A usage line was written (path and task id only).</summary>
     public const string UsageRecorded = "usage.recorded";
+    /// <summary>Idle or session-end review of usage lines: whether a repeated friction became one improvement proposal.</summary>
+    public const string FrictionReviewed = "friction.reviewed";
 
     // Tools Relay builds for itself (orchestrator rebuild, slice 6)
     /// <summary>The mind asked for a tool: name, justification, inputs, outputs, the drafting model.</summary>
