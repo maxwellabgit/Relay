@@ -83,7 +83,7 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ### Step 2 — The runtime the README claims
 
-A `TaskEngine` over `TaskLoop` with a ready queue that selects the task whose next decision is due, one semaphore so exactly one local inference runs at a time while any number of tools and external requests are in flight, durable task records holding objective, plan, waits, pending request id and permissions, resume on start for anything that was waiting, and a task version plus an applied-event set so a late reply cannot touch cancelled or advanced work. Cancellation becomes final: a cancelled task refuses completions rather than observing them.
+*Closed.* A `TaskEngine` over `TaskLoop` with a ready queue that selects the task whose next decision is due, one semaphore so exactly one local inference runs at a time while any number of tools and external requests are in flight, durable task records holding objective, plan, waits, pending request id and permissions, resume on start for approval and user waits, and a task version plus an applied-event set so a late reply cannot touch cancelled or advanced work. Cancellation becomes final: a cancelled task refuses completions rather than observing them. Local inference only is gated (`StepAsync` and digest); tools, workers, external HTTP and approvals stay concurrent.
 
 *Proves:* a task can wait, fail, resume or be cancelled without losing its objective, duplicating side effects or blocking unrelated work — and observation continues throughout.
 
