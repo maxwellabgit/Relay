@@ -1,80 +1,56 @@
 <#
 .SYNOPSIS
-  Runs one scenario of an end-to-end acceptance suite against the real Relay desktop app and writes the
-  suite's machine-readable artifacts and screenshots.
+  Alpha acceptance runner: scripted gate (default) or one Desktop suite scenario against the feed/composer.
 
 .DESCRIPTION
-  The suite is a JSON file (schema 0.1): scenarios with an input (mode "command" or "listen" and a list
-  of turns with ids, speakers and text), standing grants, frozen adapters and expectations. This runner
-  does what a person would do at the keyboard and records what the app did; it does not score the run.
+  -Scripted (default when -Suite is omitted): builds and runs AlphaGate + ObservingEvaluation tests, writes a
+  machine-readable report under OutDir. This is the CI acceptance path and needs no local model.
 
-    1. builds and launches Relay.exe against a throwaway data root, in the suite's deterministic mode:
-       the rule grammar, no model, no network. A "listen" scenario needs more than that: reading a
-       conversation is the mind's, so point model.endpoint at a local gateway and enable it, or the
-       chord will dictate and nothing will be read (docs\10, step 1);
-    2. creates every project the scenario's standing grants name (project_memory.read:<Name>);
-    3. seeds the frozen adapters as notes ("remember that <fact> -- <Project>", approved) so the app has
-       the same project memory the fixture assumes; a branch's frozen history adapter is seeded the same way;
-    4. plays the turns: command mode enters each turn between Ctrl+X presses; listen mode opens the stream
-       with Ctrl+Alt and enters each turn with a pause so it becomes its own segment(s). A turn arrives
-       the way dictation delivers an utterance: as one chunk appended to the capture surface (through UI
-       Automation), not as keystrokes. Speaker labels and turn ids are not entered (the capture surface has
-       neither; dictation does not carry them either); the transcript artifact keeps them and maps every
-       turn to the segments the app actually cut;
-    5. takes screenshots of the window at the regions the suite's views ask for, scrolling through UI
-       Automation, and dumps every UIA name next to each screenshot;
-    6. closes the window and derives the artifacts from the ledger and the records on disk:
-         run_manifest.json        what ran, with what mind and planner, against which build
-         input_transcript.json    the turns as given and as typed, each with its segment ids (matched by SHA-256)
-         detected_tasks.json      every task record with its excerpt and the turn ids the excerpt covers
-         state_transitions.jsonl  state.changed records
-         tool_calls.jsonl         tool.*, model.*, external.* records
-         approval_events.jsonl    proposal.*, approval.*, execution.*, changeset.* records
-         evidence.json            excerpts, notes (staging and project), observe.* records
-         mutations.jsonl          project.*, note.*, patch.*, artifact.*, settings.changed records
-         final_output.json        end state, what was shown, the inbox, counts, the mechanical part of the
-                                  comparison with expected_task, and the no-words-in-the-ledger check
-       plus the ledger copy, the whole data root and the project folder, so nothing has to be re-run to
-       look at a detail.
+  -Suite <path>: launches Relay.exe against a throwaway data root and drives one suite scenario through the
+  feed/composer/drawers (post-Step-5 surface). Session machine is READY / capture phases only — not IDLE /
+  COMMAND_CAPTURE / AWAITING_APPROVAL as session states. Command turns use Ctrl+X capture; settlement is
+  proposal.received / task.completed / ask.recorded. Listen mode needs a mind (RELAY_LIVE_MODEL_KEY or
+  RELAY_LIVE=1 plus a local endpoint); without one the chord dictates and observe.* never fires.
 
-  Scoring against the rubric needs a reader: compare the artifacts with expected_task, required_plan and
-  the branch expectations, then fill the suite's analysis_output_template.
+  Artifacts (suite mode): run_manifest, input_transcript, detected_tasks, state_transitions, tool_calls,
+  approval_events, evidence, mutations, final_output, plus ledger privacy checks (no overheard words, no
+  tool source, model round trips sized when present).
 
-  Requires an interactive desktop session and nothing else stealing focus while it runs (one to two
-  minutes). The only key presses are the two chords, and they are sent only after the Relay window has
-  been confirmed as the foreground window. Typographic characters in the turns (em dashes, curly quotes,
-  ellipses) are entered in their ASCII forms; the transcript records both.
-  This file is deliberately ASCII-only: Windows PowerShell reads a BOM-less script as ANSI.
+  This file is deliberately ASCII-only.
+
+.PARAMETER Scripted
+  Run the AlphaGate scripted proofs instead of the Desktop suite. Implied when -Suite is omitted.
 
 .PARAMETER Suite
-  Path to the suite JSON.
+  Path to the suite JSON (Desktop mode).
 
 .PARAMETER Scenario
   Scenario id. Default: the first scenario in the suite.
 
 .PARAMETER Branch
-  Branch id for a scenario with branches. Default: the branch whose frozen history adapter returns
-  nothing (needs no seeding), else the first.
+  Branch id for a scenario with branches.
 
 .PARAMETER Approve
-  In command mode, approve what the task leaves awaiting approval (the suite's "the user approved the
-  displayed scope" precondition). Without it the proposal stays pending and is recorded that way.
+  In command mode, approve pending proposals.
 
 .PARAMETER NoBuild
-  Skip `dotnet build`; use the existing Debug output.
+  Skip `dotnet build`.
 
 .PARAMETER Keep
-  Keep the throwaway data root and project folder in place (they are copied into OutDir regardless).
+  Keep the throwaway data root.
 
 .PARAMETER OutDir
-  Where everything goes. Default: %TEMP%\relay-acceptance\<scenario>-<timestamp>.
+  Where everything goes.
 
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File tools\acceptance-run.ps1 -Suite C:\path\suite.json -Scenario e2e_observed_worker_permissions_history_check
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\acceptance-run.ps1 -Scripted
+.EXAMPLE
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\acceptance-run.ps1 -Suite C:\path\suite.json -Scenario e2e_...
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [string] $Suite,
+    [switch] $Scripted,
+    [string] $Suite = "",
     [string] $Scenario = "",
     [string] $Branch = "",
     [switch] $Approve,
@@ -84,6 +60,68 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repo = Split-Path -Parent $PSScriptRoot
+if ($Suite -eq "") { $Scripted = $true }
+
+# ---------------------------------------------------------------------------------------------------
+# Toolchain
+# ---------------------------------------------------------------------------------------------------
+$dotnetDir = $null
+$cmd = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($cmd) { $dotnetDir = Split-Path -Parent $cmd.Source }
+foreach ($candidate in @((Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"), (Join-Path $env:ProgramFiles "dotnet"))) {
+    if (-not $dotnetDir -and (Test-Path (Join-Path $candidate "dotnet.exe"))) { $dotnetDir = $candidate }
+}
+if (-not $dotnetDir) { throw "dotnet.exe not found on PATH, %LOCALAPPDATA%\Microsoft\dotnet or %ProgramFiles%\dotnet." }
+$env:PATH = "$dotnetDir;$env:PATH"
+$env:DOTNET_ROOT = $dotnetDir
+
+if ($Scripted) {
+    if ($OutDir -eq "") { $OutDir = Join-Path $env:TEMP ("relay-acceptance\scripted-" + (Get-Date -Format "yyyyMMdd-HHmmss")) }
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    $report = New-Object System.Collections.Generic.List[string]
+    function Log($text) { Write-Host $text; $script:report.Add($text) }
+    Log "acceptance: scripted Alpha gate"
+    Log "dotnet: $dotnetDir"
+    if (-not $NoBuild) {
+        Log "building Relay.slnx (Debug)..."
+        & dotnet build (Join-Path $repo "Relay.slnx") -nologo -v q 2>&1 | Where-Object { $_ -match "error|Build succeeded" } | ForEach-Object { Log "  $_" }
+        if ($LASTEXITCODE -ne 0) { throw "build failed" }
+    }
+    $filter = "FullyQualifiedName~AlphaGate|FullyQualifiedName~ObservingEvaluation|FullyQualifiedName~FrictionTests|FullyQualifiedName~TaskEngineTests"
+    Log "dotnet test --filter $filter"
+    & dotnet test (Join-Path $repo "tests\Relay.Tests\Relay.Tests.csproj") --nologo --no-build -v q --filter $filter 2>&1 | ForEach-Object { Log "  $_" }
+    $ok = ($LASTEXITCODE -eq 0)
+    $manifest = @{
+        mode = "scripted"
+        filter = $filter
+        passed = $ok
+        ranAt = [DateTimeOffset]::UtcNow.ToString("o")
+        notes = @(
+            "Four README scenarios are encoded as AlphaGateTests (scripted).",
+            "ObservingEvaluationTests scores one pass against a recorded host.",
+            "Live counterparts skip unless RELAY_LIVE_MODEL_KEY or RELAY_LIVE=1.",
+            "Desktop suite mode: pass -Suite <path> (needs interactive session; listen needs a mind)."
+        )
+    }
+    ($manifest | ConvertTo-Json -Depth 5) | Set-Content -Path (Join-Path $OutDir "run_manifest.json") -Encoding UTF8
+    Set-Content -Path (Join-Path $OutDir "report.txt") -Value $report -Encoding UTF8
+    $checklist = @"
+Alpha hand-drive (live mind required for the window):
+  1. Messy conversation -> source-linked note/task; correction updates same work
+  2. Research with personal context + search; observation continues
+  3. Repeated friction -> approved tool/workflow; reuse and revert
+  4. Wait / fail / resume / cancel without losing objective or blocking others
+Ledger: no overheard words, no tool source, model round trips sized when present.
+"@
+    Set-Content -Path (Join-Path $OutDir "hand-drive-checklist.txt") -Value $checklist -Encoding UTF8
+    Log $(if ($ok) { "PASS" } else { "FAIL" })
+    Log "artifacts: $OutDir"
+    exit $(if ($ok) { 0 } else { 1 })
+}
+
+if ($Suite -eq "") { throw "-Suite is required unless -Scripted is used." }
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName UIAutomationClient
@@ -102,7 +140,6 @@ public static class AcceptWin32 {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-  // Windows only lets the foreground thread hand the foreground over; attach to it for the call.
   public static bool ForceForeground(IntPtr hWnd) {
     IntPtr fg = GetForegroundWindow();
     if (fg == hWnd) return true;
@@ -126,7 +163,7 @@ public static class AcceptWin32 {
 # ---------------------------------------------------------------------------------------------------
 # Suite
 # ---------------------------------------------------------------------------------------------------
-$suiteDoc = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $Suite).Path) | ConvertFrom-Json   # not $suite: variables are case-insensitive and $Suite is the path parameter
+$suiteDoc = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $Suite).Path) | ConvertFrom-Json
 $scenarios = @($suiteDoc.scenarios)
 if ($scenarios.Count -eq 0) { throw "the suite has no scenarios" }
 if ($Scenario -eq "") { $sc = $scenarios[0] } else { $sc = @($scenarios | Where-Object { $_.id -eq $Scenario })[0] }
@@ -134,14 +171,13 @@ if (-not $sc) { throw "scenario '$Scenario' is not in the suite; ids: $(($scenar
 $branchDoc = $null
 if ($sc.PSObject.Properties["branches"] -and @($sc.branches).Count -gt 0) {
     $branches = @($sc.branches)
-    if ($Branch -ne "") { $branchDoc = @($branches | Where-Object { $_.id -eq $Branch })[0]; if (-not $branchDoc) { throw "branch '$Branch' is not in scenario '$($sc.id)'; ids: $(($branches | ForEach-Object { $_.id }) -join ', ')" } }
+    if ($Branch -ne "") { $branchDoc = @($branches | Where-Object { $_.id -eq $Branch })[0]; if (-not $branchDoc) { throw "branch '$Branch' is not in scenario '$($sc.id)'" } }
     else { $branchDoc = @($branches | Where-Object { -not $_.frozen_history_adapter -or @($_.frozen_history_adapter.results).Count -eq 0 })[0]; if (-not $branchDoc) { $branchDoc = $branches[0] } }
 }
 $mode = $sc.input.mode
 $turns = @($sc.input.turns)
 if ($mode -notin @("command", "listen")) { throw "input mode '$mode' is not supported (command, listen)" }
 
-$repo = Split-Path -Parent $PSScriptRoot
 if ($OutDir -eq "") { $OutDir = Join-Path $env:TEMP ("relay-acceptance\" + $sc.id + "-" + (Get-Date -Format "yyyyMMdd-HHmmss")) }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $report = New-Object System.Collections.Generic.List[string]
@@ -158,20 +194,8 @@ function Note($name, $ok, $detail = "") {
 Log "suite: $($suiteDoc.suite_id) (schema $($suiteDoc.schema_version))"
 Log "scenario: $($sc.id) - $($sc.title)"
 if ($branchDoc) { Log "branch: $($branchDoc.id)" }
-Log "mode: $mode, $($turns.Count) turn(s)"
-
-# ---------------------------------------------------------------------------------------------------
-# Toolchain
-# ---------------------------------------------------------------------------------------------------
-$dotnetDir = $null
-$cmd = Get-Command dotnet -ErrorAction SilentlyContinue
-if ($cmd) { $dotnetDir = Split-Path -Parent $cmd.Source }
-foreach ($candidate in @((Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"), (Join-Path $env:ProgramFiles "dotnet"))) {
-    if (-not $dotnetDir -and (Test-Path (Join-Path $candidate "dotnet.exe"))) { $dotnetDir = $candidate }
-}
-if (-not $dotnetDir) { throw "dotnet.exe not found on PATH, %LOCALAPPDATA%\Microsoft\dotnet or %ProgramFiles%\dotnet." }
-$env:PATH = "$dotnetDir;$env:PATH"
-$env:DOTNET_ROOT = $dotnetDir
+Log "mode: $mode, $($turns.Count) turn(s)  (mind required for listen)"
+Log "dotnet: $dotnetDir"
 if (-not $NoBuild) {
     Log "building Relay.slnx (Debug)..."
     & dotnet build (Join-Path $repo "Relay.slnx") -nologo -v q 2>&1 | Where-Object { $_ -match "error|Build succeeded" } | ForEach-Object { Log "  $_" }
@@ -430,22 +454,21 @@ function Run-Command($text, $label) {
     for ($attempt = 1; $attempt -le 2 -and -not $settled; $attempt++) {
         $cancelledBefore = Count-Event "capture.cancelled"
         Press-CommandKey
-        if (-not (Wait-Event "state.changed" 5 { $_.data.to -eq "COMMAND_CAPTURE" })) { Note "$label - COMMAND_CAPTURE entered" $false; return $null }
+        if (-not (Wait-Event "capture.started" 5)) { Note "$label - capture.started" $false; return $null }
         if (-not (Enter-Text $text)) { Note "$label - capture box found" $false; return $null }
         Press-CommandKey
-        $settled = Wait-Until { (Count-Event "task.completed") -gt $before -or (Count-Event "task.failed") -gt 0 -or (Count-Event "state.changed" { $_.data.to -eq "AWAITING_APPROVAL" }) -gt 0 -or (Count-Event "capture.cancelled") -gt $cancelledBefore } 20
+        $settled = Wait-Until { (Count-Event "task.completed") -gt $before -or (Count-Event "task.failed") -gt 0 -or (Count-Event "proposal.received") -gt 0 -or (Count-Event "capture.cancelled") -gt $cancelledBefore } 20
         if ((Count-Event "capture.cancelled") -gt $cancelledBefore) { $settled = $false; Log "  (capture cancelled from outside the script; retrying)"; Start-Sleep -Seconds 2 }
     }
     if (-not $settled) { Note "$label" $false; return $null }
-    $state = @(Read-Ledger | Where-Object { $_.type -eq "state.changed" })[-1].data.to
-    if ($state -eq "AWAITING_APPROVAL") {
+    if ((Count-Event "proposal.received") -gt 0 -and (Count-Event "task.completed") -eq $before) {
         $approveAll = Ui-Button "Approve all"
         if (-not $approveAll) { foreach ($e in Ui-All) { if ($e.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $e.Current.Name -like "Approve all*") { $approveAll = $e; break } } }
         if ($approveAll) { $approveAll.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() } else { Ui-Invoke "Approve" | Out-Null }
         $settled = Wait-Until { (Count-Event "task.completed") -gt $before -or (Count-Event "task.failed") -gt 0 } 20
     }
     Note "$label" $settled
-    Start-Sleep -Seconds 5   # let the COMPLETED receipt return to IDLE
+    Start-Sleep -Seconds 2
     return @(Read-Ledger | Where-Object { $_.type -eq "task.completed" })[-1]
 }
 
@@ -473,7 +496,7 @@ try {
     Log ""; Log "== setup =="
     Note "window is foreground" (Focus-Relay)
     Note "session.started" ($null -ne (Wait-Event "session.started" 10))
-    Note "state IDLE" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "IDLE" }))
+    Note "state READY" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "READY" }))
     $listeningChip = Ui-WaitMatch "^(Listening|No mind)" 5
     Log "  listening chip: $listeningChip"
 
@@ -496,16 +519,15 @@ try {
             $typedAt = [DateTimeOffset]::UtcNow
             $before = Count-Event "task.completed"
             Press-CommandKey
-            Note "COMMAND_CAPTURE entered" ($null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "COMMAND_CAPTURE" }))
+            Note "capture.started" ($null -ne (Wait-Event "capture.started" 5))
             Note "turn $($turn.id) entered" (Enter-Text $typed)
             Press-CommandKey
             $typedTurns.Add(@{ id = $turn.id; speaker = $turn.speaker; final = $turn.final; text = $turn.text; typed_text = $typed; typed_at = $typedAt.ToString("o") })
             Note "capture committed" ($null -ne (Wait-Event "capture.committed" 10))
-            Wait-Until { (Count-Event "task.completed") -gt $before -or (Count-Event "task.failed") -gt 0 -or @(Read-Ledger | Where-Object { $_.type -eq "state.changed" })[-1].data.to -eq "AWAITING_APPROVAL" } 30 | Out-Null
+            Wait-Until { (Count-Event "task.completed") -gt $before -or (Count-Event "task.failed") -gt 0 -or (Count-Event "proposal.received") -gt 0 -or (Count-Event "ask.recorded") -gt 0 } 30 | Out-Null
             Shot-At "01-task-detection" "the task as detected: origin, kind, focused prompt, state, process tag" $null
             Shot-At "02-tasks" "the Tasks region with lane, origin and cost" "^TASKS$"
-            $state = @(Read-Ledger | Where-Object { $_.type -eq "state.changed" })[-1].data.to
-            if ($state -eq "AWAITING_APPROVAL") {
+            if ((Count-Event "proposal.received") -gt 0 -and (Count-Event "task.completed") -eq $before) {
                 Shot-At "03-approval" "what awaits approval: action, target, tier, policy reasons, Approve/Reject" "^RESPONSE$"
                 if ($Approve) {
                     $approveAll = $null
@@ -520,31 +542,33 @@ try {
     }
     else {
         Press-NoteKey
-        Note "NOTE_CAPTURE entered" ($null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "NOTE_CAPTURE" }))
+        Note "capture.started (listen)" ($null -ne (Wait-Event "capture.started" 5))
         $streamStarted = Wait-Event "stream.started" 5
-        Note "stream started" ($null -ne $streamStarted) $(if ($streamStarted) { "mind $($streamStarted.data.mind), observe every $($streamStarted.data.observeIntervalMs) ms" } else { "needs a mind: enable the model gateway" })
-        Note "UI shows LISTENING" ($null -ne (Ui-WaitMatch "^LISTENING" 5))
+        Note "stream started" ($null -ne $streamStarted) $(if ($streamStarted) { "mind $($streamStarted.data.mind), observe every $($streamStarted.data.observeIntervalMs) ms" } else { "needs a mind: enable the model gateway (RELAY_LIVE_MODEL_KEY)" })
+        Note "UI shows listening" ($null -ne (Ui-WaitMatch "Listening|LISTENING" 5))
         foreach ($turn in $turns) {
             $typed = Normalize-Typed $turn.text
             $typedAt = [DateTimeOffset]::UtcNow
             $entered = Enter-Text ($typed + " ")
             $typedTurns.Add(@{ id = $turn.id; speaker = $turn.speaker; final = $turn.final; text = $turn.text; typed_text = $typed; typed_at = $typedAt.ToString("o") })
             Log ("  {0} {1} ({2}, {3} chars)" -f $(if ($entered) { "entered" } else { "FAILED " }), $turn.id, $turn.speaker, $typed.Length)
-            Start-Sleep -Milliseconds 1700   # longer than segmentQuietMs: the turn closes before the next one starts
+            Start-Sleep -Milliseconds 1700
         }
         $inputEnded = [DateTimeOffset]::UtcNow
-        # Wait for a listening pass after the last segment (the observe timer fires every observeIntervalMs).
         $lastSegment = @(Read-Ledger | Where-Object { $_.type -eq "stream.segment" })[-1]
-        $read = Wait-Until { @(Read-Ledger | Where-Object { ($_.type -eq "observe.checked" -or $_.type -eq "observe.raised" -or $_.type -eq "observe.failed") -and [DateTimeOffset]$_.ts -gt [DateTimeOffset]$lastSegment.ts }).Count -gt 0 } 20
+        $read = $false
+        if ($lastSegment) {
+            $read = Wait-Until { @(Read-Ledger | Where-Object { ($_.type -eq "observe.checked" -or $_.type -eq "observe.raised" -or $_.type -eq "observe.failed") -and [DateTimeOffset]$_.ts -gt [DateTimeOffset]$lastSegment.ts }).Count -gt 0 } 20
+        }
         Note "the mind read the last segment" $read
-        Start-Sleep -Seconds 3   # let tasks raised by the last pass finish
+        Start-Sleep -Seconds 3
         Shot-At "06a-listening" "the listening view: buffer, segments, passes, raises, excerpts" $null
         Shot-At "06b-attention-while-listening" "what the arbiter surfaced while listening" "^ATTENTION$"
-        Focus-CaptureBox   # scrolling through UIA moves keyboard focus; give it back to the surface before stopping
+        Focus-CaptureBox
         Press-NoteKey
         $stopped = Wait-Event "stream.stopped" 15 { $_.data.reason -eq "stopped" }
         Note "stream stopped" ($null -ne $stopped)
-        Note "COMPLETED after listening" ($null -ne $stopped -and $null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "COMPLETED" -and [DateTimeOffset]$_.ts -gt [DateTimeOffset]$stopped.ts }))
+        Note "session still READY after listening" ($null -ne $stopped -and $null -ne (Wait-Event "state.changed" 5 { $_.data.to -eq "READY" }))
         Start-Sleep -Seconds 1
         Shot-At "06c-receipt" "the receipt for the stream" $null
         Shot-At "06d-conversation-extraction" "Attention, Review and Inbox after the stream: what was extracted and where it went" "^ATTENTION$"

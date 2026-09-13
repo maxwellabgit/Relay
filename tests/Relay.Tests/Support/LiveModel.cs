@@ -6,8 +6,8 @@ namespace Relay.Tests.Support;
 
 /// <summary>
 /// The real model a live test talks to, read from the environment so nothing about it is committed:
-/// RELAY_LIVE_MODEL_KEY switches live tests on (any non-empty value; a loopback server needs no key, the
-/// variable is the switch), RELAY_LIVE_MODEL_ENDPOINT and RELAY_LIVE_MODEL name the endpoint and model,
+/// RELAY_LIVE_MODEL_KEY or RELAY_LIVE=1 switches live tests on (any non-empty key; a loopback server needs no key,
+/// the variable is the switch), RELAY_LIVE_MODEL_ENDPOINT and RELAY_LIVE_MODEL name the endpoint and model,
 /// and RELAY_LIVE_REPORT_DIR, when set, receives the reports and transcripts so a run can be read after
 /// the temp roots are gone. <see cref="FromEnvironment"/> is null when the switch is off: live tests then
 /// return without running, which is what CI sees.
@@ -35,7 +35,11 @@ public sealed class LiveModel
     public static LiveModel? FromEnvironment()
     {
         var key = Environment.GetEnvironmentVariable("RELAY_LIVE_MODEL_KEY");
-        if (string.IsNullOrWhiteSpace(key)) return null;
+        var liveFlag = Environment.GetEnvironmentVariable("RELAY_LIVE");
+        var liveOn = liveFlag is "1" or "true" or "yes" or "on";
+        // RELAY_LIVE=1 turns live tests on the same way a key does (loopback needs no secret; the flag is the switch).
+        if (string.IsNullOrWhiteSpace(key) && !liveOn) return null;
+        if (string.IsNullOrWhiteSpace(key)) key = "live";
         var reportDirectory = Environment.GetEnvironmentVariable("RELAY_LIVE_REPORT_DIR");
         return new LiveModel(key,
             Environment.GetEnvironmentVariable("RELAY_LIVE_MODEL_ENDPOINT") ?? DefaultEndpoint,

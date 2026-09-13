@@ -24,6 +24,8 @@
     <Content Include="Evaluation\model\*.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The mind set (docs/09): cases scored on the loop's moves — the world clock build, local-first answers, delegation as a package. -->
     <Content Include="Evaluation\mind\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The Alpha observing stage: one pass against a recorded window, scored on what was raised. -->
+    <Content Include="Evaluation\observing\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

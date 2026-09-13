@@ -228,23 +228,33 @@ public sealed class EvaluationRunner
     private static string Render(IReadOnlyDictionary<string, string> target)
         => "{" + string.Join(", ", target.Select(kv => $"{kv.Key}={(kv.Value.Length > 40 ? kv.Value[..39] + "…" : kv.Value)}")) + "}";
 
-    /// <summary>"type" or "type:name" — the name is the tool, action, profile or tool-to-build; a name of "*" matches any.</summary>
-    private static bool Matches(Move move, string pattern)
+    /// <summary>"type" or "type:name" — the name is the tool, action, profile, raise kind, or tool-to-build; a name of "*" matches any.</summary>
+    internal static bool Matches(Move move, string pattern)
     {
         var parts = pattern.Split(':', 2);
         if (!string.Equals(move.Type, parts[0], StringComparison.Ordinal)) return false;
         if (parts.Length == 1 || parts[1] == "*") return true;
-        var name = move switch { UseToolMove t => t.Tool, ProposeMove p => p.Action, DelegateMove d => d.Profile, BuildMove b => b.Name, RunWorkflowMove w => w.Name, _ => null };
+        var name = move switch
+        {
+            UseToolMove t => t.Tool,
+            ProposeMove p => p.Action,
+            DelegateMove d => d.Profile,
+            BuildMove b => b.Name,
+            RunWorkflowMove w => w.Name,
+            RaiseMove r => r.Kind,
+            _ => null,
+        };
         return string.Equals(name, parts[1], StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string Written(Move move) => move switch
+    internal static string Written(Move move) => move switch
     {
         UseToolMove t => $"use_tool:{t.Tool}",
         ProposeMove p => $"propose:{p.Action}",
         DelegateMove d => $"delegate:{d.Profile}",
         BuildMove b => $"build:{b.Name}",
         RunWorkflowMove w => $"run_workflow:{w.Name}",
+        RaiseMove r => $"raise:{r.Kind}",
         _ => move.Type,
     };
 

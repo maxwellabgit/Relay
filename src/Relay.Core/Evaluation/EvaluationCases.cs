@@ -67,14 +67,27 @@ public sealed class Expectation
     [JsonPropertyName("targets")] public IReadOnlyList<string>? Targets { get; init; }
     /// <summary>Every self-change proposal (update_preference, update_prompt) must carry the four improvement-contract fields.</summary>
     [JsonPropertyName("contract")] public bool? Contract { get; init; }
+    /// <summary>Observing stage: raise kinds that must appear in this order (remember, check, …).</summary>
+    [JsonPropertyName("raises")] public IReadOnlyList<string>? Raises { get; init; }
+    /// <summary>Observing stage: raise kinds that must not appear.</summary>
+    [JsonPropertyName("forbiddenRaises")] public IReadOnlyList<string>? ForbiddenRaises { get; init; }
+    /// <summary>Observing stage: case-insensitive fragments that must appear in at least one raised objective.</summary>
+    [JsonPropertyName("raiseContains")] public IReadOnlyList<string>? RaiseContains { get; init; }
 
     /// <summary>True when at least one property is set; an expectation that checks nothing is not a case.</summary>
     [JsonIgnore]
     public bool ChecksSomething =>
         FirstMove is not null || Moves is { Count: > 0 } || ForbiddenMoves is { Count: > 0 } || Needs is { Count: > 0 } || Route is not null
         || Outcome is not null || MaxSteps is not null || Completes is not null || AnswerContains is { Count: > 0 } || AnswerAvoids is { Count: > 0 }
-        || MaxAnswerChars is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null;
+        || MaxAnswerChars is not null || Consistent is not null || Targets is { Count: > 0 } || Contract is not null
+        || Raises is { Count: > 0 } || ForbiddenRaises is { Count: > 0 } || RaiseContains is { Count: > 0 };
 }
+
+/// <summary>One labelled line of a recorded conversation window for the observing evaluation stage.</summary>
+public sealed record ObservingWindowLine(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("speaker")] string? Speaker = null);
 
 /// <summary>
 /// One evaluation case: a request Relay is given and what should come of it. The mind's loop runs it
@@ -97,11 +110,19 @@ public sealed class EvaluationCase
     /// </summary>
     [JsonPropertyName("heard")] public string? Heard { get; init; }
     /// <summary>
+    /// Observing stage: a recorded conversation window scored on what the mind raised in one pass. When set,
+    /// <see cref="ObservingEvaluationRunner"/> runs instead of the task loop; <see cref="Instruction"/> is a
+    /// short case label (not the words of the room).
+    /// </summary>
+    [JsonPropertyName("window")] public IReadOnlyList<ObservingWindowLine>? Window { get; init; }
+    /// <summary>
     /// Tools the case's world already holds as if Relay had built and promoted them (docs/09 slice 6). The mind
     /// sees them in its tool list; a call returns the scripted <see cref="EvaluationTool.Result"/> instead of running the sandbox.
     /// </summary>
     [JsonPropertyName("tools")] public IReadOnlyList<EvaluationTool>? Tools { get; init; }
     [JsonPropertyName("expect")] public required Expectation Expect { get; init; }
+    /// <summary>True when this case is scored by the observing stage (one pass over a window).</summary>
+    [JsonIgnore] public bool IsObserving => Window is { Count: > 0 };
     [JsonPropertyName("tags")] public IReadOnlyList<string> Tags { get; init; } = [];
     /// <summary>Why the case exists. Required for failure cases: the mistake it guards against.</summary>
     [JsonPropertyName("why")] public string? Why { get; init; }
@@ -202,7 +223,13 @@ public sealed class EvaluationSet
             if (!CaseSources.All.Contains(c.Source, StringComparer.OrdinalIgnoreCase)) problems.Add($"Case '{c.Id}': unknown source '{c.Source}' (recorded, unseen, failure).");
             if (!KnownOrigins.Contains(c.Origin.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown origin '{c.Origin}' (direct, observed, dialogue).");
             if (c.Kind is not null && !KnownKinds.Contains(c.Kind.Trim().ToLowerInvariant())) problems.Add($"Case '{c.Id}': unknown kind '{c.Kind}'.");
-            if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': no instruction.");
+            if (c.IsObserving)
+            {
+                if (c.Window!.Any(l => string.IsNullOrWhiteSpace(l.Label) || string.IsNullOrWhiteSpace(l.Text)))
+                    problems.Add($"Case '{c.Id}': every window line needs a label and text.");
+                if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': an observing case needs a short instruction label.");
+            }
+            else if (string.IsNullOrWhiteSpace(c.Instruction)) problems.Add($"Case '{c.Id}': no instruction.");
             if (!c.Expect.ChecksSomething) problems.Add($"Case '{c.Id}': the expectation checks nothing.");
             foreach (var move in (c.Expect.Moves ?? []).Concat(c.Expect.ForbiddenMoves ?? []).Concat(c.Expect.FirstMove is null ? [] : [c.Expect.FirstMove]))
             {
@@ -212,6 +239,10 @@ public sealed class EvaluationSet
                 if (parts[0] == Mind.Move.Propose && parts.Length == 2 && parts[1] != "*" && PolicyEngine.TierOf(parts[1]) == Tier.Prohibited && !Actions.Prohibited.Contains(parts[1]))
                     problems.Add($"Case '{c.Id}': '{parts[1]}' is not an action Relay knows.");
             }
+            foreach (var kind in (c.Expect.Raises ?? []).Concat(c.Expect.ForbiddenRaises ?? []))
+                if (string.IsNullOrWhiteSpace(kind) || kind == "*") continue;
+                else if (!KnownKinds.Contains(kind.Trim().ToLowerInvariant()))
+                    problems.Add($"Case '{c.Id}': raise kind '{kind}' is not a lane Relay knows.");
             foreach (var need in c.Expect.Needs ?? [])
                 if (!Mind.MindRead.KnownNeeds.Contains(need, StringComparer.Ordinal)) problems.Add($"Case '{c.Id}': '{need}' is not a need ({string.Join(", ", Mind.MindRead.KnownNeeds)}).");
             if (c.Tools is { Count: > 0 })

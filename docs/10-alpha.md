@@ -77,6 +77,8 @@ The fourth commit is what the deletion was waiting for. A finished plan carried 
 
 Two things the judge's deletion hands to the gate. The authored evaluation sets no longer score listening at all: the judge stage had its own cases and its own expectations, and the mind's stage scores a task loop, not a pass over a window. An observing stage — one pass against a recorded host, scored on what it raised — is the gate's to add, and until it exists listening is held only by the scenario tests. And `tools\ui-smoke.ps1` and `tools\acceptance-run.ps1` can no longer exercise listening without a model, because there is no heuristic reader behind the chord any more; both are rewritten at the gate against a local mind.
 
+*Gate closed:* the observing stage is `ObservingEvaluationRunner` with cases in `Evaluation/observing/`; smoke and acceptance default to scripted AlphaGate proofs and write a hand-drive checklist for the window.
+
 The fifth commit is the deletion, and what it costs is the evaluation set. There was a plan stage with twenty-four cases of real requirement in it, written against a grammar that no longer exists. They were not thrown away. Two of the expectation's members survived by being re-pointed at the mind's propose moves: `targets`, which says what a proposal was *about* — `create_project.name=Garden` — and `contract`, which says a self-change carried its four fields. A move says what was proposed; a target says what it was proposed about, and that is exactly where a plausible-looking proposal goes wrong. What was deleted instead was the members a mind cannot produce: `understood`, because a model always answers, replaced by `completes`, which asks the loop to reach an end or a wait; `actions` and `forbiddenActions`, subsumed by `moves` and `forbiddenMoves`; and `knowledgeGap`/`capabilityGap`, which collapse to `needs: ["new_tool"]` now that the mind's knowledge state is derived from its own read rather than declared beside it.
 
 Nothing in the evaluation is scored by a grammar any more, so the sets are no longer split by *what* scores them. They are split by the world a case needs: the top-level sets run against Atlas and Home, `mind/` adds the tools the mind built for itself, and `model/` adds Lightshift and a configured external profile. A test world is now built through the same calls the Projects and Memory panels make, never by asking the mind to interpret a sentence — that keeps the setup of a test out of what the test is about, and it is why the deletion of the phrase grammar did not take the scenarios with it.
@@ -119,14 +121,14 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ## The Alpha gate
 
-The four scenarios of the README as live tests against a real local model, each also runnable by hand:
+*Closed.* The four README proof scenarios are encoded as scripted end-to-end tests under `tests/Relay.Tests/AlphaGateTests.cs` (CI gate) and as live counterparts that return without running unless `RELAY_LIVE_MODEL_KEY` or `RELAY_LIVE=1` is set. The observing evaluation stage scores one listening pass against a recorded host (`ObservingEvaluationRunner` + `Evaluation/observing/`). `tools/ui-smoke.ps1` and `tools/acceptance-run.ps1` default to the scripted proofs; pass `-Ui` / `-Suite` for Desktop feed/composer/drawer checks. A hand-drive checklist is written beside every smoke/acceptance report for driving all four from the window with a live mind.
 
-1. A messy conversation window produces a useful, source-linked note or task, and a later correction updates the same work.
-2. A research task retrieves relevant personal context, delegates through working search, and returns an evidence-backed answer while direct interaction and observation continue.
-3. Repeated workflow friction leads to a tested, approved personal tool or workflow that is reused and can be reverted.
-4. A task waits, fails, resumes and is cancelled without losing its objective, duplicating side effects, or blocking unrelated work.
+1. A messy conversation window produces a useful, source-linked note or task, and a later correction updates the same work. — *scripted: Gate1; live-skip: LiveGate1*
+2. A research task retrieves relevant personal context, delegates through working search, and returns an evidence-backed answer while direct interaction and observation continue. — *scripted: Gate2 (FakeSearchClient); live-skip: LiveGate2*
+3. Repeated workflow friction leads to a tested, approved personal tool or workflow that is reused and can be reverted. — *scripted: Gate3 (friction review + workflow promote/run/revert); live-skip: LiveGate3*
+4. A task waits, fails, resumes and is cancelled without losing its objective, duplicating side effects, or blocking unrelated work. — *scripted: Gate4; live-skip: LiveGate4*
 
-Plus: `tools\ui-smoke.ps1` driving all four through the feed against a throwaway data root, and the ledger checks that hold today — no overheard words, no tool source, every model round trip sized and recorded. (Gate owns a full rewrite of the smoke against the feed/drawer surface; Step 5 updated drawer-open checks where they were cheap.)
+Plus: observing stage cases under `Evaluation/observing/`; smoke/acceptance ledger checks (no overheard words, no tool source, model round trips sized when present). What still needs a live local model: tuning and hand-driving the four scenarios in the Desktop window, and the optional `LiveGate*` / `LiveObservingStage*` tests. What is proven without a model: all four scenarios end-to-end on ScriptedMind, the observing evaluation set, friction review, and task resume/cancel.
 
 ## Held for after Alpha
 
