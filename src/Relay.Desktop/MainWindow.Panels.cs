@@ -13,94 +13,10 @@ using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Desktop;
 
-/// <summary>Response, Review, Inbox and Projects regions plus the dialogs they open. Pure rendering over the snapshot.</summary>
+/// <summary>Review, Inbox, Projects and dialogs. Pure rendering over the snapshot into drawers.</summary>
 public sealed partial class MainWindow
 {
-    // ------------------------------------------------------------------------------------
-    // RESPONSE: the orchestrator's visible reasoning and its proposals
-    // ------------------------------------------------------------------------------------
-
-    private void RenderResponse(RelaySnapshot s)
-    {
-        var r = s.Response;
-        ResponseCard.Visibility = Vis(r is not null);
-        if (r is null) { _responseSignature = ""; return; }
-
-        var signature = $"{r.TaskId}|{r.Status}|{r.Tag}|{r.Outcome}|{r.Live}|{r.Steps.Count}|{r.Summary}|{r.Answer?.Length}|{r.Consistent}|{r.Knowledge.Summary}|{r.Presentation}|{r.Cost.ToolCalls}|{r.Cost.ModelCalls}|{string.Join(",", r.Proposals.Select(p => p.ProposalId + p.Status + p.BlockedBy))}|{s.State}";
-        if (signature == _responseSignature) return;
-        _responseSignature = signature;
-
-        ResponseMeta.Text = $"{r.Producer} · {r.Outcome ?? r.Tag.ToLowerInvariant()} · {r.StartedAt.ToLocalTime():HH:mm:ss}";
-        ResponseInstruction.Text = "“" + Trim(r.Instruction, 240) + "”";
-        ResponseSummary.Text = r.Summary;
-
-        // Process tags: the lane, the kind, what it cost, and how the arbiter ranked it once finished.
-        ResponseTags.Children.Clear();
-        ResponseTags.Children.Add(Chip(r.Tag, status: r.Status == TaskStatus.Failed ? "failed" : r.Live ? "pending" : "executed"));
-        ResponseTags.Children.Add(Chip($"{r.Kind.Wire()} · {r.Lane.Replace('_', ' ')}", "Mono"));
-        if (r.Consistent is { } consistent) ResponseTags.Children.Add(Chip(consistent ? "consistent with stored facts" : "conflicts with stored facts", status: consistent ? "executed" : "denied"));
-        if (r.Cost.ModelCalls > 0 || r.Cost.ToolCalls > 0) ResponseTags.Children.Add(Chip(CostText(r.Cost), "Mono"));
-        if (!r.Live && r.Presentation != Presentation.None) ResponseTags.Children.Add(Chip($"ranked {r.Presentation.Wire()}", "Mono"));
-        var details = Button("Details", () => ShowTaskDiagnostics(r.TaskId), small: true);
-        details.Padding = new Thickness(10, 2, 10, 2);
-        details.FontSize = 11;
-        ResponseTags.Children.Add(details);
-
-        ResponseSteps.Children.Clear();
-        foreach (var step in r.Steps)
-            ResponseSteps.Children.Add(new TextBlock { Text = "›  " + step, FontSize = 12, Foreground = Secondary(), TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas") });
-
-        ResponseAnswerBorder.Visibility = Vis(!string.IsNullOrWhiteSpace(r.Answer));
-        ResponseAnswer.Text = r.Answer ?? "";
-
-        ResponseKnowledge.Visibility = Vis(!r.Knowledge.IsEmpty);
-        ResponseKnowledge.Text = KnowledgeText(r.Knowledge);
-
-        ResponseCitations.Children.Clear();
-        if (r.Citations.Count > 0)
-        {
-            ResponseCitations.Children.Add(new TextBlock { Text = $"SOURCES ({r.Citations.Count})", Style = (Style)RootGrid.Resources["RegionHeader"] });
-            var n = 1;
-            foreach (var c in r.Citations)
-            {
-                var row = new Grid { ColumnSpacing = 8 };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var where = CitationWhere(c);
-                var span = c.Span is { } sp ? $" · ledger {Short(sp.EventId)} [{sp.Start}–{sp.End}]" : "";
-                var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, IsTextSelectionEnabled = true };
-                text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"{n++}. {where}{span}\n", Foreground = Secondary() });
-                text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Trim(c.Excerpt, 300) });
-                row.Children.Add(text);
-                if (c.Kind == SearchIndex.NoteKind && NotePath(c.ProjectId, c.Id) is { } path)
-                {
-                    var open = Button("Open", () => OpenInExplorer(path), small: true);
-                    Grid.SetColumn(open, 1);
-                    row.Children.Add(open);
-                }
-                ResponseCitations.Children.Add(row);
-            }
-        }
-
-        ResponseProposals.Children.Clear();
-        if (r.Proposals.Count > 0)
-        {
-            ResponseProposals.Children.Add(new TextBlock { Text = $"PROPOSALS ({r.Proposals.Count})", Style = (Style)RootGrid.Resources["RegionHeader"] });
-            foreach (var p in r.Proposals) ResponseProposals.Children.Add(ProposalCard(p, r));
-        }
-
-        ResponseButtons.Children.Clear();
-        var pending = r.Proposals.Count(p => p.Status == "pending" && p.BlockedBy is null);
-        if (pending > 1 && r.Status == TaskStatus.AwaitingApproval) ResponseButtons.Children.Add(Button($"Approve all ({pending})", () => _coordinator!.ApproveAll(r.TaskId), accent: true));
-        if (r.Status == TaskStatus.Executing) ResponseButtons.Children.Add(Button("Stop", () => _coordinator!.CancelTask(r.TaskId)));
-        else if (r.Live && r.Status is TaskStatus.Planning or TaskStatus.AwaitingApproval) ResponseButtons.Children.Add(Button("Cancel task", () => _coordinator!.CancelTask(r.TaskId)));
-    }
-
-    /// <summary>
-    /// One proposal as a card: what it would do, the tier, what policy said, its dependencies, and — while
-    /// its task awaits approval — the decision buttons. Decisions are per task, so a background task's
-    /// proposals can be approved from Attention while the foreground is busy with something else.
-    /// </summary>
+    // RESPONSE helpers (proposals, citations, knowledge) live with the feed; dialogs stay here.
     private Border ProposalCard(ProposalView p, TaskView task, bool compact = false)
     {
         var panel = new StackPanel { Spacing = 6 };
@@ -193,7 +109,6 @@ public sealed partial class MainWindow
     private void RenderReview(RelaySnapshot s)
     {
         var signature = string.Join("|", s.Review.Select(r => $"{r.Kind}:{r.Title}:{r.Detail.Length}:{r.Payload?.Length}")) + $"|{s.State}|{s.CanRetry}|{s.Projects.Count}";
-        ReviewCount.Text = s.Review.Count == 0 ? "" : $"{s.Review.Count} item(s)";
         ReviewEmpty.Visibility = Vis(s.Review.Count == 0);
         if (signature == _reviewSignature) return;
         _reviewSignature = signature;
@@ -269,8 +184,6 @@ public sealed partial class MainWindow
     {
         var active = s.Projects.Where(p => p.Status == "active").ToList();
         var signature = string.Join("|", s.Inbox.Select(i => $"{i.NoteId}:{i.Candidates.Count}")) + $"#{s.TurnActive}#{active.Count}";
-        var asking = s.Inbox.Count(i => i.HasSuggestions);
-        InboxCount.Text = s.Inbox.Count == 0 ? "" : $"{s.Inbox.Count} unrouted" + (asking > 0 ? $" · {asking} with suggestions" : "");
         InboxEmpty.Visibility = Vis(s.Inbox.Count == 0);
         if (signature == _inboxSignature) return;
         _inboxSignature = signature;
@@ -314,9 +227,6 @@ public sealed partial class MainWindow
     private void RenderProjects(RelaySnapshot s)
     {
         var signature = string.Join("|", s.Projects.Select(p => $"{p.Id}:{p.Status}:{p.Name}:{p.FolderPresent}")) + $"#{s.State}";
-        var active = s.Projects.Where(p => p.Status == "active").ToList();
-        var archived = s.Projects.Count - active.Count;
-        ProjectsCount.Text = s.Projects.Count == 0 ? "" : $"{active.Count} active" + (archived > 0 ? $" · {archived} archived" : "");
         ProjectsEmpty.Visibility = Vis(s.Projects.Count == 0);
         NewProjectButton.IsEnabled = !s.TurnActive;
         BackupButton.IsEnabled = !s.TurnActive;
@@ -398,7 +308,7 @@ public sealed partial class MainWindow
         }
         panel.Children.Add(new TextBlock
         {
-            Text = "The project folder is created inside the folder you choose. A folder Relay has not used before is registered as a project folder first (recorded in the ledger); Relay never writes outside registered folders and its own data root. Creating the project is a controlled write: it becomes a proposal you approve in Response.",
+            Text = "The project folder is created inside the folder you choose. A folder Relay has not used before is registered as a project folder first (recorded in the ledger); Relay never writes outside registered folders and its own data root. Creating the project is a controlled write: it becomes a proposal you approve in the feed.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Secondary(),
         });
         var dialog = Dialog("New project", panel, "Propose");

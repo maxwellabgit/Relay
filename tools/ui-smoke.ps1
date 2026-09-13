@@ -4,17 +4,20 @@
 
 .DESCRIPTION
   Builds the solution, launches Relay.exe against a throwaway data root, drives it exactly the way a
-  user does (the window-scoped chords, typing into the capture surface, the ask box, clicking Approve),
+  user does (the chords, typing into the capture surface, the ask box, clicking Approve),
   and checks both the ledger and the rendered UI after every step:
 
-    1. idle                      window up, both chords registered for this window, listening and planner chips
-    2. Ctrl+X "create project"   plan -> proposal awaiting approval, nothing written yet
-    3. Approve (UI Automation)   project folder created, task completed
+    1. idle                      window up, both chords registered for this window, listening chip, ask box
+    2. Ctrl+X "create project"   plan -> proposal awaiting approval in the feed, nothing written yet
+    3. Approve (UI Automation)   project folder created, task completed; Projects drawer lists it
     4. Ctrl+Alt listen           the stream opens; a decision about Atlas is filed (ambient), a task without a
-                                 project lands in the Inbox; the ask box answers while listening (a Result card)
-    5. Ctrl+X recall             the answer cites the filed note
+                                 project lands in the Inbox drawer; the ask box answers while listening (feed Result)
+    5. Ctrl+X recall             the answer cites the filed note (SOURCES in the feed)
     6. Details                   the diagnostics drawer opens on a task
     7. close the window          clean shutdown recorded, no incidents, no stream text in the ledger
+
+  TODO (Alpha gate): full rewrite against the feed/drawer surface and post-Step-1 session states;
+  Step 5 only adjusted drawer-open checks where panel text moved out of the first viewport.
 
   Screenshots and the ledger are written to the output folder. Exit code 0 means every check passed.
   Requires an interactive desktop session (the chords are real key presses) and nothing else stealing
@@ -235,6 +238,33 @@ function Ui-Invoke($buttonName) {
     return $false
 }
 
+# ToggleButtons (drawer tabs) expose TogglePattern; fall back to Invoke when present.
+function Ui-Toggle($buttonName) {
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $btn = Ui-Button $buttonName
+        if (-not $btn) {
+            # Drawer tabs may include a count suffix ("Tasks · 1 finished").
+            foreach ($e in Ui-All) {
+                if ($e.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $e.Current.Name -and $e.Current.Name.StartsWith($buttonName)) {
+                    $btn = $e; break
+                }
+            }
+        }
+        if ($btn) {
+            try {
+                $toggle = $btn.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { $toggle.Toggle() }
+                return $true
+            } catch {
+                try { $btn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return $true } catch { }
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    return $false
+}
+
 function Ui-SetValue($name, $text) {
     $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name)
     $deadline = (Get-Date).AddSeconds(10)
@@ -321,8 +351,9 @@ try {
     $atlas = Join-Path $projects "atlas"
     Check "project folder exists inside the registered folder" (Test-Path $atlas) $atlas
     Check "COMPLETED reached" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "COMPLETED" }))
+    Check "UI Tasks tab shows finished count" ($null -ne (Ui-WaitMatch "1 finished" 5))
+    Check "Projects drawer opened" (Ui-Toggle "Projects")
     Check "UI lists the project as active" ($null -ne (Ui-WaitMatch "^Atlas\s+atlas \S active$" 5))
-    Check "UI lists the task" ($null -ne (Ui-FindText "1 finished"))
     Shot "3-executed"
     Start-Sleep -Seconds 5   # let the COMPLETED receipt return to IDLE
 
@@ -350,15 +381,17 @@ try {
     Check "ask task completed" ($null -ne (Wait-Event "task.completed" 15 { $_.data.lane -eq "ask" }))
     $shown = Wait-Event "attention.shown" 5 { $_.data.level -eq "result" }
     Check "answer surfaced as a result card" ($null -ne $shown)
-    Check "UI Attention shows the answer" ($null -ne (Ui-WaitText "October 14" 5))
-    Check "UI Attention shows the level" ($null -ne (Ui-FindText "RESULT"))
+    Check "UI feed shows the answer" ($null -ne (Ui-WaitText "October 14" 5))
+    Check "UI feed shows the level" ($null -ne (Ui-FindText "RESULT"))
     Shot "4b-ask-while-listening"
 
     Press-NoteKey
     Check "stream stopped" ($null -ne (Wait-Event "stream.stopped" 15 { $_.data.reason -eq "stopped" }))
     Check "COMPLETED after listening" ($null -ne (Wait-Event "state.changed" 10 { $_.data.to -eq "COMPLETED" -and $_.data.from -ne "EXECUTING" }))
+    Check "Inbox drawer opened" (Ui-Toggle "Inbox")
     Check "UI Inbox shows the unrouted task" ($null -ne (Ui-WaitText "compost" 5))
     Check "UI Inbox counts exactly one unrouted note" ($null -ne (Ui-FindText "1 unrouted"))
+    Check "Review drawer opened" (Ui-Toggle "Review")
     Check "Review stays empty (routing is not a Review item)" ($null -ne (Ui-FindText "Nothing awaiting your decision."))
     Check "ambient indicator for the filed note" ($null -ne (Ui-FindText "Note filed"))
     Shot "4c-after-listening"

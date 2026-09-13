@@ -50,7 +50,7 @@ There is no task version and no record of which events a task has already applie
 
 ### G8 · Named in the target, absent in the tree
 
-No `split`, `prioritize`, `defer` or revise-objective (cancel and stop exist). No scratchpad. No memory distinct from notes, which thins the portability claim — personalization today is notes, preferences and tools. The mind cannot search its own task history or read a workflow description. The window is seven panels, not one feed and one composer.
+No `split`, `prioritize`, `defer` or revise-objective (cancel and stop exist). No scratchpad. No memory distinct from notes, which thins the portability claim — personalization today is notes, preferences and tools. The mind cannot search its own task history or read a workflow description. The window is one feed and one composer (Step 5); projects, review, tasks and the ledger are drawers.
 
 | Gap | Blocks |
 | --- | --- |
@@ -105,7 +105,7 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ### Step 5 — One feed, one composer
 
-The panels collapse into a chronological feed of the mind's own sentences, with approvals inline where they occur and evidence expandable beneath them, one composer that takes instructions and answers, and projects, review, tasks and the ledger as drawers. One status line.
+*Closed.* The panels collapse into a chronological feed of the mind's own sentences, with approvals inline where they occur and evidence expandable beneath them, one composer that takes instructions and answers, and projects, review, tasks and the ledger as drawers. One status line.
 
 *Proves:* all four scenarios are drivable by a person, which is what Alpha means.
 
@@ -124,7 +124,7 @@ The four scenarios of the README as live tests against a real local model, each 
 3. Repeated workflow friction leads to a tested, approved personal tool or workflow that is reused and can be reverted.
 4. A task waits, fails, resumes and is cancelled without losing its objective, duplicating side effects, or blocking unrelated work.
 
-Plus: `tools\ui-smoke.ps1` driving all four through the feed against a throwaway data root, and the ledger checks that hold today — no overheard words, no tool source, every model round trip sized and recorded.
+Plus: `tools\ui-smoke.ps1` driving all four through the feed against a throwaway data root, and the ledger checks that hold today — no overheard words, no tool source, every model round trip sized and recorded. (Gate owns a full rewrite of the smoke against the feed/drawer surface; Step 5 updated drawer-open checks where they were cheap.)
 
 ## Held for after Alpha
 

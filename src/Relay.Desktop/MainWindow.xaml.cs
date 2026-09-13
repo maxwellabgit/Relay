@@ -30,9 +30,9 @@ public sealed class ActivityRow
 
 /// <summary>
 /// The single window. It renders the coordinator's snapshot and forwards user decisions; it holds
-/// no state of its own beyond render caches and which task the diagnostics drawer is open on.
-/// Regions: status (with process tags), capture or listening (with the ask box), response,
-/// attention, review, inbox, tasks, projects, relay (preferences and change sets), activity, diagnostics.
+/// no state of its own beyond render caches and which drawer / task diagnostics are open.
+/// Surface: one status line, one chronological feed, one composer; projects, review, tasks,
+/// inbox, ledger, preferences and diagnostics live in drawers.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
@@ -44,10 +44,8 @@ public sealed partial class MainWindow : Window
     private bool _suppressTextChanged;
     private long _lastActivitySeq;
     private string _reviewSignature = "";
-    private string _responseSignature = "";
     private string _inboxSignature = "";
     private string _projectsSignature = "";
-    private string _attentionSignature = "";
     private string _tasksSignature = "";
     private string _relaySignature = "";
     private string _processSignature = "";
@@ -95,7 +93,7 @@ public sealed partial class MainWindow : Window
             if (_snapshot is null) return;
             RenderStatus(_snapshot);
             RenderListening(_snapshot);
-            if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
+            if (_openDrawer == "diagnostics") RenderDiagnostics();
         };
     }
 
@@ -111,7 +109,9 @@ public sealed partial class MainWindow : Window
 
     public void ShowStartupFailure(DataRoot root, Exception ex)
     {
-        MainScroll.Visibility = Visibility.Collapsed;
+        MainSurface.Visibility = Visibility.Collapsed;
+        Composer.Visibility = Visibility.Collapsed;
+        StatusLine.Visibility = Visibility.Collapsed;
         StartupFailurePanel.Visibility = Visibility.Visible;
         StartupFailureText.Text = ex.ToString();
         StartupFailureHint.Text = $"Data root: {root.Path}\nIf another Relay is running against this folder, close it first. Details were written to {root.IncidentsDirectory} when possible.";
@@ -193,20 +193,20 @@ public sealed partial class MainWindow : Window
         RenderStatus(s);
         RenderCapture(s);
         RenderListening(s);
-        RenderResponse(s);
-        RenderAttention(s);
+        RenderFeed(s);
         RenderReview(s);
         RenderInbox(s);
         RenderTasks(s);
         RenderProjects(s);
         RenderRelay(s);
         RenderActivity(s);
-        if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
+        UpdateDrawerTabLabels(s);
+        if (_openDrawer == "diagnostics") RenderDiagnostics();
 
         // The half-second tick keeps clocks, the buffer meter and live costs moving while anything is in flight.
         var moving = s.Capture.IsCapturing() || s.Capture == CapturePhase.Organizing || s.TurnActive || s.Listening is not null || s.LiveTasks.Any();
         if (moving) { if (!_tick.IsRunning) _tick.Start(); }
-        else if (_tick.IsRunning && !DiagnosticsExpander.IsExpanded) _tick.Stop();
+        else if (_tick.IsRunning && _openDrawer != "diagnostics") _tick.Stop();
     }
 
     private void RenderStatus(RelaySnapshot s)
@@ -329,8 +329,9 @@ public sealed partial class MainWindow : Window
     {
         var editable = s.SurfaceEditable;
         var listening = s.Listening is not null;
+        var showCapture = s.Capture.IsCapturing() || s.Capture is CapturePhase.Organizing or CapturePhase.AwaitingTranscript || listening;
+        CaptureBox.Visibility = Vis(showCapture);
         CaptureBox.IsReadOnly = !editable;
-        CaptureHeader.Text = listening ? "LISTENING" : "CAPTURE";
         CaptureBox.PlaceholderText = s.Capture switch
         {
             CapturePhase.Capturing when listening => "Talk with Flow or type. Words land here, are cut into lines and read; the buffer forgets them within the window.",
@@ -351,7 +352,9 @@ public sealed partial class MainWindow : Window
 
         ReadyGreeting.Visibility = s.Mode == CaptureMode.Command && s.Capture is CapturePhase.Capturing or CapturePhase.AwaitingTranscript ? Visibility.Visible : Visibility.Collapsed;
         FocusBar.IsOpen = s.Capture.IsCapturing() && !s.CaptureSurfaceFocused;
-        CaptureMeta.Text = s.CaptureId is null ? "" : listening ? $"stream {Short(s.CaptureId)}" : $"capture {Short(s.CaptureId)} · {s.CaptureChars} chars";
+        var meta = s.CaptureId is null ? "" : listening ? $"LISTENING · stream {Short(s.CaptureId)}" : $"capture {Short(s.CaptureId)} · {s.CaptureChars} chars";
+        CaptureMeta.Text = meta;
+        CaptureMeta.Visibility = Vis(meta.Length > 0);
 
         CancelButton.Visibility = Vis(s.CanCancel);
         CancelButton.Content = s.TurnActive && s.Response?.Status == TaskStatus.Executing ? "Stop  (Esc)" : listening ? "Discard stream  (Esc)" : "Cancel  (Esc)";
@@ -362,7 +365,6 @@ public sealed partial class MainWindow : Window
         RetryButton.Visibility = Vis(s.CanRetry);
         UnlockButton.Visibility = Vis(s.State == RelayState.Locked);
 
-        // The receipt for a completed capture is shown once, in the status line (StateDetailText).
         NoticeText.Text = s.Notice ?? "";
         NoticeText.Visibility = Vis(!string.IsNullOrEmpty(s.Notice));
 
@@ -373,9 +375,9 @@ public sealed partial class MainWindow : Window
         AskBox.IsEnabled = canAsk;
         AskButton.IsEnabled = canAsk;
         AskHint.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "Relay's mind is off; enable it in Settings to ask."
-            : listening ? "Ask without stopping the stream: the question runs beside it and the answer arrives as a card in Attention."
-            : s.Capture == CapturePhase.None && !s.TurnActive ? "A direct question or instruction, answered in Response. Nothing runs without approval."
-            : "Asked now, the question runs in the background and answers in Attention.";
+            : listening ? "Ask without stopping the stream: the question runs beside it and the answer arrives in the feed."
+            : s.Capture == CapturePhase.None && !s.TurnActive ? "A direct question or instruction. Nothing runs without approval."
+            : "Asked now, the question runs in the background and answers in the feed.";
     }
 
     /// <summary>The buffer meter and counts while listening: sizes and timings only, never the words.</summary>
@@ -408,7 +410,7 @@ public sealed partial class MainWindow : Window
         }
         while (_activity.Count > 400) _activity.RemoveAt(0);
         ActivityCount.Text = $"{s.LedgerRecords} records · chain {Short(s.LedgerLastHash)}";
-        if (added) ScrollActivityToEnd();
+        if (added && _openDrawer == "ledger") ScrollActivityToEnd();
     }
 
     /// <summary>Deferred so it also works on the first render, before the list has measured its items.</summary>
@@ -422,7 +424,7 @@ public sealed partial class MainWindow : Window
         var settings = _coordinator.CurrentSettings;
         var flow = ProcessIdentity.FindProcess(settings.Diagnostics.FlowProcessNames);
         var cost = s.SessionCost;
-        DiagnosticsMeta.Text = $"{s.Tasks.Count} task(s) · {cost.TotalTokens} tokens · {cost.ModelCalls} model call(s) · {cost.ToolCalls} tool call(s)";
+        RefreshDrawerMeta(s);
         RenderTaskDiagnostics(s);
 
         var rows = new (string Label, string Value, string? OpenPath)[]
@@ -552,12 +554,6 @@ public sealed partial class MainWindow : Window
 
     private void ActivityList_Loaded(object sender, RoutedEventArgs e) => ScrollActivityToEnd();
 
-    private void Diagnostics_Expanding(Expander sender, ExpanderExpandingEventArgs args)
-    {
-        RenderDiagnostics();
-        if (!_tick.IsRunning) _tick.Start();
-    }
-
     private void CloseTaskDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         _diagnosticsTaskId = null;
@@ -577,9 +573,9 @@ public sealed partial class MainWindow : Window
     {
         _diagnosticsTaskId = taskId;
         _taskDiagnosticsSignature = "";
-        DiagnosticsExpander.IsExpanded = true;
+        OpenDrawer("diagnostics");
         RenderDiagnostics();
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => DiagnosticsExpander.StartBringIntoView());
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => TaskDiagnosticsPanel.StartBringIntoView());
     }
 
     // ------------------------------------------------------------------------------------

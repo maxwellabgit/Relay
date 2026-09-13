@@ -12,50 +12,14 @@ using TaskStatus = Relay.Core.Tasks.TaskStatus;
 namespace Relay.Desktop;
 
 /// <summary>
-/// Attention (the arbiter's cards at their levels), Tasks (every task with its process tag and cost),
-/// Relay (compiled preferences, grants, change sets) and the per-task diagnostics drawer.
+/// Attention cards (rendered into the feed), Tasks and Preferences drawers, and per-task diagnostics.
 /// Pure rendering over the snapshot; every button forwards one coordinator call.
 /// </summary>
 public sealed partial class MainWindow
 {
     // ------------------------------------------------------------------------------------
-    // ATTENTION: what RELAY0 decided you should see, at the level the arbiter chose
+    // ATTENTION cards — used by the feed
     // ------------------------------------------------------------------------------------
-
-    private void RenderAttention(RelaySnapshot s)
-    {
-        var items = s.Attention;
-        var carded = items.Where(i => i.Level != Presentation.Ambient).ToList();
-        var ambient = items.Where(i => i.Level == Presentation.Ambient).ToList();
-        var signature = string.Join("|", items.Select(i => $"{i.ItemId}:{i.Level}:{i.Occurrences}:{i.LastAt.Ticks}:{i.Title.Length}:{i.Detail.Length}:{TaskSignature(s, i.TaskId)}"));
-        var needing = carded.Count(i => i.NeedsAction);
-        var alerts = carded.Count(i => i.Level == Presentation.Alert);
-        AttentionCount.Text = items.Count == 0 ? "" : string.Join(" · ", new[]
-        {
-            needing > 0 ? $"{needing} awaiting approval" : null,
-            alerts > 0 ? $"{alerts} alert(s)" : null,
-            $"{items.Count} card(s)",
-        }.Where(p => p is not null));
-        AttentionEmpty.Visibility = Vis(items.Count == 0);
-        if (signature == _attentionSignature) return;
-        _attentionSignature = signature;
-
-        AttentionItems.Children.Clear();
-        foreach (var item in carded) AttentionItems.Children.Add(AttentionCard(item, s));
-
-        AmbientItems.Children.Clear();
-        if (ambient.Count > 0)
-        {
-            AmbientItems.Children.Add(new TextBlock { Text = "AMBIENT", Style = (Style)RootGrid.Resources["RegionHeader"], Margin = new Thickness(0, 4, 0, 2) });
-            foreach (var item in ambient) AmbientItems.Children.Add(AmbientRow(item));
-        }
-    }
-
-    private static string TaskSignature(RelaySnapshot s, string? taskId)
-    {
-        var task = taskId is null ? null : s.Tasks.FirstOrDefault(t => t.TaskId == taskId);
-        return task is null ? "" : $"{task.Status}:{string.Join(",", task.Proposals.Select(p => p.ProposalId + p.Status + p.BlockedBy))}";
-    }
 
     private Border AttentionCard(AttentionItem item, RelaySnapshot s)
     {
@@ -184,9 +148,6 @@ public sealed partial class MainWindow
     private void RenderTasks(RelaySnapshot s)
     {
         var shown = s.Tasks.OrderByDescending(t => t.Live).ThenByDescending(t => t.StartedAt).Take(14).ToList();
-        var live = s.Tasks.Count(t => t.Live);
-        var cost = s.SessionCost;
-        TasksCount.Text = s.Tasks.Count == 0 ? "" : $"{live} running · {s.Tasks.Count - live} finished" + (cost.TotalTokens > 0 ? $" · {cost.TotalTokens} tokens" : "");
         TasksEmpty.Visibility = Vis(s.Tasks.Count == 0);
         var signature = string.Join("|", shown.Select(t => $"{t.TaskId}:{t.Status}:{t.Tag}:{t.Presentation}:{t.UserResponse}:{t.Cost.ToolCalls}:{t.Cost.ModelCalls}:{t.Proposals.Count(p => p.Status == "pending")}"));
         if (signature == _tasksSignature) return;
@@ -256,7 +217,6 @@ public sealed partial class MainWindow
         var p = s.Preferences;
         var settled = s.State == RelayState.Ready && !s.TurnActive && s.Capture == CapturePhase.None;
         var signature = $"{p.Verbosity}|{p.MaxAnswerChars}|{p.PromptFragment.Length}|{string.Join(",", p.WatchedTerms)}|{string.Join(",", p.Grants.Select(g => g.GrantId))}|{p.MaxAlertsPer10Minutes}|{p.MaxResultsPer5Minutes}|{p.Cooldown}|{p.Buffer}|{p.ExcerptMaxSeconds}|{p.MaxRetainedFraction}|{p.AllowOnlineSearch}|{string.Join(",", s.ChangeSets.Select(c => c.ChangeSetId + c.Reverted))}|{settled}|{s.Projects.Count}";
-        RelayMeta.Text = s.ChangeSets.Count == 0 ? "defaults · no change sets yet" : $"{s.ChangeSets.Count} change set(s) · {s.ChangeSets.Count(c => !c.Reverted)} in effect";
         if (signature == _relaySignature) return;
         _relaySignature = signature;
 

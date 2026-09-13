@@ -226,7 +226,7 @@ public class ListeningTests : IDisposable
     {
         const string Heard = "Someone needs to find out whether Hull council requires a separate licence for the Lightshift pilot.";
         // The raise's why is a category, as the mind is told to write it (it is ledgered); the objective quotes the words.
-        var mind = new ListeningMind().When("Hull council", "research",
+        var mind = new ListeningMind().When("Hull council", "organize",
             "Find out whether Hull council requires a separate licence for the Lightshift pilot.", project: "Lightshift", topic: "licensing");
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace().Project("Lightshift");
         var lightshift = s.H.Registry.FindActive("lightshift")!;
