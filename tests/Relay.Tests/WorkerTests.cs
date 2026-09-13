@@ -213,6 +213,9 @@ public class WorkerTests : IDisposable
         Assert.Null(s.Snap.Incident);
         Assert.Contains("Stopped", s.Snap.Receipt);
         Assert.Contains("stop requested", s.H.Last(EventTypes.AgentRunTerminated)!.DataString("reason"));
+        // Cancel during Executing is a stop-request, not Cancelled; the stop completion still applies.
+        Assert.Equal(TaskStatus.Completed, s.Response.Status);
+        Assert.Equal("stopped", s.Response.Outcome);
     }
 
     [Fact]

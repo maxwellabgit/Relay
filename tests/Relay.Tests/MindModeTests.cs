@@ -262,6 +262,21 @@ public class MindModeTests : IDisposable
         Assert.Empty(s.Snap.LiveTasks);
     }
 
+    [Fact]
+    public void WaitingApprovalPersistsObjectiveAndWaitingFor()
+    {
+        var mind = new ScriptedMind()
+            .Step(Propose(Actions.CreateProject, "You asked for it", ("name", "Harbor")), "Proposing project Harbor", Read(0.2));
+        using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
+            .Ask("create a project called Harbor")
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
+        var live = Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        var record = System.Text.Json.JsonSerializer.Deserialize<DurableTaskRecord>(File.ReadAllText(live), Relay.Core.Storage.RelayJson.Indented)!;
+        Assert.Contains("Harbor", record.Instruction ?? "", StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Waits.Approval, record.WaitingFor);
+        Assert.True(record.Version >= 0);
+    }
+
     // ----------------------------------------------------------------------------------------
     // Capability building (slice 6): the world clock the mind builds for itself
     // ----------------------------------------------------------------------------------------

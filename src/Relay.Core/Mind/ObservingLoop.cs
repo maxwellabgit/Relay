@@ -70,6 +70,10 @@ public sealed class ObservingLoop
     public MindRead? LastRead { get; private set; }
     public IReadOnlyList<DecisionRecord> Decisions => _decider.Made;
 
+    /// <summary>Optional local-inference gate shared with task loops (one StepAsync at a time on the machine).</summary>
+    public Func<CancellationToken, Task>? AcquireInference { get; set; }
+    public Action? ReleaseInference { get; set; }
+
     /// <summary>
     /// One pass over a stretch of conversation. Returns when the mind waits, says its line, spends the pass's moves,
     /// or fails past the retry decision. Never call concurrently; a stream runs one pass at a time.
@@ -89,7 +93,11 @@ public sealed class ObservingLoop
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var request = new MindRequest(StreamId, MindRequest.WindowOrigin, _transcript.ToList(), _context, _clock.UtcNow, moves, _budget.MaxMovesPerPass, Observing: true);
-                var step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
+                MindStep step;
+                var held = false;
+                if (AcquireInference is not null) { await AcquireInference(cancellationToken).ConfigureAwait(false); held = true; }
+                try { step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false); }
+                finally { if (held) ReleaseInference?.Invoke(); }
                 promptTokens += step.PromptTokens;
                 completionTokens += step.CompletionTokens;
                 var now = _clock.UtcNow;

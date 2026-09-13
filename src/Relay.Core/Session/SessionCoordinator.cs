@@ -68,6 +68,7 @@ public sealed partial class SessionCoordinator
     private readonly List<ActivityEntry> _activity = new();
     private SessionRecord? _sessionRecord;
     private bool _shutDown;
+    private readonly TaskEngine _engine;
 
     private IDisposable? _timeoutTimer;
     private IDisposable? _stabilizationTimer;
@@ -113,6 +114,12 @@ public sealed partial class SessionCoordinator
         _ledgerHealth = verificationAtOpen.Health;
         _noteKey = new HotkeyStatus("NOTE_KEY", _settings.Hotkeys.NoteKey, false, "not registered yet", _settings.Hotkeys.Scope);
         _commandKey = new HotkeyStatus("COMMAND_KEY", _settings.Hotkeys.CommandKey, false, "not registered yet", _settings.Hotkeys.Scope);
+        _engine = new TaskEngine(action => _scheduler.Post(action));
+        if (_services.External is not null)
+        {
+            _services.External.AcquireInference = _engine.AcquireInferenceAsync;
+            _services.External.ReleaseInference = _engine.ReleaseInference;
+        }
 
         foreach (var record in verificationAtOpen.Records.Skip(Math.Max(0, verificationAtOpen.Records.Count - ActivityLimit)))
         {

@@ -310,6 +310,25 @@ public class TaskLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void AnUnrelatedAskCanRunWhileAnotherTaskWaitsForApproval()
+    {
+        var first = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
+        // Second ask answers immediately so we can see it finish beside the waiting proposal.
+        var answering = new ScriptedMind().Always(_ => MindStep.Of(Say("You have work waiting."), "Answered"));
+        using var s = Scenario.New(_tmp, Mind, mind: first).WithWorkspace()
+            .Command("create a project called Atlas")
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
+        Assert.True(s.Snap.PendingProposals.Any());
+        // Swap the mind for the second ask; the waiting task keeps its loop (already paused).
+        s.H.Services.Mind = answering;
+        s.Ask("what is waiting?")
+            .ExpectState(RelayState.Ready);
+        // The first proposal is still pending; the ask ran without blocking on it.
+        Assert.Contains(s.Snap.PendingProposals, p => p.Action == Actions.CreateProject);
+        Assert.Contains(s.Snap.Tasks, t => t.Lane == "ask" && t.Status == TaskStatus.Completed);
+    }
+
+    [Fact]
     public void AMindThatThrowsBecomesAFailedTaskNotACrash()
     {
         using var s = Scenario.New(_tmp, Mind, mind: new ThrowingMind())
@@ -353,22 +372,55 @@ public class TaskLifecycleTests : IDisposable
     }
 
     [Fact]
-    public void CrashWhileAwaitingApprovalIsReportedAtNextStart()
+    public void CrashWhileAwaitingApprovalResumesTheWaitingTask()
     {
         var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
             .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
-        Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        var live = Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        var before = System.Text.Json.JsonDocument.Parse(File.ReadAllText(live));
+        Assert.Equal("create a project called Atlas", before.RootElement.GetProperty("instruction").GetString(), ignoreCase: true);
+        Assert.True(before.RootElement.TryGetProperty("version", out _));
+        Assert.True(before.RootElement.TryGetProperty("waitingFor", out var wait) && wait.GetString() == "approval"
+            || before.RootElement.GetProperty("stage").GetString() == "awaiting_approval");
+
         s.CrashAndRestart()
             .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.TaskInterruptedFound)
-            .ExpectReview(ReviewItemKind.TurnInterrupted)
             .ExpectProject("atlas", exists: false);
-        Assert.Empty(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
-        Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.interrupted.json"));
-        Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TaskInterruptedFound)!.DataString("stage"));
-        Assert.Equal("direct", s.H.Last(EventTypes.TaskInterruptedFound)!.DataString("origin"));
+        var found = s.H.Last(EventTypes.TaskInterruptedFound)!;
+        Assert.Equal(true, found.DataBool("resumed"));
+        Assert.Equal("awaiting_approval", found.DataString("stage"));
+        Assert.DoesNotContain(s.Snap.Review, r => r.Kind == ReviewItemKind.TurnInterrupted);
+        Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        Assert.Empty(Directory.GetFiles(s.H.Root.TasksDirectory, "*.interrupted.json"));
+        Assert.Contains(s.Snap.PendingProposals, p => p.Action == Actions.CreateProject && p.Status == "pending");
+
+        s.Approve(Actions.CreateProject)
+            .ExpectState(RelayState.Ready)
+            .ExpectOutcome("executed")
+            .ExpectProject("atlas");
+    }
+
+    [Fact]
+    public void LiveTaskRecordCarriesDurableFieldsWhileWaiting()
+    {
+        var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
+        using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
+            .Command("create a project called Atlas")
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
+        var path = Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        var root = doc.RootElement;
+        Assert.Equal("create a project called Atlas", root.GetProperty("instruction").GetString(), ignoreCase: true);
+        Assert.Equal(root.GetProperty("instruction").GetString(), root.GetProperty("objective").GetString());
+        Assert.Equal("approval", root.GetProperty("waitingFor").GetString());
+        Assert.True(root.GetProperty("version").GetInt32() >= 0);
+        Assert.True(root.TryGetProperty("appliedEventIds", out _) || !root.TryGetProperty("appliedEventIds", out _));
+        Assert.True(root.TryGetProperty("planSummary", out _));
+        Assert.Equal("awaiting_approval", root.GetProperty("stage").GetString());
+        Assert.True(root.GetProperty("instructionChars").GetInt32() > 0);
     }
 
     [Fact]

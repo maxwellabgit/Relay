@@ -122,8 +122,22 @@ public sealed class TaskLoop
     public LoopResult? Result { get; private set; }
     public IReadOnlyList<DecisionRecord> Decisions => _decider.Made;
 
+    /// <summary>
+    /// Optional local-inference gate (TaskEngine): held only across <see cref="IMind.StepAsync"/>, never across tools or waits.
+    /// </summary>
+    public Func<CancellationToken, Task>? AcquireInference { get; set; }
+    public Action? ReleaseInference { get; set; }
+
     /// <summary>Appends an observation without stepping (the task's input, a note from the engine).</summary>
     public void Observe(Observation observation) => _transcript.Add(observation);
+
+    /// <summary>Restores a loop that was waiting when Relay last closed, so approvals and answers can continue.</summary>
+    public void RestoreAsWaiting(string waitingFor)
+    {
+        if (string.IsNullOrWhiteSpace(waitingFor)) throw new ArgumentException("A wait name is required.", nameof(waitingFor));
+        Status = LoopStatus.Waiting;
+        WaitingFor = waitingFor;
+    }
 
     /// <summary>
     /// Steps until the loop waits or ends. Returns the result when the task ended, null when it is waiting
@@ -143,7 +157,11 @@ public sealed class TaskLoop
                 if (Steps >= _budget.MaxSteps) return End(LoopStatus.Failed, "step_budget", $"The mind did not finish within {_budget.MaxSteps} steps.");
 
                 var request = new MindRequest(TaskId, Origin, _transcript.ToList(), _context, _clock.UtcNow, Steps, _budget.MaxSteps);
-                var step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
+                MindStep step;
+                var held = false;
+                if (AcquireInference is not null) { await AcquireInference(cancellationToken).ConfigureAwait(false); held = true; }
+                try { step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false); }
+                finally { if (held) ReleaseInference?.Invoke(); }
                 PromptTokens += step.PromptTokens;
                 CompletionTokens += step.CompletionTokens;
                 var now = _clock.UtcNow;

@@ -27,7 +27,11 @@ public sealed partial class SessionCoordinator
         var context = MindContextOf([], []);
         var decider = new Decider(_services.Decisions, RecordStreamDecision);
         return new ObservingLoop(streamId, _services.Mind!, host, context, decider,
-            new ObservingBudget(_settings.Stream.MaxMovesPerPass, _settings.Stream.MaxToolCallsPerPass, _settings.Stream.MaxRaisesPerPass), _clock);
+            new ObservingBudget(_settings.Stream.MaxMovesPerPass, _settings.Stream.MaxToolCallsPerPass, _settings.Stream.MaxRaisesPerPass), _clock)
+        {
+            AcquireInference = _engine.AcquireInferenceAsync,
+            ReleaseInference = _engine.ReleaseInference,
+        };
     }
 
     /// <summary>

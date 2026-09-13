@@ -1,10 +1,12 @@
 using System.Text.Json;
 using Relay.Core.Attention;
 using Relay.Core.Config;
+using Relay.Core.Decisions;
 using Relay.Core.Execution;
 using Relay.Core.External;
 using Relay.Core.Ids;
 using Relay.Core.Ledger;
+using Relay.Core.Mind;
 using Relay.Core.Notes;
 using Relay.Core.Orchestration;
 using Relay.Core.Policy;
@@ -133,6 +135,10 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public HashSet<string> ObservedApprovals { get; } = new(StringComparer.Ordinal);
         /// <summary>The tool build in flight for this task (slice 6), if any.</summary>
         public BuildState? Build { get; set; }
+        /// <summary>Monotonic task version; bumped when a completion is applied or the durable stage changes.</summary>
+        public int Version { get; set; }
+        /// <summary>Proposal / completion ids this task has already applied — late duplicates are refused.</summary>
+        public HashSet<string> AppliedEventIds { get; } = new(StringComparer.Ordinal);
     }
 
     private readonly List<TaskState> _tasks = new();
@@ -489,13 +495,20 @@ public sealed partial class SessionCoordinator : IExecutionSink
     {
         var task = _tasks.FirstOrDefault(t => t.PendingOperation?.Proposal.ProposalId == proposalId);
         if (task?.PendingOperation is null) return;
+        // Hard cancel / idempotency: a cancelled or finished task refuses late completions; already-applied ids are no-ops.
+        if (task.Status is TaskStatus.Cancelled or TaskStatus.Completed or TaskStatus.Failed) return;
+        if (task.AppliedEventIds.Contains(proposalId)) return;
+
         var op = task.PendingOperation;
         task.PendingOperation = null;
+        task.AppliedEventIds.Add(proposalId);
+        task.Version++;
         _executor.Complete(op.Proposal, task.TaskId, result, this);
         op.Result = result;
         // A worker killed because the user asked for a stop is not a failure of the task; it is the stop working.
         op.Status = result.Status == ExecutionStatus.Completed ? "executed" : task.StopRequested ? "stopped" : "failed";
         if (op.Status == "executed") RefreshIndexAfter(op);
+        PersistTask(task);
         if (task.Loop is not null) { OnMindOperationCompleted(task, op, result); Notify(); return; }
         if (op.Status == "executed" && op.Proposal.Action == Actions.ModelRequest && result.Outputs.TryGetValue("artifactId", out var artifactId))
         {
@@ -598,6 +611,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
                 task.Status = TaskStatus.Cancelled;
                 task.Outcome = "cancelled";
                 task.CompletedAt = _clock.UtcNow;
+                task.Version++;
                 Append(EventTypes.TaskCancelled, new { taskId = task.TaskId, stage = "planning", reason });
                 WriteDiagnostics(task);
                 task.Cts.Cancel();
@@ -611,6 +625,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
                 task.Status = TaskStatus.Cancelled;
                 task.Outcome = "cancelled";
                 task.CompletedAt = _clock.UtcNow;
+                task.Version++;
                 Append(EventTypes.TaskCancelled, new { taskId = task.TaskId, stage = "awaiting_approval", reason });
                 Arbiter.Resolve(task.TaskId, null, "", "", _clock.UtcNow);
                 WriteDiagnostics(task);
@@ -1021,19 +1036,35 @@ public sealed partial class SessionCoordinator : IExecutionSink
         try
         {
             Directory.CreateDirectory(_root.TasksDirectory);
-            var payload = new
+            var payload = new DurableTaskRecord
             {
-                taskId = task.TaskId,
-                origin = task.Origin.Wire(),
-                kind = task.Kind.Wire(),
-                lane = task.Lane,
-                captureId = task.CaptureId,
-                sourceEventId = task.SourceEventId,
-                instructionChars = task.Instruction.Length,
-                stage = task.Status.Wire(),
-                startedAt = task.StartedAt,
-                updatedAt = _clock.UtcNow,
-                proposals = task.Proposals.Select(p => new { p.Proposal.ProposalId, p.Proposal.Action, p.Status }),
+                TaskId = task.TaskId,
+                Origin = task.Origin.Wire(),
+                Kind = task.Kind.Wire(),
+                Lane = task.Lane,
+                CaptureId = task.CaptureId,
+                SourceEventId = task.SourceEventId,
+                InstructionChars = task.Instruction.Length,
+                Stage = task.Status.Wire(),
+                StartedAt = task.StartedAt,
+                UpdatedAt = _clock.UtcNow,
+                Proposals = task.Proposals.Select(p => new DurableProposalRef { ProposalId = p.Proposal.ProposalId, Action = p.Proposal.Action, Status = p.Status }).ToList(),
+                Instruction = task.Instruction,
+                Objective = task.Instruction,
+                WaitingFor = task.Loop?.WaitingFor
+                    ?? (task.Status == TaskStatus.AwaitingApproval ? Waits.Approval : null),
+                PendingProposalId = task.PendingOperation?.Proposal.ProposalId,
+                PlanSummary = task.Plan?.Summary,
+                PlanSteps = task.Plan?.Steps,
+                PlanAnswer = task.Plan?.Answer,
+                Version = task.Version,
+                AppliedEventIds = task.AppliedEventIds.Count > 0 ? task.AppliedEventIds.ToList() : null,
+                CapabilityIds = task.Proposals.Where(p => p.Capability is not null).Select(p => p.Proposal.ProposalId).ToList() is { Count: > 0 } caps ? caps : null,
+                LoopOrigin = task.Loop?.Origin,
+                Foreground = task.Foreground,
+                Title = task.Title,
+                ParentTaskId = task.ParentTaskId,
+                ExcerptId = task.ExcerptId,
             };
             AtomicFile.WriteAllText(LiveTaskPath(task), JsonSerializer.Serialize(payload, RelayJson.Indented));
         }
@@ -1108,24 +1139,34 @@ public sealed partial class SessionCoordinator : IExecutionSink
         {
             foreach (var file in Directory.EnumerateFiles(_root.TasksDirectory, "*.live.json").OrderBy(f => f, StringComparer.Ordinal))
             {
-                string? taskId = null, stage = null, origin = null, kind = null;
-                var chars = 0;
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(file));
-                    taskId = doc.RootElement.TryGetProperty("taskId", out var t) ? t.GetString() : null;
-                    stage = doc.RootElement.TryGetProperty("stage", out var s) ? s.GetString() : null;
-                    origin = doc.RootElement.TryGetProperty("origin", out var o) ? o.GetString() : null;
-                    kind = doc.RootElement.TryGetProperty("kind", out var k) ? k.GetString() : null;
-                    chars = doc.RootElement.TryGetProperty("instructionChars", out var c) ? c.GetInt32() : 0;
-                }
+                DurableTaskRecord? record = null;
+                try { record = JsonSerializer.Deserialize<DurableTaskRecord>(File.ReadAllText(file), RelayJson.Indented); }
                 catch (Exception ex) when (ex is JsonException or IOException) { }
-                Append(EventTypes.TaskInterruptedFound, new { taskId, stage, origin, kind, instructionChars = chars });
+
+                var taskId = record?.TaskId;
+                var stage = record?.Stage;
+                var origin = record?.Origin;
+                var kind = record?.Kind;
+                var chars = record?.InstructionChars ?? 0;
+                var waitingFor = record?.WaitingFor;
+                var instruction = record?.Instruction ?? record?.Objective;
+
+                // Waiting work with a durable objective resumes instead of being renamed away.
+                if (record is not null && !string.IsNullOrWhiteSpace(instruction) && IsResumableWait(waitingFor, stage)
+                    && TryResumeWaitingTask(record, instruction!))
+                {
+                    Append(EventTypes.TaskInterruptedFound, new { taskId, stage, origin, kind, instructionChars = chars, waitingFor, resumed = true });
+                    continue;
+                }
+
+                Append(EventTypes.TaskInterruptedFound, new { taskId, stage, origin, kind, instructionChars = chars, waitingFor, resumed = false });
                 if (origin == "direct")
                 {
                     _recoveryReview.Add(new ReviewItem(ReviewItemKind.TurnInterrupted,
                         $"An instruction was {stage ?? "in progress"} when Relay last closed",
-                        "Nothing further ran. The instruction text is preserved in the ledger; re-issue it if you still want it done.", taskId));
+                        waitingFor is Waits.Approval or Waits.User || stage == "awaiting_approval"
+                            ? "The waiting work could not be restored (the mind is unavailable or the proposals were missing). Re-issue the instruction if you still want it done."
+                            : "Nothing further ran. The instruction text is preserved in the ledger; re-issue it if you still want it done.", taskId));
                 }
                 try { File.Move(file, Path.ChangeExtension(file, null) + ".interrupted.json", overwrite: true); } catch (IOException) { }
             }
@@ -1157,6 +1198,98 @@ public sealed partial class SessionCoordinator : IExecutionSink
         }
 
         static string Describe(IReadOnlyDictionary<string, string>? target) => target is null ? "(unknown)" : string.Join(", ", target.Select(kv => $"{kv.Key}={kv.Value}"));
+    }
+
+    /// <summary>Approval and user waits are local and durable; in-flight workers/delegates/builds are not resumed after a crash.</summary>
+    private static bool IsResumableWait(string? waitingFor, string? stage)
+        => waitingFor is Waits.Approval or Waits.User
+           || (waitingFor is null && stage == "awaiting_approval");
+
+    /// <summary>Rehydrates a waiting task from its live.json so the user can approve or answer without re-issuing the instruction.</summary>
+    private bool TryResumeWaitingTask(DurableTaskRecord record, string instruction)
+    {
+        if (string.IsNullOrWhiteSpace(record.TaskId) || _services.Mind is null) return false;
+        if (_tasks.Any(t => t.TaskId == record.TaskId)) return false;
+
+        var origin = record.Origin?.Trim().ToLowerInvariant() switch
+        {
+            "observed" => TaskOrigin.Observed,
+            "dialogue" => TaskOrigin.Dialogue,
+            _ => TaskOrigin.Direct,
+        };
+        var kind = TaskLanes.ParseKind(record.Kind);
+        var waitingFor = record.WaitingFor is Waits.User ? Waits.User : Waits.Approval;
+        var status = waitingFor == Waits.User ? TaskStatus.Planning : TaskStatus.AwaitingApproval;
+        if (record.Stage == "awaiting_approval") status = TaskStatus.AwaitingApproval;
+
+        var task = new TaskState
+        {
+            TaskId = record.TaskId!,
+            Origin = origin,
+            Kind = kind,
+            Lane = record.Lane ?? (origin == TaskOrigin.Direct ? "command" : "observed"),
+            CaptureId = record.CaptureId ?? "",
+            SourceEventId = record.SourceEventId ?? "",
+            Instruction = instruction,
+            StartedAt = record.StartedAt == default ? _clock.UtcNow : record.StartedAt,
+            Foreground = record.Foreground || origin == TaskOrigin.Direct,
+            Overheard = origin == TaskOrigin.Observed,
+            ExcerptId = record.ExcerptId,
+            ParentTaskId = record.ParentTaskId,
+            Title = record.Title ?? Truncate(instruction, 80),
+            Status = status,
+            Version = Math.Max(0, record.Version),
+        };
+        if (record.AppliedEventIds is { Count: > 0 })
+            foreach (var id in record.AppliedEventIds) task.AppliedEventIds.Add(id);
+
+        foreach (var pref in record.Proposals ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(pref.ProposalId)) continue;
+            var text = AtomicFile.ReadAllTextIfExists(Path.Combine(_root.ProposalsDirectory, pref.ProposalId + ".json"));
+            if (text is null) continue;
+            Proposal? proposal;
+            try { proposal = JsonSerializer.Deserialize<Proposal>(text, RelayJson.Indented); }
+            catch (JsonException) { continue; }
+            if (proposal is null) continue;
+            var decision = PolicyEngine.Decide(proposal, WorldFor(task));
+            var ps = new ProposalState
+            {
+                Proposal = proposal,
+                Decision = decision,
+                Status = pref.Status ?? (decision.Outcome == DecisionOutcome.NeedsApproval ? "pending" : decision.Outcome == DecisionOutcome.Allow ? "allowed" : "denied"),
+            };
+            task.Proposals.Add(ps);
+        }
+
+        if (waitingFor == Waits.Approval && !task.Proposals.Any(p => p.Status == "pending"))
+            return false; // nothing left to approve — fall through to interrupt
+
+        task.Plan = new TurnPlan(true, record.PlanSummary ?? "Resumed after restart…", record.PlanSteps?.ToList() ?? ["Resumed after Relay restarted"], record.PlanAnswer, [], [], _services.Mind.Name);
+
+        var sink = new TaskSink(this, task);
+        var tools = new ToolBroker(ToolSources, sink, int.MaxValue);
+        var context = MindContextOf(task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved, RecallFor(task));
+        var decider = new Decider(_services.Decisions, d => RecordDecision(task, d));
+        var host = new MindHost(this, task, sink, tools);
+        var loopOrigin = record.LoopOrigin ?? LoopOrigin(task);
+        var loop = new TaskLoop(task.TaskId, loopOrigin, _services.Mind, host, context, decider,
+            new LoopBudget(_settings.Orchestrator.MaxSteps, _settings.Orchestrator.MaxToolCalls), _clock)
+        {
+            AcquireInference = _engine.AcquireInferenceAsync,
+            ReleaseInference = _engine.ReleaseInference,
+        };
+        loop.Observe(new InputObserved(task.StartedAt, loopOrigin, task.Instruction, task.ExcerptId));
+        loop.RestoreAsWaiting(waitingFor);
+        task.Loop = loop;
+        task.Host = host;
+
+        _tasks.Insert(0, task);
+        if (task.Foreground) _lastForeground = task;
+        TrimTasks();
+        PersistTask(task);
+        if (!task.Foreground && waitingFor == Waits.Approval) PresentTask(task, interim: true);
+        return true;
     }
 
     private void RefreshIndexAfter(ProposalState ps)

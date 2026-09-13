@@ -73,6 +73,8 @@ public sealed partial class SessionCoordinator
         var loop = new TaskLoop(task.TaskId, LoopOrigin(task), mind, host, context, decider,
             new LoopBudget(_settings.Orchestrator.MaxSteps, _settings.Orchestrator.MaxToolCalls), _clock);
         loop.Observe(new InputObserved(task.StartedAt, LoopOrigin(task), task.Instruction, task.ExcerptId));
+        loop.AcquireInference = _engine.AcquireInferenceAsync;
+        loop.ReleaseInference = _engine.ReleaseInference;
         task.Loop = loop;
         task.Host = host;
         task.Plan = new TurnPlan(true, "Thinking…", [], null, [], [], mind.Name);
@@ -97,10 +99,11 @@ public sealed partial class SessionCoordinator
 
     private void Drive(TaskState task, Func<Task<LoopResult?>> run)
     {
-        Task<LoopResult?> running;
-        try { running = run(); }
-        catch (Exception ex) { running = Task.FromException<LoopResult?>(ex); }
-        running.ContinueWith(t => _scheduler.Post(() => OnLoopReturned(task, t)), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        _engine.Enqueue(
+            task.TaskId,
+            () => run(),
+            returned => OnLoopReturned(task, (Task<LoopResult?>)returned),
+            _clock.UtcNow);
     }
 
     /// <summary>The stall guard: a step that takes longer than the planning timeout ends the task. Disarmed while the loop waits for the user or another process.</summary>
@@ -281,6 +284,7 @@ public sealed partial class SessionCoordinator
     {
         if (!task.IsLive) return;
         Append(EventTypes.LoopWaiting, new { taskId = task.TaskId, waitingFor });
+        PersistTask(task);
         Notify();
     }
 

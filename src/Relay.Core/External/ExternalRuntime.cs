@@ -101,6 +101,9 @@ public sealed class ExternalRuntime : IExternalOperations
     public Func<IModelClient?>? Digester { get; set; }
     /// <summary>Set by the composition root: the <c>digest.md</c> override, if the user keeps one.</summary>
     public Func<string?>? DigestInstructions { get; set; }
+    /// <summary>Local-inference gate (TaskEngine): held only while the digester model runs, not while the external HTTP stream is open.</summary>
+    public Func<CancellationToken, Task>? AcquireInference { get; set; }
+    public Action? ReleaseInference { get; set; }
     /// <summary>How many turns one approval covers (the first exchange counts as one). Bounded multi-turn, first cut.</summary>
     public int MaxTurns { get; set; } = DefaultMaxTurns;
 
@@ -252,7 +255,14 @@ public sealed class ExternalRuntime : IExternalOperations
             {
                 IModelClient? local = null;
                 try { local = digester?.Invoke(); } catch (ArgumentException) { local = null; }
-                try { digest = await Digest.MakeAsync(local, digestInstructions?.Invoke(), objective, response.Content ?? "", flight.Cts.Token).ConfigureAwait(false); }
+                try
+                {
+                    // Gate only the local digester call — the external stream already finished above.
+                    var held = false;
+                    if (AcquireInference is not null) { await AcquireInference(flight.Cts.Token).ConfigureAwait(false); held = true; }
+                    try { digest = await Digest.MakeAsync(local, digestInstructions?.Invoke(), objective, response.Content ?? "", flight.Cts.Token).ConfigureAwait(false); }
+                    finally { if (held) ReleaseInference?.Invoke(); }
+                }
                 catch (OperationCanceledException) { digest = DigestResult.None; }
             }
             _scheduler.Post(() => Finish(flight, response, digest));
