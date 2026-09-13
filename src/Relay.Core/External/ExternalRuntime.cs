@@ -108,7 +108,16 @@ public sealed class ExternalRuntime : IExternalOperations
     public int MaxTurns { get; set; } = DefaultMaxTurns;
 
     public IReadOnlyList<string> ProfileNames => _profiles.Select(p => p.Name).ToList();
-    public IReadOnlyList<string> SearchProfileNames => _profiles.Where(p => p.SupportsSearch).Select(p => p.Name).ToList();
+    /// <summary>
+    /// Profiles whose <c>supportsSearch</c> is true and for which Relay's search client is configured.
+    /// Empty when search is not wired — those profiles keep the allowSearch=false correction.
+    /// </summary>
+    public IReadOnlyList<string> SearchProfileNames => SearchAvailable
+        ? _profiles.Where(p => p.SupportsSearch).Select(p => p.Name).ToList()
+        : [];
+
+    /// <summary>Set by the composition root when an <see cref="ISearchClient"/> is wired.</summary>
+    public bool SearchAvailable { get; set; }
 
     public string? ReadArtifact(string artifactId) => ReadArtifactRecord(artifactId)?.Text;
 
@@ -176,7 +185,10 @@ public sealed class ExternalRuntime : IExternalOperations
 
         var profile = _profiles.FirstOrDefault(p => string.Equals(p.Name, profileName, StringComparison.Ordinal));
         if (profile is null) return ExecutionResult.Fail($"No external profile named '{profileName}'.");
-        if (allowSearch && !profile.SupportsSearch) return ExecutionResult.Fail($"Profile '{profileName}' does not support online search.");
+        if (allowSearch && (!profile.SupportsSearch || !SearchAvailable))
+            return ExecutionResult.Fail(profile.SupportsSearch
+                ? "Online search is not configured; the request cannot allow search."
+                : $"Profile '{profileName}' does not support online search.");
         if (_inFlight.ContainsKey(proposal.ProposalId)) return ExecutionResult.Fail("That request is already in flight.");
 
         Conversation conversation;

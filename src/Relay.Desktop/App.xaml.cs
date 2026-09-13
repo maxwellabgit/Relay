@@ -61,6 +61,7 @@ public partial class App : Application
                     return worker is null ? null : new JobObjectWorkerHost(worker);
                 },
                 ModelClientFactory = settings => ModelComposition.Client(settings, root),
+                SearchClientFactory = settings => ModelComposition.Search(settings, root),
                 Secrets = ModelComposition.Secrets(root),
             };
             _runtime = RelayRuntime.Create(

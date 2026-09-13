@@ -34,7 +34,9 @@ There is no task version and no record of which events a task has already applie
 
 ### G5 · Search is nominal
 
-`allowSearch` adds one sentence to the delegate's prompt and a flag to the ledger; `supportsSearch` is a claim in configuration. There is no search integration in the solution — no provider client, no MCP, no browser. Whether anything is searched depends on the remote endpoint alone. The README's own rule, that a search prompt must be backed by an actual search integration, is violated today.
+*Closed with Step 3. One search provider behind the brokered `web_search` tool, called only through Relay.Gateway under standing grant or per-task approval; hits are stored as citable local artifacts. `supportsSearch` means the profile has a search integration (and search is configured); profiles without it keep the allowSearch=false correction.*
+
+~~`allowSearch` adds one sentence to the delegate's prompt and a flag to the ledger; `supportsSearch` is a claim in configuration. There is no search integration in the solution — no provider client, no MCP, no browser. Whether anything is searched depends on the remote endpoint alone. The README's own rule, that a search prompt must be backed by an actual search integration, is violated today.~~
 
 ### G6 · Workflows do not exist
 
@@ -89,7 +91,7 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ### Step 3 — Real search
 
-One provider behind one brokered tool, called through `Relay.Gateway` (still the only thing that opens a connection), under a standing grant or a per-task approval, with results stored as citable local artifacts. `supportsSearch` then means the profile has a search integration; a profile without one keeps the correction the loop already makes.
+*Closed.* One provider behind one brokered tool (`web_search`), called through `Relay.Gateway` (still the only thing that opens a connection), under a standing grant (`sources.allowOnlineSearch`) or a per-task approval (approving a `model.request` with `allowSearch`), with results stored as citable local artifacts under `artifacts/search`. `supportsSearch` means the profile has a search integration and Relay's search client is configured; a profile without one keeps the correction the loop already makes. Citations still require the mind to `read_artifact`.
 
 *Proves:* a research task retrieves personal context, delegates through working search, and returns an evidence-backed answer while interaction and observation continue.
 

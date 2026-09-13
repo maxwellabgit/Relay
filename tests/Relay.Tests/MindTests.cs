@@ -138,6 +138,7 @@ public class MindPromptTests
         Assert.Contains("delegate: unavailable", bare);
         Assert.Contains("build: not available", bare);
         Assert.Contains("- search(query, project?, limit?, exclude?)", bare);
+        Assert.Contains("- web_search(query, limit?)", bare);
         Assert.Contains("- create_project {name, slug?}", bare);
         Assert.Contains("update_prompt", bare);
         Assert.StartsWith(MindPrompt.DefaultConstitution, bare);

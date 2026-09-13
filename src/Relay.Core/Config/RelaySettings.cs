@@ -23,6 +23,7 @@ public sealed class RelaySettings
     [JsonPropertyName("orchestrator")] public OrchestratorSettings Orchestrator { get; set; } = new();
     [JsonPropertyName("model")] public ModelSettings Model { get; set; } = new();
     [JsonPropertyName("externalModels")] public List<ExternalModelProfile> ExternalModels { get; set; } = new();
+    [JsonPropertyName("search")] public SearchSettings Search { get; set; } = new();
     [JsonPropertyName("workers")] public WorkerSettings Workers { get; set; } = new();
 
     public IReadOnlyList<string> Validate()
@@ -49,6 +50,12 @@ public sealed class RelaySettings
             if (string.IsNullOrWhiteSpace(profile.SecretName)) problems.Add($"externalModels[{profile.Name}].secretName is required.");
         }
         if (ExternalModels.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != ExternalModels.Count) problems.Add("externalModels names must be unique.");
+        if (Search.Enabled)
+        {
+            if (!SearchSettings.IsAllowedEndpoint(Search.Endpoint, out var searchWhy)) problems.Add("search.endpoint: " + searchWhy);
+            if (string.IsNullOrWhiteSpace(Search.SecretName)) problems.Add("search.secretName is required when search is enabled.");
+            if (Search.TimeoutMs < 1000) problems.Add("search.timeoutMs must be at least 1000.");
+        }
         if (Listening.PassTimeoutMs < 1000) problems.Add("listening.passTimeoutMs must be at least 1000.");
         if (Stream.BufferSeconds != StreamSettings.WholeConversation && Stream.BufferSeconds is < 15 or > 600) problems.Add("stream.bufferSeconds must be 0 (whole conversation) or 15–600.");
         if (Stream.SegmentQuietMs is < 200 or > 10000) problems.Add("stream.segmentQuietMs must be 200–10000.");
@@ -165,10 +172,34 @@ public sealed class ExternalModelProfile
     [JsonPropertyName("secretName")] public string SecretName { get; set; } = "external-research";
     [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 120_000;
     [JsonPropertyName("maxOutputTokens")] public int MaxOutputTokens { get; set; } = 4_000;
-    /// <summary>Whether the profile's host may be asked to search online on Relay's behalf (only when a task is approved with allowSearch).</summary>
+    /// <summary>
+    /// Whether this profile has a search integration: when true and Relay's search client is configured,
+    /// a request approved with allowSearch may proceed, and the mind may use the web_search tool under grant.
+    /// Profiles without it keep the correction that forces allowSearch false.
+    /// </summary>
     [JsonPropertyName("supportsSearch")] public bool SupportsSearch { get; set; }
 
     public ModelSettings AsModelSettings() => new() { Enabled = true, Endpoint = Endpoint, Model = Model, SecretName = SecretName, TimeoutMs = TimeoutMs, MaxOutputTokens = MaxOutputTokens };
+}
+
+/// <summary>Online search provider (called only through Relay.Gateway). Off until enabled with an https endpoint and a secret.</summary>
+public sealed class SearchSettings
+{
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    /// <summary>HTTPS search API endpoint (Brave Search API shape: GET with q and count). Empty means search is not configured.</summary>
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "https://api.search.brave.com/res/v1/web/search";
+    /// <summary>Name of the DPAPI-protected secret holding the API key. Never stored in this file.</summary>
+    [JsonPropertyName("secretName")] public string SecretName { get; set; } = "search";
+    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 15_000;
+
+    /// <summary>https only — search never uses plain http.</summary>
+    public static bool IsAllowedEndpoint(string? endpoint, out string reason)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) { reason = "must be an absolute URL."; return false; }
+        if (uri.Scheme == Uri.UriSchemeHttps) { reason = ""; return true; }
+        reason = "must be https.";
+        return false;
+    }
 }
 
 /// <summary>Listening: how the stream is cut, how long it is held, how often the mind reads it, how much may be retained.</summary>
@@ -263,6 +294,7 @@ public static class SettingsStore
             if (validation.Any(p => p.StartsWith("orchestrator", StringComparison.Ordinal))) settings.Orchestrator = defaults.Orchestrator;
             if (validation.Any(p => p.StartsWith("model", StringComparison.Ordinal))) settings.Model = defaults.Model;
             if (validation.Any(p => p.StartsWith("externalModels", StringComparison.Ordinal))) settings.ExternalModels = defaults.ExternalModels;
+            if (validation.Any(p => p.StartsWith("search", StringComparison.Ordinal))) settings.Search = defaults.Search;
             if (validation.Any(p => p.StartsWith("listening", StringComparison.Ordinal))) settings.Listening = defaults.Listening;
             if (validation.Any(p => p.StartsWith("stream", StringComparison.Ordinal))) settings.Stream = defaults.Stream;
             if (validation.Any(p => p.StartsWith("workers", StringComparison.Ordinal))) settings.Workers = defaults.Workers;

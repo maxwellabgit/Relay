@@ -42,6 +42,10 @@ public sealed class CoordinatorServices
     /// <summary>Tools Relay builds for itself (docs/09, slice 6): store, sandbox runner, builder, promotion. Null when there is no worker host.</summary>
     public Tools.ToolRuntime? Tools { get; init; }
     public ExternalRuntime? External { get; init; }
+    /// <summary>Online search provider (Gateway); null when search is off or misconfigured.</summary>
+    public Search.ISearchClient? Search { get; init; }
+    /// <summary>Stored web-search hit artifacts; null when search storage was not built.</summary>
+    public Search.SearchArtifacts? SearchArtifacts { get; init; }
     public ExcerptStore? Excerpts { get; init; }
     public ChangeSetStore? ChangeSets { get; init; }
     public PreferenceStore? Preferences { get; init; }
@@ -139,6 +143,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         public int Version { get; set; }
         /// <summary>Proposal / completion ids this task has already applied — late duplicates are refused.</summary>
         public HashSet<string> AppliedEventIds { get; } = new(StringComparer.Ordinal);
+        /// <summary>True after the user approved a model.request with allowSearch for this task (or standing grant covers tools via preferences).</summary>
+        public bool OnlineSearchGranted { get; set; }
     }
 
     private readonly List<TaskState> _tasks = new();
@@ -191,6 +197,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (!Ulid.IsValid(id)) return false;
         if (_notes.Read(id) is not null) return true;
         if (Excerpts.Read(id) is not null) return true;
+        if (_services.SearchArtifacts?.Read(id) is not null) return true;
         if (_services.External?.ReadArtifact(id) is not null) return true;
         if (_services.Index.Search(id, null, 1).Any(h => h.Id == id)) return true;
         foreach (var p in _services.Registry.Active)
@@ -198,15 +205,20 @@ public sealed partial class SessionCoordinator : IExecutionSink
         return false;
     }
 
-    private ToolSources ToolSources => new()
+    private ToolSources ToolSourcesFor(TaskState? task = null) => new()
     {
         Registry = _services.Registry,
         Drafts = _notes,
         Index = _services.Index,
         Excerpts = Excerpts,
-        ReadArtifact = _services.External is null ? null : _services.External.ReadArtifact,
+        ReadArtifact = id => _services.SearchArtifacts?.Read(id) ?? _services.External?.ReadArtifact(id),
         Preferences = () => Preferences,
+        Search = _services.Search,
+        SearchArtifacts = _services.SearchArtifacts,
+        OnlineSearchGranted = () => Preferences.AllowOnlineSearch || (task?.OnlineSearchGranted ?? false),
     };
+
+    private ToolSources ToolSources => ToolSourcesFor(null);
 
     // ----------------------------------------------------------------------------------------
     // Creating tasks
@@ -741,6 +753,9 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (Append(EventTypes.ApprovalGranted, new { taskId = task.TaskId, proposalId, action = ps.Proposal.Action, proposalHash = hash, by = "user", target = ps.Decision.NormalizedTarget }) is null) { Notify(); return; }
         ps.Status = "approved";
         ps.Capability = _capabilities.Issue(ps.Proposal, _clock.UtcNow);
+        if (ps.Proposal.Action == Actions.ModelRequest
+            && string.Equals(ps.Decision.NormalizedTarget.GetValueOrDefault("allowSearch"), "true", StringComparison.OrdinalIgnoreCase))
+            task.OnlineSearchGranted = true;
         task.UserResponse ??= "approved";
         if (!task.Proposals.Any(p => p.Status == "pending")) Arbiter.Resolve(task.TaskId, null, "", "", _clock.UtcNow);
         AdvanceTask(task);
@@ -1260,6 +1275,10 @@ public sealed partial class SessionCoordinator : IExecutionSink
                 Status = pref.Status ?? (decision.Outcome == DecisionOutcome.NeedsApproval ? "pending" : decision.Outcome == DecisionOutcome.Allow ? "allowed" : "denied"),
             };
             task.Proposals.Add(ps);
+            if (ps.Status is "approved" or "allowed" or "executing" or "executed"
+                && proposal.Action == Actions.ModelRequest
+                && string.Equals(proposal.Target.GetValueOrDefault("allowSearch"), "true", StringComparison.OrdinalIgnoreCase))
+                task.OnlineSearchGranted = true;
         }
 
         if (waitingFor == Waits.Approval && !task.Proposals.Any(p => p.Status == "pending"))
@@ -1268,7 +1287,7 @@ public sealed partial class SessionCoordinator : IExecutionSink
         task.Plan = new TurnPlan(true, record.PlanSummary ?? "Resumed after restart…", record.PlanSteps?.ToList() ?? ["Resumed after Relay restarted"], record.PlanAnswer, [], [], _services.Mind.Name);
 
         var sink = new TaskSink(this, task);
-        var tools = new ToolBroker(ToolSources, sink, int.MaxValue);
+        var tools = new ToolBroker(ToolSourcesFor(task), sink, int.MaxValue);
         var context = MindContextOf(task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved, RecallFor(task));
         var decider = new Decider(_services.Decisions, d => RecordDecision(task, d));
         var host = new MindHost(this, task, sink, tools);

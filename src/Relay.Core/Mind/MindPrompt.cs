@@ -47,9 +47,9 @@ public static class MindPrompt
 
     /// <summary>What the read-only tools cannot do, so the mind does not search notes for the time of day — and, having no clock, does not compute it either.</summary>
     private const string ToolLimits =
-        "The tools read this machine only: notes, projects, excerpts, preferences. No tool tells the current time or date anywhere, the weather, prices, news, " +
-        "the contents of the web, or the result of a calculation; searching notes for such things is a wasted step and finds nothing. " +
-        "You have no clock: the transcript shows today's date only. The current time anywhere needs a tool.";
+        "The tools read this machine (notes, projects, excerpts, preferences, stored artifacts). web_search reaches the web only when online search is granted and configured; " +
+        "it returns hit ids — open one with read_artifact before citing it. No tool tells the current time or date anywhere, the weather as a live feed, or the result of a calculation; " +
+        "searching notes for such things is a wasted step. You have no clock: the transcript shows today's date only. The current time anywhere needs a tool.";
 
     /// <summary>
     /// What changes when the mind is listening rather than working: nobody is asking it anything, the usual answer is

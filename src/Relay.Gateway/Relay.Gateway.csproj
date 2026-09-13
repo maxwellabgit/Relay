@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <!-- The only project in Relay that opens a network connection. It speaks to exactly one
-         configured OpenAI-compatible endpoint over https, with a key from the secret store. -->
+    <!-- The only project in Relay that opens a network connection. It speaks to configured
+         OpenAI-compatible endpoints and the search API over https, with keys from the secret store. -->
   </PropertyGroup>
 
   <ItemGroup>

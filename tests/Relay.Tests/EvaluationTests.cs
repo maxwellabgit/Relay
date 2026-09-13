@@ -49,7 +49,12 @@ public class EvaluationTests : IDisposable
     }
 
     private static void WithResearchProfile(RelaySettings s)
-        => s.ExternalModels.Add(new ExternalModelProfile { Name = "research", Endpoint = "https://api.example.test/v1/chat/completions", Model = "gpt-5-nano", SecretName = "external-research", SupportsSearch = true });
+    {
+        s.ExternalModels.Add(new ExternalModelProfile { Name = "research", Endpoint = "https://api.example.test/v1/chat/completions", Model = "gpt-5-nano", SecretName = "external-research", SupportsSearch = true });
+        s.Search.Enabled = true;
+        s.Search.Endpoint = "https://search.test/v1/web/search";
+        s.Search.SecretName = "search";
+    }
 
     /// <summary>
     /// The world the authored cases are written against: Atlas with its beta decision, Home with the backyard

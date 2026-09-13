@@ -46,7 +46,8 @@ public sealed class Harness : IDisposable
     public Harness(DataRoot root, Action<RelaySettings>? configure = null, int? failLedgerAfter = null, FixedClock? clock = null,
         IWorkerHost? workerHost = null, bool inlinePost = true,
         Func<ExternalModelProfile, IModelClient>? externalClients = null, MemorySecretStore? secrets = null,
-        Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
+        Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null,
+        ISearchClient? searchClient = null)
     {
         // xUnit installs a SynchronizationContext on the test thread, which stops awaiter continuations from being
         // inlined; the in-process worker pipes depend on inline continuations to keep a whole run on this thread.
@@ -88,11 +89,34 @@ public sealed class Harness : IDisposable
             // Built tools share the sandbox; without a drafter the mind can still call promoted tools but cannot build.
             Tools = new Relay.Core.Tools.ToolRuntime(root, ChangeSets, workerHost, SettingsLoad.Settings.Workers, () => toolDrafter, () => Clock.UtcNow);
         }
+        // Search is available when settings enable it (or a client was injected). Profiles with SupportsSearch
+        // then appear in SearchProfileNames so allowSearch on model.request may proceed.
+        Search = searchClient ?? (SettingsLoad.Settings.Search.Enabled ? new FakeSearchClient() : null);
+        if (Search is not null)
+        {
+            SearchArtifacts = new SearchArtifacts(root, () => Clock.UtcNow);
+            foreach (var (id, text, at) in SearchArtifacts.All()) Index.IndexArtifact(id, text, at);
+        }
         if (externalClients is not null)
         {
             External = new ExternalRuntime(root, SettingsLoad.Settings.ExternalModels, externalClients,
-                () => new ToolSources { Registry = Registry, Drafts = Notes, Index = Index, Excerpts = Excerpts, ReadArtifact = id => External!.ReadArtifact(id), Preferences = () => Preferences.Compiled() },
-                Scheduler, () => Clock.UtcNow) { Digester = () => digester };
+                () => new ToolSources
+                {
+                    Registry = Registry,
+                    Drafts = Notes,
+                    Index = Index,
+                    Excerpts = Excerpts,
+                    ReadArtifact = id => SearchArtifacts?.Read(id) ?? External!.ReadArtifact(id),
+                    Preferences = () => Preferences.Compiled(),
+                    Search = Search,
+                    SearchArtifacts = SearchArtifacts,
+                    OnlineSearchGranted = () => Preferences.Compiled().AllowOnlineSearch,
+                },
+                Scheduler, () => Clock.UtcNow)
+            {
+                Digester = () => digester,
+                SearchAvailable = Search is not null,
+            };
             foreach (var (id, text, at) in External.AllArtifacts()) Index.IndexArtifact(id, text, at);
         }
         Services = new CoordinatorServices
@@ -106,6 +130,8 @@ public sealed class Harness : IDisposable
             Workers = Workers,
             Tools = Tools,
             External = External,
+            Search = Search,
+            SearchArtifacts = SearchArtifacts,
             Excerpts = Excerpts,
             ChangeSets = ChangeSets,
             Preferences = Preferences,
@@ -129,6 +155,8 @@ public sealed class Harness : IDisposable
     public ChangeSetStore ChangeSets { get; }
     public PreferenceStore Preferences { get; }
     public ExternalRuntime? External { get; }
+    public ISearchClient? Search { get; }
+    public SearchArtifacts? SearchArtifacts { get; }
     public CoordinatorServices Services { get; }
     public WorkerRuntime? Workers { get; }
     public Relay.Core.Tools.ToolRuntime? Tools { get; }
@@ -159,7 +187,18 @@ public sealed class Harness : IDisposable
         var s = sink ?? new NullTurnSink();
         return new TurnContext
         {
-            Tools = new ToolBroker(new ToolSources { Registry = Registry, Drafts = Notes, Index = Index, Excerpts = Excerpts, Preferences = () => Preferences.Compiled() }, s, SettingsLoad.Settings.Orchestrator.MaxToolCalls),
+            Tools = new ToolBroker(new ToolSources
+            {
+                Registry = Registry,
+                Drafts = Notes,
+                Index = Index,
+                Excerpts = Excerpts,
+                Preferences = () => Preferences.Compiled(),
+                Search = Search,
+                SearchArtifacts = SearchArtifacts,
+                ReadArtifact = id => SearchArtifacts?.Read(id) ?? External?.ReadArtifact(id),
+                OnlineSearchGranted = () => Preferences.Compiled().AllowOnlineSearch,
+            }, s, SettingsLoad.Settings.Orchestrator.MaxToolCalls),
             Sink = s,
             Registry = Registry,
             Roots = Roots,

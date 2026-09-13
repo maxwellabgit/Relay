@@ -6,6 +6,7 @@ using Relay.Core.Ledger;
 using Relay.Core.Mind;
 using Relay.Core.Model;
 using Relay.Core.Orchestration;
+using Relay.Core.Search;
 using Relay.Core.Session;
 using Relay.Core.State;
 using Relay.Core.Storage;
@@ -28,6 +29,7 @@ public sealed class Scenario : IDisposable
     private readonly Relay.Core.Mind.IMind? _mind;
     private readonly IModelClient? _toolDrafter;
     private readonly IModelClient? _digester;
+    private readonly ISearchClient? _searchClient;
     private readonly bool _inlinePost;
     private readonly MemorySecretStore _secrets = new();
     private readonly StringBuilder _transcript = new();
@@ -37,7 +39,7 @@ public sealed class Scenario : IDisposable
     private long _activityFrom;
     private string _heard = "";
 
-    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IWorkerHost? workerHost, FixedClock? clock, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester)
+    private Scenario(TempRoot tmp, Action<RelaySettings>? configure, IWorkerHost? workerHost, FixedClock? clock, Func<ExternalModelProfile, IModelClient>? externalClients, bool inlinePost, Relay.Core.Mind.IMind? mind, IModelClient? toolDrafter, IModelClient? digester, ISearchClient? searchClient)
     {
         _tmp = tmp;
         _workerHost = workerHost;
@@ -45,6 +47,7 @@ public sealed class Scenario : IDisposable
         _mind = mind;
         _toolDrafter = toolDrafter;
         _digester = digester;
+        _searchClient = searchClient;
         _inlinePost = inlinePost;
         _h = Open(configure, clock);
         Log($"== Session started ({_h.Coordinator.SessionId[^8..]}) state {_h.Snap.State.Label()} mind {(_h.Snap.MindReady ? "ready" : "none")} ==");
@@ -54,12 +57,13 @@ public sealed class Scenario : IDisposable
     /// <param name="mind">Relay's mind: it runs every task and reads every conversation when listening is on. Without one no task can run.</param>
     /// <param name="toolDrafter">The model that drafts tools for the mind's build move (slice 6); needs <paramref name="workerHost"/> for the sandbox.</param>
     /// <param name="digester">The local model that digests delegate replies into feed lines (slice 5); null means the reply's own first lines.</param>
+    /// <param name="searchClient">Online search provider; when null and search is enabled in settings, Harness supplies a fake so allowSearch can proceed.</param>
     public static Scenario New(TempRoot tmp, Action<RelaySettings>? configure = null, IWorkerHost? workerHost = null, FixedClock? clock = null,
-        Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null)
-        => new(tmp, configure, workerHost, clock, externalClients, inlinePost, mind, toolDrafter, digester);
+        Func<ExternalModelProfile, IModelClient>? externalClients = null, bool inlinePost = true, Relay.Core.Mind.IMind? mind = null, IModelClient? toolDrafter = null, IModelClient? digester = null, ISearchClient? searchClient = null)
+        => new(tmp, configure, workerHost, clock, externalClients, inlinePost, mind, toolDrafter, digester, searchClient);
 
     private Harness Open(Action<RelaySettings>? configure, FixedClock? clock)
-        => new Harness(_tmp.Root, configure: configure, workerHost: _workerHost, clock: clock, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester).Start();
+        => new Harness(_tmp.Root, configure: configure, workerHost: _workerHost, clock: clock, externalClients: _externalClients, secrets: _secrets, inlinePost: _inlinePost, mind: _mind, toolDrafter: _toolDrafter, digester: _digester, searchClient: _searchClient).Start();
 
     /// <summary>Drains work posted by background threads on this thread until the condition holds; fails the scenario on timeout.</summary>
     public Scenario PumpUntil(string what, Func<bool> condition, TimeSpan? timeout = null)

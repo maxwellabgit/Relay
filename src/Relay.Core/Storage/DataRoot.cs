@@ -73,6 +73,8 @@ public sealed class DataRoot
     public string PromptsDirectory => Combine("config", "prompts");
     /// <summary>Responses from approved external tasks, kept as source artifacts.</summary>
     public string ExternalArtifactsDirectory => Combine("artifacts", "external");
+    /// <summary>Hits from the brokered web_search tool, kept as citable source artifacts.</summary>
+    public string SearchArtifactsDirectory => Combine("artifacts", "search");
     /// <summary>Weights and thresholds of every decision the engine makes between paths.</summary>
     public string DecisionsPath => Combine("config", "decisions.json");
     /// <summary>One line per task: route, scores, model metrics, outcome, the user's response. Metadata only, for post-hoc tuning.</summary>
@@ -104,7 +106,7 @@ public sealed class DataRoot
             DraftsDirectory, DiscardedDraftsDirectory, DraftNotesDirectory, IncidentsDirectory, LogsDirectory,
             RegistryDirectory, SecretsDirectory, ArchiveDirectory, BackupsDirectory, ReviewDirectory, TurnsDirectory,
             ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
-            StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, UsageDirectory,
+            StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, SearchArtifactsDirectory, UsageDirectory,
             ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
         })
         {

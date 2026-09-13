@@ -66,7 +66,7 @@ public sealed partial class SessionCoordinator
     {
         var mind = _services.Mind!;
         var sink = new TaskSink(this, task);
-        var tools = new ToolBroker(ToolSources, sink, int.MaxValue); // the loop's own budget governs; the broker just serves
+        var tools = new ToolBroker(ToolSourcesFor(task), sink, int.MaxValue); // the loop's own budget governs; the broker just serves
         var context = MindContextOf(task.Origin == TaskOrigin.Direct ? ActionCatalog.ForDirect : ActionCatalog.ForObserved, RecallFor(task));
         var decider = new Decider(_services.Decisions, d => RecordDecision(task, d));
         var host = new MindHost(this, task, sink, tools);

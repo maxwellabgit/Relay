@@ -20,9 +20,15 @@ public sealed class ToolSources
     public required IDraftNoteStore Drafts { get; init; }
     public required SearchIndex Index { get; init; }
     public ExcerptStore? Excerpts { get; init; }
-    /// <summary>Reads a stored external artifact by id; null when none is configured.</summary>
+    /// <summary>Reads a stored external or search artifact by id; null when none is configured.</summary>
     public Func<string, string?>? ReadArtifact { get; init; }
     public Func<CompiledPreferences>? Preferences { get; init; }
+    /// <summary>Online search provider (Gateway); null when search is not configured.</summary>
+    public ISearchClient? Search { get; init; }
+    /// <summary>Where web_search stores citable hit artifacts; null when search storage is not configured.</summary>
+    public SearchArtifacts? SearchArtifacts { get; init; }
+    /// <summary>Standing grant or a per-task approval that allows online search for this tool call.</summary>
+    public Func<bool>? OnlineSearchGranted { get; init; }
 }
 
 /// <summary>
@@ -51,11 +57,12 @@ public sealed class ToolBroker
     [
         new("list_projects", "Active and archived projects with slug, name, aliases, and folder.", []),
         new("search", "Search selected conversation excerpts, draft notes, and project notes for words. Returns excerpts with source spans.", ["query", "project?", "limit?", "exclude?"]),
+        new("web_search", "Search the web through Relay's search provider. Requires a standing online-search grant or a per-task approval. Returns hit artifact ids; open one with read_artifact to cite it.", ["query", "limit?"]),
         new("read_note", "Read one canonical project note by id.", ["projectId", "noteId"]),
         new("project_notes", "List the notes of one project (id, type, status, first line).", ["projectId", "type?"]),
         new("list_draft_notes", "Draft notes still waiting in staging (the inbox).", []),
         new("read_excerpt", "Read a retained conversation excerpt by id (the words a task was triggered by).", ["excerptId"]),
-        new("read_artifact", "Read a stored external response artifact by id.", ["artifactId"]),
+        new("read_artifact", "Read a stored external response or web-search hit artifact by id.", ["artifactId"]),
         new("preferences", "The user's compiled preferences: response style, watched terms, standing grants, source permissions.", []),
     ];
 
@@ -79,6 +86,7 @@ public sealed class ToolBroker
             {
                 "list_projects" => ListProjects(),
                 "search" => Search(args),
+                "web_search" => WebSearch(args),
                 "read_note" => ReadNote(args),
                 "project_notes" => ProjectNotes(args),
                 "list_draft_notes" => ListDrafts(),
@@ -127,6 +135,39 @@ public sealed class ToolBroker
         }
         var data = hits.Select(h => new { kind = h.Kind, id = h.Id, projectSlug = h.ProjectSlug, type = h.Type, status = h.Status, excerpt = h.Excerpt, span = h.Span, at = h.At }).ToList();
         return new ToolResult(true, summary, data, null, hits);
+    }
+
+    private ToolResult WebSearch(IReadOnlyDictionary<string, string> args)
+    {
+        if (_sources.OnlineSearchGranted?.Invoke() != true)
+            return ToolResult.Fail("Online search is not granted. Set sources.allowOnlineSearch, or get a per-task approval (a model.request with allowSearch), then try again.");
+        if (_sources.Search is null || _sources.SearchArtifacts is null)
+            return ToolResult.Fail("Online search is not configured. Enable search in settings with an https endpoint and a secret, then try again.");
+        if (!args.TryGetValue("query", out var query) || string.IsNullOrWhiteSpace(query)) return ToolResult.Fail("web_search needs 'query'.");
+        var limit = args.TryGetValue("limit", out var l) && int.TryParse(l, out var parsed) ? Math.Clamp(parsed, 1, 20) : 8;
+
+        SearchResponse response;
+        try
+        {
+            response = _sources.Search.SearchAsync(new SearchRequest(query.Trim(), limit), CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or IOException)
+        {
+            return ToolResult.Fail(ex.GetType().Name + ": " + ex.Message);
+        }
+        if (!response.Ok) return ToolResult.Fail(response.Error ?? "search failed");
+
+        var stored = new List<object>();
+        var citeHits = new List<SearchHit>();
+        foreach (var hit in response.Hits)
+        {
+            var artifact = _sources.SearchArtifacts.Store(query.Trim(), hit, _sources.Search.Host);
+            var text = SearchArtifacts.Format(artifact);
+            _sources.Index.IndexArtifact(artifact.ArtifactId, text, artifact.At);
+            stored.Add(new { id = artifact.ArtifactId, title = artifact.Title, url = artifact.Url, snippet = FirstLine(artifact.Snippet) });
+            citeHits.Add(new SearchHit(SearchIndex.ArtifactKind, artifact.ArtifactId, null, null, "search", FirstLine(text), 1, null, artifact.At, text));
+        }
+        return new ToolResult(true, $"{stored.Count} hit(s) for \"{query.Trim()}\" (open with read_artifact to cite)", stored, null, citeHits);
     }
 
     private ToolResult ReadNote(IReadOnlyDictionary<string, string> args)

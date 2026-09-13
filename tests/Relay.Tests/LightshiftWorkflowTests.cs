@@ -58,7 +58,15 @@ public class LightshiftWorkflowTests : IDisposable
         s.Model.Enabled = true;
         s.Listening.Enabled = listening;
         if (profile)
+        {
             s.ExternalModels.Add(new ExternalModelProfile { Name = "research", Endpoint = "https://api.example.test/v1/chat/completions", Model = "gpt-5-nano", SecretName = "external-research", SupportsSearch = search });
+            if (search)
+            {
+                s.Search.Enabled = true;
+                s.Search.Endpoint = "https://search.test/v1/web/search";
+                s.Search.SecretName = "search";
+            }
+        }
     }
 
     /// <summary>

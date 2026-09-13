@@ -30,6 +30,8 @@ public sealed class RuntimeOptions
 {
     /// <summary>Builds a chat client for a model endpoint (RELAY0's own, or an external profile). Null keeps everything local and heuristic.</summary>
     public Func<ModelSettings, IModelClient?>? ModelClientFactory { get; init; }
+    /// <summary>Builds the online search client when search is enabled; null keeps web_search unavailable.</summary>
+    public Func<SearchSettings, ISearchClient?>? SearchClientFactory { get; init; }
     /// <summary>Builds the process host for workers (job object on Windows); null or a null result disables workers.</summary>
     public Func<RelaySettings, IWorkerHost?>? WorkerHostFactory { get; init; }
     /// <summary>The protected secret store for API keys; null when the host has none.</summary>
@@ -93,16 +95,39 @@ public sealed class RelayRuntime : IDisposable
         }
 
         ExternalRuntime? external = null;
+        SearchArtifacts? searchArtifacts = null;
+        ISearchClient? searchClient = null;
         CoordinatorServices? servicesRef = null;
+        if (settings.Settings.Search.Enabled && options.SearchClientFactory is { } searchFactory)
+        {
+            searchClient = searchFactory(settings.Settings.Search);
+            if (searchClient is not null)
+            {
+                searchArtifacts = new SearchArtifacts(root, () => clock.UtcNow);
+                foreach (var (id, text, at) in searchArtifacts.All()) index.IndexArtifact(id, text, at);
+            }
+        }
         if (options.ModelClientFactory is { } factory)
         {
             external = new ExternalRuntime(root, settings.Settings.ExternalModels, profile => factory(profile.AsModelSettings()) ?? throw new ArgumentException("no client for profile " + profile.Name),
-                () => new ToolSources { Registry = registry, Drafts = notes, Index = servicesRef!.Index, Excerpts = excerpts, ReadArtifact = id => servicesRef!.External!.ReadArtifact(id), Preferences = () => preferences.Compiled() },
+                () => new ToolSources
+                {
+                    Registry = registry,
+                    Drafts = notes,
+                    Index = servicesRef!.Index,
+                    Excerpts = excerpts,
+                    ReadArtifact = id => servicesRef!.SearchArtifacts?.Read(id) ?? servicesRef!.External!.ReadArtifact(id),
+                    Preferences = () => preferences.Compiled(),
+                    Search = servicesRef!.Search,
+                    SearchArtifacts = servicesRef!.SearchArtifacts,
+                    OnlineSearchGranted = () => preferences.Compiled().AllowOnlineSearch,
+                },
                 scheduler, () => clock.UtcNow)
             {
                 // Replies are digested into feed lines by RELAY0 (digest.md); with the local model off, the digest is the reply's own first lines.
                 Digester = () => current.Model.Enabled ? factory(current.Model) : null,
                 DigestInstructions = () => AtomicFile.ReadAllTextIfExists(Path.Combine(root.PromptsDirectory, Digest.PromptName + ".md")),
+                SearchAvailable = searchClient is not null,
             };
             foreach (var (id, text, at) in external.AllArtifacts()) index.IndexArtifact(id, text, at);
         }
@@ -120,6 +145,8 @@ public sealed class RelayRuntime : IDisposable
             Workers = workers,
             Tools = tools,
             External = external,
+            Search = searchClient,
+            SearchArtifacts = searchArtifacts,
             Excerpts = excerpts,
             ChangeSets = changeSets,
             Preferences = preferences,
