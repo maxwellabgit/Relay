@@ -5,7 +5,9 @@ using Relay.Core.Mind;
 using Relay.Core.Policy;
 using Relay.Core.Session;
 using Relay.Core.State;
+using Relay.Core.Tasks;
 using Relay.Tests.Support;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 using static Relay.Core.Mind.ScriptedMind;
 
 namespace Relay.Tests;
@@ -71,14 +73,14 @@ public class WorkerTests : IDisposable
         mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
 
         s.Command("summarize atlas")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.LaunchWorker, "pending")
             .Approve(Actions.LaunchWorker)
-            .ExpectState(RelayState.Executing)              // the worker is a pending operation: the turn stays open and visible
+            .ExpectState(RelayState.Ready /*was Executing*/)              // the worker is a pending operation: the turn stays open and visible
             .ExpectEvent(EventTypes.AgentRunLaunched)
             .ExpectProposal(Actions.LaunchWorker, "executing")
             .Advance(TimeSpan.Zero)                          // the deferred start runs the whole worker inline
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")
             .ExpectProposal(Actions.LaunchWorker, "executed")
             .ExpectEvent(EventTypes.AgentRunLog)
@@ -111,10 +113,10 @@ public class WorkerTests : IDisposable
         Assert.False(File.Exists(artifact)); // derived content never lands in the project without its own approval
 
         s.Command("apply the summary to atlas")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.ApplyPatch, "pending")
             .Approve(Actions.ApplyPatch)
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")
             .ExpectEvent(EventTypes.PatchApplied);
         Assert.True(File.Exists(artifact));
@@ -122,8 +124,8 @@ public class WorkerTests : IDisposable
         Assert.True(AgentRunStatus.Load(spec.StagingPath)!.Applied);
 
         // Applying again over an existing artifact versions the previous file instead of overwriting it.
-        s.Command("summarize atlas").Approve(Actions.LaunchWorker).Advance(TimeSpan.Zero).ExpectState(RelayState.Completed)
-         .Command("apply the summary to atlas").Approve(Actions.ApplyPatch).ExpectState(RelayState.Completed);
+        s.Command("summarize atlas").Approve(Actions.LaunchWorker).Advance(TimeSpan.Zero).ExpectState(RelayState.Ready)
+         .Command("apply the summary to atlas").Approve(Actions.ApplyPatch).ExpectState(RelayState.Ready);
         var versions = Path.Combine(project.RootPath, ".orchestrator", "versions", "artifacts");
         Assert.Single(Directory.EnumerateFiles(versions));
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.PatchApplied && r.DataString("previousVersionPath") is not null);
@@ -139,7 +141,8 @@ public class WorkerTests : IDisposable
 
         s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.AgentRunToolDenied, atLeast: 9)
             .ExpectEvent(EventTypes.AgentRunTerminated)
             .ExpectNoEvent(EventTypes.PatchApplied);
@@ -161,10 +164,10 @@ public class WorkerTests : IDisposable
         Assert.Equal("terminated", AgentRunStatus.Load(spec.StagingPath)!.State);
 
         // A terminated run's output can never be applied: the run wrote a summary, and the operation refuses it anyway.
-        s.Dismiss().ExpectState(RelayState.Idle)
+        s.Dismiss().ExpectState(RelayState.Ready)
          .Command("apply the summary to atlas")
          .Approve(Actions.ApplyPatch)
-         .ExpectState(RelayState.Failed)
+         .ExpectState(RelayState.Ready)
          .ExpectProposal(Actions.ApplyPatch, "failed")
          .ExpectNoEvent(EventTypes.PatchApplied);
         Assert.Contains("did not complete", Assert.Single(s.Response.Proposals, p => p.Action == Actions.ApplyPatch).Error);
@@ -180,11 +183,12 @@ public class WorkerTests : IDisposable
 
         s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
-            .ExpectState(RelayState.Executing)
+            .ExpectState(RelayState.Ready /*was Executing*/)
             .Advance(TimeSpan.FromSeconds(4))
-            .ExpectState(RelayState.Executing)
+            .ExpectState(RelayState.Ready /*was Executing*/)
             .Advance(TimeSpan.FromSeconds(2))
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.AgentRunTerminated);
         Assert.Contains("wall clock limit of 5s", s.H.Last(EventTypes.AgentRunTerminated)!.DataString("reason"));
         Assert.Equal(0, s.H.Workers!.ActiveRuns);
@@ -200,11 +204,11 @@ public class WorkerTests : IDisposable
 
         s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
-            .ExpectState(RelayState.Executing)
+            .ExpectState(RelayState.Ready /*was Executing*/)
             .Cancel()
             .ExpectEvent(EventTypes.ExecutionStopRequested)
             .ExpectEvent(EventTypes.AgentRunTerminated)
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("stopped");
         Assert.Null(s.Snap.Incident);
         Assert.Contains("Stopped", s.Snap.Receipt);
@@ -221,11 +225,11 @@ public class WorkerTests : IDisposable
 
         s.Command("summarize atlas").Approve(Actions.LaunchWorker)
             .Advance(TimeSpan.Zero)
-            .ExpectState(RelayState.Executing)
+            .ExpectState(RelayState.Ready /*was Executing*/)
             .Restart();
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.AgentRunTerminated);
         Assert.Equal(0, s.H.Workers!.ActiveRuns);
-        s.ExpectState(RelayState.Idle);
+        s.ExpectState(RelayState.Ready);
     }
 
     [Fact]
@@ -238,7 +242,7 @@ public class WorkerTests : IDisposable
         mind.Always(WorkerMoves(() => host.Started.LastOrDefault()?.RunId));
 
         s.Command("summarize atlas")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("denied")
             .ExpectProposal(Actions.LaunchWorker, "denied")
             .ExpectAnswerContains("Workers are disabled in settings")
@@ -270,14 +274,14 @@ public class WorkerTests : IDisposable
             h.Coordinator.TextChanged("summarize atlas");
             h.Coordinator.PressCommandKey();
             h.Scheduler.Advance(TimeSpan.FromSeconds(2));
-            Assert.True(h.Scheduler.PumpUntil(() => h.Snap.State == RelayState.AwaitingApproval, TimeSpan.FromSeconds(10)), "the mind did not finish; state " + h.Snap.State);
+            Assert.True(h.Scheduler.PumpUntil(() => h.Snap.PendingProposals.Any() || h.Snap.Response?.Status == Relay.Core.Tasks.TaskStatus.AwaitingApproval, TimeSpan.FromSeconds(10)), "the mind did not finish; state " + h.Snap.State);
             h.Coordinator.ApproveAll();
-            Assert.Equal(RelayState.Executing, h.Snap.State);
+            Assert.Equal(RelayState.Ready /*was Executing*/, h.Snap.State);
             h.Scheduler.Advance(TimeSpan.Zero); // starts the real process
 
-            var finished = h.Scheduler.PumpUntil(() => h.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(90));
+            var finished = h.Scheduler.PumpUntil(() => h.Snap.Response is null or { Live: false }, TimeSpan.FromSeconds(90));
             Assert.True(finished, "worker did not finish in time; state " + h.Snap.State);
-            Assert.Equal(RelayState.Completed, h.Snap.State);
+            Assert.Equal(RelayState.Ready, h.Snap.State);
             Assert.Equal("executed", h.Snap.Response!.Outcome);
 
             var launched = h.Last(EventTypes.AgentRunLaunched)!;

@@ -24,41 +24,31 @@ public class TransitionTableTests
         }
     }
 
-    [Theory]
-    [InlineData(RelayState.NoteCapture, Trigger.CommandKey)]
-    [InlineData(RelayState.CommandCapture, Trigger.NoteKey)]
-    public void TheOtherKeyDuringCaptureNeitherSwitchesNorSubmits(RelayState state, Trigger otherKey)
+    [Fact]
+    public void RecoveryMovesStartingToReadyOrLocked()
     {
-        var t = TransitionTable.Next(state, otherKey);
-        Assert.False(t.Accepted);
-        Assert.Equal(state, t.To);
-        Assert.Equal(TransitionTable.FinishOrCancelFirst, t.Message);
+        Assert.Equal(RelayState.Ready, TransitionTable.Next(RelayState.Starting, Trigger.RecoveryCompleted).To);
+        Assert.Equal(RelayState.Locked, TransitionTable.Next(RelayState.Starting, Trigger.RecoveryLocked).To);
+        Assert.False(TransitionTable.Next(RelayState.Starting, Trigger.Cancel).Accepted);
+        Assert.Equal(TransitionTable.StartingMessage, TransitionTable.Next(RelayState.Starting, Trigger.Dismiss).Message);
     }
 
     [Fact]
-    public void OnePressStartsAndTheSamePressStops()
+    public void ReadyAcceptsDismissAndCancelWithoutLeaving()
     {
-        Assert.Equal(RelayState.NoteCapture, TransitionTable.Next(RelayState.Idle, Trigger.NoteKey).To);
-        Assert.Equal(RelayState.AwaitingTranscript, TransitionTable.Next(RelayState.NoteCapture, Trigger.NoteKey).To);
-        Assert.Equal(RelayState.CommandCapture, TransitionTable.Next(RelayState.Idle, Trigger.CommandKey).To);
-        Assert.Equal(RelayState.AwaitingTranscript, TransitionTable.Next(RelayState.CommandCapture, Trigger.CommandKey).To);
-    }
-
-    [Theory]
-    [InlineData(RelayState.NoteCapture)]
-    [InlineData(RelayState.CommandCapture)]
-    [InlineData(RelayState.AwaitingTranscript)]
-    public void CancelReturnsToIdleFromEveryCaptureState(RelayState state)
-    {
-        var t = TransitionTable.Next(state, Trigger.Cancel);
-        Assert.True(t.Accepted);
-        Assert.Equal(RelayState.Idle, t.To);
+        Assert.Equal(RelayState.Ready, TransitionTable.Next(RelayState.Ready, Trigger.Dismiss).To);
+        Assert.Equal(RelayState.Ready, TransitionTable.Next(RelayState.Ready, Trigger.Cancel).To);
+        Assert.False(TransitionTable.Next(RelayState.Ready, Trigger.Retry).Accepted);
+        Assert.False(TransitionTable.Next(RelayState.Ready, Trigger.Unlock).Accepted);
     }
 
     [Fact]
-    public void OrganizingCannotBeCancelled()
+    public void FailedOnlyLeavesThroughDismissOrRetry()
     {
-        Assert.False(TransitionTable.Next(RelayState.Organizing, Trigger.Cancel).Accepted);
+        Assert.Equal(RelayState.Ready, TransitionTable.Next(RelayState.Failed, Trigger.Dismiss).To);
+        Assert.Equal(RelayState.Ready, TransitionTable.Next(RelayState.Failed, Trigger.Retry).To);
+        Assert.False(TransitionTable.Next(RelayState.Failed, Trigger.Cancel).Accepted);
+        Assert.Equal(TransitionTable.InspectFailureFirst, TransitionTable.Next(RelayState.Failed, Trigger.Unlock).Message);
     }
 
     [Fact]
@@ -73,69 +63,23 @@ public class TransitionTableTests
     }
 
     [Fact]
+    public void FailMovesToFailedExceptFromLockedOrFailed()
+    {
+        Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Ready, Trigger.Fail).To);
+        Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Starting, Trigger.Fail).To);
+        Assert.False(TransitionTable.Next(RelayState.Failed, Trigger.Fail).Accepted);
+        Assert.False(TransitionTable.Next(RelayState.Locked, Trigger.Fail).Accepted);
+    }
+
+    [Fact]
     public void LockedOnlyLeavesThroughExplicitUnlock()
     {
         foreach (var trigger in Enum.GetValues<Trigger>())
         {
             var t = TransitionTable.Next(RelayState.Locked, trigger);
-            if (trigger == Trigger.Unlock) Assert.Equal(RelayState.Idle, t.To);
+            if (trigger == Trigger.Unlock) Assert.Equal(RelayState.Ready, t.To);
+            else if (trigger == Trigger.Lock) Assert.False(t.Accepted);
             else Assert.False(t.Accepted);
         }
-    }
-
-    [Fact]
-    public void TurnStatesAreReachedOnlyThroughTheirDefinedPaths()
-    {
-        Assert.Equal(RelayState.Planning, TransitionTable.Next(RelayState.Organizing, Trigger.BeginPlanning).To);
-        Assert.Equal(RelayState.AwaitingApproval, TransitionTable.Next(RelayState.Planning, Trigger.ApprovalRequired).To);
-        Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.Planning, Trigger.BeginExecution).To);
-        Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.AwaitingApproval, Trigger.BeginExecution).To);
-        Assert.Equal(RelayState.Executing, TransitionTable.Next(RelayState.Idle, Trigger.BeginExecution).To);
-        // The ask box: a direct question from idle (or from a completed receipt) plans in the foreground without a capture.
-        Assert.Equal(RelayState.Planning, TransitionTable.Next(RelayState.Idle, Trigger.BeginPlanning).To);
-        Assert.Equal(RelayState.Planning, TransitionTable.Next(RelayState.Completed, Trigger.BeginPlanning).To);
-        Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.Planning, Trigger.PlanReady).To);
-        Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.AwaitingApproval, Trigger.AllRejected).To);
-        Assert.Equal(RelayState.Completed, TransitionTable.Next(RelayState.Executing, Trigger.ExecutionSucceeded).To);
-        Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Executing, Trigger.ExecutionFailed).To);
-        Assert.Equal(RelayState.Failed, TransitionTable.Next(RelayState.Planning, Trigger.PlanFailed).To);
-        // The mind's loop: an operation returned and the next move needs the user (a follow-up delegate request, a question).
-        Assert.Equal(RelayState.AwaitingApproval, TransitionTable.Next(RelayState.Executing, Trigger.ApprovalRequired).To);
-
-        // No capture state can jump straight into a turn state.
-        foreach (var state in new[] { RelayState.NoteCapture, RelayState.CommandCapture, RelayState.AwaitingTranscript })
-            foreach (var trigger in Enum.GetValues<Trigger>())
-            {
-                var t = TransitionTable.Next(state, trigger);
-                if (t.Accepted) Assert.False(t.To.IsTurnActive());
-            }
-    }
-
-    [Fact]
-    public void CancelDuringATurnStopsSafely()
-    {
-        Assert.Equal(RelayState.Idle, TransitionTable.Next(RelayState.Planning, Trigger.Cancel).To);
-        Assert.Equal(RelayState.Idle, TransitionTable.Next(RelayState.AwaitingApproval, Trigger.Cancel).To);
-        var executing = TransitionTable.Next(RelayState.Executing, Trigger.Cancel);
-        Assert.True(executing.Accepted);
-        Assert.Equal(RelayState.Executing, executing.To);
-        Assert.Equal(TransitionTable.StopRequested, executing.Message);
-    }
-
-    [Theory]
-    [InlineData(RelayState.Planning)]
-    [InlineData(RelayState.AwaitingApproval)]
-    [InlineData(RelayState.Executing)]
-    public void HotkeysAreRejectedDuringATurn(RelayState state)
-    {
-        Assert.False(TransitionTable.Next(state, Trigger.NoteKey).Accepted);
-        Assert.False(TransitionTable.Next(state, Trigger.CommandKey).Accepted);
-    }
-
-    [Fact]
-    public void KeysDuringAwaitingTranscriptAreRejectedWithGuidance()
-    {
-        Assert.Equal(TransitionTable.WaitingForTranscript, TransitionTable.Next(RelayState.AwaitingTranscript, Trigger.NoteKey).Message);
-        Assert.Equal(TransitionTable.WaitingForTranscript, TransitionTable.Next(RelayState.AwaitingTranscript, Trigger.CommandKey).Message);
     }
 }

@@ -204,15 +204,15 @@ public sealed partial class MainWindow : Window
         if (DiagnosticsExpander.IsExpanded) RenderDiagnostics();
 
         // The half-second tick keeps clocks, the buffer meter and live costs moving while anything is in flight.
-        var moving = s.State.IsCapturing() || s.State is RelayState.Planning or RelayState.Executing || s.Listening is not null || s.LiveTasks.Any();
+        var moving = s.Capture.IsCapturing() || s.Capture == CapturePhase.Organizing || s.TurnActive || s.Listening is not null || s.LiveTasks.Any();
         if (moving) { if (!_tick.IsRunning) _tick.Start(); }
         else if (_tick.IsRunning && !DiagnosticsExpander.IsExpanded) _tick.Stop();
     }
 
     private void RenderStatus(RelaySnapshot s)
     {
-        StateLabel.Text = s.State == RelayState.NoteCapture && s.Listening is not null ? "LISTENING" : s.State.Label();
-        StateDot.Fill = new SolidColorBrush(StateColor(s.State));
+        StateLabel.Text = s.Listening is not null ? "LISTENING" : s.State.Label();
+        StateDot.Fill = new SolidColorBrush(StateColor(s));
         ModeLabel.Text = s.Mode is { } m ? (m == CaptureMode.Note ? (s.Listening is not null ? "stream" : "silent note") : "instruction") : "";
         StateDetail.Text = StateDetailText(s);
 
@@ -287,70 +287,78 @@ public sealed partial class MainWindow : Window
         var pending = s.PendingProposals.Count();
         var background = s.LiveTasks.Count(t => !t.Foreground);
         var beside = background > 0 ? $" {background} task(s) running in the background." : "";
-        return s.State switch
-        {
-            RelayState.Starting => "Verifying the ledger and checking for interrupted work…",
-            RelayState.Idle => (s.NoteKey.Registered || s.CommandKey.Registered)
-                ? (s.ListeningEnabled
-                    ? $"Press {s.NoteKey.Chord} to listen or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
-                    : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording.") + beside
-                : "The chords are not active. See Review for the reason and fix hotkeys in settings.json, then restart Relay.",
-            RelayState.NoteCapture when s.Listening is { } l =>
-                $"Listening · {clock} · {l.HeldSegments} segment(s) held of {l.TotalSegments} heard · {l.Passes} pass(es) · {l.Raised} raised · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. The buffer expires continuously; only excerpts are kept." + beside,
-            RelayState.NoteCapture => $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply.",
-            RelayState.CommandCapture => $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels.",
-            RelayState.AwaitingTranscript => s.Awaiting?.TimedOut == true
+
+        if (s.State == RelayState.Starting) return "Verifying the ledger and checking for interrupted work…";
+        if (s.State == RelayState.Failed) return s.Incident?.Summary ?? "Work stopped without completing.";
+        if (s.State == RelayState.Locked) return s.Incident?.Summary ?? "Integrity protection stopped the system.";
+
+        if (s.Listening is { } l && s.Capture == CapturePhase.Capturing)
+            return $"Listening · {clock} · {l.HeldSegments} segment(s) held of {l.TotalSegments} heard · {l.Passes} pass(es) · {l.Raised} raised · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. The buffer expires continuously; only excerpts are kept." + beside;
+        if (s.Capture == CapturePhase.Capturing && s.Mode == CaptureMode.Note)
+            return $"Silent note · {clock} · {s.CaptureChars} chars · {focus}. Press {s.NoteKey.Chord} again to stop; Esc cancels. Relay will not reply." + beside;
+        if (s.Capture == CapturePhase.Capturing && s.Mode == CaptureMode.Command)
+            return $"Instruction · {clock} · {s.CaptureChars} chars · {focus}. Press {s.CommandKey.Chord} again to stop; Esc cancels." + beside;
+        if (s.Capture == CapturePhase.AwaitingTranscript)
+            return s.Awaiting?.TimedOut == true
                 ? $"No transcript arrived within the timeout ({s.CaptureChars} chars present). Retry wait, submit what is here, or cancel."
                 : s.Awaiting?.StabilizationPending == true
                     ? $"Text is arriving ({s.CaptureChars} chars). Submitting once it stops changing…"
-                    : $"Stop requested at {s.CaptureChars} chars. Waiting for Flow to insert the transcript…",
-            RelayState.Organizing => s.Mode == CaptureMode.Note
+                    : $"Stop requested at {s.CaptureChars} chars. Waiting for Flow to insert the transcript…";
+        if (s.Capture == CapturePhase.Organizing)
+            return s.Mode == CaptureMode.Note
                 ? (s.Listening is { Finishing: true } ? "Final check of what was heard, then the stream closes. Excerpts that were kept stay; the buffer is dropped." : "Storing the capture, extracting notes and routing them to projects. Confident matches are filed; uncertain ones go to Review.")
-                : "Storing the instruction verbatim before anything interprets it.",
-            RelayState.Planning => $"{s.OrchestratorName} is interpreting the instruction with read-only tools. Nothing changes until you approve. Esc cancels." + beside,
-            RelayState.AwaitingApproval => $"{pending} proposal(s) need your decision below. Nothing has changed yet." + beside,
-            RelayState.Executing => "Executing approved operation(s) with single-use capabilities. Each write is journaled and versioned." + beside,
-            RelayState.Completed => (s.Receipt ?? "Stored.") + beside,
-            RelayState.Failed => s.Incident?.Summary ?? "Work stopped without completing.",
-            RelayState.Locked => s.Incident?.Summary ?? "Integrity protection stopped the system.",
-            _ => "",
-        };
+                : "Storing the instruction verbatim before anything interprets it.";
+
+        if (s.Response is { Live: true, Status: TaskStatus.Planning })
+            return $"{s.OrchestratorName} is interpreting the instruction with read-only tools. Nothing changes until you approve. Esc cancels." + beside;
+        if (s.Response is { Live: true, Status: TaskStatus.AwaitingApproval })
+            return $"{pending} proposal(s) need your decision below. Nothing has changed yet." + beside;
+        if (s.Response is { Live: true, Status: TaskStatus.Executing })
+            return "Executing approved operation(s) with single-use capabilities. Each write is journaled and versioned." + beside;
+        if (s.Receipt is not null)
+            return s.Receipt + beside;
+
+        return (s.NoteKey.Registered || s.CommandKey.Registered)
+            ? (s.ListeningEnabled
+                ? $"Press {s.NoteKey.Chord} to listen or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording."
+                : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction{(s.NoteKey.WindowScoped ? " while this window is active" : "")}. Nothing is recording.") + beside
+            : "The chords are not active. See Review for the reason and fix hotkeys in settings.json, then restart Relay.";
     }
 
     private void RenderCapture(RelaySnapshot s)
     {
         var editable = s.SurfaceEditable;
-        var listening = s.State == RelayState.NoteCapture && s.Listening is not null;
+        var listening = s.Listening is not null;
         CaptureBox.IsReadOnly = !editable;
         CaptureHeader.Text = listening ? "LISTENING" : "CAPTURE";
-        CaptureBox.PlaceholderText = s.State switch
+        CaptureBox.PlaceholderText = s.Capture switch
         {
-            RelayState.NoteCapture when listening => "Talk with Flow or type. Words land here, are cut into lines and read; the buffer forgets them within the window.",
-            RelayState.NoteCapture => "Dictate with Flow or type. Text arrives here and nowhere else.",
-            RelayState.CommandCapture => "State your instruction. Relay records it exactly, then plans; nothing runs without approval.",
-            RelayState.AwaitingTranscript => "Waiting for the transcript to be inserted…",
-            RelayState.Locked => "Locked. Inspect the incident in Review, then unlock.",
-            RelayState.Failed => "Stopped. Inspect the failure in Review.",
+            CapturePhase.Capturing when listening => "Talk with Flow or type. Words land here, are cut into lines and read; the buffer forgets them within the window.",
+            CapturePhase.Capturing when s.Mode == CaptureMode.Note => "Dictate with Flow or type. Text arrives here and nowhere else.",
+            CapturePhase.Capturing => "State your instruction. Relay records it exactly, then plans; nothing runs without approval.",
+            CapturePhase.AwaitingTranscript => "Waiting for the transcript to be inserted…",
+            _ when s.State == RelayState.Locked => "Locked. Inspect the incident in Review, then unlock.",
+            _ when s.State == RelayState.Failed => "Stopped. Inspect the failure in Review.",
             _ => s.ListeningEnabled ? $"Press {s.NoteKey.Chord} to listen or {s.CommandKey.Chord} to give an instruction." : $"Press {s.NoteKey.Chord} to start a silent note or {s.CommandKey.Chord} to give an instruction.",
         };
 
-        if (!s.State.IsCapturing() && s.State != RelayState.Organizing && CaptureBox.Text.Length > 0 && s.State is RelayState.Idle or RelayState.Completed or RelayState.Locked)
+        if (!s.Capture.IsCapturing() && s.Capture != CapturePhase.Organizing && CaptureBox.Text.Length > 0 && s.State is RelayState.Ready or RelayState.Locked)
         {
             _suppressTextChanged = true;
             CaptureBox.Text = "";
             _suppressTextChanged = false;
         }
 
-        ReadyGreeting.Visibility = s.Mode == CaptureMode.Command && s.State is RelayState.CommandCapture or RelayState.AwaitingTranscript ? Visibility.Visible : Visibility.Collapsed;
-        FocusBar.IsOpen = s.State.IsCapturing() && !s.CaptureSurfaceFocused;
+        ReadyGreeting.Visibility = s.Mode == CaptureMode.Command && s.Capture is CapturePhase.Capturing or CapturePhase.AwaitingTranscript ? Visibility.Visible : Visibility.Collapsed;
+        FocusBar.IsOpen = s.Capture.IsCapturing() && !s.CaptureSurfaceFocused;
         CaptureMeta.Text = s.CaptureId is null ? "" : listening ? $"stream {Short(s.CaptureId)}" : $"capture {Short(s.CaptureId)} · {s.CaptureChars} chars";
 
         CancelButton.Visibility = Vis(s.CanCancel);
-        CancelButton.Content = s.State == RelayState.Executing ? "Stop  (Esc)" : listening ? "Discard stream  (Esc)" : "Cancel  (Esc)";
-        SubmitNowButton.Visibility = Vis(s.State == RelayState.AwaitingTranscript);
+        CancelButton.Content = s.TurnActive && s.Response?.Status == TaskStatus.Executing ? "Stop  (Esc)" : listening ? "Discard stream  (Esc)" : "Cancel  (Esc)";
+        SubmitNowButton.Visibility = Vis(s.Capture == CapturePhase.AwaitingTranscript);
         SubmitNowButton.IsEnabled = s.CanSubmitNow;
         RetryWaitButton.Visibility = Vis(s.CanRetryWait);
-        DismissButton.Visibility = Vis(s.State is RelayState.Completed or RelayState.Failed);
+        DismissButton.Visibility = Vis(s.State == RelayState.Failed || s.Receipt is not null || s.Incident is not null);
         RetryButton.Visibility = Vis(s.CanRetry);
         UnlockButton.Visibility = Vis(s.State == RelayState.Locked);
 
@@ -359,12 +367,14 @@ public sealed partial class MainWindow : Window
         NoticeText.Visibility = Vis(!string.IsNullOrEmpty(s.Notice));
 
         var canAsk = s.CanAsk && s.OrchestratorMode != OrchestratorSettings.Off;
-        AskPanel.Visibility = Vis(s.State is not (RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Locked or RelayState.Failed or RelayState.Starting));
+        var askVisible = s.State is not (RelayState.Locked or RelayState.Failed or RelayState.Starting)
+            && (listening || s.Capture is not (CapturePhase.Capturing or CapturePhase.AwaitingTranscript));
+        AskPanel.Visibility = Vis(askVisible);
         AskBox.IsEnabled = canAsk;
         AskButton.IsEnabled = canAsk;
         AskHint.Text = s.OrchestratorMode == OrchestratorSettings.Off ? "Relay's mind is off; enable it in Settings to ask."
             : listening ? "Ask without stopping the stream: the question runs beside it and the answer arrives as a card in Attention."
-            : s.State is RelayState.Idle or RelayState.Completed ? "A direct question or instruction, answered in Response. Nothing runs without approval."
+            : s.Capture == CapturePhase.None && !s.TurnActive ? "A direct question or instruction, answered in Response. Nothing runs without approval."
             : "Asked now, the question runs in the background and answers in Attention.";
     }
 
@@ -507,7 +517,7 @@ public sealed partial class MainWindow : Window
         if (_coordinator.SubmitDirect(text))
         {
             AskBox.Text = "";
-            if (_snapshot?.State == RelayState.NoteCapture) CaptureBox.Focus(FocusState.Programmatic);
+            if (_snapshot?.Listening is not null || _snapshot?.Capture == CapturePhase.Capturing) CaptureBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -611,12 +621,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static Color StateColor(RelayState state) => state switch
+    private static Color StateColor(RelaySnapshot s) => s.State switch
     {
-        RelayState.NoteCapture => Palette.Note,
-        RelayState.CommandCapture or RelayState.Planning => Palette.Command,
-        RelayState.AwaitingTranscript or RelayState.Organizing or RelayState.AwaitingApproval or RelayState.Executing => Palette.Warn,
-        RelayState.Completed => Palette.Good,
+        RelayState.Ready when s.Listening is not null => Palette.Note,
+        RelayState.Ready when s.Capture == CapturePhase.Capturing && s.Mode == CaptureMode.Note => Palette.Note,
+        RelayState.Ready when s.Capture == CapturePhase.Capturing => Palette.Command,
+        RelayState.Ready when s.Capture is CapturePhase.AwaitingTranscript or CapturePhase.Organizing => Palette.Warn,
+        RelayState.Ready when s.TurnActive && s.Response?.Status == TaskStatus.Planning => Palette.Command,
+        RelayState.Ready when s.TurnActive => Palette.Warn,
+        RelayState.Ready when s.Receipt is not null => Palette.Good,
+        RelayState.Ready => Palette.Good,
         RelayState.Failed or RelayState.Locked => Palette.Bad,
         _ => Palette.Neutral,
     };

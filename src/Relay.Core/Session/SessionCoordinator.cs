@@ -45,7 +45,8 @@ public sealed partial class SessionCoordinator
     private readonly SettingsStore.LoadResult _settingsLoad;
 
     private RelayState _state = RelayState.Starting;
-    private CaptureDraft? _draft;                 // the active capture (NoteCapture/CommandCapture/AwaitingTranscript/Organizing)
+    private CapturePhase _capture = CapturePhase.None;
+    private CaptureDraft? _draft;                 // the active capture while _capture is not None
     private string? _draftCommittedEventId;       // set once capture.committed has been written for _draft (idempotent retry)
     private CaptureDraft? _cancelledDraft;        // memory only, never written (contract §3.4)
     private CaptureDraft? _interruptedDraft;      // found at startup; file still in staging
@@ -291,24 +292,48 @@ public sealed partial class SessionCoordinator
     // Primary toggles
     // ----------------------------------------------------------------------------------------
 
-    public void PressNoteKey() => PressKey(Trigger.NoteKey, CaptureMode.Note, "NOTE_KEY");
-    public void PressCommandKey() => PressKey(Trigger.CommandKey, CaptureMode.Command, "COMMAND_KEY");
+    public void PressNoteKey() => PressKey(CaptureMode.Note, "NOTE_KEY");
+    public void PressCommandKey() => PressKey(CaptureMode.Command, "COMMAND_KEY");
 
-    private void PressKey(Trigger trigger, CaptureMode mode, string keyName)
+    private void PressKey(CaptureMode mode, string keyName)
     {
         if (_shutDown) return;
-        var before = _state;
-        var transition = Apply(trigger, keyName);
-        if (!transition.Accepted) { Notify(); return; }
+        if (_state != RelayState.Ready)
+        {
+            RejectHotkey(keyName, _state == RelayState.Starting ? TransitionTable.StartingMessage
+                : _state == RelayState.Locked ? TransitionTable.LockedMessage
+                : TransitionTable.InspectFailureFirst);
+            return;
+        }
 
-        if (before is RelayState.Idle or RelayState.Completed && _state is RelayState.NoteCapture or RelayState.CommandCapture)
+        if (_capture == CapturePhase.None)
         {
+            _capture = CapturePhase.Capturing;
             BeginCapture(mode);
+            Notify();
+            return;
         }
-        else if (before is RelayState.NoteCapture or RelayState.CommandCapture && _state == RelayState.AwaitingTranscript)
+
+        if (_capture == CapturePhase.Capturing && _draft?.Mode == mode)
         {
+            _capture = CapturePhase.AwaitingTranscript;
             RequestStop();
+            Notify();
+            return;
         }
+
+        if (_capture == CapturePhase.AwaitingTranscript)
+            RejectHotkey(keyName, "Waiting for the transcript to settle. Submit now, retry wait, or cancel.");
+        else if (_capture == CapturePhase.Organizing)
+            RejectHotkey(keyName, "Relay is still storing the capture.");
+        else
+            RejectHotkey(keyName, TransitionTable.FinishInstructionFirst);
+    }
+
+    private void RejectHotkey(string keyName, string reason)
+    {
+        _notice = reason;
+        Append(EventTypes.HotkeyRejected, new { key = keyName, state = _state.Label(), capture = _capture.Label(), reason });
         Notify();
     }
 
@@ -392,17 +417,18 @@ public sealed partial class SessionCoordinator
     {
         _stabilizationTimer = null;
         _stabilizationPending = false;
-        if (generation != _awaitGeneration || _state != RelayState.AwaitingTranscript || _draft is null || (_draft.Text.Length == 0 && !IsStreaming(_draft))) return;
+        if (generation != _awaitGeneration || _capture != CapturePhase.AwaitingTranscript || _draft is null || (_draft.Text.Length == 0 && !IsStreaming(_draft))) return;
         if (Append(EventTypes.CaptureTranscriptStable, new { captureId = _draft.CaptureId, chars = _draft.Text.Length }) is null) { Notify(); return; }
         StopAwaitingTimers();
-        if (Apply(Trigger.TranscriptStable).Accepted) Organize();
+        _capture = CapturePhase.Organizing;
+        Organize();
         Notify();
     }
 
     private void OnTranscriptTimeout(int generation)
     {
         _timeoutTimer = null;
-        if (generation != _awaitGeneration || _state != RelayState.AwaitingTranscript || _draft is null) return;
+        if (generation != _awaitGeneration || _capture != CapturePhase.AwaitingTranscript || _draft is null) return;
         if (_draft.Text.Length > 0 || IsStreaming(_draft))
         {
             // Text is present but never went quiet; treat the timeout as the stability boundary.
@@ -411,7 +437,6 @@ public sealed partial class SessionCoordinator
         }
         if (Append(EventTypes.CaptureTranscriptTimeout, new { captureId = _draft.CaptureId, waitedMs = _settings.Capture.TranscriptTimeoutMs, extensions = _awaitExtensions }) is null) { Notify(); return; }
         _awaitTimedOut = true;
-        Apply(Trigger.TranscriptTimeout);
         _notice = "No transcript arrived. If Flow shows your dictation, recover it from Flow and paste it here, or retry waiting. Relay does not read the clipboard.";
         Notify();
     }
@@ -432,7 +457,7 @@ public sealed partial class SessionCoordinator
 
     public void TextChanged(string text)
     {
-        if (_draft is null || !_state.IsCapturing()) return;
+        if (_draft is null || !_capture.IsCapturing()) return;
         if (string.Equals(_draft.Text, text, StringComparison.Ordinal)) return;
 
         _draft.Text = text;
@@ -453,7 +478,7 @@ public sealed partial class SessionCoordinator
             });
         }
 
-        if (_state == RelayState.AwaitingTranscript)
+        if (_capture == CapturePhase.AwaitingTranscript)
         {
             if (_awaitTimedOut && text.Length > 0)
             {
@@ -470,7 +495,7 @@ public sealed partial class SessionCoordinator
     {
         if (_surfaceFocused == focused) return;
         _surfaceFocused = focused;
-        if (_draft is not null && _state.IsCapturing())
+        if (_draft is not null && _capture.IsCapturing())
         {
             Append(focused ? EventTypes.CaptureFocusRegained : EventTypes.CaptureFocusLost, new { captureId = _draft.CaptureId });
         }
@@ -479,11 +504,12 @@ public sealed partial class SessionCoordinator
 
     public void Cancel()
     {
-        if (_state.IsTurnActive()) { CancelForegroundTask(); Notify(); return; }
-        if (_draft is null || !_state.CanCancelFrom()) { _notice = TransitionTable.Next(_state, Trigger.Cancel).Message; Notify(); return; }
-        var stateAtCancel = _state;
-        var transition = Apply(Trigger.Cancel);
-        if (!transition.Accepted) { Notify(); return; }
+        if (Foreground is not null && Foreground.IsLive) { CancelForegroundTask(); Notify(); return; }
+        if (_capture == CapturePhase.Organizing) { _notice = "Relay is still storing the capture."; Notify(); return; }
+        if (_draft is null || !_capture.IsCapturing()) { _notice = TransitionTable.Next(_state, Trigger.Cancel).Message; Notify(); return; }
+        var captureAtCancel = _capture;
+        _capture = CapturePhase.None;
+        Apply(Trigger.Cancel);
 
         StopAwaitingTimers();
         _draftPersistTimer?.Dispose();
@@ -497,7 +523,7 @@ public sealed partial class SessionCoordinator
         if (_stream is { } stream && stream.StreamId == draft.CaptureId)
         {
             // Listening cancelled: the window is dropped; excerpts and tasks already raised stand on their own.
-            Append(EventTypes.CaptureCancelled, new { captureId = draft.CaptureId, mode = draft.ModeWire, chars = draft.Text.Length, stateAtCancel = stateAtCancel.Label(), listening = true });
+            Append(EventTypes.CaptureCancelled, new { captureId = draft.CaptureId, mode = draft.ModeWire, chars = draft.Text.Length, stateAtCancel = captureAtCancel.Label(), listening = true });
             CompleteStream(stream, "cancelled");
             _cancelledDraft = null;
             Notify();
@@ -509,7 +535,7 @@ public sealed partial class SessionCoordinator
             captureId = draft.CaptureId,
             mode = draft.ModeWire,
             chars = draft.Text.Length,
-            stateAtCancel = stateAtCancel.Label(),
+            stateAtCancel = captureAtCancel.Label(),
         });
 
         try { _drafts.RemoveCurrent(); }
@@ -521,26 +547,26 @@ public sealed partial class SessionCoordinator
 
     public void SubmitNow()
     {
-        if (_state != RelayState.AwaitingTranscript || _draft is null || _draft.Text.Length == 0)
+        if (_capture != CapturePhase.AwaitingTranscript || _draft is null || _draft.Text.Length == 0)
         {
-            _notice = _draft is { Text.Length: 0 } ? "Nothing has arrived yet." : TransitionTable.Next(_state, Trigger.SubmitNow).Message;
+            _notice = _draft is { Text.Length: 0 } ? "Nothing has arrived yet." : "Submit now is only available while waiting for the transcript.";
             Notify();
             return;
         }
         if (Append(EventTypes.CaptureSubmittedEarly, new { captureId = _draft.CaptureId, chars = _draft.Text.Length }) is null) { Notify(); return; }
         StopAwaitingTimers();
-        if (Apply(Trigger.SubmitNow).Accepted) Organize();
+        _capture = CapturePhase.Organizing;
+        Organize();
         Notify();
     }
 
     public void RetryWait()
     {
-        if (_state != RelayState.AwaitingTranscript || _draft is null) { Notify(); return; }
+        if (_capture != CapturePhase.AwaitingTranscript || _draft is null) { Notify(); return; }
         if (Append(EventTypes.CaptureWaitExtended, new { captureId = _draft.CaptureId, extensions = _awaitExtensions + 1 }) is null) { Notify(); return; }
         _awaitExtensions++;
         _awaitTimedOut = false;
         _notice = null;
-        Apply(Trigger.RetryWait);
         StartAwaitingTimers(restartTimeout: true);
         Notify();
     }
@@ -551,7 +577,7 @@ public sealed partial class SessionCoordinator
 
     private void Organize()
     {
-        if (_state != RelayState.Organizing || _draft is null) return;
+        if (_capture != CapturePhase.Organizing || _draft is null) return;
         var draft = _draft;
 
         if (_stream is { } stream && stream.StreamId == draft.CaptureId)
@@ -610,19 +636,21 @@ public sealed partial class SessionCoordinator
             var sourceEventId = _draftCommittedEventId;
             _draft = null;
             _draftCommittedEventId = null;
+            _capture = CapturePhase.None;
             if (startTurn)
             {
-                StartCommandTask(draft, sourceEventId);
+                StartCommandTask(draft, sourceEventId!);
                 return;
             }
-            if (Apply(Trigger.OrganizeSucceeded).Accepted) ShowReceipt(receipt);
+            ShowReceipt(receipt);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             Append(EventTypes.CaptureOrganizeFailed, new { captureId = draft.CaptureId, error = ex.Message, committed = _draftCommittedEventId is not null });
             _incident = new IncidentInfo("organize_failed", "Could not store the capture", ex.ToString(), _clock.UtcNow, null);
             _retryable = true;
-            Apply(Trigger.OrganizeFailed);
+            _capture = CapturePhase.None;
+            Apply(Trigger.Fail);
         }
     }
 
@@ -651,7 +679,7 @@ public sealed partial class SessionCoordinator
         _receiptTimer = _scheduler.Schedule(TimeSpan.FromMilliseconds(_settings.Capture.CompletedReceiptMs), () =>
         {
             _receiptTimer = null;
-            if (_state == RelayState.Completed) { Apply(Trigger.Dismiss); Notify(); }
+            if (_state == RelayState.Ready && _receipt is not null) { _receipt = null; Notify(); }
         });
     }
 
@@ -661,13 +689,19 @@ public sealed partial class SessionCoordinator
 
     public void CommitInterrupted()
     {
-        if (_interruptedDraft is null || _state != RelayState.Idle) { _notice = _interruptedDraft is null ? "No interrupted capture." : "Return to IDLE first."; Notify(); return; }
+        if (_interruptedDraft is null || _state != RelayState.Ready || _capture != CapturePhase.None)
+        {
+            _notice = _interruptedDraft is null ? "No interrupted capture." : _capture != CapturePhase.None ? TransitionTable.FinishInstructionFirst : "Return to Ready first.";
+            Notify();
+            return;
+        }
         _draft = _interruptedDraft;
         _interruptedDraft = null;
         _draftCommittedEventId = null;
         _receiptTimer?.Dispose();
         _receipt = null;
-        if (Apply(Trigger.CommitInterrupted).Accepted) Organize();
+        _capture = CapturePhase.Organizing;
+        Organize();
         Notify();
     }
 
@@ -690,7 +724,12 @@ public sealed partial class SessionCoordinator
 
     public void RecoverCancelledDraft()
     {
-        if (_cancelledDraft is null || _state != RelayState.Idle) { _notice = _cancelledDraft is null ? "No cancelled draft to recover." : "Return to IDLE first."; Notify(); return; }
+        if (_cancelledDraft is null || _state != RelayState.Ready || _capture != CapturePhase.None)
+        {
+            _notice = _cancelledDraft is null ? "No cancelled draft to recover." : _capture != CapturePhase.None ? TransitionTable.FinishInstructionFirst : "Return to Ready first.";
+            Notify();
+            return;
+        }
         var original = _cancelledDraft;
         _cancelledDraft = null;
         var now = _clock.UtcNow;
@@ -709,7 +748,8 @@ public sealed partial class SessionCoordinator
         PersistDraftNow();
         _receiptTimer?.Dispose();
         _receipt = null;
-        if (Apply(Trigger.RecoverDraft).Accepted) Organize();
+        _capture = CapturePhase.Organizing;
+        Organize();
         Notify();
     }
 
@@ -721,11 +761,11 @@ public sealed partial class SessionCoordinator
 
     public void Dismiss()
     {
-        if (_state is RelayState.Completed or RelayState.Failed)
+        if (_state == RelayState.Failed)
         {
             _receiptTimer?.Dispose();
             _receiptTimer = null;
-            if (_state == RelayState.Failed && _draft is not null)
+            if (_draft is not null)
             {
                 if (_draftCommittedEventId is not null)
                 {
@@ -739,9 +779,18 @@ public sealed partial class SessionCoordinator
                 }
                 _draft = null;
                 _draftCommittedEventId = null;
+                _capture = CapturePhase.None;
             }
             _incident = null;
             _receipt = null;
+            Apply(Trigger.Dismiss);
+        }
+        else if (_state == RelayState.Ready)
+        {
+            _receiptTimer?.Dispose();
+            _receiptTimer = null;
+            _receipt = null;
+            _incident = null;
             Apply(Trigger.Dismiss);
         }
         Notify();
@@ -755,7 +804,11 @@ public sealed partial class SessionCoordinator
         if (!CanRetry) { Dismiss(); return; }
         _incident = null;
         _retryable = false;
-        if (Apply(Trigger.Retry).Accepted) Organize();
+        if (Apply(Trigger.Retry).Accepted)
+        {
+            _capture = CapturePhase.Organizing;
+            Organize();
+        }
         Notify();
     }
 
@@ -808,7 +861,7 @@ public sealed partial class SessionCoordinator
             CompleteStream(stream, "failed");
             if (_draft is not null && _draft.CaptureId == stream.StreamId) { _draft = null; _draftCommittedEventId = null; }
         }
-        else if (_draft is not null && _state.IsCapturing())
+        else if (_draft is not null && _capture.IsCapturing())
         {
             StopAwaitingTimers();
             if (_draftDirty) PersistDraftNow();
@@ -834,7 +887,7 @@ public sealed partial class SessionCoordinator
             // A clean exit while listening closes the stream; the window is dropped, not kept.
             CompleteStream(stream, "shutdown:" + reason);
         }
-        else if (_draft is not null && _state.IsCapturing() && _draftDirty) PersistDraftNow();
+        else if (_draft is not null && _capture.IsCapturing() && _draftDirty) PersistDraftNow();
 
         foreach (var task in _tasks.Where(t => t.IsLive).ToList())
         {
@@ -856,7 +909,7 @@ public sealed partial class SessionCoordinator
         {
             reason,
             finalState = _state.Label(),
-            activeCaptureId = _draft is not null && _state.IsCapturing() ? _draft.CaptureId : null,
+            activeCaptureId = _draft is not null && _capture.IsCapturing() ? _draft.CaptureId : null,
         });
 
         if (_sessionRecord is not null)
@@ -1010,12 +1063,13 @@ public sealed partial class SessionCoordinator
 
             return new RelaySnapshot(
                 _state,
-                _state is RelayState.Idle or RelayState.Locked or RelayState.Starting ? null : _draft?.Mode,
+                _capture,
+                _capture == CapturePhase.None ? null : _draft?.Mode,
                 _draft?.CaptureId,
                 _draft?.StartedAt,
                 _draft?.Text.Length ?? 0,
                 _surfaceFocused,
-                _state == RelayState.AwaitingTranscript ? new AwaitingStatus(_awaitTimedOut, _awaitExtensions, _stabilizationPending) : null,
+                _capture == CapturePhase.AwaitingTranscript ? new AwaitingStatus(_awaitTimedOut, _awaitExtensions, _stabilizationPending) : null,
                 _notice,
                 _receipt,
                 _incident,
@@ -1052,10 +1106,4 @@ public sealed partial class SessionCoordinator
                 _services.External?.ProfileNames ?? []);
         }
     }
-}
-
-internal static class StateGuards
-{
-    public static bool CanCancelFrom(this RelayState state)
-        => state is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript;
 }

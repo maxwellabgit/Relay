@@ -167,7 +167,7 @@ public class ObservingTests : IDisposable
             .ExpectEvent(EventTypes.ObserveChecked)
             .ExpectNoEvent(EventTypes.ObserveRaised)
             .StopListening()
-            .ExpectState(RelayState.Completed);
+            .ExpectState(RelayState.Ready);
         _output.WriteLine(s.Transcript());
 
         // The mind read the stream, and every request it took was a listening pass.

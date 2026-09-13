@@ -231,7 +231,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         _lastForeground = task;
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: draft.Text.Length)) is null) return;
         PersistTask(task);
-        if (!Apply(Trigger.BeginPlanning).Accepted) return;
         BeginTask(task);
     }
 
@@ -250,9 +249,8 @@ public sealed partial class SessionCoordinator : IExecutionSink
         // A task waiting for the user's answer gets the typed text as its reply, in the same box.
         if (Foreground is { Loop: not null } waitingTask && waitingTask.Loop.WaitingFor == Mind.Waits.User) return AnswerMind(waitingTask.TaskId, text);
         var now = _clock.UtcNow;
-        var foreground = _state is RelayState.Idle or RelayState.Completed;
-        if (foreground && Foreground is not null) foreground = false;
-        var source = Append(EventTypes.AskRecorded, new { text, chars = text.Length, whileListening = _state == RelayState.NoteCapture, foreground });
+        var foreground = _state == RelayState.Ready && _capture == CapturePhase.None && Foreground is null;
+        var source = Append(EventTypes.AskRecorded, new { text, chars = text.Length, whileListening = _stream is not null, foreground });
         if (source is null) { Notify(); return false; }
         var task = NewTask(TaskOrigin.Direct, DirectKind, "ask", "", source.Id, text, foreground, title: Truncate(text, 80));
         if (foreground)
@@ -263,11 +261,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         }
         if (Append(EventTypes.TaskCreated, TaskCreatedPayload(task, chars: text.Length)) is null) return false;
         PersistTask(task);
-        if (foreground)
-        {
-            if (_state == RelayState.Completed) Apply(Trigger.Dismiss);
-            if (!Apply(Trigger.BeginPlanning).Accepted) { _tasks.Remove(task); Notify(); return false; }
-        }
         BeginTask(task);
         Notify();
         return true;
@@ -437,7 +430,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
             var entering = task.Status != TaskStatus.AwaitingApproval;
             task.Status = TaskStatus.AwaitingApproval;
             PersistTask(task);
-            if (task.Foreground && _state == RelayState.Planning) Apply(Trigger.ApprovalRequired);
             if (entering && !task.Foreground) PresentTask(task, interim: true);
             return;
         }
@@ -445,7 +437,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         {
             task.Status = TaskStatus.Executing;
             PersistTask(task);
-            if (task.Foreground && _state is RelayState.Planning or RelayState.AwaitingApproval) Apply(Trigger.BeginExecution);
             RunExecutionQueue(task);
             return;
         }
@@ -549,7 +540,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
             var firstError = task.Proposals.First(p => p.Status == "failed");
             _incident = new IncidentInfo("execution_failed", $"{firstError.Proposal.Action} failed", firstError.Result?.Error ?? "unknown", _clock.UtcNow, null);
             _retryable = false;
-            Apply(_state == RelayState.Executing ? Trigger.ExecutionFailed : Trigger.PlanFailed);
             return;
         }
 
@@ -562,12 +552,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
             "answered" => "Answered · no changes made",
             _ => "Handled · no changes made",
         };
-        switch (_state)
-        {
-            case RelayState.Executing: Apply(Trigger.ExecutionSucceeded); break;
-            case RelayState.AwaitingApproval: Apply(Trigger.AllRejected); break;
-            case RelayState.Planning: Apply(Trigger.PlanReady); break;
-        }
         ShowReceipt(receipt);
     }
 
@@ -584,7 +568,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
         if (!task.Foreground) return;
         _incident = new IncidentInfo(kind, summary, detail ?? summary, _clock.UtcNow, null);
         _retryable = false;
-        Apply(_state == RelayState.Executing ? Trigger.ExecutionFailed : Trigger.PlanFailed);
     }
 
     private void CancelForegroundTask()
@@ -890,9 +873,9 @@ public sealed partial class SessionCoordinator : IExecutionSink
     private bool RunUserOperation(string action, string title, Dictionary<string, string> target, string reason)
     {
         if (_shutDown) return false;
-        if (_state is not (RelayState.Idle or RelayState.Completed) || Foreground is not null)
+        if (_state != RelayState.Ready || _capture != CapturePhase.None || Foreground is not null)
         {
-            _notice = _state.IsTurnActive() || Foreground is not null ? TransitionTable.FinishInstructionFirst : "Return to IDLE first.";
+            _notice = Foreground is not null || _capture != CapturePhase.None ? TransitionTable.FinishInstructionFirst : "Return to Ready first.";
             Notify();
             return false;
         }
@@ -919,8 +902,6 @@ public sealed partial class SessionCoordinator : IExecutionSink
             Append(EventTypes.ApprovalGranted, new { taskId = task.TaskId, proposalId = proposal.ProposalId, action, proposalHash = proposal.Hash(), by = "user", implicitViaUi = true, target = ps.Decision.NormalizedTarget });
             ps.Status = "approved";
         }
-        if (_state == RelayState.Completed) Apply(Trigger.Dismiss);
-        if (!Apply(Trigger.BeginExecution).Accepted) { _tasks.Remove(task); Notify(); return false; }
         task.Status = TaskStatus.Executing;
         PersistTask(task);
         RunExecutionQueue(task);

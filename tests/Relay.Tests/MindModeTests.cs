@@ -45,7 +45,7 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Ask("what projects do I have?")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("answered")
             .ExpectAnswerContains("no projects yet")
             .ExpectEvent(EventTypes.MindStepped, 2)
@@ -82,13 +82,13 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Ask("create a project called Harbor")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.CreateProject, "pending")
             .ExpectEvent(EventTypes.LoopWaiting)
             .ExpectProject("harbor", exists: false);
         Assert.Single(mind.Requests); // nothing was stepped while the user decided
         s.Approve(Actions.CreateProject)
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProposal(Actions.CreateProject, "executed")
             .ExpectProject("harbor")
             .ExpectAnswerContains("Harbor is ready")
@@ -111,9 +111,9 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Ask("create a project called Harbor")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Reject(Actions.CreateProject, "not now")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("harbor", exists: false)
             .ExpectAnswerContains("nothing was created");
         _output.WriteLine(s.Transcript());
@@ -139,12 +139,12 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Ask("create a project")
-            .ExpectState(RelayState.AwaitingApproval)   // waiting for the user's words, shown as the interim answer
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)   // waiting for the user's words, shown as the interim answer
             .ExpectAnswerContains("What should the project be called?")
             .ExpectProposal(Actions.CreateProject, "denied");
         Assert.Empty(s.Snap.PendingProposals);
         // The typed reply goes to the waiting task, not to a new one.
-        s.Ask("Harbor").ExpectState(RelayState.Completed).ExpectAnswerContains("Got it: Harbor").ExpectTaskCount(1);
+        s.Ask("Harbor").ExpectState(RelayState.Ready).ExpectAnswerContains("Got it: Harbor").ExpectTaskCount(1);
         _output.WriteLine(s.Transcript());
         Assert.Equal(3, mind.Requests.Count);
     }
@@ -155,7 +155,8 @@ public class MindModeTests : IDisposable
         var mind = new ScriptedMind().Raw("not json").Raw("{\"move\":{\"type\":\"say\"}}").Raw("still not json");
         using var s = Scenario.New(_tmp, MindMode, mind: mind)
             .Ask("hello")
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.MindFailed, 3)
             .ExpectEvent(EventTypes.TaskFailed);
         _output.WriteLine(s.Transcript());
@@ -171,7 +172,8 @@ public class MindModeTests : IDisposable
         var mind = new ScriptedMind().Always(_ => MindStep.Of(Tool("list_projects"), "Looking again"));
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); cfg.Orchestrator.MaxSteps = 4; cfg.Orchestrator.MaxToolCalls = 10; }, mind: mind)
             .Ask("loop forever")
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.MindStepped, 4);
         _output.WriteLine(s.Transcript());
         Assert.Equal("step_budget", s.H.Last(EventTypes.LoopEnded)!.DataString("outcome"));
@@ -197,13 +199,13 @@ public class MindModeTests : IDisposable
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); WithResearchProfile(cfg); }, externalClients: _ => external, inlinePost: false, mind: mind)
             .WithSecret("external-research")
             .Ask("research UK council licensing for scheduling pilots")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.ModelRequest, "pending");
         Assert.Equal(0, external.Calls);   // nothing leaves the machine before approval
         var wait = TimeSpan.FromSeconds(20);
         s.Approve(Actions.ModelRequest)
-            .PumpUntil("the delegate to answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, wait)
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the delegate to answer", () => s.ForegroundSettled, wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("2000 characters")
             .ExpectEvent(EventTypes.ExternalPackaged)
             .ExpectEvent(EventTypes.ArtifactStored);
@@ -236,8 +238,8 @@ public class MindModeTests : IDisposable
             .WithSecret("external-research")
             .Ask("research everything")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("the loop to end", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(30))
-            .ExpectState(RelayState.Completed);
+        s.PumpUntil("the loop to end", () => s.ForegroundSettled, TimeSpan.FromSeconds(30))
+            .ExpectState(RelayState.Ready);
         _output.WriteLine(s.Transcript());
         Assert.Contains(s.H.Records(), r => r.Type == EventTypes.ExecutionStopRequested && r.DataString("by") == "mind");
         Assert.Contains(mind.Requests.SelectMany(r => r.Transcript).OfType<DelegateObserved>(), d => d.Stage is DelegateObserved.Stopped or DelegateObserved.Failed or DelegateObserved.Returned);
@@ -250,9 +252,9 @@ public class MindModeTests : IDisposable
             .Step(Propose(Actions.CreateProject, "You asked for it", ("name", "Harbor")), "Proposing project Harbor", Read(0.2));
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Ask("create a project called Harbor")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Cancel()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("harbor", exists: false)
             .ExpectEvent(EventTypes.TaskCancelled);
         _output.WriteLine(s.Transcript());
@@ -290,8 +292,8 @@ public class MindModeTests : IDisposable
         var host = new InProcessWorkerHost();
         using var s = Scenario.New(_tmp, MindMode, workerHost: host, inlinePost: false, mind: mind, toolDrafter: drafter).WithWorkspace()
             .Ask("what time is it in London?");
-        s.PumpUntil("the draft to be tested and proposed", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.AwaitingApproval)
+        s.PumpUntil("the draft to be tested and proposed", () => s.AwaitingUserOrSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.AddTool, "pending")
             .ExpectEvent(EventTypes.ToolBuildStarted)
             .ExpectEvent(EventTypes.ToolBuildDrafted)
@@ -307,8 +309,8 @@ public class MindModeTests : IDisposable
         Assert.Equal("mind:scripted", card.ProposedBy);
 
         s.Approve(Actions.AddTool)
-            .PumpUntil("the tool to run and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the tool to run and the answer", () => s.ForegroundSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")                                             // one operation ran (the promotion); the answer is below it
             .ExpectAnswerContains("It is 13:00 in Europe/London")                  // BST at T0 12:00Z
             .ExpectProposal(Actions.AddTool, "executed")
@@ -344,8 +346,8 @@ public class MindModeTests : IDisposable
 
         // The next task has the tool from the start and needs no build; then a revert takes it away again.
         s.Ask("what time is it in London now?")
-            .PumpUntil("the second answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the second answer", () => s.ForegroundSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("It is 13:00 in Europe/London");
         Assert.Equal(1, s.H.Records().Count(r => r.Type == EventTypes.ToolBuildStarted));
         Assert.Equal("Asking the world clock", s.Response.Steps[0]);
@@ -374,19 +376,19 @@ public class MindModeTests : IDisposable
         try
         {
             s.Ask("What time is it in Tokyo right now?")
-             .PumpUntil("the mind to build and the draft to be proposed", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, wait);
+             .PumpUntil("the mind to build and the draft to be proposed", () => s.AwaitingUserOrSettled, wait);
             _output.WriteLine(s.Transcript());
 
             // The mind built rather than guessed: a tested draft waits for the one approval.
-            Assert.Equal(RelayState.AwaitingApproval, s.Snap.State);
+            Assert.Equal(RelayState.Ready /*was AwaitingApproval*/, s.Snap.State);
             var card = Assert.Single(s.Snap.PendingProposals);
             Assert.Equal(Actions.AddTool, card.Action);
             s.ExpectEvent(EventTypes.ToolBuildStarted).ExpectEvent(EventTypes.ToolBuildTested).ExpectNoEvent(EventTypes.ToolPromoted);
             Assert.Empty(Directory.GetFiles(_tmp.Root.ToolsDirectory));
 
             s.Approve(Actions.AddTool)
-             .PumpUntil("the tool to run and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, wait)
-             .ExpectState(RelayState.Completed)
+             .PumpUntil("the tool to run and the answer", () => s.ForegroundSettled, wait)
+             .ExpectState(RelayState.Ready)
              .ExpectEvent(EventTypes.ToolPromoted)
              .ExpectEvent(EventTypes.ToolRan);
             // T0 is 12:00Z, so Tokyo is 21:00; the mind may say it either way, but it must say the tool's time, not UTC and not a guess.
@@ -420,8 +422,8 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, workerHost: new InProcessWorkerHost(), inlinePost: false, mind: mind, toolDrafter: drafter)
             .Ask("what time is it in London?");
-        s.PumpUntil("the loop to end", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.Completed)
+        s.PumpUntil("the loop to end", () => s.ForegroundSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("stopped building")
             .ExpectEvent(EventTypes.ToolBuildStarted)
             .ExpectEvent(EventTypes.ToolBuildFailed)
@@ -443,11 +445,11 @@ public class MindModeTests : IDisposable
         var mind = WorldClockMind("Europe/London");
         using var s = Scenario.New(_tmp, MindMode, workerHost: new InProcessWorkerHost(), inlinePost: false, mind: mind, toolDrafter: drafter)
             .Ask("what time is it in London?");
-        s.PumpUntil("the promotion proposal", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.AwaitingApproval)
+        s.PumpUntil("the promotion proposal", () => s.AwaitingUserOrSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Reject(Actions.AddTool, "not this one")
-            .PumpUntil("the loop to end", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the loop to end", () => s.ForegroundSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("was not added")
             .ExpectProposal(Actions.AddTool, "rejected")
             .ExpectNoEvent(EventTypes.ToolPromoted)
@@ -480,8 +482,8 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, workerHost: new InProcessWorkerHost(), inlinePost: false, mind: mind, toolDrafter: drafter)
             .Ask("what time is it in Tokyo?");
-        s.PumpUntil("the second build to be proposed", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(20))
-            .ExpectState(RelayState.AwaitingApproval)
+        s.PumpUntil("the second build to be proposed", () => s.AwaitingUserOrSettled, TimeSpan.FromSeconds(20))
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.AddTool, "pending");
         _output.WriteLine(s.Transcript());
 
@@ -511,7 +513,7 @@ public class MindModeTests : IDisposable
             });
         using var s = Scenario.New(_tmp, MindMode, mind: mind)
             .Ask("what time is it in London?")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("cannot be built here")
             .ExpectNoEvent(EventTypes.ToolBuildStarted);
         Assert.False(mind.Requests[0].Context.CanBuild);
@@ -528,7 +530,7 @@ public class MindModeTests : IDisposable
         var mind = new ScriptedMind().Always(_ => throw new InvalidOperationException("the mind must not be consulted with the mode off"));
         using var s = Scenario.New(_tmp, cfg => cfg.Orchestrator.Mode = OrchestratorSettings.Off, mind: mind).WithWorkspace()
             .Command("create project Harbor")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("harbor", exists: false)
             .ExpectTaskCount(0)
             .ExpectNoEvent(EventTypes.MindStepped);

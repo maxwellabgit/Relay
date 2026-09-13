@@ -175,7 +175,7 @@ public class ListeningTests : IDisposable
     {
         var mind = new ListeningMind();   // hears everything, raises nothing
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
-            .WithListening().StartListening().ExpectState(RelayState.NoteCapture).ExpectListening()
+            .WithListening().StartListening().ExpectState(RelayState.Ready /*was NoteCapture*/).ExpectListening()
             .Hear(Decision)
             .Hear(Chatter)
             .Hear(LaunchEmail)
@@ -194,7 +194,7 @@ public class ListeningTests : IDisposable
         Assert.Equal(3, live.TotalSegments);
         Assert.False(File.Exists(s.H.Root.CurrentDraftPath));                        // no dictation draft while streaming
 
-        s.StopListening().ExpectState(RelayState.Completed).ExpectListening(false).ExpectTaskCount(0);
+        s.StopListening().ExpectState(RelayState.Ready).ExpectListening(false).ExpectTaskCount(0);
         Assert.StartsWith("Listened", s.Snap.Receipt);
         Assert.False(File.Exists(s.H.Root.CurrentStreamPath));
 
@@ -241,14 +241,14 @@ public class ListeningTests : IDisposable
         s.WithListening().StartListening()
             .Hear(Chatter)
             .Hear(Heard).Observe()
-            .ExpectTask(TaskKind.Research, TaskStatus.Completed, TaskOrigin.Observed)
+            .ExpectTask(TaskKind.Organize, TaskStatus.Completed, TaskOrigin.Observed)
             .ExpectEvent(EventTypes.ProposalReceived);
 
         var ledger = s.H.LedgerText();
         foreach (var words in new[] { Heard, "Hull council", "separate licence", "The room said", "The excerpt says", "quoting" })
             Assert.DoesNotContain(words, ledger, StringComparison.OrdinalIgnoreCase);
 
-        var task = s.FindTask(TaskKind.Research)!;
+        var task = s.FindTask(TaskKind.Organize)!;
         Assert.Equal("mind:scripted", task.Producer);
         var received = Assert.Single(s.H.Records(), r => r.Type == EventTypes.ProposalReceived && r.DataString("taskId") == task.TaskId);
         Assert.StartsWith("withheld: ", received.DataString("reason"));
@@ -309,7 +309,7 @@ public class ListeningTests : IDisposable
         Assert.Equal(stored.Select(n => n.Id), task.Citations.Select(c => c.Id));
         Assert.Equal(Presentation.Alert, task.Presentation);
         Assert.NotNull(task.ExcerptId);
-        Assert.Equal(RelayState.NoteCapture, s.Snap.State);                          // the stream is untouched by the task
+        Assert.Equal(RelayState.Ready /*was NoteCapture*/, s.Snap.State);                          // the stream is untouched by the task
 
         var excerpt = s.H.Excerpts.Read(task.ExcerptId!)!;
         Assert.Single(excerpt.Segments);                                              // anchored to the line the raise named
@@ -468,7 +468,7 @@ public class ListeningTests : IDisposable
         Assert.True(mind.Calls >= 1);
         s.Hear(LaunchEmail).Silence(TimeSpan.FromSeconds(8));
         Assert.True(s.Snap.Listening!.Passes >= 2, "the stream keeps reading after a timeout");
-        s.StopListening().ExpectState(RelayState.Completed).ExpectListening(false);
+        s.StopListening().ExpectState(RelayState.Ready).ExpectListening(false);
     }
 
     /// <summary>A watched term is resolved the moment it is heard, pinned, and refreshed in place on every later mention.</summary>
@@ -517,7 +517,7 @@ public class ListeningTests : IDisposable
             .WithListening().StartListening()
             .Hear(Chatter)
             .Ask("what did I say about the beta?")
-            .ExpectState(RelayState.NoteCapture)
+            .ExpectState(RelayState.Ready /*was NoteCapture*/)
             .ExpectListening()
             .ExpectTask(TaskKind.Answer, TaskStatus.Completed, TaskOrigin.Direct)
             .ExpectAttention(Presentation.Result, "beta");
@@ -531,7 +531,7 @@ public class ListeningTests : IDisposable
         Assert.NotEqual(task.TaskId, s.Snap.Response?.TaskId);                       // nothing took the foreground away from the stream
 
         s.Hear(LaunchEmail).Observe().ExpectListening()
-            .StopListening().ExpectState(RelayState.Completed).ExpectListening(false);
+            .StopListening().ExpectState(RelayState.Ready).ExpectListening(false);
         Assert.StartsWith("Listened", s.Snap.Receipt);
     }
 
@@ -550,7 +550,7 @@ public class ListeningTests : IDisposable
         s.CrashAndRestart()
             .ExpectEvent(EventTypes.StreamInterruptedFound)
             .ExpectListening(false)
-            .ExpectState(RelayState.Idle);
+            .ExpectState(RelayState.Ready);
         var found = s.H.Last(EventTypes.StreamInterruptedFound)!;
         Assert.Equal(2, found.DataInt64("segments"));
         Assert.Equal(Decision.Length + Chatter.Length, found.DataInt64("chars"));

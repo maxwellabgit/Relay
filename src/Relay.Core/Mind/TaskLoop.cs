@@ -349,6 +349,10 @@ public sealed class TaskLoop
 
     public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool;
 
+    public static bool IsOrganizeChange(string action) => action is Policy.Actions.CreateProject or Policy.Actions.ArchiveProject or Policy.Actions.RestoreProject
+        or Policy.Actions.RenameProject or Policy.Actions.DeleteProject or Policy.Actions.RouteNote or Policy.Actions.MoveNote
+        or Policy.Actions.CreateDraftNote or Policy.Actions.ModifyNote or Policy.Actions.SupersedeNote;
+
     private static bool SameArgs(IReadOnlyDictionary<string, string> a, IReadOnlyDictionary<string, string> b)
     {
         if (a.Count != b.Count) return false;

@@ -254,7 +254,7 @@ public sealed partial class MainWindow
     private void RenderRelay(RelaySnapshot s)
     {
         var p = s.Preferences;
-        var settled = s.State is RelayState.Idle or RelayState.Completed && !s.LiveTasks.Any(t => t.Foreground);
+        var settled = s.State == RelayState.Ready && !s.TurnActive && s.Capture == CapturePhase.None;
         var signature = $"{p.Verbosity}|{p.MaxAnswerChars}|{p.PromptFragment.Length}|{string.Join(",", p.WatchedTerms)}|{string.Join(",", p.Grants.Select(g => g.GrantId))}|{p.MaxAlertsPer10Minutes}|{p.MaxResultsPer5Minutes}|{p.Cooldown}|{p.Buffer}|{p.ExcerptMaxSeconds}|{p.MaxRetainedFraction}|{p.AllowOnlineSearch}|{string.Join(",", s.ChangeSets.Select(c => c.ChangeSetId + c.Reverted))}|{settled}|{s.Projects.Count}";
         RelayMeta.Text = s.ChangeSets.Count == 0 ? "defaults · no change sets yet" : $"{s.ChangeSets.Count} change set(s) · {s.ChangeSets.Count(c => !c.Reverted)} in effect";
         if (signature == _relaySignature) return;

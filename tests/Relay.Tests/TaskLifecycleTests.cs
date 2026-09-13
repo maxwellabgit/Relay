@@ -49,14 +49,14 @@ public class TaskLifecycleTests : IDisposable
         var mind = Proposing(Actions.CreateProject, "Market Study is ready.", ("name", "Market Study"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("Create a project called Market Study")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.CreateProject, "pending")
             .ExpectProject("market-study", exists: false);
         // The pending proposal is shown once, in Response next to the feed; Review is for everything else.
         Assert.Single(s.Snap.PendingProposals);
         Assert.Empty(s.Snap.Review);
         s.Approve(Actions.CreateProject)
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")
             .ExpectProposal(Actions.CreateProject, "executed")
             .ExpectProject("market-study");
@@ -89,7 +89,7 @@ public class TaskLifecycleTests : IDisposable
         var mind = Proposing(Actions.CreateProject, "There is nowhere to put it yet.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind)
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("denied")
             .ExpectProposal(Actions.CreateProject, "denied")
             .ExpectNoEvent(EventTypes.ExecutionStarted)
@@ -112,7 +112,7 @@ public class TaskLifecycleTests : IDisposable
 
             // The dialog path: the chosen folder becomes a registered project folder, then the project is created in it.
             s.Do("New project… in a fresh folder", c => Assert.True(c.CreateProjectIn(folder, "Atlas")))
-                .ExpectState(RelayState.Completed)
+                .ExpectState(RelayState.Ready)
                 .ExpectEvent(EventTypes.WorkspaceRegistered)
                 .ExpectEvent(EventTypes.ProjectCreated)
                 .ExpectProject("atlas");
@@ -147,7 +147,7 @@ public class TaskLifecycleTests : IDisposable
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
             .Reject(Actions.CreateProject, "not now")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("rejected")
             .ExpectProject("atlas", exists: false)
             .ExpectEvent(EventTypes.ApprovalRejected)
@@ -162,11 +162,11 @@ public class TaskLifecycleTests : IDisposable
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
             .Edit(Actions.CreateProject, ("slug", "atlas-2026"), ("name", "Atlas 2026"))
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.CreateProject, "edited")
             .ExpectProposal(Actions.CreateProject, "pending")
             .Approve()
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("atlas-2026")
             .ExpectProject("atlas", exists: false);
         var edited = s.H.Last(EventTypes.ProposalEdited)!;
@@ -193,17 +193,17 @@ public class TaskLifecycleTests : IDisposable
         });
 
         s.Command("delete the Atlas project permanently")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.DeleteProject, "pending")
             .ExpectProject("atlas");
         // Nothing is gone until the words are approved; rejecting leaves everything in place.
         Assert.Equal("RequiresApproval", s.H.Last(EventTypes.ProposalDecided)!.DataString("tier"));
-        s.Reject(Actions.DeleteProject).ExpectState(RelayState.Completed).ExpectProject("atlas").ExpectNoEvent(EventTypes.ProjectDeleted);
+        s.Reject(Actions.DeleteProject).ExpectState(RelayState.Ready).ExpectProject("atlas").ExpectNoEvent(EventTypes.ProjectDeleted);
 
         s.Command("delete the Atlas project permanently")   // asked again, and approved this time
             .ExpectProposal(Actions.DeleteProject, "pending")
             .Approve()
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")
             .ExpectEvent(EventTypes.ProjectDeleted)
             .ExpectProject("atlas", exists: false);
@@ -254,17 +254,17 @@ public class TaskLifecycleTests : IDisposable
         var mind = new ScriptedMind().Always(_ => MindStep.Of(Say("You have one project, Atlas."), "Answered"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Project("Atlas")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .Ask("what projects do I have?")                           // asked from the COMPLETED receipt: the receipt is dismissed and the task runs
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectTask(TaskKind.Answer, TaskStatus.Completed, TaskOrigin.Direct)
             .ExpectAnswerContains("Atlas")
             .ExpectNoProposals();
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.StateChanged && r.DataString("from") == "COMPLETED" && r.DataString("to") == "IDLE");
-        Assert.Contains(s.H.Records(), r => r.Type == EventTypes.StateChanged && r.DataString("from") == "IDLE" && r.DataString("to") == "PLANNING");
-        s.Dismiss().ExpectState(RelayState.Idle)
-            .Ask("and how many is that?")                             // and from IDLE
-            .ExpectState(RelayState.Completed)
+        // The session stays Ready for both asks; turn progress is on the tasks, not on state.changed.
+        Assert.DoesNotContain(s.H.Records(), r => r.Type == EventTypes.StateChanged && r.DataString("to") is "PLANNING" or "COMPLETED");
+        s.Dismiss().ExpectState(RelayState.Ready)
+            .Ask("and how many is that?")                             // and again from Ready
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("Atlas");
         Assert.Equal(2, s.H.Records().Count(r => r.Type == EventTypes.AskRecorded));
         Assert.Equal(2, s.H.Records().Count(r => r.Type == EventTypes.TaskCompleted && r.DataString("lane") == "ask"));
@@ -277,13 +277,13 @@ public class TaskLifecycleTests : IDisposable
         var pausing = new PausingMind();
         using var s = Scenario.New(_tmp, Mind, mind: pausing).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.Planning)
+            .ExpectState(RelayState.Ready /*was Planning*/)
             .Cancel()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.TaskCancelled);
         Assert.True(pausing.LastToken.IsCancellationRequested);
         Assert.False(pausing.Release()); // the gate was cancelled; nothing to release
-        Assert.Equal(RelayState.Idle, s.Snap.State);
+        Assert.Equal(RelayState.Ready, s.Snap.State);
         Assert.Equal("planning", s.H.Last(EventTypes.TaskCancelled)!.DataString("stage"));
         Assert.Equal(0, s.H.Count(EventTypes.MindStepped));   // the step that arrived late is not a step of anything
         Assert.Equal(0, s.H.Count(EventTypes.LoopEnded));
@@ -296,16 +296,17 @@ public class TaskLifecycleTests : IDisposable
         var pausing = new PausingMind();
         using var s = Scenario.New(_tmp, cfg => { Mind(cfg); cfg.Orchestrator.StepTimeoutMs = 5000; }, mind: pausing).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.Planning)
+            .ExpectState(RelayState.Ready /*was Planning*/)
             .Advance(TimeSpan.FromSeconds(6))
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.TaskFailed);
         var incident = s.Snap.Incident!;
         Assert.Equal("mind_timeout", incident.Kind);
         Assert.Contains("did not answer within 5s", incident.Summary);
         Assert.False(s.Snap.CanRetry);
         Assert.True(pausing.IsPaused);   // the step is still held; the task stopped waiting for it
-        s.Dismiss().ExpectState(RelayState.Idle);
+        s.Dismiss().ExpectState(RelayState.Ready);
     }
 
     [Fact]
@@ -313,11 +314,12 @@ public class TaskLifecycleTests : IDisposable
     {
         using var s = Scenario.New(_tmp, Mind, mind: new ThrowingMind())
             .Command("anything")
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.TaskFailed);
         Assert.Equal("mind_failed", s.H.Last(EventTypes.TaskFailed)!.DataString("failure"));
         Assert.Contains("model exploded", s.Snap.Incident!.Detail);
-        s.Dismiss().ExpectState(RelayState.Idle);
+        s.Dismiss().ExpectState(RelayState.Ready);
     }
 
     [Fact]
@@ -326,9 +328,9 @@ public class TaskLifecycleTests : IDisposable
         var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Cancel()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.ApprovalRejected)
             .ExpectEvent(EventTypes.TaskCancelled)
             .ExpectProject("atlas", exists: false);
@@ -337,16 +339,17 @@ public class TaskLifecycleTests : IDisposable
     }
 
     [Fact]
-    public void HotkeysAreRefusedWhileAProposalWaits()
+    public void CaptureCanStartWhileAProposalWaits()
     {
         var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.AwaitingApproval)
-            .Note("this should not start")
-            .ExpectState(RelayState.AwaitingApproval)
-            .ExpectEvent(EventTypes.HotkeyRejected);
-        Assert.Equal(TransitionTable.DecideProposalsFirst, s.Snap.Notice);
+            .ExpectState(RelayState.Ready);
+        Assert.True(s.Snap.TurnActive || s.Snap.PendingProposals.Any());
+        s.H.Coordinator.PressNoteKey();
+        Assert.Equal(RelayState.Ready, s.Snap.State);
+        Assert.Equal(CapturePhase.Capturing, s.Snap.Capture);
+        Assert.Null(s.H.Last(EventTypes.HotkeyRejected));
     }
 
     [Fact]
@@ -355,10 +358,10 @@ public class TaskLifecycleTests : IDisposable
         var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.AwaitingApproval);
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
         Assert.Single(Directory.GetFiles(s.H.Root.TasksDirectory, "*.live.json"));
         s.CrashAndRestart()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.TaskInterruptedFound)
             .ExpectReview(ReviewItemKind.TurnInterrupted)
             .ExpectProject("atlas", exists: false);
@@ -374,9 +377,9 @@ public class TaskLifecycleTests : IDisposable
         var mind = Proposing(Actions.CreateProject, "Atlas is ready.", ("name", "Atlas"));
         using var s = Scenario.New(_tmp, Mind, mind: mind).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Restart()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectNoEvent(EventTypes.TaskInterruptedFound)
             .ExpectEvent(EventTypes.TaskCancelled);
         Assert.Equal("awaiting_approval", s.H.Last(EventTypes.TaskCancelled)!.DataString("stage"));
@@ -390,7 +393,7 @@ public class TaskLifecycleTests : IDisposable
         File.WriteAllText(Path.Combine(_tmp.Root.ExecutionsDirectory, "P1.json"),
             """{"proposalId":"P1","action":"archive_project","turnId":"T1","startedAt":"2026-09-04T11:59:00Z","target":{"projectId":"X"}}""");
         using var s = Scenario.New(_tmp)
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.ExecutionInterruptedFound)
             .ExpectReview(ReviewItemKind.ExecutionInterrupted);
         var journal = File.ReadAllText(Path.Combine(_tmp.Root.ExecutionsDirectory, "P1.json"));
@@ -405,7 +408,7 @@ public class TaskLifecycleTests : IDisposable
     {
         using var s = Scenario.New(_tmp).WithWorkspace()
             .Do("Create project from UI", c => Assert.True(c.CreateProject("Field Notes")))
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("executed")
             .ExpectProject("field-notes")
             .ExpectEvent(EventTypes.ProposalReceived)
@@ -416,11 +419,11 @@ public class TaskLifecycleTests : IDisposable
         Assert.Equal("direct", s.H.Last(EventTypes.TaskCreated)!.DataString("origin"));
 
         s.Do("Archive from UI", c => Assert.True(c.ArchiveProject(s.H.Registry.FindActive("field-notes")!.Id)))
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("field-notes", exists: false);
 
         s.Do("Duplicate slug is refused", c => Assert.False(c.CreateProject("Field Notes 2", "bad slug!")))
-            .ExpectState(RelayState.Completed);
+            .ExpectState(RelayState.Ready);
         Assert.Contains("not a valid slug", s.Snap.Notice);
     }
 
@@ -433,7 +436,7 @@ public class TaskLifecycleTests : IDisposable
             .Command("make me a backup")
             .ExpectProposal(Actions.ExportBackup, "pending")
             .Approve()
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.BackupExported)
             .ExpectEvent(EventTypes.BackupVerified);
         Assert.True(s.H.Last(EventTypes.BackupVerified)!.DataBool("ok"));
@@ -448,7 +451,7 @@ public class TaskLifecycleTests : IDisposable
             .Note("The beta ships in the fourth quarter.")
             .FileLast("atlas")
             .Restart()
-            .ExpectState(RelayState.Idle)
+            .ExpectState(RelayState.Ready)
             .ExpectProject("atlas");
         // The index is built from what is on disk at every start, so the note carries across without being re-filed.
         var hit = Assert.Single(s.H.Index.Search("fourth quarter", null, 5), h => h.ProjectSlug == "atlas");
@@ -461,7 +464,7 @@ public class TaskLifecycleTests : IDisposable
     {
         using var s = Scenario.New(_tmp, x => x.Orchestrator.Mode = OrchestratorSettings.Off).WithWorkspace()
             .Command("create a project called Atlas")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectNoEvent(EventTypes.TaskCreated)
             .ExpectReview(ReviewItemKind.RecordedInstruction)
             .ExpectProject("atlas", exists: false);

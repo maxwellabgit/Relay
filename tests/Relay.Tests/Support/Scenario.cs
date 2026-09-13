@@ -69,6 +69,12 @@ public sealed class Scenario : IDisposable
         return End();
     }
 
+    /// <summary>The foreground task has finished (or there is none). Session Ready is not enough after the state collapse — the session stays Ready while a task runs.</summary>
+    public bool ForegroundSettled => Snap.Response is null or { Live: false };
+
+    /// <summary>A proposal is waiting for the user, or the foreground task has already settled.</summary>
+    public bool AwaitingUserOrSettled => Snap.PendingProposals.Any() || Snap.Response?.Status == TaskStatus.AwaitingApproval || ForegroundSettled;
+
     public Harness H => _h;
     public SessionCoordinator C => _h.Coordinator;
     public RelaySnapshot Snap => _h.Snap;
@@ -156,7 +162,7 @@ public sealed class Scenario : IDisposable
     {
         Begin($"{mode.Label()} \"{text}\"");
         if (mode == CaptureMode.Note) C.PressNoteKey(); else C.PressCommandKey();
-        if (Snap.State is not (RelayState.NoteCapture or RelayState.CommandCapture))
+        if (Snap.Capture != CapturePhase.Capturing)
         {
             Log($"  rejected: {Snap.Notice}");
             return End();
@@ -186,8 +192,7 @@ public sealed class Scenario : IDisposable
         Begin("Start listening");
         _heard = "";
         C.PressNoteKey();
-        if (Snap.State != RelayState.NoteCapture) Log($"  rejected: {Snap.Notice}");
-        else if (Snap.Listening is null) Log("  WARNING: note capture opened as dictation, not as a stream (listening off, or no mind?)");
+        if (Snap.Listening is null) Log($"  rejected: {Snap.Notice ?? "note capture opened as dictation, not as a stream (listening off, or no mind?)"}");
         return End();
     }
 

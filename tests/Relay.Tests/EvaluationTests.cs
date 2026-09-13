@@ -341,9 +341,9 @@ public class EvaluationTests : IDisposable
         var sessionStart = s.H.Clock.UtcNow;
 
         // The mind offers one operation at a time and waits, so refusing the destination ends the move there.
-        s.Command("what did we decide about the Atlas beta date?").ExpectState(RelayState.Completed).ExpectAnswerContains("October 14")
-         .Command("move the backyard notes into Garden").ExpectState(RelayState.AwaitingApproval)
-         .Reject(Actions.CreateProject).ExpectState(RelayState.Completed).ExpectOutcome("rejected")
+        s.Command("what did we decide about the Atlas beta date?").ExpectState(RelayState.Ready).ExpectAnswerContains("October 14")
+         .Command("move the backyard notes into Garden").ExpectState(RelayState.Ready /*was AwaitingApproval*/)
+         .Reject(Actions.CreateProject).ExpectState(RelayState.Ready).ExpectOutcome("rejected")
          .Command("keep responses concise").Approve().ExpectEvent(EventTypes.ChangeSetApplied);
         // The self-change is a change set: revert it, so the record is back where the authored cases expect it.
         foreach (var change in s.Snap.ChangeSets.Where(c => !c.Reverted).ToList()) s.Do($"Revert {change.Kind}", c => Assert.True(c.RevertChangeSet(change.ChangeSetId)));
@@ -744,7 +744,7 @@ public class EvaluationTests : IDisposable
 
             // A direct research ask: the model states what it is missing and packages the delegation; approval sends exactly that package.
             s.Command("research how UK councils license scheduling software pilots for restaurants and give me a plan for the Lightshift pilot")
-             .PumpUntil("the research plan", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed, wait);
+             .PumpUntil("the research plan", () => s.AwaitingUserOrSettled, wait);
             if (s.Snap.PendingProposals.Any(p => p.Action == Actions.ModelRequest))
             {
                 Assert.Empty(external.Requests);                                                            // nothing has left the machine before approval

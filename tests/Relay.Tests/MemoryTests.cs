@@ -197,7 +197,7 @@ public class MemoryTests : IDisposable
         using var s = Scenario.New(_tmp, Mind).WithWorkspace()
             .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14. Need to email the Atlas pilot customers before then.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.NoteExtracted)
             .ExpectEvent(EventTypes.NoteDraftCreated, atLeast: 2)
             .ExpectEvent(EventTypes.NoteRouted, atLeast: 2)
@@ -238,7 +238,7 @@ public class MemoryTests : IDisposable
             .Project("Atlas")
             .Project("Garden")
             .Note("Buy compost and a new rake at the hardware store this weekend.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.NoteRoutingDeferred)
             .ExpectNoEvent(EventTypes.NoteRouted);
         Assert.Contains("unrouted", s.Snap.Receipt);
@@ -248,7 +248,7 @@ public class MemoryTests : IDisposable
         Assert.Empty(s.Snap.Review);          // routing is never a Review item
 
         s.Note("Atlas and Garden both need a budget line before the board meeting.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectNoEvent(EventTypes.NoteRouted);
         Assert.Contains("need your routing decision", s.Snap.Receipt);
         Assert.Empty(s.Snap.Review);
@@ -319,10 +319,10 @@ public class MemoryTests : IDisposable
         using var s = Scenario.New(_tmp, Mind, mind: Recalling()).WithWorkspace()
             .Project("Atlas")
             .Note("We decided the Atlas beta ships on October 14.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.NoteRouted)
             .Note("We decided the Atlas beta ships on November 2 instead.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.NoteDisputed)
             .ExpectReview(ReviewItemKind.DisputedNotes);
         Assert.Contains("1 disputed", s.Snap.Receipt);
@@ -337,7 +337,7 @@ public class MemoryTests : IDisposable
 
         // Recall shows both, and the dispute is on the record itself, so whatever reads it can say so.
         s.Command("What did I decide about the Atlas beta?")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("October 14")
             .ExpectAnswerContains("November 2")
             .ExpectAnswerContains("(disputed)");
@@ -387,7 +387,7 @@ public class MemoryTests : IDisposable
     {
         using var s = Scenario.New(_tmp, configure: x => x.Orchestrator.Mode = OrchestratorSettings.Off).WithWorkspace()
             .Note("We decided the Atlas beta ships on October 14. Need to email the pilot customers.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectEvent(EventTypes.NoteDraftCreated, atLeast: 1)
             .ExpectNoEvent(EventTypes.NoteExtracted)
             .ExpectNoEvent(EventTypes.NoteRouted);
@@ -405,7 +405,7 @@ public class MemoryTests : IDisposable
         s.H.Registry.Update(project);
 
         s.Note("The Atlas kickoff is on Monday.")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectNoEvent(EventTypes.NoteRouted);
         var item = Assert.Single(s.Snap.Inbox);
         Assert.Equal("atlas", Assert.Single(item.Candidates).Slug); // offered, not filed

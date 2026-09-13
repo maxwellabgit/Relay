@@ -210,7 +210,7 @@ public class PreferenceTests : IDisposable
             .Do("Start from normal", c => Assert.True(c.UpdatePreference("response.verbosity", "normal")))
             .ExpectPreference("response.verbosity", "normal")
             .Command("update our preferences to always display concise text")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.UpdatePreference, "pending");
 
         var pref = Assert.Single(s.Response.Proposals, p => p.Action == Actions.UpdatePreference);
@@ -225,7 +225,7 @@ public class PreferenceTests : IDisposable
         s.Approve(Actions.UpdatePreference)
             .ExpectProposal(Actions.UpdatePreference, "executed")
             .ExpectPreference("response.verbosity", ResponsePreferences.Concise)
-            .ExpectState(RelayState.AwaitingApproval)                                       // one approval at a time: the second self-change is put on its own
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)                                       // one approval at a time: the second self-change is put on its own
             .ExpectProposal(Actions.UpdatePrompt, "pending");
 
         var prompt = Assert.Single(s.Response.Proposals, p => p.Action == Actions.UpdatePrompt);
@@ -234,7 +234,7 @@ public class PreferenceTests : IDisposable
         Assert.True(prompt.Editable);
 
         s.Approve(Actions.UpdatePrompt)
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectProposal(Actions.UpdatePrompt, "executed")
             .ExpectEvent(EventTypes.ChangeSetApplied, before + 2);
         Assert.Equal(mind.Name, s.Response.Producer);
@@ -284,7 +284,7 @@ public class PreferenceTests : IDisposable
         using var s = Scenario.New(_tmp, MindMode, mind: mind).WithWorkspace()
             .Do("Ask for one-liners", c => Assert.True(c.UpdatePreference("response.verbosity", ResponsePreferences.Minimalist)))
             .Command("what do you know about the beta?")
-            .ExpectState(RelayState.Completed);
+            .ExpectState(RelayState.Ready);
         Assert.Equal(241, s.Response.Answer!.Length);                                        // 240 characters and the ellipsis that says there was more
         Assert.EndsWith("…", s.Response.Answer);
         Assert.Contains(s.Response.Steps, step => step.Contains("240 chars"));
@@ -315,14 +315,14 @@ public class PreferenceTests : IDisposable
             .Command("always show what CAD means")
             .ExpectProposal(Actions.UpdatePreference, "pending")
             .Approve()
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectPreference("display.alwaysShow", "CAD")
             .ExpectEvent(EventTypes.ChangeSetApplied)
             .Dismiss()
             .Command("stop showing CAD")
             .ExpectProposal(Actions.UpdatePreference, "pending")
             .Approve()
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectPreference("display.alwaysShow", "");
         Assert.Equal(2, s.Snap.ChangeSets.Count);
         Assert.Empty(s.H.Preferences.Compiled().WatchedTerms);
@@ -362,7 +362,7 @@ public class PreferenceTests : IDisposable
         Assert.Equal(Actions.RouteNote, p.Target["value"]);
         Assert.Equal(NoteTypes.Decision, p.Target["noteType"]);
         Assert.Equal(atlas.Id, p.Target["projectId"]);
-        s.Approve().ExpectState(RelayState.Completed).ExpectEvent(EventTypes.GrantApplied).Dismiss();
+        s.Approve().ExpectState(RelayState.Ready).ExpectEvent(EventTypes.GrantApplied).Dismiss();
         var grant = Assert.Single(s.H.Preferences.Compiled().Grants);
         Assert.Equal(NoteTypes.Decision, grant.NoteType);
         s.ExpectPreference("filing.grant", $"{Actions.RouteNote}:{grant.ProjectId}/{NoteTypes.Decision}");
@@ -398,7 +398,7 @@ public class PreferenceTests : IDisposable
             .ExpectProposal(Actions.UpdatePreference, "pending");
         Assert.Equal("filing.revoke", Assert.Single(s.Response.Proposals).Target["key"]);
         Assert.Equal(grant.GrantId, Assert.Single(s.Response.Proposals).Target["value"]);
-        s.Approve().ExpectState(RelayState.Completed).ExpectPreference("filing.grant", "").Dismiss()
+        s.Approve().ExpectState(RelayState.Ready).ExpectPreference("filing.grant", "").Dismiss()
             .Note("Decision: Atlas pricing goes public next spring with three tiers.").Dismiss();
         Assert.Equal(routingBefore + 2, s.Snap.Inbox.Count);
         Assert.Single(ProjectNoteStore.ReadAll(atlas.RootPath).Notes);

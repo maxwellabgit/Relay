@@ -14,12 +14,12 @@ public class CaptureFlowTests : IDisposable
     public void StartsIdleWithVerifiedLedgerAndSessionRecord()
     {
         using var h = new Harness(_tmp.Root).Start();
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.NotNull(h.Last(EventTypes.SessionStarted));
         Assert.NotNull(h.Last(EventTypes.LedgerVerified));
         Assert.NotNull(h.Last(EventTypes.SettingsLoaded));
         Assert.Equal("STARTING", h.Last(EventTypes.StateChanged)!.DataString("from"));
-        Assert.Equal("IDLE", h.Last(EventTypes.StateChanged)!.DataString("to"));
+        Assert.Equal("READY", h.Last(EventTypes.StateChanged)!.DataString("to"));
         Assert.True(File.Exists(h.Sessions.PathFor(h.Coordinator.SessionId)));
         Assert.True(h.SettingsLoad.CreatedDefault);
         Assert.Equal("Ctrl+Alt", h.Snap.NoteKey.Chord);
@@ -39,7 +39,8 @@ public class CaptureFlowTests : IDisposable
         using var h = new Harness(_tmp.Root).Start();
 
         h.Coordinator.PressNoteKey();
-        Assert.Equal(RelayState.NoteCapture, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.Capturing, h.Snap.Capture);
         Assert.Equal(CaptureMode.Note, h.Snap.Mode);
         Assert.Equal(1, h.Host.PrepareCalls);
         Assert.True(File.Exists(h.Root.CurrentDraftPath));
@@ -53,11 +54,13 @@ public class CaptureFlowTests : IDisposable
         Assert.Contains(text, File.ReadAllText(h.Root.CurrentDraftPath).Replace("\\n", "\n"));
 
         h.Coordinator.PressNoteKey();
-        Assert.Equal(RelayState.AwaitingTranscript, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.AwaitingTranscript, h.Snap.Capture);
         Assert.Equal(text.Length, h.Last(EventTypes.CaptureStopRequested)!.DataInt64("chars"));
 
         h.Scheduler.Advance(TimeSpan.FromMilliseconds(600)); // stabilization without relay
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.None, h.Snap.Capture);
         Assert.StartsWith("Saved 1 note", h.Snap.Receipt);
 
         var committed = h.Last(EventTypes.CaptureCommitted)!;
@@ -77,7 +80,7 @@ public class CaptureFlowTests : IDisposable
         Assert.DoesNotContain(h.Snap.Review, r => r.Kind == ReviewItemKind.RecordedInstruction);
 
         h.Scheduler.Advance(TimeSpan.FromSeconds(5));
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
     }
 
     [Fact]
@@ -85,12 +88,14 @@ public class CaptureFlowTests : IDisposable
     {
         using var h = new Harness(_tmp.Root, configure: s => s.Orchestrator.Mode = OrchestratorSettings.Off).Start();
         h.Coordinator.PressCommandKey();
-        Assert.Equal(RelayState.CommandCapture, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.Capturing, h.Snap.Capture);
+        Assert.Equal(CaptureMode.Command, h.Snap.Mode);
         h.Coordinator.TextChanged("Create a project called market study");
         h.Coordinator.PressCommandKey();
         h.Scheduler.Advance(TimeSpan.FromSeconds(1));
 
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         var recorded = h.Last(EventTypes.CommandRecorded)!;
         Assert.Equal(false, recorded.DataBool("executed"));
         Assert.Equal("Create a project called market study", h.Last(EventTypes.CaptureCommitted)!.DataString("text"));
@@ -108,11 +113,13 @@ public class CaptureFlowTests : IDisposable
         h.Coordinator.TextChanged("half a thought");
         h.Coordinator.PressCommandKey();
 
-        Assert.Equal(RelayState.NoteCapture, h.Snap.State);
-        Assert.Equal(TransitionTable.FinishOrCancelFirst, h.Snap.Notice);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.Capturing, h.Snap.Capture);
+        Assert.Equal(TransitionTable.FinishInstructionFirst, h.Snap.Notice);
         var rejected = h.Last(EventTypes.HotkeyRejected)!;
         Assert.Equal("COMMAND_KEY", rejected.DataString("key"));
-        Assert.Equal("NOTE_CAPTURE", rejected.DataString("state"));
+        Assert.Equal("READY", rejected.DataString("state"));
+        Assert.Equal("CAPTURING", rejected.DataString("capture"));
         Assert.Null(h.Last(EventTypes.CaptureCommitted));
         Assert.Equal("half a thought".Length, h.Snap.CaptureChars);
     }
@@ -125,10 +132,10 @@ public class CaptureFlowTests : IDisposable
         h.Coordinator.TextChanged("secret thing I did not mean to say");
         h.Coordinator.Cancel();
 
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         var cancelled = h.Last(EventTypes.CaptureCancelled)!;
         Assert.Equal(34, cancelled.DataInt64("chars"));
-        Assert.Equal("NOTE_CAPTURE", cancelled.DataString("stateAtCancel"));
+        Assert.Equal("CAPTURING", cancelled.DataString("stateAtCancel"));
         Assert.DoesNotContain("secret", h.LedgerText());
         Assert.False(File.Exists(h.Root.CurrentDraftPath));
         Assert.Null(h.Last(EventTypes.CaptureCommitted));
@@ -137,7 +144,7 @@ public class CaptureFlowTests : IDisposable
         Assert.Equal("secret thing I did not mean to say", review.Payload);
 
         h.Coordinator.RecoverCancelledDraft();
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Equal("secret thing I did not mean to say", h.Last(EventTypes.CaptureCommitted)!.DataString("text"));
         Assert.Equal(cancelled.DataString("captureId"), h.Last(EventTypes.CaptureDraftRecovered)!.DataString("originalCaptureId"));
         Assert.DoesNotContain(h.Snap.Review, r => r.Kind == ReviewItemKind.CancelledDraft);
@@ -149,11 +156,13 @@ public class CaptureFlowTests : IDisposable
         using var h = new Harness(_tmp.Root).Start();
         h.Coordinator.PressNoteKey();
         h.Coordinator.PressNoteKey();
-        Assert.Equal(RelayState.AwaitingTranscript, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.AwaitingTranscript, h.Snap.Capture);
         h.Coordinator.Cancel();
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.None, h.Snap.Capture);
         h.Scheduler.Advance(TimeSpan.FromMinutes(1));
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Null(h.Last(EventTypes.CaptureTranscriptTimeout));
         Assert.DoesNotContain(h.Snap.Review, r => r.Kind == ReviewItemKind.CancelledDraft); // nothing to recover
     }
@@ -166,7 +175,8 @@ public class CaptureFlowTests : IDisposable
         h.Coordinator.PressNoteKey();
 
         h.Scheduler.Advance(TimeSpan.FromSeconds(10));
-        Assert.Equal(RelayState.AwaitingTranscript, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
+        Assert.Equal(CapturePhase.AwaitingTranscript, h.Snap.Capture);
         Assert.True(h.Snap.Awaiting!.TimedOut);
         Assert.True(h.Snap.CanRetryWait);
         Assert.Contains("does not read the clipboard", h.Snap.Notice);
@@ -178,7 +188,7 @@ public class CaptureFlowTests : IDisposable
 
         h.Coordinator.TextChanged("late but present");
         h.Scheduler.Advance(TimeSpan.FromMilliseconds(700));
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Equal("late but present", h.Last(EventTypes.CaptureCommitted)!.DataString("text"));
     }
 
@@ -192,7 +202,7 @@ public class CaptureFlowTests : IDisposable
         h.Coordinator.PressCommandKey();
         Assert.True(h.Snap.CanSubmitNow);
         h.Coordinator.SubmitNow();
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.NotNull(h.Last(EventTypes.CaptureSubmittedEarly));
     }
 
@@ -207,7 +217,7 @@ public class CaptureFlowTests : IDisposable
             h.Coordinator.TextChanged(new string('x', i + 1));
             h.Scheduler.Advance(TimeSpan.FromMilliseconds(250)); // always inside the 600ms quiet window
         }
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Equal(40, h.Last(EventTypes.CaptureCommitted)!.DataInt64("chars"));
     }
 
@@ -239,7 +249,7 @@ public class CaptureFlowTests : IDisposable
         h.Coordinator.TextChanged("dictated words");
         h.Coordinator.PressNoteKey();
         h.Scheduler.Advance(TimeSpan.FromMilliseconds(700));
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
 
         var started = h.Last(EventTypes.CaptureStarted)!;
         Assert.Null(started.DataString("flowRelayEnabled"));
@@ -253,7 +263,7 @@ public class CaptureFlowTests : IDisposable
         using var h = new Harness(_tmp.Root).Start();
         h.Coordinator.Shutdown("user_exit");
         h.Coordinator.PressNoteKey();
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Equal("user_exit", h.Last(EventTypes.SessionEnded)!.DataString("reason"));
     }
 

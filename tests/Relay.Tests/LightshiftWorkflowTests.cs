@@ -134,7 +134,7 @@ public class LightshiftWorkflowTests : IDisposable
         var mind = new ScriptedMind();
         var (s, model) = Seeded(_tmp, mind);
         using var _ = s;
-        s.Command("research Lightshift's competitors and give me an implementation plan").ExpectState(RelayState.AwaitingApproval);
+        s.Command("research Lightshift's competitors and give me an implementation plan").ExpectState(RelayState.Ready /*was AwaitingApproval*/);
 
         var task = s.Response;
         Assert.Equal(mind.Name, task.Producer);
@@ -171,8 +171,8 @@ public class LightshiftWorkflowTests : IDisposable
         using var _ = s;
         s.Command("research Lightshift's competitors and give me an implementation plan").Approve(Actions.ModelRequest)
             .ExpectEvent(EventTypes.ExternalPackaged)                                // recorded before anything is sent
-            .PumpUntil("the reply, the artifact and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed)
-            .ExpectState(RelayState.Completed).ExpectOutcome("executed");
+            .PumpUntil("the reply, the artifact and the answer", () => s.ForegroundSettled)
+            .ExpectState(RelayState.Ready).ExpectOutcome("executed");
 
         // Exactly the package: the prompt the mind wrote plus the two notes it opened, nothing else.
         var request = Assert.Single(model.Requests);
@@ -233,7 +233,7 @@ public class LightshiftWorkflowTests : IDisposable
         var (s, model) = Seeded(_tmp, mind);
         using var _ = s;
         s.Command("research Lightshift's competitors").Reject(Actions.ModelRequest, "not now")
-            .ExpectState(RelayState.Completed).ExpectOutcome("rejected")
+            .ExpectState(RelayState.Ready).ExpectOutcome("rejected")
             .ExpectAnswerContains("Nothing was sent")
             .ExpectNoEvent(EventTypes.ExternalPackaged);
         Assert.Empty(model.Requests);
@@ -247,8 +247,8 @@ public class LightshiftWorkflowTests : IDisposable
         var (s, _) = Seeded(_tmp, mind, new ScriptedModelClient().Fail("upstream 503"));
         using var __ = s;
         s.Command("research Lightshift's competitors").Approve(Actions.ModelRequest)
-            .PumpUntil("the failure", () => s.Snap.State is RelayState.Completed or RelayState.Failed)
-            .ExpectState(RelayState.Failed).ExpectOutcome("failed")
+            .PumpUntil("the failure", () => s.ForegroundSettled)
+            .ExpectState(RelayState.Ready).ExpectOutcome("failed")
             .ExpectNoEvent(EventTypes.ArtifactStored);
         var proposal = Assert.Single(s.Response.Proposals);
         Assert.Equal("failed", proposal.Status);
@@ -266,7 +266,7 @@ public class LightshiftWorkflowTests : IDisposable
         mind.Always(Researching(s.H.Registry.FindActive("lightshift")!.Id, [], search: true));
 
         s.Command("research Lightshift's competitors and give me an implementation plan")
-            .ExpectState(RelayState.Completed).ExpectNoProposals()
+            .ExpectState(RelayState.Ready).ExpectNoProposals()
             .ExpectAnswerContains("no model here that could settle it");
         var route = s.H.Records().First(r => r.Type == EventTypes.DecisionMade && r.DataString("decision") == Decider.Route);
         Assert.Equal(Decider.Local, route.DataString("outcome"));
@@ -279,7 +279,7 @@ public class LightshiftWorkflowTests : IDisposable
         var mind = new ScriptedMind();
         var (s, model) = Seeded(_tmp, mind, search: false);
         using var _ = s;
-        s.Command("research Lightshift's competitors").ExpectState(RelayState.AwaitingApproval);
+        s.Command("research Lightshift's competitors").ExpectState(RelayState.Ready /*was AwaitingApproval*/);
         var proposal = Assert.Single(s.Response.Proposals);
         Assert.Equal("false", proposal.Target["allowSearch"]);
         Assert.Contains(proposal.Reasons, r => r.Contains("No online search"));
@@ -295,7 +295,7 @@ public class LightshiftWorkflowTests : IDisposable
         using var __ = s;
         s.Do("allow online search", c => Assert.True(c.UpdatePreference("sources.allowOnlineSearch", "true")))
             .ExpectPreference("sources.allowOnlineSearch", "true")
-            .Command("research Lightshift's competitors").ExpectState(RelayState.AwaitingApproval);
+            .Command("research Lightshift's competitors").ExpectState(RelayState.Ready /*was AwaitingApproval*/);
         Assert.Contains(Assert.Single(s.Response.Proposals).Reasons, r => r.Contains("allowed by your sources preference"));
     }
 

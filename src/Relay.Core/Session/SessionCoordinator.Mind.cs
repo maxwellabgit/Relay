@@ -319,6 +319,8 @@ public sealed partial class SessionCoordinator
         // were. The lane follows what is being proposed, and it has to be set before policy decides: the
         // improvement contract is only owed in an improve task.
         if (TaskLoop.IsSelfChange(move.Action) && task.Kind != TaskKind.Improve) Relabel(task, TaskKind.Improve);
+        else if (move.Action == Actions.ModelRequest && task.Kind != TaskKind.Research) Relabel(task, TaskKind.Research);
+        else if (TaskLoop.IsOrganizeChange(move.Action) && task.Kind is not (TaskKind.Organize or TaskKind.Improve)) Relabel(task, TaskKind.Organize);
         ReceiveProposal(task, proposal);
         var ps = task.Proposals.Last(p => p.Proposal.ProposalId == proposal.ProposalId);
 
@@ -353,8 +355,6 @@ public sealed partial class SessionCoordinator
             case "pending":
                 task.Status = TaskStatus.AwaitingApproval;
                 PersistTask(task);
-                // From PLANNING on the first move, from EXECUTING when the mind read an operation's result and needs the user for the next one.
-                if (task.Foreground && _state is RelayState.Planning or RelayState.Executing) Apply(Trigger.ApprovalRequired);
                 if (!task.Foreground) PresentTask(task, interim: true);
                 return MoveOutcome.Wait(Waits.Approval, new PolicyObserved(now, proposal.ProposalId, proposal.Action, PolicyObserved.NeedsApproval, ps.Decision.Reasons));
             default:
@@ -442,7 +442,6 @@ public sealed partial class SessionCoordinator
         task.Plan = (task.Plan ?? new TurnPlan(true, "Question", [], null, [], [], task.Loop!.MindName)) with { Answer = move.Question + (move.Options.Count == 0 ? "" : " (" + string.Join(" / ", move.Options) + ")") };
         task.Status = TaskStatus.AwaitingApproval;
         PersistTask(task);
-        if (task.Foreground && _state is RelayState.Planning or RelayState.Executing) Apply(Trigger.ApprovalRequired);
         if (!task.Foreground) PresentTask(task, interim: true);
         Append(EventTypes.TaskUserResponse, new { taskId = task.TaskId, response = "asked", question = Guarded(task, move.Question), options = move.Options.Count });
         return MoveOutcome.Wait(Waits.User);
@@ -485,7 +484,6 @@ public sealed partial class SessionCoordinator
         ps.Capability ??= _capabilities.Issue(ps.Proposal, _clock.UtcNow);
         task.Status = TaskStatus.Executing;
         PersistTask(task);
-        if (task.Foreground && _state is RelayState.Planning or RelayState.AwaitingApproval) Apply(Trigger.BeginExecution);
         var result = _executor.Execute(ps.Proposal, ps.Capability, WorldFor(task, forExecution: true), task.TaskId, this, overheard: task.Overheard);
         ps.Result = result;
         var id = ps.Proposal.ProposalId;

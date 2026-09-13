@@ -220,11 +220,11 @@ public sealed partial class MainWindow
             switch (item.Kind)
             {
                 case ReviewItemKind.InterruptedCapture:
-                    buttons.Children.Add(Button("Commit as captured", () => _coordinator!.CommitInterrupted(), accent: true, enabled: s.State == RelayState.Idle));
+                    buttons.Children.Add(Button("Commit as captured", () => _coordinator!.CommitInterrupted(), accent: true, enabled: s.State == RelayState.Ready && s.Capture == CapturePhase.None));
                     buttons.Children.Add(Button("Discard to staging", () => _coordinator!.DiscardInterrupted()));
                     break;
                 case ReviewItemKind.CancelledDraft:
-                    buttons.Children.Add(Button("Recover draft", () => _coordinator!.RecoverCancelledDraft(), accent: true, enabled: s.State == RelayState.Idle));
+                    buttons.Children.Add(Button("Recover draft", () => _coordinator!.RecoverCancelledDraft(), accent: true, enabled: s.State == RelayState.Ready && s.Capture == CapturePhase.None));
                     buttons.Children.Add(Button("Forget", () => _coordinator!.ForgetCancelledDraft()));
                     break;
                 case ReviewItemKind.Incident:

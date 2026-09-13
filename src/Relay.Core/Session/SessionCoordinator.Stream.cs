@@ -228,8 +228,9 @@ public sealed partial class SessionCoordinator
             _draftCommittedEventId = null;
             _draftDirty = false;
         }
-        if (_state == RelayState.Organizing && Apply(Trigger.OrganizeSucceeded).Accepted)
+        if (_capture == CapturePhase.Organizing)
         {
+            _capture = CapturePhase.None;
             var parts = new List<string>();
             if (stream.Tasks > 0) parts.Add($"{stream.Tasks} task(s) raised");
             if (stream.Excerpts > 0) parts.Add($"{stream.Excerpts} excerpt(s) kept");

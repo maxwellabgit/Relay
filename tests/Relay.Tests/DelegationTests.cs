@@ -59,15 +59,15 @@ public class DelegationTests : IDisposable
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); WithResearchProfile(cfg); }, externalClients: _ => external, inlinePost: false, mind: mind)
             .WithSecret("external-research")
             .Ask("research UK council licensing for scheduling pilots")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.ModelRequest, "pending");
         Assert.Equal(0, external.Calls);
         s.Approve(Actions.ModelRequest)
-            .PumpUntil("three turns and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait);
+            .PumpUntil("three turns and the answer", () => s.ForegroundSettled, Wait);
         _output.WriteLine(s.Transcript());
         _output.WriteLine("--- the mind's last transcript ---");
         foreach (var o in mind.Requests[^1].Transcript) _output.WriteLine(o.Render());
-        s.ExpectState(RelayState.Completed)
+        s.ExpectState(RelayState.Ready)
             .ExpectAnswerContains("three turns")
             .ExpectEvent(EventTypes.DelegateTurnRefused);
 
@@ -125,13 +125,13 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("research something")
             .Approve(Actions.ModelRequest);
-        try { s.PumpUntil("the second request to wait for approval", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Failed, Wait); }
+        try { s.PumpUntil("the second request to wait for approval", () => s.AwaitingUserOrSettled, Wait); }
         finally
         {
             _output.WriteLine(s.Transcript());
             foreach (var o in mind.Requests[^1].Transcript) _output.WriteLine(o.Render());
         }
-        s.ExpectState(RelayState.AwaitingApproval)
+        s.ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectEvent(EventTypes.DelegateTurnRefused);
 
         // The refusal did not leave the machine; the fresh request is a new card, not a turn.
@@ -160,8 +160,8 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("explain the licensing regime")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("the digested reply", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait)
-            .ExpectState(RelayState.Completed)
+        s.PumpUntil("the digested reply", () => s.ForegroundSettled, Wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("12-week cap")
             .ExpectEvent(EventTypes.DelegateDigested);
         _output.WriteLine(s.Transcript());
@@ -203,7 +203,7 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("two questions")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("both turns", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait).ExpectState(RelayState.Completed);
+        s.PumpUntil("both turns", () => s.ForegroundSettled, Wait).ExpectState(RelayState.Ready);
         _output.WriteLine(s.Transcript());
 
         Assert.Equal(1, digester.Calls); // only the long reply went to the digester
@@ -234,9 +234,9 @@ public class DelegationTests : IDisposable
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); WithResearchProfile(cfg); }, externalClients: _ => external, inlinePost: false, mind: mind)
             .WithSecret("external-research")
             .Ask("research the licensing rules")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .Reject(Actions.ModelRequest, "retry locally: try again without an external model")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("notes say instead");
         _output.WriteLine(s.Transcript());
         Assert.Equal(0, external.Calls);
@@ -262,7 +262,7 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("research something")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("the failure and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait);
+        s.PumpUntil("the failure and the answer", () => s.ForegroundSettled, Wait);
         _output.WriteLine(s.Transcript());
         var failed = mind.Requests.SelectMany(r => r.Transcript).OfType<DelegateObserved>().First(d => d.Stage == DelegateObserved.Failed);
         Assert.Contains("You may delegate again (the user will be asked)", failed.Text);
@@ -286,12 +286,12 @@ public class DelegationTests : IDisposable
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); WithResearchProfile(cfg); }, externalClients: _ => external, inlinePost: false, mind: mind)
             .WithSecret("external-research")
             .Ask("look this up")
-            .ExpectState(RelayState.AwaitingApproval);
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
         var card = Assert.Single(s.Snap.PendingProposals);
         Assert.Contains(card.Reasons, r => r.StartsWith("No online search", StringComparison.Ordinal));
         s.Approve(Actions.ModelRequest)
-            .PumpUntil("the reply", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait)
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the reply", () => s.ForegroundSettled, Wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("from the package alone");
         _output.WriteLine(s.Transcript());
         // The correction reached the mind before the card's decision did, and the request went out without search.
@@ -325,12 +325,12 @@ public class DelegationTests : IDisposable
         using var s = Scenario.New(_tmp, cfg => { MindMode(cfg); WithResearchProfile(cfg); }, externalClients: _ => external, inlinePost: false, mind: mind)
             .WithSecret("external-research")
             .Ask("look this up")
-            .ExpectState(RelayState.AwaitingApproval);
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/);
         var card = Assert.Single(s.Snap.PendingProposals);
         Assert.Equal(noteId, card.Target["refs"]);
         s.Approve(Actions.ModelRequest)
-            .PumpUntil("the reply", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait)
-            .ExpectState(RelayState.Completed)
+            .PumpUntil("the reply", () => s.ForegroundSettled, Wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("Done: Answer.");
         _output.WriteLine(s.Transcript());
         var told = Assert.Single(mind.Requests[^1].Transcript.OfType<SystemObserved>().Where(o => o.Text.StartsWith("Left out of the package: 01ARZ3NDEKTSV4RRFFQ69G5FAV", StringComparison.Ordinal)));
@@ -357,8 +357,8 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("one question")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("the reply and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait)
-            .ExpectState(RelayState.Completed)
+        s.PumpUntil("the reply and the answer", () => s.ForegroundSettled, Wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("The one reply.");
         _output.WriteLine(s.Transcript());
         Assert.Equal(1, external.Calls);
@@ -390,8 +390,8 @@ public class DelegationTests : IDisposable
             .WithSecret("external-research")
             .Ask("what is the cap")
             .Approve(Actions.ModelRequest);
-        s.PumpUntil("the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, Wait)
-            .ExpectState(RelayState.Completed)
+        s.PumpUntil("the answer", () => s.ForegroundSettled, Wait)
+            .ExpectState(RelayState.Ready)
             .ExpectAnswerContains("12 weeks");
         _output.WriteLine(s.Transcript());
         Assert.Equal(1, external.Calls);
@@ -449,11 +449,11 @@ public class DelegationTests : IDisposable
         try
         {
             s.Ask("Research how UK councils license scheduling-software pilots for restaurants, and what Lightshift would need for one.")
-             .PumpUntil("the mind to write the delegate request", () => s.Snap.State is RelayState.AwaitingApproval or RelayState.Completed or RelayState.Failed, wait);
+             .PumpUntil("the mind to write the delegate request", () => s.AwaitingUserOrSettled, wait);
             _output.WriteLine(s.Transcript());
 
             // The mind delegated rather than guessed: one package waits for the user, nothing has left the machine.
-            Assert.Equal(RelayState.AwaitingApproval, s.Snap.State);
+            Assert.Equal(RelayState.Ready /*was AwaitingApproval*/, s.Snap.State);
             var card = Assert.Single(s.Snap.PendingProposals);
             Assert.Equal(Actions.ModelRequest, card.Action);
             Assert.Equal(0, external.Calls);
@@ -464,11 +464,11 @@ public class DelegationTests : IDisposable
             {
                 s.Approve(Actions.ModelRequest);
                 approvals++;
-                s.PumpUntil("the reply, its digest and the answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed or RelayState.AwaitingApproval, wait);
-                if (s.Snap.State != RelayState.AwaitingApproval || approvals >= ExternalRuntime.DefaultMaxTurns) break;
+                s.PumpUntil("the reply, its digest and the answer", () => s.AwaitingUserOrSettled, wait);
+                if (s.Snap.State != RelayState.Ready /*was AwaitingApproval*/ || approvals >= ExternalRuntime.DefaultMaxTurns) break;
                 if (Assert.Single(s.Snap.PendingProposals).Action != Actions.ModelRequest) break;
             }
-            s.ExpectState(RelayState.Completed).ExpectEvent(EventTypes.DelegateDigested);
+            s.ExpectState(RelayState.Ready).ExpectEvent(EventTypes.DelegateDigested);
 
             // One approval per fresh request, none per follow-up turn; every reply was digested by the model into one to three bounded lines.
             Assert.Equal(approvals, s.H.Records().Count(r => r.Type == EventTypes.ApprovalGranted));

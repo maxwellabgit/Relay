@@ -46,7 +46,7 @@ public class BackyardWorkflowTests : IDisposable
         var s = Scenario.New(tmp, Mind, mind: mind).WithWorkspace().Project("Home");
         foreach (var text in BackyardNotes) s.Note(text);
         s.Note("Idea: repaint the kitchen cabinets.");
-        return s.FileAll("home").ExpectState(RelayState.Completed);
+        return s.FileAll("home").ExpectState(RelayState.Ready);
     }
 
     private static IReadOnlyList<NoteDocument> NotesOf(Scenario s, string slug)
@@ -178,7 +178,7 @@ public class BackyardWorkflowTests : IDisposable
         Assert.Equal(4, NotesOf(s, "home").Count);
 
         s.Command("move the backyard notes into Garden")
-            .ExpectState(RelayState.AwaitingApproval)
+            .ExpectState(RelayState.Ready /*was AwaitingApproval*/)
             .ExpectProposal(Actions.CreateProject, "pending")
             .ExpectEvent(EventTypes.MindStepped, 3)             // the projects, the search, the proposal
             .ExpectEvent(EventTypes.LoopWaiting);
@@ -200,7 +200,7 @@ public class BackyardWorkflowTests : IDisposable
 
         s.Command("move the backyard notes into Garden");
         ApproveEach(s);
-        s.ExpectState(RelayState.Completed).ExpectOutcome("executed")
+        s.ExpectState(RelayState.Ready).ExpectOutcome("executed")
             .ExpectProject("garden").ExpectEvent(EventTypes.ProjectCreated).ExpectEvent(EventTypes.NoteMoved, atLeast: 3);
 
         Assert.Equal(4, s.Response.Proposals.Count);
@@ -235,7 +235,7 @@ public class BackyardWorkflowTests : IDisposable
 
         s.Command("move the backyard notes into Garden")
             .Reject(Actions.CreateProject, "not a new project")
-            .ExpectState(RelayState.Completed).ExpectOutcome("rejected");
+            .ExpectState(RelayState.Ready).ExpectOutcome("rejected");
 
         // The move the mind tried anyway names a project that does not exist, and the registry is the judge of that.
         var move = Assert.Single(s.Response.Proposals, p => p.Action == Actions.MoveNote);
@@ -261,7 +261,7 @@ public class BackyardWorkflowTests : IDisposable
             .Approve(Actions.MoveNote)
             .Reject(Actions.MoveNote, "this one stays")
             .Approve(Actions.MoveNote)
-            .ExpectState(RelayState.Completed).ExpectOutcome("executed");
+            .ExpectState(RelayState.Ready).ExpectOutcome("executed");
 
         Assert.Equal(2, NotesOf(s, "garden").Count);
         Assert.Equal(2, NotesOf(s, "home").Count);                                 // kitchen + the one that stayed
@@ -280,7 +280,7 @@ public class BackyardWorkflowTests : IDisposable
         Assert.Equal("Yard", Assert.Single(s.Snap.PendingProposals).Target["name"]);
 
         ApproveEach(s);
-        s.ExpectState(RelayState.Completed).ExpectOutcome("executed")
+        s.ExpectState(RelayState.Ready).ExpectOutcome("executed")
             .ExpectProject("yard").ExpectProject("garden", exists: false);
         var moves = s.Response.Proposals.Where(p => p.Action == Actions.MoveNote).ToList();
         Assert.Equal(3, moves.Count);
@@ -296,7 +296,7 @@ public class BackyardWorkflowTests : IDisposable
         var garden = s.H.Registry.FindActive("garden")!;
 
         ApproveEach(s);
-        s.ExpectState(RelayState.Completed).ExpectOutcome("executed");
+        s.ExpectState(RelayState.Ready).ExpectOutcome("executed");
         Assert.DoesNotContain(s.Response.Proposals, p => p.Action == Actions.CreateProject);
         Assert.Equal(3, s.Response.Proposals.Count(p => p.Action == Actions.MoveNote));
         Assert.All(s.Response.Proposals, p => Assert.Equal(garden.Id, p.Target["toProjectId"]));
@@ -304,7 +304,7 @@ public class BackyardWorkflowTests : IDisposable
 
         // Asking again finds every backyard note already in Garden: an answer, not a proposal.
         s.Command("move the backyard notes into Garden")
-            .ExpectState(RelayState.Completed).ExpectNoProposals().ExpectOutcome("answered");
+            .ExpectState(RelayState.Ready).ExpectNoProposals().ExpectOutcome("answered");
         Assert.All(Hits(mind.Requests[^1]).Where(h => h.Kind == SearchIndex.NoteKind), h => Assert.Equal("garden", h.ProjectSlug));
     }
 
@@ -314,7 +314,7 @@ public class BackyardWorkflowTests : IDisposable
         var mind = Working("greenhouse");
         using var s = Seeded(_tmp, mind)
             .Command("move the greenhouse notes into Garden")
-            .ExpectState(RelayState.Completed).ExpectNoProposals().ExpectOutcome("answered")
+            .ExpectState(RelayState.Ready).ExpectNoProposals().ExpectOutcome("answered")
             .ExpectProject("garden", exists: false);
         Assert.DoesNotContain(Hits(mind.Requests[^1]), h => h.Kind == SearchIndex.NoteKind);
     }

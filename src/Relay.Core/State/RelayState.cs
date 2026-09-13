@@ -1,24 +1,29 @@
 namespace Relay.Core.State;
 
 /// <summary>
-/// The single primary state the UI must always display (contract §4). Planning,
-/// AwaitingApproval and Executing are defined so the table is complete, but nothing in the
-/// v0.1 slice can enter them.
+/// The session machine: whether Relay is up, ready for work, failed, or locked. Capture, listening,
+/// and turns live elsewhere — on surface flags and on each task — so many tasks and a held chord can
+/// coexist without locking the session into a turn state.
 /// </summary>
 public enum RelayState
 {
     Starting,
-    Idle,
-    NoteCapture,
-    CommandCapture,
-    AwaitingTranscript,
-    Organizing,
-    Planning,
-    AwaitingApproval,
-    Executing,
-    Completed,
+    Ready,
     Failed,
     Locked,
+}
+
+/// <summary>
+/// Where the capture surface is in its own short life. Independent of <see cref="RelayState"/>: the
+/// session stays Ready the whole time, and the UI reads this flag (plus <see cref="CaptureMode"/>)
+/// for the box, the meters and the cancel/submit buttons.
+/// </summary>
+public enum CapturePhase
+{
+    None,
+    Capturing,
+    AwaitingTranscript,
+    Organizing,
 }
 
 public enum CaptureMode
@@ -31,19 +36,7 @@ public enum Trigger
 {
     RecoveryCompleted,
     RecoveryLocked,
-    NoteKey,
-    CommandKey,
     Cancel,
-    TranscriptStable,
-    TranscriptTimeout,
-    RetryWait,
-    SubmitNow,
-    OrganizeSucceeded,
-    OrganizeFailed,
-    /// <summary>User chose to store an interrupted capture found at startup (IDLE → ORGANIZING).</summary>
-    CommitInterrupted,
-    /// <summary>User chose to store the text of a capture cancelled earlier this session (IDLE → ORGANIZING).</summary>
-    RecoverDraft,
     Dismiss,
     Retry,
     /// <summary>An unexpected failure was reported; work stops and the user inspects it (→ FAILED).</summary>
@@ -51,21 +44,6 @@ public enum Trigger
     /// <summary>Integrity or policy protection stops the system (→ LOCKED).</summary>
     Lock,
     Unlock,
-
-    // Orchestrator turns (phases 3–4)
-    /// <summary>A command capture was stored and the orchestrator is enabled (ORGANIZING → PLANNING).</summary>
-    BeginPlanning,
-    /// <summary>The plan has no proposals that need approval or execution (PLANNING → COMPLETED).</summary>
-    PlanReady,
-    /// <summary>At least one proposal needs the user's decision (PLANNING → AWAITING_APPROVAL).</summary>
-    ApprovalRequired,
-    /// <summary>Approved or automatically allowed operations are about to run (→ EXECUTING). Also used for user-initiated operations from IDLE.</summary>
-    BeginExecution,
-    /// <summary>Every pending proposal was rejected; nothing runs (AWAITING_APPROVAL → COMPLETED).</summary>
-    AllRejected,
-    PlanFailed,
-    ExecutionSucceeded,
-    ExecutionFailed,
 }
 
 public static class RelayStateExtensions
@@ -74,26 +52,23 @@ public static class RelayStateExtensions
     public static string Label(this RelayState state) => state switch
     {
         RelayState.Starting => "STARTING",
-        RelayState.Idle => "IDLE",
-        RelayState.NoteCapture => "NOTE_CAPTURE",
-        RelayState.CommandCapture => "COMMAND_CAPTURE",
-        RelayState.AwaitingTranscript => "AWAITING_TRANSCRIPT",
-        RelayState.Organizing => "ORGANIZING",
-        RelayState.Planning => "PLANNING",
-        RelayState.AwaitingApproval => "AWAITING_APPROVAL",
-        RelayState.Executing => "EXECUTING",
-        RelayState.Completed => "COMPLETED",
+        RelayState.Ready => "READY",
         RelayState.Failed => "FAILED",
         RelayState.Locked => "LOCKED",
         _ => state.ToString().ToUpperInvariant(),
     };
 
-    public static bool IsCapturing(this RelayState state)
-        => state is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript;
+    public static string Label(this CapturePhase phase) => phase switch
+    {
+        CapturePhase.None => "NONE",
+        CapturePhase.Capturing => "CAPTURING",
+        CapturePhase.AwaitingTranscript => "AWAITING_TRANSCRIPT",
+        CapturePhase.Organizing => "ORGANIZING",
+        _ => phase.ToString().ToUpperInvariant(),
+    };
 
-    /// <summary>States in which an orchestrator turn owns the session.</summary>
-    public static bool IsTurnActive(this RelayState state)
-        => state is RelayState.Planning or RelayState.AwaitingApproval or RelayState.Executing;
+    public static bool IsCapturing(this CapturePhase phase)
+        => phase is CapturePhase.Capturing or CapturePhase.AwaitingTranscript;
 
     public static string Label(this CaptureMode mode) => mode switch
     {

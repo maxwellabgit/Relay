@@ -7,8 +7,10 @@ using Relay.Core.Mind;
 using Relay.Core.Model;
 using Relay.Core.Session;
 using Relay.Core.State;
+using Relay.Core.Tasks;
 using Relay.Gateway;
 using Relay.Tests.Support;
+using TaskStatus = Relay.Core.Tasks.TaskStatus;
 
 namespace Relay.Tests;
 
@@ -69,7 +71,7 @@ public sealed class ModelGatewayTests : IDisposable
         using var s = Scenario.New(_tmp, MindMode, mind: new ModelMind(model)).WithWorkspace()
             .Project("Atlas")
             .Command("which projects do I have?")
-            .ExpectState(RelayState.Completed)
+            .ExpectState(RelayState.Ready)
             .ExpectOutcome("answered")
             .ExpectAnswerContains("Atlas")
             .ExpectEvent(EventTypes.ToolCalled)
@@ -114,7 +116,8 @@ public sealed class ModelGatewayTests : IDisposable
 
         using var s = Scenario.New(_tmp, MindMode, mind: new ModelMind(model))
             .Command("what did we decide about the beta?")
-            .ExpectState(RelayState.Failed)
+            .ExpectState(RelayState.Ready)
+            .ExpectTask(TaskKind.Answer, TaskStatus.Failed, TaskOrigin.Direct)
             .ExpectEvent(EventTypes.MindFailed, 2)
             .ExpectEvent(EventTypes.TaskFailed)
             .ExpectNoEvent(EventTypes.ProposalReceived);
@@ -347,8 +350,8 @@ public sealed class ModelGatewayTests : IDisposable
             .Note("We decided the Atlas beta ships on October 14.");
 
         s.Ask("what is the current thinking on when the atlas beta ships?")
-         .PumpUntil("the mind to answer", () => s.Snap.State is RelayState.Completed or RelayState.Failed, TimeSpan.FromSeconds(180))
-         .ExpectState(RelayState.Completed)
+         .PumpUntil("the mind to answer", () => s.ForegroundSettled, TimeSpan.FromSeconds(180))
+         .ExpectState(RelayState.Ready)
          .ExpectEvent(EventTypes.ModelRequested);
         Assert.Equal(ModelMind.NamePrefix + live.Model, s.Response.Producer);
         Assert.Contains("October 14", s.Response.Answer ?? "");

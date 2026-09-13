@@ -25,7 +25,7 @@ public class RecoveryAndFailureTests : IDisposable
         }
 
         using var h2 = new Harness(_tmp.Root, clock: new FixedClock(Harness.T0.AddMinutes(5))).Start();
-        Assert.Equal(RelayState.Idle, h2.Snap.State);
+        Assert.Equal(RelayState.Ready, h2.Snap.State);
         Assert.Single(h2.Recovery.CrashedSessions);
         Assert.Equal(firstSession, h2.Last(EventTypes.SessionCrashDetected)!.DataString("crashedSessionId"));
 
@@ -36,7 +36,7 @@ public class RecoveryAndFailureTests : IDisposable
         Assert.Equal("words that must survive a crash", item.Payload);
 
         h2.Coordinator.CommitInterrupted();
-        Assert.Equal(RelayState.Completed, h2.Snap.State);
+        Assert.Equal(RelayState.Ready, h2.Snap.State);
         var committed = h2.Last(EventTypes.CaptureCommitted)!;
         Assert.Equal(captureId, committed.DataString("captureId"));
         Assert.Equal("words that must survive a crash", committed.DataString("text"));
@@ -122,7 +122,7 @@ public class RecoveryAndFailureTests : IDisposable
         File.WriteAllBytes(_tmp.Root.LedgerPath, [.. bytes, .. fragment]);
 
         using var h2 = new Harness(_tmp.Root).Start();
-        Assert.Equal(RelayState.Idle, h2.Snap.State);
+        Assert.Equal(RelayState.Ready, h2.Snap.State);
         Assert.NotNull(h2.Recovery.QuarantinePath);
         var repaired = h2.Last(EventTypes.LedgerRepaired)!;
         Assert.Equal(fragment.Length, repaired.DataInt64("quarantinedBytes"));
@@ -153,7 +153,7 @@ public class RecoveryAndFailureTests : IDisposable
         Assert.Equal("LOCKED", h2.Last(EventTypes.HotkeyRejected)!.DataString("state"));
 
         h2.Coordinator.Unlock();
-        Assert.Equal(RelayState.Idle, h2.Snap.State);
+        Assert.Equal(RelayState.Ready, h2.Snap.State);
         Assert.Null(h2.Snap.Incident);
         Assert.Equal("ledger_integrity_failed", h2.Last(EventTypes.LockReleased)!.DataString("acknowledged"));
 
@@ -170,7 +170,7 @@ public class RecoveryAndFailureTests : IDisposable
         using var h = new Harness(_tmp.Root).Start();
         h.Faulty.FailAfterAppends = h.Faulty.Appends + 2; // capture.started + state.changed succeed
         h.Coordinator.PressNoteKey();
-        Assert.Equal(RelayState.NoteCapture, h.Snap.State);
+        Assert.Equal(RelayState.Ready /*was NoteCapture*/, h.Snap.State);
         h.Coordinator.TextChanged("text during a disk failure");
         h.Coordinator.PressNoteKey(); // state.changed or capture.stop_requested fails → LOCKED
 
@@ -186,7 +186,7 @@ public class RecoveryAndFailureTests : IDisposable
 
         h.Faulty.FailAfterAppends = int.MaxValue;
         h.Coordinator.Unlock();
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.NotNull(h.Last(EventTypes.LockReleased));
     }
 
@@ -205,7 +205,7 @@ public class RecoveryAndFailureTests : IDisposable
         Assert.True(File.Exists(h.Root.CurrentDraftPath));
 
         h.Coordinator.Dismiss();
-        Assert.Equal(RelayState.Idle, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         var item = Assert.Single(h.Snap.Review, r => r.Kind == ReviewItemKind.InterruptedCapture);
         Assert.Equal("in flight when the UI threw", item.Payload);
         h.Coordinator.CommitInterrupted();
@@ -231,7 +231,7 @@ public class RecoveryAndFailureTests : IDisposable
 
         File.Delete(h.Root.DraftNotesDirectory);
         h.Coordinator.Retry();
-        Assert.Equal(RelayState.Completed, h.Snap.State);
+        Assert.Equal(RelayState.Ready, h.Snap.State);
         Assert.Equal(1, h.Count(EventTypes.CaptureCommitted)); // idempotent
         Assert.Equal(1, h.Count(EventTypes.NoteDraftCreated));
     }

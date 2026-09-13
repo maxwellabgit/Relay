@@ -107,7 +107,7 @@ public class AtlasWorkflowTests : IDisposable
             .ExpectTask(TaskKind.Check, TaskStatus.AwaitingApproval, TaskOrigin.Observed)
             .ExpectAttention(Presentation.Proposal, "Conflict")
             .ExpectAnyProposal(Actions.SupersedeNote, "pending")
-            .ExpectState(RelayState.NoteCapture);                                    // the stream never stopped
+            .ExpectState(RelayState.Ready /*was NoteCapture*/);                                    // the stream never stopped
 
         var check = s.FindTask(TaskKind.Check)!;
         Assert.False(check.Consistent);
@@ -129,7 +129,7 @@ public class AtlasWorkflowTests : IDisposable
             .ExpectEvent(EventTypes.NoteSuperseded)
             .ExpectNoAttention(Presentation.Proposal)
             .ExpectNoAttention(Presentation.Alert)                                   // approved: no alert about a conflict already resolved
-            .ExpectState(RelayState.NoteCapture);
+            .ExpectState(RelayState.Ready /*was NoteCapture*/);
 
         var atlas = s.H.Registry.FindActive("atlas")!;
         var notes = ProjectNoteStore.ReadAll(atlas.RootPath).Notes.Select(n => n.Note).ToList();
@@ -150,7 +150,7 @@ public class AtlasWorkflowTests : IDisposable
 
         // Still listening: a direct question is answered from the corrected record and cites it.
         s.Ask("what did we decide about the Atlas beta date?")
-            .ExpectState(RelayState.NoteCapture)
+            .ExpectState(RelayState.Ready /*was NoteCapture*/)
             .ExpectTask(TaskKind.Answer, TaskStatus.Completed, TaskOrigin.Direct)
             .ExpectAttention(Presentation.Result, "beta");
         var answer = s.FindTask(TaskKind.Answer, origin: TaskOrigin.Direct)!;
@@ -158,7 +158,7 @@ public class AtlasWorkflowTests : IDisposable
         Assert.Contains("(superseded)", answer.Answer);                               // the old decision is shown as history, not hidden
         Assert.Contains(answer.Citations, c => c.Id == current.Id);
 
-        s.StopListening().ExpectState(RelayState.Completed).ExpectListening(false);
+        s.StopListening().ExpectState(RelayState.Ready).ExpectListening(false);
         Assert.Contains("2 task(s) raised", s.Snap.Receipt);
 
         // Approval bound to the proposal hash, a capability consumed, the execution journaled: the usual chain, from an observed task.

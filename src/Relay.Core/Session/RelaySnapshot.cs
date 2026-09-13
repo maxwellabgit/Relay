@@ -158,6 +158,7 @@ public sealed record InboxItem(string NoteId, string Type, DateTimeOffset Create
 /// <summary>Everything the UI renders. Rebuilt by the coordinator after every change.</summary>
 public sealed record RelaySnapshot(
     RelayState State,
+    CapturePhase Capture,
     CaptureMode? Mode,
     string? CaptureId,
     DateTimeOffset? CaptureStartedAt,
@@ -201,13 +202,13 @@ public sealed record RelaySnapshot(
     IReadOnlyList<ChangeSetView> ChangeSets,
     IReadOnlyList<string> ExternalProfiles)
 {
-    public bool CanCancel => State is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript or RelayState.Planning or RelayState.AwaitingApproval or RelayState.Executing;
-    public bool CanSubmitNow => State == RelayState.AwaitingTranscript && CaptureChars > 0;
-    public bool CanRetryWait => State == RelayState.AwaitingTranscript && Awaiting?.TimedOut == true;
-    public bool SurfaceEditable => State is RelayState.NoteCapture or RelayState.CommandCapture or RelayState.AwaitingTranscript;
-    public bool TurnActive => State.IsTurnActive();
-    /// <summary>Whether a direct ask can be submitted now (the ask box): any settled state, including while listening.</summary>
-    public bool CanAsk => State is RelayState.Idle or RelayState.Completed or RelayState.NoteCapture or RelayState.AwaitingApproval or RelayState.Executing or RelayState.Planning;
+    public bool CanCancel => Capture.IsCapturing() || TurnActive;
+    public bool CanSubmitNow => Capture == CapturePhase.AwaitingTranscript && CaptureChars > 0;
+    public bool CanRetryWait => Capture == CapturePhase.AwaitingTranscript && Awaiting?.TimedOut == true;
+    public bool SurfaceEditable => Capture is CapturePhase.Capturing or CapturePhase.AwaitingTranscript;
+    public bool TurnActive => Response?.Live == true && Response.Status is TaskStatus.Planning or TaskStatus.AwaitingApproval or TaskStatus.Executing;
+    /// <summary>Whether a direct ask can be submitted now (the ask box): Ready includes capturing and listening.</summary>
+    public bool CanAsk => State == RelayState.Ready;
     /// <summary>Proposals awaiting approval across every live task (foreground first).</summary>
     public IEnumerable<ProposalView> PendingProposals => Tasks.Where(t => t.Live).OrderByDescending(t => t.Foreground).SelectMany(t => t.PendingProposals);
     public IEnumerable<TaskView> LiveTasks => Tasks.Where(t => t.Live);
