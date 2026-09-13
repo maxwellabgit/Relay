@@ -35,7 +35,7 @@ public static partial class MoveSchema
         "consistent":{"type":["string","null"],"enum":["consistent","conflicts",null]}},
         "required":["intent","complexity","needs","significance","sensitivity","risk","consistent"],"additionalProperties":false},
         "move":{"type":"object","properties":{
-        "type":{"type":"string","enum":["say","use_tool","propose","delegate","build","ask_user","wait","stop"]},
+        "type":{"type":"string","enum":["say","use_tool","propose","delegate","build","run_workflow","ask_user","wait","stop"]},
         "text":{"type":"string"},
         "name":{"type":"string"},
         "args":{"type":"object","additionalProperties":{"type":"string"}},
@@ -174,6 +174,12 @@ public static partial class MoveSchema
                 if (tool.Length > 40) tool = tool[..40].TrimEnd('_');
                 if (!char.IsAsciiLetter(tool[0])) tool = "t_" + tool;
                 return new BuildMove(tool, text, args.GetValueOrDefault("inputs") ?? "", args.GetValueOrDefault("outputs") ?? "");
+            case Move.RunWorkflow:
+                var workflow = NotIdentifier().Replace(name.ToLowerInvariant().Replace(' ', '_').Replace('-', '_'), "").Trim('_');
+                if (workflow.Length == 0) throw new FormatException("a run_workflow move needs the workflow's name in 'name'");
+                if (workflow.Length > 40) workflow = workflow[..40].TrimEnd('_');
+                if (!char.IsAsciiLetter(workflow[0])) workflow = "w_" + workflow;
+                return new RunWorkflowMove(workflow, args);
             case Move.AskUser:
                 if (text.Length == 0) throw new FormatException("an ask_user move needs the question in 'text'");
                 var options = (args.GetValueOrDefault("options") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();

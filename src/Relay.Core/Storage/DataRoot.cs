@@ -84,6 +84,10 @@ public sealed class DataRoot
     /// <summary>Tool drafts that have not been promoted (or were rejected), and beneath them the sandbox runs of every test and call.</summary>
     public string ToolDraftsDirectory => Combine("staging", "tools");
     public string ToolRunsDirectory => Combine("staging", "tools", "runs");
+    /// <summary>Workflows Relay authored and the user promoted: one JSON file per definition, each written by a change set.</summary>
+    public string WorkflowsDirectory => Combine("workflows");
+    /// <summary>Workflow drafts that have not been promoted (or were rejected).</summary>
+    public string WorkflowDraftsDirectory => Combine("staging", "workflows");
 
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
@@ -108,6 +112,7 @@ public sealed class DataRoot
             ExecutionsDirectory, AgentsDirectory, ProposalsDirectory,
             StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, SearchArtifactsDirectory, UsageDirectory,
             ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
+            WorkflowsDirectory, WorkflowDraftsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

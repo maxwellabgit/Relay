@@ -206,6 +206,7 @@ public class TaskEngineTests : IDisposable
         public Task<MoveOutcome> ProposeAsync(TaskLoop loop, ProposeMove move, DecisionRecord? fof, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
         public Task<MoveOutcome> DelegateAsync(TaskLoop loop, DelegateMove move, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
         public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
+        public Task<MoveOutcome> RunWorkflowAsync(TaskLoop loop, RunWorkflowMove move, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
         public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
         public Task<MoveOutcome> StopAsync(TaskLoop loop, StopMove move, string waitingFor, CancellationToken cancellationToken) => Task.FromResult(MoveOutcome.Nothing);
         public void Waiting(TaskLoop loop, string waitingFor) { }

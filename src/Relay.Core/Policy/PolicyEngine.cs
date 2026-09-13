@@ -48,7 +48,7 @@ public static class PolicyEngine
         Actions.CreateDraftNote or Actions.RouteNote => Tier.Automatic,
         Actions.CreateProject or Actions.ModifyNote or Actions.SupersedeNote or Actions.MoveNote or Actions.RenameProject
             or Actions.ArchiveProject or Actions.RestoreProject or Actions.DeleteProject or Actions.LaunchWorker or Actions.ApplyPatch or Actions.ExportBackup
-            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt or Actions.AddTool => Tier.RequiresApproval,
+            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt or Actions.AddTool or Actions.AddWorkflow => Tier.RequiresApproval,
         _ => Tier.Prohibited,
     };
 
@@ -93,6 +93,7 @@ public static class PolicyEngine
             Actions.UpdatePreference => ValidateUpdatePreference(target).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.UpdatePrompt => ValidateUpdatePrompt(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.AddTool => ValidateAddTool(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
+            Actions.AddWorkflow => ValidateAddWorkflow(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             _ => ["Unhandled action."],
         };
         if (problems.Count > 0)
@@ -462,6 +463,32 @@ public static class PolicyEngine
         t["description"] = draft.Description;
         t["hostFunctions"] = string.Join(",", draft.HostFunctionNames);
         t["tests"] = draft.Tests.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return problems;
+    }
+
+    /// <summary>
+    /// Promoting a drafted workflow: the draft must exist in staging, have passed its dry-run for exactly the
+    /// definition being promoted (the target pins the definition hash), and take a free name.
+    /// </summary>
+    private static List<string> ValidateAddWorkflow(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var name = t.GetValueOrDefault("name") ?? "";
+        if (!Workflows.WorkflowDefinition.ValidName(name)) { problems.Add("target.name must be a snake_case workflow name."); return problems; }
+        var draftPath = Path.Combine(w.DataRoot.WorkflowDraftsDirectory, name + ".json");
+        var text = AtomicFile.ReadAllTextIfExists(draftPath);
+        var draft = text is null ? null : Workflows.WorkflowDefinition.FromJson(text);
+        if (draft is null) { problems.Add($"No draft workflow named '{name}' is waiting in staging."); return problems; }
+        if (!draft.Tested) problems.Add($"Draft '{name}' has not passed its dry-run for its current definition.");
+        var pinned = t.GetValueOrDefault("definitionSha256") ?? t.GetValueOrDefault("sourceSha256");
+        if (string.IsNullOrWhiteSpace(pinned)) problems.Add("target.definitionSha256 is required: the approval pins the tested definition.");
+        else if (!string.Equals(pinned, draft.DefinitionSha256, StringComparison.OrdinalIgnoreCase)) problems.Add("The draft's definition changed after this proposal was made; it must be tested and proposed again.");
+        if (File.Exists(Path.Combine(w.DataRoot.WorkflowsDirectory, name + ".json"))) problems.Add($"A promoted workflow named '{name}' already exists.");
+        problems.AddRange(draft.Validate([]).Where(p => !p.StartsWith("a workflow named", StringComparison.Ordinal)));
+        t["description"] = draft.Description;
+        t["version"] = draft.Version.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        t["steps"] = draft.Steps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        t["definitionSha256"] = draft.DefinitionSha256;
         return problems;
     }
 

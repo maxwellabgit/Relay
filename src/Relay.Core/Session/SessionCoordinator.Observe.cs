@@ -66,9 +66,10 @@ public sealed partial class SessionCoordinator
             return;
         }
         var loop = stream.Loop;
-        // The project list and the tools can both have changed since the stream opened (a task raised earlier created a project).
+        // The project list, tools and workflows can all have changed since the stream opened (a task raised earlier created a project).
         loop.Context.Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList();
         loop.Context.Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors;
+        loop.Context.Workflows = _services.Workflows?.Descriptors() ?? [];
         stream.Reading = true;
         stream.Passes++;
         var fresh = window.Fresh.Select(l => l.SegmentId).ToList();

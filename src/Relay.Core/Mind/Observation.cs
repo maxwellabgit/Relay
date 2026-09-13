@@ -215,6 +215,20 @@ public sealed record BuildObserved(DateTimeOffset At, string Tool, string Stage,
     public override string Render() => $"build {Tool} → {Stage}" + (string.IsNullOrWhiteSpace(Detail) ? "" : $" · {Clip(Detail, 600)}");
 }
 
+/// <summary>A workflow run moved through a stage: started, a step, finished, failed, or unavailable.</summary>
+public sealed record WorkflowObserved(DateTimeOffset At, string Workflow, string Stage, string Detail, int? StepIndex = null) : Observation(At)
+{
+    public const string Started = "started";
+    public const string Step = "step";
+    public const string Finished = "finished";
+    public const string Failed = "failed";
+    public const string Promoted = "promoted";
+    public const string Unavailable = "unavailable";
+
+    public override string Kind => "workflow";
+    public override string Render() => $"workflow {Workflow} → {Stage}" + (StepIndex is { } i ? $" #{i + 1}" : "") + (string.IsNullOrWhiteSpace(Detail) ? "" : $" · {Clip(Detail, 600)}");
+}
+
 /// <summary>The user spoke to the task directly: a reply to a question, an override of a route, a dismissal, a stop.</summary>
 public sealed record UserObserved(DateTimeOffset At, string What, string Text) : Observation(At)
 {

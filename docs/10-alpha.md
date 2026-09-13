@@ -40,7 +40,9 @@ There is no task version and no record of which events a task has already applie
 
 ### G6 · Workflows do not exist
 
-No type, no store, no move, no action, no directory. The capability table and the improvement loop both name them.
+*Closed with Step 4. Named, versioned definitions under `workflows\` (drafts in `staging\workflows`), promoted by one `add_workflow` approval as a change set, listed to the mind, and run with `run_workflow` through the same TaskLoop.*
+
+~~No type, no store, no move, no action, no directory. The capability table and the improvement loop both name them.~~
 
 ### G7 · Improvement only happens inside a task
 
@@ -57,7 +59,7 @@ No `split`, `prioritize`, `defer` or revise-objective (cancel and stop exist). N
 | G3 no durable task | scenario 4 |
 | G4 no versioning | scenario 4 |
 | G5 nominal search | scenario 2 |
-| G6 no workflows | the workflow half of scenario 3 |
+| G6 no workflows | *closed* |
 | G7 no friction review | scenario 3's *leads to* |
 | G8 the rest | nothing; post-Alpha |
 
@@ -97,7 +99,7 @@ Migrating the tests found a second hole of the same family, and a worse one. `co
 
 ### Step 4 — Workflows, minimally
 
-A named, versioned definition that composes context retrieval, tool calls, delegation and formatting, run through the same loop so its waits and resumes are the task runtime's. Built and evaluated in isolation like a tool, promoted by one approval as a change set, revertible, and listed to the mind beside the tools.
+*Closed.* A named, versioned definition that composes context retrieval, tool calls, delegation and formatting, run through the same loop so its waits and resumes are the task runtime's. Built and evaluated in isolation like a tool (draft under `staging\workflows`, dry-run with no side effects, one `add_workflow` approval at promote), revertible as a change set, and listed to the mind beside the tools. The mind runs one with `run_workflow`, which expands steps into the observations the loop already understands.
 
 *Proves:* the workflow half of scenario 3, and gives the improvement loop something other than a tool to propose.
 

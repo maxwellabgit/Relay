@@ -51,6 +51,8 @@ public class MoveSchemaTests
         var build = Assert.IsType<BuildMove>(Move("""{"type":"build","text":"We need a world clock.","name":"World Clock!","args":{"inputs":"city","outputs":"local time"},"done":false}"""));
         Assert.Equal("world_clock", build.Name);
         Assert.Equal("city", build.Inputs);
+        var workflow = Assert.IsType<RunWorkflowMove>(Move("""{"type":"run_workflow","text":"","name":"list_and_say","args":{},"done":false}"""));
+        Assert.Equal("list_and_say", workflow.Name);
         var ask = Assert.IsType<AskUserMove>(Move("""{"type":"ask_user","text":"Which project?","name":"","args":{"options":"Atlas|Backyard"},"done":false}"""));
         Assert.Equal(["Atlas", "Backyard"], ask.Options);
         Assert.Equal("nothing here", ((WaitMove)Move("""{"type":"wait","text":"nothing here","name":"","args":{},"done":false}""")).Reason);

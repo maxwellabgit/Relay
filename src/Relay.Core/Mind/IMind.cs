@@ -1,4 +1,5 @@
 using Relay.Core.Orchestration;
+using Relay.Core.Workflows;
 
 namespace Relay.Core.Mind;
 
@@ -6,7 +7,7 @@ namespace Relay.Core.Mind;
 public sealed record ActionDescriptor(string Action, string Target, string Note);
 
 /// <summary>
-/// What the mind knows besides the transcript: which tools, actions, delegate profiles and projects
+/// What the mind knows besides the transcript: which tools, actions, workflows, delegate profiles and projects
 /// exist, whether building is available, the user's response style, and any approved prompt fragment.
 /// Built by the host per task; the same object is reused for every step of that task.
 /// </summary>
@@ -14,6 +15,8 @@ public sealed class MindContext
 {
     /// <summary>The built-in read-only tools and every promoted tool. Settable because a build promoted during the task adds to it.</summary>
     public IReadOnlyList<ToolDescriptor> Tools { get; set; } = ToolBroker.Descriptors;
+    /// <summary>Promoted workflows the mind may run. Settable because a promotion during the task adds to it.</summary>
+    public IReadOnlyList<WorkflowDescriptor> Workflows { get; set; } = [];
     public IReadOnlyList<ActionDescriptor> Actions { get; init; } = ActionCatalog.ForDirect;
     /// <summary>Configured external profiles the mind may delegate to; empty means delegation is unavailable.</summary>
     public IReadOnlyList<string> DelegateProfiles { get; init; } = [];
@@ -74,6 +77,7 @@ public static class ActionCatalog
         new(Policy.Actions.ExportBackup, "{path?}", ""),
         new(Policy.Actions.UpdatePreference, "{key, value, benefit, permissions, scope, acceptance}", "how Relay itself behaves; keys: response.verbosity | response.promptLine | display.alwaysShow | display.stopShowing | display.maxAlertsPer10Minutes | display.maxResultsPer5Minutes | display.cooldownSeconds | filing.grant | filing.revoke | sources.allowOnlineSearch | retention.bufferSeconds | retention.excerptMaxSeconds"),
         new(Policy.Actions.UpdatePrompt, "{name:\"mind\", content, benefit, permissions, scope, acceptance}", "an approved addition to your own instructions"),
+        new(Policy.Actions.AddWorkflow, "{name, definitionSha256, benefit, permissions, scope, acceptance}", "promote a tested draft workflow from staging; one approval, one reversible change set"),
     ];
 
     /// <summary>Everything, for a task the user asked for directly.</summary>

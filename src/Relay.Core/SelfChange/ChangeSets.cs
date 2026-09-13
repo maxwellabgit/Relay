@@ -15,7 +15,9 @@ public static class ChangeKinds
     public const string Routing = "routing";
     /// <summary>A tool Relay built was promoted (the file appears) or withdrawn; reverting a promotion removes the tool.</summary>
     public const string Tool = "tool";
-    public static readonly string[] All = [Preference, Prompt, Routing, Tool];
+    /// <summary>A workflow definition was promoted (the file appears) or withdrawn; reverting a promotion removes the workflow.</summary>
+    public const string Workflow = "workflow";
+    public static readonly string[] All = [Preference, Prompt, Routing, Tool, Workflow];
 }
 
 /// <summary>
@@ -54,19 +56,20 @@ public sealed class ChangeSetStore
 
     public ChangeSetStore(DataRoot root) => _root = root;
 
-    /// <summary>Paths a change set may touch: preferences, prompt fragments, and promoted tools. Settings that gate authority are out of scope by construction.</summary>
+    /// <summary>Paths a change set may touch: preferences, prompt fragments, promoted tools and workflows. Settings that gate authority are out of scope by construction.</summary>
     public bool IsAllowedPath(string path)
     {
         var full = System.IO.Path.GetFullPath(path);
         return string.Equals(full, System.IO.Path.GetFullPath(_root.PreferencesPath), StringComparison.OrdinalIgnoreCase)
             || full.StartsWith(System.IO.Path.GetFullPath(_root.PromptsDirectory) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            || full.StartsWith(System.IO.Path.GetFullPath(_root.ToolsDirectory) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            || full.StartsWith(System.IO.Path.GetFullPath(_root.ToolsDirectory) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(System.IO.Path.GetFullPath(_root.WorkflowsDirectory) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     public ChangeSetResult Apply(string kind, string path, string newContent, string reason, DateTimeOffset now, string? taskId = null, string? proposalId = null)
     {
         if (!ChangeKinds.All.Contains(kind)) return new ChangeSetResult(false, null, $"Unknown change kind '{kind}'.");
-        if (!IsAllowedPath(path)) return new ChangeSetResult(false, null, "Change sets may only touch preferences, prompt fragments and promoted tools.");
+        if (!IsAllowedPath(path)) return new ChangeSetResult(false, null, "Change sets may only touch preferences, prompt fragments, promoted tools and workflows.");
         var before = AtomicFile.ReadAllTextIfExists(path);
         if (string.Equals(before, newContent, StringComparison.Ordinal)) return new ChangeSetResult(false, null, "No change: the content is already in effect.");
         var set = new ChangeSet

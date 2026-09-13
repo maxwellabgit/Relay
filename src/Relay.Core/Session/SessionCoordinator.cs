@@ -98,6 +98,7 @@ public sealed partial class SessionCoordinator
             Workers = services.Workers,
             External = services.External,
             Tools = services.Tools,
+            Workflows = services.Workflows,
         };
         _executor.SelfChange = new SelfChange.SelfChangeRuntime(root, PreferenceStore, ChangeSets, () => clock.UtcNow);
         _ledger = ledger;

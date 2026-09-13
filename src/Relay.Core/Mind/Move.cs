@@ -15,16 +15,17 @@ public abstract record Move(string Type)
     public const string Propose = "propose";
     public const string Delegate = "delegate";
     public const string Build = "build";
+    public const string RunWorkflow = "run_workflow";
     public const string AskUser = "ask_user";
     public const string Wait = "wait";
     public const string Stop = "stop";
     public const string Raise = "raise";
 
     /// <summary>Every move that exists, in either grammar.</summary>
-    public static readonly string[] Types = [Say, UseTool, Propose, Delegate, Build, AskUser, Wait, Stop, Raise];
+    public static readonly string[] Types = [Say, UseTool, Propose, Delegate, Build, RunWorkflow, AskUser, Wait, Stop, Raise];
 
     /// <summary>The moves a task may make. It is already the work, so it has nothing to raise to.</summary>
-    public static readonly string[] TaskTypes = [Say, UseTool, Propose, Delegate, Build, AskUser, Wait, Stop];
+    public static readonly string[] TaskTypes = [Say, UseTool, Propose, Delegate, Build, RunWorkflow, AskUser, Wait, Stop];
 
     /// <summary>The moves the observing loop may make while Relay is listening: it interprets and raises work, it never acts and never waits on anything.</summary>
     public static readonly string[] ObservingTypes = [Wait, Say, UseTool, Raise];
@@ -82,6 +83,12 @@ public sealed record DelegateMove(string Profile, string Prompt, IReadOnlyList<s
 public sealed record BuildMove(string Name, string Justification, string Inputs, string Outputs) : Move(Build)
 {
     public override string Brief() => $"build {Name} (in: {Clip(Inputs, 80)}; out: {Clip(Outputs, 80)}) \"{Clip(Justification, 120)}\"";
+}
+
+/// <summary>Run a promoted workflow by name: its steps expand into tool calls, proposals and say/format observations the loop already understands.</summary>
+public sealed record RunWorkflowMove(string Name, IReadOnlyDictionary<string, string> Args) : Move(RunWorkflow)
+{
+    public override string Brief() => $"run_workflow {Name}" + (Args.Count == 0 ? "" : $" {Map(Args)}");
 }
 
 /// <summary>One question for the user, optionally with choices; the reply arrives as a <see cref="UserObserved"/>.</summary>

@@ -89,6 +89,7 @@ public sealed class Harness : IDisposable
             // Built tools share the sandbox; without a drafter the mind can still call promoted tools but cannot build.
             Tools = new Relay.Core.Tools.ToolRuntime(root, ChangeSets, workerHost, SettingsLoad.Settings.Workers, () => toolDrafter, () => Clock.UtcNow);
         }
+        Workflows = new Relay.Core.Workflows.WorkflowRuntime(root, ChangeSets, () => Clock.UtcNow);
         // Search is available when settings enable it (or a client was injected). Profiles with SupportsSearch
         // then appear in SearchProfileNames so allowSearch on model.request may proceed.
         Search = searchClient ?? (SettingsLoad.Settings.Search.Enabled ? new FakeSearchClient() : null);
@@ -129,6 +130,7 @@ public sealed class Harness : IDisposable
             Index = Index,
             Workers = Workers,
             Tools = Tools,
+            Workflows = Workflows,
             External = External,
             Search = Search,
             SearchArtifacts = SearchArtifacts,
@@ -160,6 +162,7 @@ public sealed class Harness : IDisposable
     public CoordinatorServices Services { get; }
     public WorkerRuntime? Workers { get; }
     public Relay.Core.Tools.ToolRuntime? Tools { get; }
+    public Relay.Core.Workflows.WorkflowRuntime Workflows { get; }
     public MemorySecretStore Secrets { get; }
 
     public DataRoot Root { get; }

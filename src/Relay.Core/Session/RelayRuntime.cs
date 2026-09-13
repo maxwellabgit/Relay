@@ -22,6 +22,7 @@ using Relay.Core.Stream;
 using Relay.Core.Time;
 using Relay.Core.Tools;
 using Relay.Core.Workspaces;
+using Relay.Core.Workflows;
 
 namespace Relay.Core.Session;
 
@@ -93,6 +94,7 @@ public sealed class RelayRuntime : IDisposable
             tools = new ToolRuntime(root, changeSets, workerHost, settings.Settings.Workers,
                 () => current.Model.Enabled ? options.ModelClientFactory?.Invoke(current.Model) : null, () => clock.UtcNow);
         }
+        var workflows = new WorkflowRuntime(root, changeSets, () => clock.UtcNow);
 
         ExternalRuntime? external = null;
         SearchArtifacts? searchArtifacts = null;
@@ -144,6 +146,7 @@ public sealed class RelayRuntime : IDisposable
             Index = index,
             Workers = workers,
             Tools = tools,
+            Workflows = workflows,
             External = external,
             Search = searchClient,
             SearchArtifacts = searchArtifacts,
@@ -154,6 +157,7 @@ public sealed class RelayRuntime : IDisposable
             IndexProblems = indexProblems,
         };
         if (tools is not null) indexProblems.AddRange(tools.Store.Problems());
+        indexProblems.AddRange(workflows.Store.Problems());
 
         var coordinator = new SessionCoordinator(
             root, ledger, recovery.Verification, drafts, notes, sessions, settings,

@@ -50,6 +50,7 @@ public sealed partial class SessionCoordinator
     private MindContext MindContextOf(IReadOnlyList<ActionDescriptor> actions, IReadOnlyList<string> recall) => new()
     {
         Tools = _services.Tools?.AllDescriptors() ?? ToolBroker.Descriptors,
+        Workflows = _services.Workflows?.Descriptors() ?? [],
         Actions = actions,
         DelegateProfiles = _services.External?.ProfileNames ?? [],
         SearchProfiles = _services.External?.SearchProfileNames ?? [],
@@ -269,6 +270,7 @@ public sealed partial class SessionCoordinator
         ProposeMove p => p.Action,
         DelegateMove d => d.Profile,
         BuildMove b => b.Name,
+        RunWorkflowMove w => w.Name,
         _ => null,
     };
 
@@ -322,9 +324,11 @@ public sealed partial class SessionCoordinator
         // A task is an improvement the moment Relay proposes changing itself, whatever the words that started it
         // were. The lane follows what is being proposed, and it has to be set before policy decides: the
         // improvement contract is only owed in an improve task.
+        // Direct asks start as Answer; the lane follows what is being proposed. Observed kinds (Check, Remember,
+        // …) are already the right lane and must not be overwritten by the action vocabulary.
         if (TaskLoop.IsSelfChange(move.Action) && task.Kind != TaskKind.Improve) Relabel(task, TaskKind.Improve);
-        else if (move.Action == Actions.ModelRequest && task.Kind != TaskKind.Research) Relabel(task, TaskKind.Research);
-        else if (TaskLoop.IsOrganizeChange(move.Action) && task.Kind is not (TaskKind.Organize or TaskKind.Improve)) Relabel(task, TaskKind.Organize);
+        else if (move.Action == Actions.ModelRequest && task.Kind == TaskKind.Answer) Relabel(task, TaskKind.Research);
+        else if (TaskLoop.IsOrganizeChange(move.Action) && task.Kind == TaskKind.Answer) Relabel(task, TaskKind.Organize);
         ReceiveProposal(task, proposal);
         var ps = task.Proposals.Last(p => p.Proposal.ProposalId == proposal.ProposalId);
 
@@ -509,6 +513,7 @@ public sealed partial class SessionCoordinator
         task.Status = TaskStatus.Planning;
         var executed = new ExecutionObserved(now, id, action, ps.Status == "executed", ps.Status == "executed" ? result.Summary : result.Error ?? "failed", result.Outputs);
         if (action == Actions.AddTool && ps.Status == "executed") return ([executed, ToolPromoted(task, result.Outputs.GetValueOrDefault("tool") ?? ps.Proposal.Target.GetValueOrDefault("name") ?? "")], null);
+        if (action == Actions.AddWorkflow && ps.Status == "executed") return ([executed, WorkflowPromoted(task, result.Outputs.GetValueOrDefault("workflow") ?? ps.Proposal.Target.GetValueOrDefault("name") ?? "")], null);
         return ([executed], null);
     }
 
@@ -674,6 +679,7 @@ public sealed partial class SessionCoordinator
         public Task<MoveOutcome> ProposeAsync(TaskLoop loop, ProposeMove move, DecisionRecord? fof, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindPropose(_task, loop, move, fof));
         public Task<MoveOutcome> DelegateAsync(TaskLoop loop, DelegateMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindDelegate(_task, loop, move));
         public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindBuild(_task, loop, move, fof));
+        public Task<MoveOutcome> RunWorkflowAsync(TaskLoop loop, RunWorkflowMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindRunWorkflow(_task, _tools, move));
         public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindAskUser(_task, move));
         public Task<MoveOutcome> StopAsync(TaskLoop loop, StopMove move, string waitingFor, CancellationToken cancellationToken) => OnCoordinator(() => _owner.MindStop(_task, move, waitingFor));
         public void Waiting(TaskLoop loop, string waitingFor) => _owner._scheduler.Post(() => _owner.OnMindWaiting(_task, waitingFor));

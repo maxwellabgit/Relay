@@ -45,6 +45,7 @@ public interface ILoopHost
     Task<MoveOutcome> ProposeAsync(TaskLoop loop, ProposeMove move, DecisionRecord? fof, CancellationToken cancellationToken);
     Task<MoveOutcome> DelegateAsync(TaskLoop loop, DelegateMove move, CancellationToken cancellationToken);
     Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken);
+    Task<MoveOutcome> RunWorkflowAsync(TaskLoop loop, RunWorkflowMove move, CancellationToken cancellationToken);
     Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken);
     /// <summary>Cancel what the loop is waiting for.</summary>
     Task<MoveOutcome> StopAsync(TaskLoop loop, StopMove move, string waitingFor, CancellationToken cancellationToken);
@@ -330,6 +331,16 @@ public sealed class TaskLoop
                 return await _host.BuildAsync(this, build, fof, cancellationToken).ConfigureAwait(false);
             }
 
+            case RunWorkflowMove run:
+            {
+                if (!_context.Workflows.Any(w => w.Name == run.Name))
+                {
+                    var listed = _context.Workflows.Count == 0 ? "none are promoted" : string.Join(", ", _context.Workflows.Select(w => w.Name));
+                    return MoveOutcome.Of(new WorkflowObserved(now, run.Name, WorkflowObserved.Failed, $"There is no promoted workflow named '{run.Name}'. Workflows: {listed}."));
+                }
+                return await _host.RunWorkflowAsync(this, run, cancellationToken).ConfigureAwait(false);
+            }
+
             case AskUserMove ask:
                 return await _host.AskUserAsync(this, ask, cancellationToken).ConfigureAwait(false);
 
@@ -365,7 +376,7 @@ public sealed class TaskLoop
         return Result;
     }
 
-    public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool;
+    public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool or Policy.Actions.AddWorkflow;
 
     public static bool IsOrganizeChange(string action) => action is Policy.Actions.CreateProject or Policy.Actions.ArchiveProject or Policy.Actions.RestoreProject
         or Policy.Actions.RenameProject or Policy.Actions.DeleteProject or Policy.Actions.RouteNote or Policy.Actions.MoveNote

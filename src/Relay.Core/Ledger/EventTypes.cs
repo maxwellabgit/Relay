@@ -199,4 +199,9 @@ public static class EventTypes
     public const string ToolPromoted = "tool.promoted";
     /// <summary>A promoted tool ran in the sandbox for a task: run id, ok, host calls, denials, elapsed.</summary>
     public const string ToolRan = "tool.ran";
+
+    /// <summary>A tested draft became a promoted workflow (with its change set id); reverting the change set removes it.</summary>
+    public const string WorkflowPromoted = "workflow.promoted";
+    /// <summary>A promoted workflow ran for a task: name, step count, ok.</summary>
+    public const string WorkflowRan = "workflow.ran";
 }

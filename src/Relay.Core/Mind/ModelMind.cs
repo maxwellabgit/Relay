@@ -92,6 +92,7 @@ public sealed class ScriptedMind : IMind
     /// <summary>The next turn of a delegate conversation that returned (slice 5): under the first request's approval, within its bounds.</summary>
     public static DelegateMove Reply(string requestId, string prompt, params string[] refs) => new("", prompt, refs, MoveSchema.DefaultDelegateBudget, false, requestId);
     public static BuildMove Build(string name, string justification, string inputs = "", string outputs = "") => new(name, justification, inputs, outputs);
+    public static RunWorkflowMove RunWorkflow(string name, params (string Key, string Value)[] args) => new(name, args.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal));
     public static AskUserMove Ask(string question, params string[] options) => new(question, options);
     public static WaitMove Wait(string reason = "nothing to do") => new(reason);
     public static StopMove Stop(string reason = "stop") => new(reason);

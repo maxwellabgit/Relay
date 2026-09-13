@@ -234,7 +234,7 @@ public sealed class EvaluationRunner
         var parts = pattern.Split(':', 2);
         if (!string.Equals(move.Type, parts[0], StringComparison.Ordinal)) return false;
         if (parts.Length == 1 || parts[1] == "*") return true;
-        var name = move switch { UseToolMove t => t.Tool, ProposeMove p => p.Action, DelegateMove d => d.Profile, BuildMove b => b.Name, _ => null };
+        var name = move switch { UseToolMove t => t.Tool, ProposeMove p => p.Action, DelegateMove d => d.Profile, BuildMove b => b.Name, RunWorkflowMove w => w.Name, _ => null };
         return string.Equals(name, parts[1], StringComparison.OrdinalIgnoreCase);
     }
 
@@ -244,6 +244,7 @@ public sealed class EvaluationRunner
         ProposeMove p => $"propose:{p.Action}",
         DelegateMove d => $"delegate:{d.Profile}",
         BuildMove b => $"build:{b.Name}",
+        RunWorkflowMove w => $"run_workflow:{w.Name}",
         _ => move.Type,
     };
 
@@ -315,6 +316,9 @@ public sealed class EvaluationRunner
 
         public Task<MoveOutcome> BuildAsync(TaskLoop loop, BuildMove move, DecisionRecord fof, CancellationToken cancellationToken)
             => Task.FromResult(MoveOutcome.Wait(Waits.Build, new BuildObserved(_clock(), move.Name, BuildObserved.Started, "Evaluation: the build request is scored, not built.")));
+
+        public Task<MoveOutcome> RunWorkflowAsync(TaskLoop loop, RunWorkflowMove move, CancellationToken cancellationToken)
+            => Task.FromResult(MoveOutcome.Of(new WorkflowObserved(_clock(), move.Name, WorkflowObserved.Finished, "Evaluation: workflows are scored as a single move.")));
 
         public Task<MoveOutcome> AskUserAsync(TaskLoop loop, AskUserMove move, CancellationToken cancellationToken)
             => Task.FromResult(MoveOutcome.Wait(Waits.User));

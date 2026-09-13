@@ -41,6 +41,8 @@ public sealed class CoordinatorServices
     public IWorkerOperations? Workers { get; init; }
     /// <summary>Tools Relay builds for itself (docs/09, slice 6): store, sandbox runner, builder, promotion. Null when there is no worker host.</summary>
     public Tools.ToolRuntime? Tools { get; init; }
+    /// <summary>Workflows Relay authors for itself (Alpha Step 4): store, builder, promotion. Always available when change sets are.</summary>
+    public Workflows.WorkflowRuntime? Workflows { get; init; }
     public ExternalRuntime? External { get; init; }
     /// <summary>Online search provider (Gateway); null when search is off or misconfigured.</summary>
     public Search.ISearchClient? Search { get; init; }

@@ -98,6 +98,8 @@ public static class MindPrompt
         sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer. done=false only narrates: it does nothing and costs a step, so act instead (the feed sentence already tells the user what you are doing).\n");
         sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only; the result is the next observation.\n");
         sb.Append("- propose: name=the action, args=its target fields, text=the reason in one line. Policy decides; the user may have to approve; you see the decision and then the execution result.\n");
+        if (context.Workflows.Count > 0)
+            sb.Append("- run_workflow: name=a promoted workflow. Expands its steps (tools, retrieve/search, delegate, say/format) through this same loop; waits and resumes are the runtime's.\n");
         if (context.DelegateProfiles.Count > 0)
             sb.Append("- delegate: name=a profile, text=the complete prompt you write for that external AI (it cannot see this machine: include every fact it needs), args={\"refs\":\"<ids returned by tools, comma-separated>\",\"budget_tokens\":\"<n>\",\"allow_search\":\"true|false\"}. The package leaves the machine only after the user approves. " +
                       "When a delegate has returned and turns are left, you may continue that conversation: delegate again with args reply_to=<its request id> and text=your next message (a follow-up question, a correction); the same approval covers it, new refs do not.\n");
@@ -128,6 +130,14 @@ public static class MindPrompt
         sb.Append("\nTools (read-only):\n");
         foreach (var d in context.Tools) sb.Append("- ").Append(d.Name).Append('(').Append(string.Join(", ", d.Arguments)).Append("): ").Append(d.Description).Append('\n');
         sb.Append(ToolLimits).Append('\n');
+
+        if (context.Workflows.Count > 0)
+        {
+            sb.Append("\nWorkflows available:\n");
+            foreach (var w in context.Workflows)
+                sb.Append("- ").Append(w.Name).Append(" v").Append(w.Version).Append(": ").Append(w.Description)
+                  .Append(" [").Append(string.Join(" → ", w.StepKinds)).Append("]\n");
+        }
 
         if (observing)
         {
