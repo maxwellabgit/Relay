@@ -40,8 +40,8 @@ public sealed record BuildOutcome(bool Ok, ToolPackage? Package, string Summary,
 /// <summary>
 /// Turns the mind's build move into a tested draft: the fixed build prompt asks the model for a package
 /// under a schema, the package is validated, its tests run in the worker sandbox, and one retry feeds the
-/// failure back verbatim. Nothing here promotes anything: the tested draft waits in staging for the
-/// user's one approval (<c>add_tool</c>), and the loop observes each stage as it happens.
+/// failure back verbatim. Nothing here promotes anything: the coordinator promotes under the approved
+/// <c>build_tool</c> proposal after tests pass, and the loop observes each stage as it happens.
 /// </summary>
 public sealed partial class ToolBuilder
 {

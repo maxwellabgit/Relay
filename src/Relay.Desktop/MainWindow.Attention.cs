@@ -89,23 +89,33 @@ public sealed partial class MainWindow
     /// <summary>A subtle indicator: one line, no card. A note was filed, something ran under a grant.</summary>
     private Grid AmbientRow(AttentionItem item)
     {
-        var row = new Grid { ColumnSpacing = 8 };
+        var row = new Grid { ColumnSpacing = 10, Margin = new Thickness(4, 2, 0, 2) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(Dot(Palette.Neutral));
-        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-        text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = item.Title });
-        if (item.Detail.Length > 0 && item.Detail != item.Title) text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "  " + Trim(item.Detail, 140), Foreground = Secondary() });
-        text.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = $"  {item.LastAt.ToLocalTime():HH:mm:ss}" + (item.Occurrences > 1 ? $" ×{item.Occurrences}" : ""), Foreground = Secondary(), FontSize = 11 });
+        var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = item.Title, FontWeight = FontWeights.SemiBold, FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        if (item.Detail.Length > 0 && item.Detail != item.Title)
+            text.Children.Add(new TextBlock { Text = Trim(item.Detail, 160), FontSize = 11, Foreground = Secondary(), TextWrapping = TextWrapping.Wrap });
         Grid.SetColumn(text, 1);
         row.Children.Add(text);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        if (item.TaskId is { } taskId) buttons.Children.Add(TinyButton("details", () => ShowTaskDiagnostics(taskId)));
-        buttons.Children.Add(TinyButton("dismiss", () => _coordinator!.DismissAttention(item.ItemId)));
-        Grid.SetColumn(buttons, 2);
-        row.Children.Add(buttons);
+        var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Top };
+        meta.Children.Add(new TextBlock { Text = RelativeWhen(item.LastAt), FontSize = 11, Foreground = Secondary() });
+        if (item.TaskId is { } taskId) meta.Children.Add(TinyButton("details", () => ShowTaskDiagnostics(taskId)));
+        meta.Children.Add(TinyButton("dismiss", () => _coordinator!.DismissAttention(item.ItemId)));
+        Grid.SetColumn(meta, 2);
+        row.Children.Add(meta);
         return row;
+    }
+
+    private static string RelativeWhen(DateTimeOffset at)
+    {
+        var ago = DateTimeOffset.Now - at;
+        if (ago.TotalSeconds < 45) return "now";
+        if (ago.TotalMinutes < 60) return $"{Math.Max(1, (int)ago.TotalMinutes)}m";
+        if (ago.TotalHours < 24) return $"{(int)ago.TotalHours}h";
+        return at.ToLocalTime().ToString("HH:mm");
     }
 
     private static Button TinyButton(string text, Action action)

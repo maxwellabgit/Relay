@@ -70,14 +70,7 @@ public sealed partial class MainWindow
     };
 
     private static string KnowledgeText(KnowledgeState k)
-    {
-        var parts = new List<string>();
-        if (k.Summary.Length > 0) parts.Add(k.Summary);
-        if (k.Known.Count > 0) parts.Add("Known locally: " + string.Join("; ", k.Known));
-        if (k.Missing.Count > 0) parts.Add("Missing: " + string.Join("; ", k.Missing));
-        parts.Add(k.CapabilityGap ? "Capability: beyond the local model — an external task would be needed and is only proposed, never run, without approval." : "Capability: within the local model.");
-        return "Knowledge state — " + string.Join("  ·  ", parts);
-    }
+        => k.Known.Count > 0 ? "Pulled from local knowledge" : "Knowledge added";
 
     private static string CostText(TaskCost c)
     {
@@ -96,9 +89,9 @@ public sealed partial class MainWindow
     {
         Background = Res("SubtleFillColorSecondaryBrush"),
         BorderBrush = stripe,
-        BorderThickness = stripe is null ? new Thickness(0) : new Thickness(2, 0, 0, 0),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(14, 10, 14, 10),
+        BorderThickness = stripe is null ? new Thickness(0) : new Thickness(3, 0, 0, 0),
+        CornerRadius = new CornerRadius(12),
+        Padding = new Thickness(16, 12, 16, 12),
         Child = child,
     };
 

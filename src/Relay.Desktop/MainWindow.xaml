@@ -10,7 +10,7 @@
             <Style x:Key="Card" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="CornerRadius" Value="14" />
                 <Setter Property="Padding" Value="18,14" />
             </Style>
             <Style x:Key="RegionHeader" TargetType="TextBlock">
@@ -328,16 +328,19 @@
                     <Button x:Name="UnlockButton" Content="Unlock" Click="Unlock_Click" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}" />
                 </StackPanel>
                 <TextBlock x:Name="NoticeText" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="Collapsed" />
-                <Grid x:Name="AskPanel" ColumnSpacing="8">
+                <Grid x:Name="AskPanel" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="AskBox" AutomationProperties.Name="Ask box" PlaceholderText="Ask Relay… (Enter)" FontSize="14" IsSpellCheckEnabled="False"
-                             BorderThickness="0" CornerRadius="8" Padding="14,10"
+                    <TextBox x:Name="AskBox" AutomationProperties.Name="Ask box" PlaceholderText="Ask Relay…" FontSize="14" IsSpellCheckEnabled="False"
+                             BorderThickness="0" CornerRadius="14" Padding="16,12" MinHeight="48"
                              Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                              KeyDown="AskBox_KeyDown" />
-                    <Button x:Name="AskButton" Grid.Column="1" Content="Ask" Click="Ask_Click" VerticalAlignment="Center" Style="{ThemeResource AccentButtonStyle}" />
+                    <Button x:Name="AskButton" Grid.Column="1" Content="↑" Click="Ask_Click" VerticalAlignment="Stretch"
+                            MinWidth="48" FontSize="18" FontWeight="SemiBold" CornerRadius="14"
+                            Style="{ThemeResource AccentButtonStyle}"
+                            AutomationProperties.Name="Ask" ToolTipService.ToolTip="Ask Relay" />
                 </Grid>
                 <TextBlock x:Name="AskHint" Style="{StaticResource Secondary}" FontSize="11" Text="Instructions and answers go here. Note capture and listening still use the chords." />
             </StackPanel>

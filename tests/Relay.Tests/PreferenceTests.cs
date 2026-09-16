@@ -187,6 +187,18 @@ public class PreferenceTests : IDisposable
     /// each argued for, each approved on its own, each a change set that can be reverted without the other.
     /// </summary>
     [Fact]
+    public void SettingAPreferenceToItsCurrentValueSucceedsAsAlreadyInEffect()
+    {
+        using var s = Scenario.New(_tmp, MindMode).WithWorkspace()
+            .Do("Turn online search on", c => Assert.True(c.UpdatePreference("sources.allowOnlineSearch", "true")))
+            .ExpectPreference("sources.allowOnlineSearch", "true");
+        var setsAfterFirst = s.H.ChangeSets.All().Count(c => !c.Reverted);
+        s.Do("Turn it on again", c => Assert.True(c.UpdatePreference("sources.allowOnlineSearch", "true")))
+            .ExpectPreference("sources.allowOnlineSearch", "true");
+        Assert.Equal(setsAfterFirst, s.H.ChangeSets.All().Count(c => !c.Reverted)); // no new change set when nothing changed
+    }
+
+    [Fact]
     public void UpdatingPreferencesToConciseTextIsTwoApprovedRevertibleChangeSets()
     {
         var mind = new ScriptedMind()

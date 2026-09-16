@@ -128,6 +128,9 @@ public sealed class SelfChangeRuntime : ISelfChangeOperations
             default:
                 return ExecutionResult.Fail($"Unhandled key {key}.");
         }
+        // Idempotent: the value is already what was asked for. Treat as success so the mind does not re-propose the same preference (seen live as an approval loop).
+        if (!result.Ok && result.Error is not null && result.Error.Contains("already in effect", StringComparison.OrdinalIgnoreCase))
+            return ExecutionResult.Ok(summary + " (already in effect)", new Dictionary<string, string> { ["key"] = key, ["unchanged"] = "true" });
         if (!result.Ok) return ExecutionResult.Fail(result.Error ?? "change set failed");
         sink.Record(EventTypes.ChangeSetApplied, new { taskId, proposalId = proposal.ProposalId, changeSetId = result.ChangeSet!.ChangeSetId, kind = result.ChangeSet.Kind, path = result.ChangeSet.Path, key, afterSha256 = result.ChangeSet.AfterSha256, acceptance = proposal.Target.GetValueOrDefault("acceptance") });
         return ExecutionResult.Ok(summary, new Dictionary<string, string> { ["changeSetId"] = result.ChangeSet.ChangeSetId, ["key"] = key });

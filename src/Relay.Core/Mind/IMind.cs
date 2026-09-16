@@ -24,6 +24,8 @@ public sealed class MindContext
     public IReadOnlyList<string> SearchProfiles { get; init; } = [];
     /// <summary>Whether the build move is available in this build. When false the mind is told to name the gap instead.</summary>
     public bool CanBuild { get; init; }
+    /// <summary>Whether an online search client is wired (settings.search enabled with endpoint and secret). When false, web_search cannot run.</summary>
+    public bool OnlineSearchConfigured { get; init; }
     /// <summary>"Name (id …, slug …)" per active project. Settable because a long listening pass outlives the project list it started with.</summary>
     public IReadOnlyList<string> Projects { get; set; } = [];
     /// <summary>The user's response style (compiled preferences).</summary>

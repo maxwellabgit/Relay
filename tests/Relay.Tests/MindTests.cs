@@ -143,14 +143,16 @@ public class MindPromptTests
         Assert.Contains("- web_search(query, limit?)", bare);
         Assert.Contains("- create_project {name, slug?}", bare);
         Assert.Contains("update_prompt", bare);
+        Assert.Contains("Online search is not configured on this machine", bare);
         Assert.StartsWith(MindPrompt.DefaultConstitution, bare);
 
-        var full = MindPrompt.System(new MindContext { DelegateProfiles = ["research"], SearchProfiles = ["research"], CanBuild = true, ResponseStyle = "Terse.", PromptFragment = "Always answer in English.", Constitution = "You are the test mind.", Actions = ActionCatalog.ForObserved });
+        var full = MindPrompt.System(new MindContext { DelegateProfiles = ["research"], SearchProfiles = ["research"], CanBuild = true, OnlineSearchConfigured = true, ResponseStyle = "Terse.", PromptFragment = "Always answer in English.", Constitution = "You are the test mind.", Actions = ActionCatalog.ForObserved });
         Assert.StartsWith("You are the test mind.", full);
         Assert.Contains("Delegate profiles: research (can search online when approved: research)", full);
         Assert.Contains("- build: name=<snake_case tool name>", full);
         Assert.Contains("Response style (the user's preference; obey it): Terse.", full);
         Assert.Contains("Additional instructions approved by the user: Always answer in English.", full);
+        Assert.DoesNotContain("Online search is not configured on this machine", full);
         Assert.DoesNotContain("delete_project", full);   // an overheard task may not propose deletion
         Assert.DoesNotContain("update_preference", full);
     }
@@ -270,6 +272,24 @@ public class TaskLoopTests
     }
 
     [Fact]
+    public async Task IdenticalFeedSentencesAreKeptOnceEvenAcrossAnnotations()
+    {
+        var mind = new ScriptedMind()
+            .Step(ScriptedMind.Tool("search", ("query", "Lightshift")), "Looking up Lightshift.")
+            .Step(ScriptedMind.Tool("list_projects"), "Looking up Lightshift.")
+            .Then(_ => MindStep.Of(ScriptedMind.Say("No notes on Lightshift yet."), "Done."));
+        var (loop, host, _) = Build(mind, input: "What does Lightshift do?");
+        var annotated = false;
+        host.OnTool = m =>
+        {
+            if (!annotated) { annotated = true; loop.Annotate(["no local hit"]); }
+            return MoveOutcome.Of(new ToolObserved(At, m.Tool, m.Args, true, "0 hit(s)", "[]", []));
+        };
+        var result = await loop.RunAsync(CancellationToken.None);
+        Assert.Equal(["Looking up Lightshift.", "· no local hit", "Done."], result!.Feed);
+    }
+
+    [Fact]
     public async Task AProposalThatNeedsApprovalPausesTheLoopUntilTheUserAnswersAndTheResultIsObserved()
     {
         var mind = new ScriptedMind()
@@ -300,6 +320,60 @@ public class TaskLoopTests
         Assert.Equal("Atlas is set up.", result.Answer);
         Assert.Null(loop.WaitingFor);
         Assert.Equal(1, loop.Proposals);
+    }
+
+    [Fact]
+    public async Task TheSameProposalAgainAfterItRanIsNotSentToTheUserTwice()
+    {
+        // Seen live: mind re-proposed sources.allowOnlineSearch after it executed (or reported already in effect), stacking approval cards.
+        var mind = new ScriptedMind()
+            .Step(ScriptedMind.Propose(Actions.UpdatePreference, "Enable online search.", ("key", "sources.allowOnlineSearch"), ("value", "true"), ("benefit", "search"), ("permissions", "/"), ("scope", "task"), ("acceptance", "yes")), "Asking for search.", ScriptedMind.Read(0.1))
+            .Then(r =>
+            {
+                Assert.Contains(r.Transcript, o => o is ExecutionObserved);
+                return MindStep.Of(ScriptedMind.Propose(Actions.UpdatePreference, "Enable online search again.", ("key", "sources.allowOnlineSearch"), ("value", "true"), ("benefit", "search"), ("permissions", "/"), ("scope", "task"), ("acceptance", "yes")), "Asking again.");
+            })
+            .Then(r =>
+            {
+                Assert.Contains("You already proposed update_preference with these arguments", ((SystemObserved)r.Transcript[^1]).Text);
+                return MindStep.Of(ScriptedMind.Say("Online search is on — looking that up next, or say if search is not configured."), "Continuing.");
+            });
+        var (loop, host, _) = Build(mind, input: "look up Lightshift");
+        host.OnPropose = (m, _) => MoveOutcome.Of(
+            new PolicyObserved(At, "p1", m.Action, PolicyObserved.Allowed, ["ok"]),
+            new ExecutionObserved(At, "p1", m.Action, true, "Online search is on", new Dictionary<string, string> { ["key"] = "sources.allowOnlineSearch" }));
+
+        Assert.Equal("answered", (await loop.RunAsync(CancellationToken.None))!.Outcome);
+        Assert.Equal(1, loop.Proposals);
+        Assert.Equal(1, host.Calls.Count(c => c.StartsWith("propose:", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task WebSearchWithoutAProviderIsNotCalledBuiltOrAskedAsSettings()
+    {
+        // Seen live: search not wired → web_search fails → build web_search → ask_user with a/b/c echoing the error.
+        var mind = new ScriptedMind()
+            .Step(ScriptedMind.Tool("web_search", ("query", "Lightshift")), "Searching.", ScriptedMind.Read(0.3, MindRead.NeedNewTool))
+            .Then(r =>
+            {
+                Assert.Contains("not configured", ((SystemObserved)r.Transcript[^1]).Text);
+                return MindStep.Of(ScriptedMind.Build("web_search", "Need web search", "query", "hits"), "Building search.");
+            })
+            .Then(r =>
+            {
+                Assert.Contains("already a tool", ((SystemObserved)r.Transcript[^1]).Text);
+                return MindStep.Of(ScriptedMind.Ask("Enable online search in settings with an https endpoint and a secret, then try again.", "a", "b", "c"), "Asking.");
+            })
+            .Then(r =>
+            {
+                Assert.Contains("not a question for the user", ((SystemObserved)r.Transcript[^1]).Text);
+                return MindStep.Of(ScriptedMind.Say("Online search is not set up on this machine, so I cannot look Lightshift up on the web.", done: true), "Done.");
+            });
+        var (loop, host, _) = Build(mind, new MindContext { CanBuild = true, OnlineSearchConfigured = false }, input: "Search online and tell me what lightshift does");
+        Assert.Equal("answered", (await loop.RunAsync(CancellationToken.None))!.Outcome);
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("tool:", StringComparison.Ordinal));
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("build:", StringComparison.Ordinal));
+        Assert.DoesNotContain(host.Calls, c => c == "ask");
     }
 
     [Fact]

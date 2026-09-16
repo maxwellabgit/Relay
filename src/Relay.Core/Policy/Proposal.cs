@@ -25,6 +25,7 @@ public static class Actions
     public const string UpdatePreference = "update_preference";  // Tier B: a change set to preferences
     public const string UpdatePrompt = "update_prompt";          // Tier B: a change set to a prompt fragment
     public const string AddTool = "add_tool";                    // Tier B: promote a tested draft tool Relay built (docs/09, slice 6); one approval, one change set
+    public const string BuildTool = "build_tool";                // Tier B: approve drafting+testing a new tool in the sandbox (then promote on success)
     public const string AddWorkflow = "add_workflow";            // Tier B: promote a tested draft workflow; one approval, one change set
     public const string RunShell = "run_shell";                  // Prohibited
     public const string SendMessage = "send_message";            // Prohibited
@@ -32,10 +33,10 @@ public static class Actions
     public static readonly string[] Prohibited = [RunShell, SendMessage];
 
     /// <summary>Actions a standing grant may never cover: each needs a fresh approval every time.</summary>
-    public static readonly string[] NeverGranted = [DeleteProject, ModelRequest, UpdatePreference, UpdatePrompt, LaunchWorker, ApplyPatch, AddTool, AddWorkflow];
+    public static readonly string[] NeverGranted = [DeleteProject, ModelRequest, UpdatePreference, UpdatePrompt, LaunchWorker, ApplyPatch, AddTool, BuildTool, AddWorkflow];
 
     /// <summary>Actions an observed task may not propose: a destructive or self-modifying step needs the user's own words.</summary>
-    public static readonly string[] DirectOnly = [DeleteProject, UpdatePreference, UpdatePrompt, ModelRequest];
+    public static readonly string[] DirectOnly = [DeleteProject, UpdatePreference, UpdatePrompt, ModelRequest, BuildTool];
 }
 
 public static class Producers

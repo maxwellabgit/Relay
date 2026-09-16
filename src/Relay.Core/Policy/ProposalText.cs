@@ -32,6 +32,7 @@ public static class ProposalText
             Actions.UpdatePreference => ($"Change preference {Get("key")}", $"New value: {Get("value")}\nApplied as a reversible change set to config\\preferences.json." + Contract(t)),
             Actions.UpdatePrompt => ($"Change the '{Get("name")}' prompt fragment", $"New text ({Get("content").Length} chars): {Truncate(Get("content"), 300)}\nApplied as a reversible change set; the previous text is kept." + Contract(t)),
             Actions.AddTool => ($"Add the tool '{Get("name")}'", $"{Get("description", "A tool Relay built for itself.")}\nRuns only in the worker sandbox; reaches the machine through: {(Get("hostFunctions", "").Length == 0 ? "nothing" : Get("hostFunctions"))}.\nTests passed in the sandbox: {Get("tests", "?")} · source {Short(Get("sourceSha256"))}\nOne reversible change set; reverting removes the tool." + Contract(t)),
+            Actions.BuildTool => ($"Build the tool '{Get("name")}'", $"Inputs: {Get("inputs", "(none stated)")}\nOutputs: {Get("outputs", "(none stated)")}\nAfter you approve: the local model drafts the tool, its tests run in the worker sandbox, and on success it is promoted as a reversible change set. Nothing is drafted until you approve." + Contract(t)),
             Actions.AddWorkflow => ($"Add the workflow '{Get("name")}'", $"{Get("description", "A workflow Relay authored for itself.")}\nVersion {Get("version", "1")} · {Get("steps", "?")} step(s) · definition {Short(Get("definitionSha256"))}\nRuns through the same task loop (waits and resumes are the runtime's).\nOne reversible change set; reverting removes the workflow." + Contract(t)),
             _ => (p.Action, string.Join("\n", p.Target.Select(kv => $"{kv.Key}: {kv.Value}"))),
         };
@@ -63,6 +64,7 @@ public static class ProposalText
         Actions.ModelRequest => ["objective", "profile", "budgetTokens", "allowSearch"],
         Actions.UpdatePreference => ["value"],
         Actions.UpdatePrompt => ["content"],
+        Actions.BuildTool => ["name", "inputs", "outputs"],
         _ => [],
     };
 

@@ -55,6 +55,7 @@ public sealed partial class SessionCoordinator
         DelegateProfiles = _services.External?.ProfileNames ?? [],
         SearchProfiles = _services.External?.SearchProfileNames ?? [],
         CanBuild = _services.Tools?.CanBuild == true,
+        OnlineSearchConfigured = _services.Search is not null,
         Projects = _services.Registry.Active.Select(p => $"{p.Name} (id {p.Id}, slug {p.Slug})").ToList(),
         ResponseStyle = Preferences.PromptFragment,
         MaxAnswerChars = Preferences.MaxAnswerChars,
@@ -492,10 +493,13 @@ public sealed partial class SessionCoordinator
         ps.Capability ??= _capabilities.Issue(ps.Proposal, _clock.UtcNow);
         task.Status = TaskStatus.Executing;
         PersistTask(task);
-        var result = _executor.Execute(ps.Proposal, ps.Capability, WorldFor(task, forExecution: true), task.TaskId, this, overheard: task.Overheard);
-        ps.Result = result;
         var id = ps.Proposal.ProposalId;
         var action = ps.Proposal.Action;
+        // Drafting is gated on this approval; BeginApprovedBuild starts the sandbox work and keeps the loop on Waits.Build.
+        if (action == Actions.BuildTool)
+            return BeginApprovedBuild(task, ps);
+        var result = _executor.Execute(ps.Proposal, ps.Capability, WorldFor(task, forExecution: true), task.TaskId, this, overheard: task.Overheard);
+        ps.Result = result;
         if (result.Status == ExecutionStatus.Pending)
         {
             task.PendingOperation = ps;

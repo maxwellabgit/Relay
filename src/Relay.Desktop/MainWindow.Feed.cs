@@ -66,6 +66,12 @@ public sealed partial class MainWindow
         var ambient = s.Attention.Where(i => i.Level == Presentation.Ambient).ToList();
         if (ambient.Count > 0)
         {
+            FeedItems.Children.Add(new TextBlock
+            {
+                Text = "QUIET ACTIVITY",
+                Style = (Style)RootGrid.Resources["RegionHeader"],
+                Margin = new Thickness(2, 8, 0, 2),
+            });
             foreach (var item in ambient.Take(8))
                 FeedItems.Children.Add(AmbientRow(item));
         }
@@ -108,27 +114,37 @@ public sealed partial class MainWindow
         if (!string.Equals(t.Instruction, title, StringComparison.Ordinal) && t.Origin == TaskOrigin.Direct)
             panel.Children.Add(new TextBlock { Text = "“" + Trim(t.Instruction, 240) + "”", Style = (Style)RootGrid.Resources["Secondary"], FontStyle = FontStyle.Italic });
 
-        if (!string.IsNullOrWhiteSpace(t.Summary) && t.Summary != title)
+        // Summary is the latest feed sentence — skip it when Steps already show that line (seen live: "Looking up…" twice).
+        var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(t.Summary) && t.Summary != title && t.Steps.All(s => !string.Equals(s.Trim(), t.Summary.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            shown.Add(t.Summary.Trim());
             panel.Children.Add(new TextBlock { Text = t.Summary, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        }
 
-        // Mind feed sentences (turn progress).
+        // Mind feed sentences (turn progress) — one line per distinct sentence for display.
         foreach (var step in t.Steps)
+        {
+            if (string.IsNullOrWhiteSpace(step)) continue;
+            if (!shown.Add(step.Trim())) continue;
             panel.Children.Add(new TextBlock
             {
                 Text = step,
                 FontSize = 13,
                 LineHeight = 20,
                 TextWrapping = TextWrapping.Wrap,
+                Foreground = Secondary(),
                 IsTextSelectionEnabled = true,
             });
+        }
 
         if (!string.IsNullOrWhiteSpace(t.Answer))
         {
             panel.Children.Add(new Border
             {
-                Background = Res("SubtleFillColorSecondaryBrush"),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(14, 10, 14, 10),
+                Background = Res("ControlFillColorDefaultBrush"),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(14, 12, 14, 12),
                 Child = new TextBlock { Text = t.Answer, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 13, LineHeight = 20 },
             });
         }

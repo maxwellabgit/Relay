@@ -58,7 +58,7 @@ public static class FrictionReview
         => Preference(
             "need:new_tool",
             "response.promptLine",
-            "When the same capability gap appears repeatedly, draft a personal tool and propose add_tool after tests pass.",
+            "When the same capability gap appears repeatedly, use build so the user can approve drafting a personal tool.",
             "A personal tool for a repeated capability gap",
             "preferences.json (one prompt line)",
             "one preference key",

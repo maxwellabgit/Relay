@@ -1,4 +1,5 @@
 using Relay.Core.Decisions;
+using Relay.Core.Orchestration;
 using Relay.Core.Time;
 
 namespace Relay.Core.Mind;
@@ -191,7 +192,11 @@ public sealed class TaskLoop
                 // A verdict, once reached, stands for the task: the mind need not repeat it on every step after.
                 if (step.Read?.Consistent is not null) Consistent = step.Read.Consistent;
                 _transcript.Add(new MoveObserved(now, move, step.Feed));
-                _feed.Add(step.Feed);
+                // Identical mind feed sentences are noise in the Result card (seen live: "Looking up Lightshift." ×4).
+                // Compare against prior mind lines only — · annotations must not reopen the same sentence.
+                if (!_feed.Any(line => !line.StartsWith("· ", StringComparison.Ordinal)
+                        && string.Equals(line.Trim(), step.Feed.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    _feed.Add(step.Feed);
                 _host.Stepped(this, step);
 
                 if (Route is null && step.Read is not null)
@@ -211,8 +216,16 @@ public sealed class TaskLoop
                     var repeated = _lastSay is not null && string.Equals(_lastSay.Trim(), say.Text.Trim(), StringComparison.OrdinalIgnoreCase);
                     _lastSay = say.Text;
                     if (repeated)
+                    {
+                        // Same sentence a third time: treat it as the answer so the task cannot burn the step budget (seen live after a failed build).
+                        if (_consecutiveSays > _budget.MaxConsecutiveSays)
+                        {
+                            Answer = say.Text;
+                            return End(LoopStatus.Done, "answered", null);
+                        }
                         _transcript.Add(new SystemObserved(now, "You said exactly that already; saying it again does nothing and spends a step. " +
                             "If that sentence is your answer, say it with done=true. If you need something from the user, use ask_user. Otherwise take a different move."));
+                    }
                     else if (_consecutiveSays >= _budget.MaxConsecutiveSays)
                         _transcript.Add(new SystemObserved(now, "You have narrated without acting. Take a move now, or finish with say and done=true."));
                     continue;
@@ -269,13 +282,30 @@ public sealed class TaskLoop
                     var hint = nearest is null ? "" : $" Did you mean {nearest.Name}({string.Join(", ", nearest.Arguments)})? Use exactly that name.";
                     return MoveOutcome.Of(new SystemObserved(now, $"There is no tool named '{tool.Tool}'. Tools: {string.Join(", ", _context.Tools.Select(t => t.Name))}.{hint}"));
                 }
+                // web_search with no provider wired cannot succeed; calling it only burns steps and leads to ask_user/build stalls (seen live).
+                if (tool.Tool == "web_search" && !_context.OnlineSearchConfigured)
+                    return MoveOutcome.Of(new SystemObserved(now, "Online search is not configured on this machine (no https search endpoint/secret in settings). " +
+                        "Do not call web_search again, do not build web_search, and do not ask_user to configure settings. " +
+                        "Finish with say and done=true telling the user search is not set up."));
                 // The same call again would return the same thing: the loop observes the repetition instead of spending a call on it.
                 var earlier = _transcript.OfType<ToolObserved>().LastOrDefault(t => t.Tool == tool.Tool && SameArgs(t.Args, tool.Args));
                 if (earlier is not null)
                     return MoveOutcome.Of(new SystemObserved(now, $"You already called {tool.Tool} with these arguments; it returned: {Observation.Clip(earlier.Summary, 200)}. Calling it again changes nothing. " +
                         "Try different arguments, use another tool, or, if no tool can produce what is needed, say so (needs: new_tool) and finish."));
                 ToolCalls++;
-                return await _host.UseToolAsync(this, tool, cancellationToken).ConfigureAwait(false);
+                var toolOutcome = await _host.UseToolAsync(this, tool, cancellationToken).ConfigureAwait(false);
+                // A configuration/grant failure is not a missing tool: building web_search or asking the user to pick a/b/c only stalls.
+                if (tool.Tool == "web_search"
+                    && toolOutcome.Observations.OfType<ToolObserved>().LastOrDefault() is { Ok: false } failed
+                    && (failed.Summary.Contains("not configured", StringComparison.OrdinalIgnoreCase)
+                        || failed.Summary.Contains("not granted", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var tip = failed.Summary.Contains("not granted", StringComparison.OrdinalIgnoreCase)
+                        ? "If online search should be allowed, propose update_preference sources.allowOnlineSearch=true once; otherwise finish with say and done=true."
+                        : "Do not build web_search and do not ask_user to configure settings. Finish with say and done=true naming what is missing.";
+                    return new MoveOutcome([.. toolOutcome.Observations, new SystemObserved(now, tip)], toolOutcome.WaitFor);
+                }
+                return toolOutcome;
             }
 
             case ProposeMove propose:
@@ -292,6 +322,24 @@ public sealed class TaskLoop
                         : meantDelegate ? $" An external AI is not proposed, it is delegated to: use the delegate move with name=one of {string.Join("/", _context.DelegateProfiles)} and text=the complete prompt you write for it."
                         : "";
                     return MoveOutcome.Of(new SystemObserved(now, $"'{propose.Action}' is not an action you may propose here. Actions: {string.Join(", ", _context.Actions.Select(a => a.Action))}.{hint}"));
+                }
+                // Same target again after it already ran (or was a no-op "already in effect") only asks the user for another card — seen live with sources.allowOnlineSearch.
+                if (_transcript.OfType<MoveObserved>().Select(m => m.Move).OfType<ProposeMove>()
+                    .Any(p => !ReferenceEquals(p, propose) && string.Equals(p.Action, propose.Action, StringComparison.Ordinal) && SameArgs(p.Target, propose.Target)))
+                {
+                    var ran = _transcript.OfType<ExecutionObserved>().LastOrDefault(e =>
+                        string.Equals(e.Action, propose.Action, StringComparison.Ordinal)
+                        && (e.Ok || e.Summary.Contains("already in effect", StringComparison.OrdinalIgnoreCase)));
+                    var approved = _transcript.OfType<ApprovalObserved>().LastOrDefault(a =>
+                        string.Equals(a.Action, propose.Action, StringComparison.Ordinal) && a.Granted);
+                    if (ran is not null || approved is not null)
+                    {
+                        var what = ran is { Ok: true } ? $"It already ran: {Observation.Clip(ran.Summary, 200)}."
+                            : ran is not null ? $"It already ran and reported: {Observation.Clip(ran.Summary, 200)}. The change is already in effect."
+                            : "The user already approved this change.";
+                        return MoveOutcome.Of(new SystemObserved(now, $"You already proposed {propose.Action} with these arguments. {what} " +
+                            "Proposing it again only asks them to approve the same change twice. Take the next step (use what that change unlocked, or finish with say and done=true)."));
+                    }
                 }
                 var selfChange = IsSelfChange(propose.Action);
                 var selfDirected = Origin != InputObserved.Ask;
@@ -325,6 +373,19 @@ public sealed class TaskLoop
             case BuildMove build:
             {
                 if (!_context.CanBuild) return MoveOutcome.Of(new BuildObserved(now, build.Name, BuildObserved.Unavailable, "Building tools is not available in this build. Tell the user which tool would be needed and answer what you can."));
+                // Built-in tools (web_search, search, …) already exist; a failed call is configuration or grant, not a missing capability (seen live: build web_search).
+                if (ToolBroker.Descriptors.Any(t => string.Equals(t.Name, build.Name, StringComparison.OrdinalIgnoreCase))
+                    || _context.Tools.Any(t => string.Equals(t.Name, build.Name, StringComparison.OrdinalIgnoreCase)))
+                    return MoveOutcome.Of(new SystemObserved(now, $"'{build.Name}' is already a tool. Building it again does nothing. " +
+                        (string.Equals(build.Name, "web_search", StringComparison.OrdinalIgnoreCase)
+                            ? "If web_search failed, search is not granted or not configured — finish with say and done=true, or propose sources.allowOnlineSearch once when the grant is what is missing."
+                            : "Use use_tool with that name, or finish with say and done=true.")));
+                // Online search is a settings/provider concern, not a sandbox tool (seen live: build sourcesallowonlinesearch in a loop).
+                if (LooksLikeOnlineSearchBuild(build))
+                    return MoveOutcome.Of(new SystemObserved(now, "Online search is not something a built tool can provide (built tools have no network). " +
+                        (_context.OnlineSearchConfigured
+                            ? "Use web_search, or propose sources.allowOnlineSearch when the grant is missing. Finish with say and done=true if you cannot."
+                            : "Search is not configured on this machine. Finish with say and done=true saying so — do not build a tool for it.")));
                 var fof = _decider.FofFor(LastRead, Move.Build, build.Name, selfDirected: true);
                 if (fof.Outcome == Decider.Refuse) return MoveOutcome.Of(new SystemObserved(now, $"Refused by the fundamental-operation flag: {fof.Rationale}. Explain to the user instead."));
                 Proposals++;
@@ -342,7 +403,20 @@ public sealed class TaskLoop
             }
 
             case AskUserMove ask:
+            {
+                // Echoing a tool's configuration error as ask_user (often with placeholder a|b|c) stalls the task on the user (seen live).
+                var lastToolFail = _transcript.OfType<ToolObserved>().LastOrDefault(t => !t.Ok);
+                var echoesConfig = lastToolFail is not null
+                    && (ask.Question.Contains(lastToolFail.Summary, StringComparison.OrdinalIgnoreCase)
+                        || (lastToolFail.Summary.Contains("not configured", StringComparison.OrdinalIgnoreCase)
+                            && ask.Question.Contains("endpoint", StringComparison.OrdinalIgnoreCase)));
+                var placeholderOptions = ask.Options.Count > 0 && ask.Options.All(o =>
+                    o.Trim().Length <= 1 || o.Trim() is "a" or "b" or "c" or "A" or "B" or "C");
+                if (echoesConfig || (placeholderOptions && ask.Question.Contains("settings", StringComparison.OrdinalIgnoreCase)))
+                    return MoveOutcome.Of(new SystemObserved(now, "That is not a question for the user — it restates a tool failure or uses placeholder options. " +
+                        "Finish with say and done=true explaining what is missing, or take a real next move."));
                 return await _host.AskUserAsync(this, ask, cancellationToken).ConfigureAwait(false);
+            }
 
             case StopMove stop:
                 if (WaitingFor is null) return MoveOutcome.Of(new SystemObserved(now, "Nothing is running that could be stopped."));
@@ -376,7 +450,7 @@ public sealed class TaskLoop
         return Result;
     }
 
-    public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool or Policy.Actions.AddWorkflow;
+    public static bool IsSelfChange(string action) => action is Policy.Actions.UpdatePreference or Policy.Actions.UpdatePrompt or Policy.Actions.AddTool or Policy.Actions.BuildTool or Policy.Actions.AddWorkflow;
 
     public static bool IsOrganizeChange(string action) => action is Policy.Actions.CreateProject or Policy.Actions.ArchiveProject or Policy.Actions.RestoreProject
         or Policy.Actions.RenameProject or Policy.Actions.DeleteProject or Policy.Actions.RouteNote or Policy.Actions.MoveNote
@@ -388,6 +462,19 @@ public sealed class TaskLoop
         foreach (var (key, value) in a)
             if (!b.TryGetValue(key, out var other) || !string.Equals(value.Trim(), other.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
         return true;
+    }
+
+    /// <summary>Built tools cannot reach the web; a build whose name or contract is about online search is a stall, not a capability gap.</summary>
+    private static bool LooksLikeOnlineSearchBuild(BuildMove build)
+    {
+        var blob = string.Join(' ', build.Name, build.Justification, build.Inputs, build.Outputs).ToLowerInvariant();
+        return blob.Contains("web_search", StringComparison.Ordinal)
+            || blob.Contains("online search", StringComparison.Ordinal)
+            || blob.Contains("search online", StringComparison.Ordinal)
+            || blob.Contains("allowonlinesearch", StringComparison.Ordinal)
+            || blob.Contains("allow_online_search", StringComparison.Ordinal)
+            || blob.Contains("sources.allow", StringComparison.Ordinal)
+            || blob.Contains("search the web", StringComparison.Ordinal);
     }
 
     private static string RouteHint(DecisionRecord route) => route.Outcome switch

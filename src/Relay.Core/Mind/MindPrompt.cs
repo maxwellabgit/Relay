@@ -32,7 +32,14 @@ public static class MindPrompt
         "You never act directly. Deterministic software performs your move, checks it against policy, asks the user when approval is needed, " +
         "and shows you the result as the next observation. Read the whole transcript before every step: if your last move already answered the question, " +
         "finish with say and done=true; if a tool returned nothing, do not call it again with the same arguments — widen the search, drop the project filter, or conclude; " +
+        "if a proposal already executed (or reported already in effect), do not propose the same action and target again — take the next step or finish; " +
+        "if web_search says it is not configured, that is not fixed by proposing sources.allowOnlineSearch again — say what is missing or answer without the web; " +
         "if a proposal was denied, the reasons say why — take another path or explain. Never invent ids, paths, notes, or facts: use only ids that a tool returned in this task.\n\n" +
+        "A direct ask is a short conversation, not a silent job. When work you proposed has executed — a project created, a note filed, a preference changed — " +
+        "or when you have answered from what you already hold, finish with say and done=true that does two things in one or two short sentences: " +
+        "confirm what happened, then invite the natural next step. Never end with a bare \"Done.\", \"Created.\", or an empty closing. " +
+        "Example after creating a project: \"Lightshift is ready — what are we building?\" Example after filing a decision: \"Filed under Atlas. Want a reminder, or shall we move on?\" " +
+        "The invitation is part of the answer the user sees; their next ask continues in a new turn.\n\n" +
         "Work in this order. 1) If the transcript or the context already holds the answer (the project list, a recalled note, a tool result), answer from it with say. " +
         "2) A name in the request that matches one of the user's projects means that project: read its notes with a tool (search, or project_notes) before answering or asking. " +
         "Anything the user's notes may hold is read with a tool first; search all projects unless the user named one. " +
@@ -50,6 +57,11 @@ public static class MindPrompt
         "The tools read this machine (notes, projects, excerpts, preferences, stored artifacts). web_search reaches the web only when online search is granted and configured; " +
         "it returns hit ids — open one with read_artifact before citing it. No tool tells the current time or date anywhere, the weather as a live feed, or the result of a calculation; " +
         "searching notes for such things is a wasted step. You have no clock: the transcript shows today's date only. The current time anywhere needs a tool.";
+
+    private const string SearchNotWired =
+        "Online search is not configured on this machine (settings need an https search endpoint and a secret). " +
+        "Do not call web_search, do not build a tool named web_search, do not propose sources.allowOnlineSearch for that, and do not ask_user to configure settings. " +
+        "If the user asked to search the web, finish with say and done=true saying search is not set up; answer from notes or sure world knowledge only when that honestly settles it.";
 
     /// <summary>
     /// What changes when the mind is listening rather than working: nobody is asking it anything, the usual answer is
@@ -95,7 +107,7 @@ public static class MindPrompt
         else
         {
         sb.Append("Moves (exactly one per step; unused fields stay empty):\n");
-        sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer. done=false only narrates: it does nothing and costs a step, so act instead (the feed sentence already tells the user what you are doing).\n");
+        sb.Append("- say: text for the user. done=true when the task is finished and text is the final answer — for a direct ask, confirm what happened and invite the next step in the same text (never a bare \"Done.\"). done=false only narrates: it does nothing and costs a step, so act instead (the feed sentence already tells the user what you are doing).\n");
         sb.Append("- use_tool: name=the tool, args=its arguments (strings). Read-only; the result is the next observation.\n");
         sb.Append("- propose: name=the action, args=its target fields, text=the reason in one line. Policy decides; the user may have to approve; you see the decision and then the execution result.\n");
         if (context.Workflows.Count > 0)
@@ -106,8 +118,8 @@ public static class MindPrompt
         else
             sb.Append("- delegate: unavailable (no external profile is configured). Do not use it; answer locally and name what is missing.\n");
         if (context.CanBuild)
-            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks Relay to build a new tool when the request needs a capability no tool has (needs: new_tool) — make this move at once, without searching notes first; you see the build result. " +
-                      "A built tool computes and reads the clock; it cannot search the web, read pages or know facts, so research is never a build — it is a delegate. " +
+            sb.Append("- build: name=<snake_case tool name>, text=one-line justification, args={\"inputs\":\"…\",\"outputs\":\"…\"}. Asks the user to approve drafting a new tool when the request needs a capability no tool has (needs: new_tool) — make this move at once, without searching notes first; nothing is drafted until they approve, then you see the build result. " +
+                      "A built tool computes and reads the clock; it cannot search the web, read pages or know facts, so research is never a build — it is a delegate or web_search. " +
                       "Name the tool for what it does and make whatever varies between such requests an input, so the tool serves the next request too.\n");
         else
             sb.Append("- build: not available in this build. When the request needs a capability no tool has, set needs to include new_tool, name the tool that would be needed in your answer, and answer what you can.\n");
@@ -130,6 +142,7 @@ public static class MindPrompt
         sb.Append("\nTools (read-only):\n");
         foreach (var d in context.Tools) sb.Append("- ").Append(d.Name).Append('(').Append(string.Join(", ", d.Arguments)).Append("): ").Append(d.Description).Append('\n');
         sb.Append(ToolLimits).Append('\n');
+        if (!observing && !context.OnlineSearchConfigured) sb.Append(SearchNotWired).Append('\n');
 
         if (context.Workflows.Count > 0)
         {
@@ -191,7 +204,7 @@ public static class MindPrompt
             sb.Append("Task ").Append(request.TaskId).Append(" · origin: ").Append(request.Origin).Append(" · step ").Append(request.StepIndex + 1);
             if (request.MaxSteps > 0) sb.Append(" of ").Append(request.MaxSteps);
             sb.Append('\n');
-            if (request.StepsLeftAfterThis == 0) sb.Append("This is the last step: finish now with say and done=true, stating what you found and what you could not do.\n");
+            if (request.StepsLeftAfterThis == 0) sb.Append("This is the last step: finish now with say and done=true, confirming what you did or found and inviting the natural next step — never a bare Done.\n");
             else if (request.StepsLeftAfterThis == 1) sb.Append("One step remains after this one.\n");
             sb.Append("Projects (the user's active projects; answer from this list without a tool): ").Append(request.Context.Projects.Count == 0 ? "none" : string.Join("; ", request.Context.Projects)).Append('\n');
         }

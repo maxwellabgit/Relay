@@ -48,7 +48,7 @@ public static class PolicyEngine
         Actions.CreateDraftNote or Actions.RouteNote => Tier.Automatic,
         Actions.CreateProject or Actions.ModifyNote or Actions.SupersedeNote or Actions.MoveNote or Actions.RenameProject
             or Actions.ArchiveProject or Actions.RestoreProject or Actions.DeleteProject or Actions.LaunchWorker or Actions.ApplyPatch or Actions.ExportBackup
-            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt or Actions.AddTool or Actions.AddWorkflow => Tier.RequiresApproval,
+            or Actions.ModelRequest or Actions.UpdatePreference or Actions.UpdatePrompt or Actions.AddTool or Actions.BuildTool or Actions.AddWorkflow => Tier.RequiresApproval,
         _ => Tier.Prohibited,
     };
 
@@ -93,6 +93,7 @@ public static class PolicyEngine
             Actions.UpdatePreference => ValidateUpdatePreference(target).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.UpdatePrompt => ValidateUpdatePrompt(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.AddTool => ValidateAddTool(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
+            Actions.BuildTool => ValidateBuildTool(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             Actions.AddWorkflow => ValidateAddWorkflow(target, w).Concat(ValidateImprovementContract(target, w, p.ProposedBy)).ToList(),
             _ => ["Unhandled action."],
         };
@@ -436,6 +437,22 @@ public static class PolicyEngine
             }
             if (value.Length > 400) problems.Add($"target.{key} is longer than 400 characters.");
         }
+        return problems;
+    }
+
+    /// <summary>
+    /// Approving a build: the name must be free and well-formed; drafting and sandbox tests run only after this
+    /// approval. Promotion on success is covered by the same approval (no second card).
+    /// </summary>
+    private static List<string> ValidateBuildTool(Dictionary<string, string> t, PolicyWorld w)
+    {
+        var problems = new List<string>();
+        var name = t.GetValueOrDefault("name") ?? "";
+        if (!Tools.ToolPackage.ValidName(name)) { problems.Add("target.name must be a snake_case tool name."); return problems; }
+        if (File.Exists(Path.Combine(w.DataRoot.ToolsDirectory, name + ".json"))) problems.Add($"A promoted tool named '{name}' already exists.");
+        if (Orchestration.ToolBroker.Descriptors.Any(d => d.Name == name)) problems.Add($"'{name}' is a built-in tool; it cannot be built again.");
+        t.TryAdd("inputs", t.GetValueOrDefault("inputs") ?? "");
+        t.TryAdd("outputs", t.GetValueOrDefault("outputs") ?? "");
         return problems;
     }
 
