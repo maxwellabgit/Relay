@@ -1,0 +1,25 @@
+{
+  "id": "choice-candidate_case_relation-no-01",
+  "decisionId": "candidate.case_relation",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "no",
+    "probabilities": {
+      "yes": 0.075,
+      "no": 0.85,
+      "unclear": 0.075
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

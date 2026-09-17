@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-04",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "This keeps failing every Monday standup."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:4"
+  ]
+}

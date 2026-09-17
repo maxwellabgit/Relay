@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_commitment-unc-03",
+  "decisionId": "passage.commitment",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "test",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

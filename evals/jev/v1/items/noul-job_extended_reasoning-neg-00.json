@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_extended_reasoning-neg-00",
+  "decisionId": "job.extended_reasoning",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "dev",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "choice-output_claim_support-supported-01",
+  "decisionId": "output.claim_support",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "supported",
+    "probabilities": {
+      "supported": 0.85,
+      "unsupported": 0.05,
+      "insufficient": 0.05,
+      "unclear": 0.05
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

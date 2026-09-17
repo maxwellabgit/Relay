@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-13",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface.",
+    "variant": 13
+  },
+  "label": {
+    "noul": 0.8
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

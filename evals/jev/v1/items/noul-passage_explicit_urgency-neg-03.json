@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_explicit_urgency-neg-03",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "test",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-background-09",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "Can you file a note about the hallway decision?",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.3,
+    "band": "background"
+  },
+  "split": "test",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:9"
+  ]
+}

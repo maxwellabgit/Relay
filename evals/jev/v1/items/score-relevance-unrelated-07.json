@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-unrelated-07",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "Plan depends on the disputed ship date.",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.05,
+    "band": "unrelated"
+  },
+  "split": "test",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:7"
+  ]
+}

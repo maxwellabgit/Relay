@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_recurring_friction-neg-02",
+  "decisionId": "passage.recurring_friction",
+  "primitive": "noul",
+  "state": {
+    "passage": "What is the status of Atlas beta?"
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "test",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

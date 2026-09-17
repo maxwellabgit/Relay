@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-background-01",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.3,
+    "band": "background"
+  },
+  "split": "test",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

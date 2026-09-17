@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-00",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

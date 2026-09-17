@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_unresolved_question-pos-03",
+  "decisionId": "passage.unresolved_question",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "test",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

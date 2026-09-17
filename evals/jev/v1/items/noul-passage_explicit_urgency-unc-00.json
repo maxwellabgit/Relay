@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_explicit_urgency-unc-00",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "dev",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

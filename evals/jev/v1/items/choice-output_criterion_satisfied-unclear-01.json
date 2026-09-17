@@ -1,0 +1,25 @@
+{
+  "id": "choice-output_criterion_satisfied-unclear-01",
+  "decisionId": "output.criterion_satisfied",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "unclear",
+    "probabilities": {
+      "satisfied": 0.075,
+      "unsatisfied": 0.075,
+      "unclear": 0.85
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

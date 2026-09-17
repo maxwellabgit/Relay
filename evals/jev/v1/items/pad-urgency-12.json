@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-12",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "What is the status of Atlas beta?",
+    "variant": 12
+  },
+  "label": {
+    "noul": 0.7
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

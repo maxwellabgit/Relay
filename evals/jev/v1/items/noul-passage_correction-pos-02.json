@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_correction-pos-02",
+  "decisionId": "passage.correction",
+  "primitive": "noul",
+  "state": {
+    "passage": "What is the status of Atlas beta?"
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "test",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

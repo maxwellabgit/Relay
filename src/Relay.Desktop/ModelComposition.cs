@@ -1,16 +1,19 @@
+using Relay.Core.Cases;
+using Relay.Core.Composition;
 using Relay.Core.Config;
 using Relay.Core.Model;
 using Relay.Core.Search;
 using Relay.Core.Storage;
+using Relay.Core.Time;
 using Relay.Gateway;
 using Relay.Windows;
 
 namespace Relay.Desktop;
 
 /// <summary>
-/// Builds model and search clients for the runtime: RELAY0's own endpoint (loopback http or https),
-/// any external profile (https only), and the online search provider. API keys live only in the DPAPI
-/// store and are read per request. An invalid endpoint yields no client.
+/// Builds model and search clients for the runtime. Desktop should compose via
+/// <see cref="RelayCompositionFactory"/> for CaseRuntime surfaces; SessionCoordinator
+/// remains only until full §12 cutover (see docs/JEV-DECISIONS.md).
 /// </summary>
 public static class ModelComposition
 {
@@ -41,4 +44,16 @@ public static class ModelComposition
             return null;
         }
     }
+
+    /// <summary>Preferred production entry: CaseRuntime surface factory (no SessionCoordinator).</summary>
+    public static RelayCompositionOptions CaseRuntimeOptions(DataRoot root, IClock clock, string runId)
+        => new()
+        {
+            Root = root,
+            Clock = clock,
+            RunId = runId,
+            ProviderMode = RelayProviderMode.Production,
+            AllowScriptedMinds = false,
+            ModelHealth = () => ModelHealthView.Placeholder,
+        };
 }

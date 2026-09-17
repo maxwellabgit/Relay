@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-11",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "variant": 11
+  },
+  "label": {
+    "noul": 0.6000000000000001
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

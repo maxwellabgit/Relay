@@ -1,0 +1,26 @@
+{
+  "id": "choice-output_argument_support-unclear-01",
+  "decisionId": "output.argument_support",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "unclear",
+    "probabilities": {
+      "supported": 0.05,
+      "unsupported": 0.05,
+      "insufficient": 0.05,
+      "unclear": 0.85
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

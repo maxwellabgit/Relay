@@ -1,0 +1,25 @@
+{
+  "id": "choice-capability_request_match-none-01",
+  "decisionId": "capability.request_match",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "none",
+    "probabilities": {
+      "candidates": 0.075,
+      "none": 0.85,
+      "unclear": 0.075
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

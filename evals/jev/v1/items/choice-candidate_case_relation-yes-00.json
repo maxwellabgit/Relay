@@ -1,0 +1,25 @@
+{
+  "id": "choice-candidate_case_relation-yes-00",
+  "decisionId": "candidate.case_relation",
+  "primitive": "choice",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "yes",
+    "probabilities": {
+      "yes": 0.85,
+      "no": 0.075,
+      "unclear": 0.075
+    }
+  },
+  "split": "train",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

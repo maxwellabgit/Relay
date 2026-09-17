@@ -1,0 +1,25 @@
+{
+  "id": "choice-context_required_fact-conflicting-01",
+  "decisionId": "context.required_fact",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "conflicting",
+    "probabilities": {
+      "established": 0.075,
+      "missing": 0.075,
+      "conflicting": 0.85
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-05",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "Urgent: need approval before noon."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:5"
+  ]
+}

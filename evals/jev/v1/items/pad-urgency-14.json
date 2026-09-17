@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-14",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "This keeps failing every Monday standup.",
+    "variant": 14
+  },
+  "label": {
+    "noul": 0.2
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:4"
+  ]
+}

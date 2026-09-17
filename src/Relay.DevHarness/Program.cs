@@ -19,19 +19,24 @@ public static class Program
         string? dataRootPath = null;
         string runId = "run-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
         string scenario = "slice1";
+        string provider = "fixture";
 
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--data-root" && i + 1 < args.Length) dataRootPath = args[++i];
             else if (args[i] == "--run-id" && i + 1 < args.Length) runId = args[++i];
             else if (args[i] == "--scenario" && i + 1 < args.Length) scenario = args[++i];
+            else if (args[i] == "--provider" && i + 1 < args.Length) provider = args[++i];
         }
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4|slice5|slice6|slice7]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario <name>] [--provider fixture|replay|live]");
             return 2;
         }
+
+        if (JevScenarios.Names.Contains(scenario))
+            return await JevScenarios.RunAsync(scenario, dataRootPath, runId, provider);
 
         return scenario switch
         {

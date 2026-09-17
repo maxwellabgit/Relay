@@ -1,0 +1,26 @@
+{
+  "id": "choice-output_claim_support-insufficient-00",
+  "decisionId": "output.claim_support",
+  "primitive": "choice",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "insufficient",
+    "probabilities": {
+      "supported": 0.05,
+      "unsupported": 0.05,
+      "insufficient": 0.85,
+      "unclear": 0.05
+    }
+  },
+  "split": "train",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

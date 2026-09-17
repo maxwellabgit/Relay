@@ -1,0 +1,25 @@
+{
+  "id": "choice-output_criterion_satisfied-unsatisfied-00",
+  "decisionId": "output.criterion_satisfied",
+  "primitive": "choice",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "unsatisfied",
+    "probabilities": {
+      "satisfied": 0.075,
+      "unsatisfied": 0.85,
+      "unclear": 0.075
+    }
+  },
+  "split": "train",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

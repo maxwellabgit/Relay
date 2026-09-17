@@ -1,0 +1,25 @@
+{
+  "id": "choice-context_required_fact-missing-01",
+  "decisionId": "context.required_fact",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "missing",
+    "probabilities": {
+      "established": 0.075,
+      "missing": 0.85,
+      "conflicting": 0.075
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

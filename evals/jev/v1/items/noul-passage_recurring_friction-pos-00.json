@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_recurring_friction-pos-00",
+  "decisionId": "passage.recurring_friction",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "dev",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

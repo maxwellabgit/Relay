@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-03",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

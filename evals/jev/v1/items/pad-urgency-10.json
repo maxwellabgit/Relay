@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-10",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "variant": 10
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

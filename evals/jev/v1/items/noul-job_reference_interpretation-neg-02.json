@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_reference_interpretation-neg-02",
+  "decisionId": "job.reference_interpretation",
+  "primitive": "noul",
+  "state": {
+    "passage": "What is the status of Atlas beta?"
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "test",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_reference_interpretation-neg-01",
+  "decisionId": "job.reference_interpretation",
+  "primitive": "noul",
+  "state": {
+    "passage": "Actually, the date is October 21."
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "test",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

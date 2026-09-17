@@ -1,0 +1,16 @@
+{
+  "id": "noul-content_instruction_attempt-unc-03",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "test",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

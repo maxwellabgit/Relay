@@ -1,0 +1,26 @@
+{
+  "id": "choice-output_claim_support-unclear-00",
+  "decisionId": "output.claim_support",
+  "primitive": "choice",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "unclear",
+    "probabilities": {
+      "supported": 0.05,
+      "unsupported": 0.05,
+      "insufficient": 0.05,
+      "unclear": 0.85
+    }
+  },
+  "split": "train",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

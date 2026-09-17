@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_unresolved_question-pos-00",
+  "decisionId": "passage.unresolved_question",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "dev",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

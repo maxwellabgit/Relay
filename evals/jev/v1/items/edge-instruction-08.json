@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-08",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "The customer said the invoice is wrong."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:8"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-09",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "Can you file a note about the hallway decision?"
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:9"
+  ]
+}

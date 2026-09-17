@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_extended_reasoning-neg-03",
+  "decisionId": "job.extended_reasoning",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.1
+  },
+  "split": "test",
+  "notes": "synthetic neg",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

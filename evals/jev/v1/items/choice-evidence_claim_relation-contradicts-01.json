@@ -1,0 +1,26 @@
+{
+  "id": "choice-evidence_claim_relation-contradicts-01",
+  "decisionId": "evidence.claim_relation",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "contradicts",
+    "probabilities": {
+      "supports": 0.05,
+      "contradicts": 0.85,
+      "unrelated": 0.05,
+      "insufficient": 0.05
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

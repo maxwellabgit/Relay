@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_extended_reasoning-unc-03",
+  "decisionId": "job.extended_reasoning",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "test",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

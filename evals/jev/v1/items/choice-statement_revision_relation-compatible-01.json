@@ -1,0 +1,26 @@
+{
+  "id": "choice-statement_revision_relation-compatible-01",
+  "decisionId": "statement.revision_relation",
+  "primitive": "choice",
+  "state": {
+    "passage": "Actually, the date is October 21.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "compatible",
+    "probabilities": {
+      "revision": 0.05,
+      "conflict": 0.05,
+      "compatible": 0.85,
+      "unclear": 0.05
+    }
+  },
+  "split": "test",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

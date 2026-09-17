@@ -1,0 +1,16 @@
+{
+  "id": "noul-content_instruction_attempt-pos-03",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "API means Application Programming Interface."
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "test",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

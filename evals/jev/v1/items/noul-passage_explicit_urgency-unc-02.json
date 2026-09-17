@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_explicit_urgency-unc-02",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "What is the status of Atlas beta?"
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "test",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

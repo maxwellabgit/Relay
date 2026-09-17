@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-background-02",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "What is the status of Atlas beta?",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.3,
+    "band": "background"
+  },
+  "split": "dev",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:2"
+  ]
+}

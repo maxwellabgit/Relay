@@ -1,0 +1,16 @@
+{
+  "id": "noul-job_reference_interpretation-unc-00",
+  "decisionId": "job.reference_interpretation",
+  "primitive": "noul",
+  "state": {
+    "passage": "We should move the launch to November."
+  },
+  "label": {
+    "noul": 0.5
+  },
+  "split": "dev",
+  "notes": "synthetic unc",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

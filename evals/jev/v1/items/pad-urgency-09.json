@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-09",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "Can you file a note about the hallway decision?",
+    "variant": 9
+  },
+  "label": {
+    "noul": 0.4
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:9"
+  ]
+}

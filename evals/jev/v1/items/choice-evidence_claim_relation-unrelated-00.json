@@ -1,0 +1,26 @@
+{
+  "id": "choice-evidence_claim_relation-unrelated-00",
+  "decisionId": "evidence.claim_relation",
+  "primitive": "choice",
+  "state": {
+    "passage": "We should move the launch to November.",
+    "candidates": [
+      "a",
+      "b"
+    ]
+  },
+  "label": {
+    "choice": "unrelated",
+    "probabilities": {
+      "supports": 0.05,
+      "contradicts": 0.05,
+      "unrelated": 0.85,
+      "insufficient": 0.05
+    }
+  },
+  "split": "train",
+  "notes": "synthetic choice",
+  "sourceRefs": [
+    "passage:0"
+  ]
+}

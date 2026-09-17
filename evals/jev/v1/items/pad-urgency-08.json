@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-08",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "The customer said the invoice is wrong.",
+    "variant": 8
+  },
+  "label": {
+    "noul": 0.30000000000000004
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:8"
+  ]
+}

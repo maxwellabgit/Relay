@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-partial-08",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "The customer said the invoice is wrong.",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.6,
+    "band": "partial"
+  },
+  "split": "dev",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:8"
+  ]
+}

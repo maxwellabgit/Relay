@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JevEvalItem",
+  "type": "object",
+  "required": ["id", "decisionId", "primitive", "state", "label", "split"],
+  "properties": {
+    "id": { "type": "string" },
+    "decisionId": { "type": "string" },
+    "primitive": { "enum": ["noul", "choice", "score"] },
+    "state": { "type": "object" },
+    "label": {
+      "type": "object",
+      "description": "Expected judgment label (noul/choice/score fields depending on primitive)"
+    },
+    "split": { "enum": ["train", "dev", "test"] },
+    "notes": { "type": "string" },
+    "sourceRefs": { "type": "array", "items": { "type": "string" } }
+  }
+}

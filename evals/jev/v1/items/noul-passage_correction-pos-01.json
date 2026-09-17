@@ -1,0 +1,16 @@
+{
+  "id": "noul-passage_correction-pos-01",
+  "decisionId": "passage.correction",
+  "primitive": "noul",
+  "state": {
+    "passage": "Actually, the date is October 21."
+  },
+  "label": {
+    "noul": 0.9
+  },
+  "split": "test",
+  "notes": "synthetic pos",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

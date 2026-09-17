@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-01",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "Actually, the date is October 21."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:1"
+  ]
+}

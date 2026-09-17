@@ -1,0 +1,7 @@
+{
+  "version": "v1",
+  "itemCount": 240,
+  "target": 240,
+  "generator": "evals/jev/v1/generators/generate_items.py",
+  "schema": "evals/jev/v1/schema/item.schema.json"
+}

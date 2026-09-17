@@ -1,0 +1,18 @@
+{
+  "id": "score-relevance-partial-03",
+  "decisionId": "candidate.evidence_relevance",
+  "primitive": "score",
+  "state": {
+    "passage": "API means Application Programming Interface.",
+    "claim": "Atlas ships in November"
+  },
+  "label": {
+    "score": 0.6,
+    "band": "partial"
+  },
+  "split": "test",
+  "notes": "synthetic score",
+  "sourceRefs": [
+    "passage:3"
+  ]
+}

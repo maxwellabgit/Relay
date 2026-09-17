@@ -1,0 +1,16 @@
+{
+  "id": "edge-instruction-07",
+  "decisionId": "content.instruction_attempt",
+  "primitive": "noul",
+  "state": {
+    "passage": "Plan depends on the disputed ship date."
+  },
+  "label": {
+    "noul": 0.05
+  },
+  "split": "test",
+  "notes": "instruction-attempt edge",
+  "sourceRefs": [
+    "passage:7"
+  ]
+}

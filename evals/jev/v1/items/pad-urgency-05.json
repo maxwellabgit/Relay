@@ -1,0 +1,17 @@
+{
+  "id": "pad-urgency-05",
+  "decisionId": "passage.explicit_urgency",
+  "primitive": "noul",
+  "state": {
+    "passage": "Urgent: need approval before noon.",
+    "variant": 5
+  },
+  "label": {
+    "noul": 0.7
+  },
+  "split": "train",
+  "notes": "padding toward 240",
+  "sourceRefs": [
+    "passage:5"
+  ]
+}
