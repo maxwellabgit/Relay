@@ -54,3 +54,4 @@ Update this file whenever a default is chosen or an old test expectation is inte
 | 2026-09-17 | Keep historical `ICaseMind` tests until controller parity | Spec: retain temporarily for historical tests |
 | 2026-09-17 | §4 outbox + `LegacyMindBridgeController`; cancel-before-dispatch refuses execute | Spec §4; Slice4 expectation updated |
 | 2026-09-17 | §5 evidence + hosted grants; outbound policy before every hosted call | Spec §5; `hosted_eligible` ≠ permission |
+| 2026-09-17 | §6 TypeSafe Jev transport + Fixture/Replay clients; Gateway.Tests | Spec §6; live requires `TYPESAFE_API_KEY` |

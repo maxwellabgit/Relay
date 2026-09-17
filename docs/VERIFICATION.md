@@ -53,7 +53,7 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 | --- | --- | --- |
 | Persistence / async outbox tests (§4) | **Passed** — `AsyncPersistenceTests` 13/13; full `Relay.Core.Tests` 46/46 | deterministic |
 | Provenance / grant tests (§5) | **Passed** — `ProvenanceGrantTests` 11/11 | deterministic |
-| Jev transport fixture tests (§6) | pending | fixture |
+| Jev transport fixture tests (§6) | **Passed** — `Relay.Gateway.Tests` 18/18 | fixture |
 | Decision catalog tests (§7) | pending | deterministic |
 | Context / local jobs tests (§8) | pending | deterministic |
 | Listening window tests (§9) | pending | deterministic |
@@ -71,6 +71,15 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 
 ### §5 notes
 
+- `dotnet test tests/Relay.Core.Tests -c Release` → **57** passed (46 prior + 11 provenance/grant).
 - Evidence artifacts carry restriction (`local_only` | `hosted_eligible`); `hosted_eligible` does not grant permission.
 - Outbound package policy runs before hosted dispatch; `blocked_context_restriction` when required context cannot be exported.
 - Budget reservations are atomic per transport attempt; estimates are never displayed as exact billed amounts.
+
+### §6 notes
+
+- `dotnet test tests/Relay.Gateway.Tests -c Release` → **18** passed (fixture/replay/HttpHandler; no API key).
+- Transport: `TypeSafeJevClient` → `POST https://api.typesafe.ai/v1/systemone`, model default `jev-latest`, key via env `TYPESAFE_API_KEY` (`EnvironmentSecretProvider`).
+- Malformed provider payloads → `provider_contract_error` (never invented answers).
+- Live preflight without a key fails explicitly.
+- `decisions/v1/` stubs present for catalog load; full catalog content is §7.

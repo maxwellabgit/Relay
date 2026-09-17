@@ -1,0 +1,13 @@
+{
+  "id": "transport.smoke.noul_only",
+  "version": "1",
+  "title": "Single noul smoke",
+  "purpose": "judgment",
+  "stateRequirements": [ "message" ],
+  "questions": {
+    "refund_requested": {
+      "type": "noul",
+      "instructions": "Does the customer request a refund?"
+    }
+  }
+}

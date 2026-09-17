@@ -1,0 +1,32 @@
+{
+  "id": "transport.smoke.mixed",
+  "version": "1",
+  "title": "Mixed question types smoke (transport stub)",
+  "purpose": "judgment",
+  "stateRequirements": [ "message" ],
+  "questions": {
+    "urgent": {
+      "type": "noul",
+      "instructions": "Does the message convey urgency?"
+    },
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {
+        "billing": "Payment or subscription issues",
+        "technical": "Bugs or integration problems",
+        "other": "Anything else"
+      }
+    },
+    "frustration": {
+      "type": "score",
+      "instructions": "How frustrated does the speaker appear?",
+      "criteria": [
+        "Calm and neutral",
+        "Concerned but civil",
+        "Very angry or strong language"
+      ]
+    }
+  },
+  "interpretationNotes": "Stub for §6 transport tests; full catalog content arrives in §7."
+}
