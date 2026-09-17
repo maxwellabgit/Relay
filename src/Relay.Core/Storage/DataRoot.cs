@@ -89,6 +89,21 @@ public sealed class DataRoot
     /// <summary>Workflow drafts that have not been promoted (or were rejected).</summary>
     public string WorkflowDraftsDirectory => Combine("staging", "workflows");
 
+    // --- vNext durable case runtime (additive) ---
+
+    /// <summary>Authoritative per-case records and event logs: <c>cases/{caseId}/record.json</c> + <c>events.jsonl</c>.</summary>
+    public string CasesDirectory => Combine("cases");
+    /// <summary>Content-addressed object store (transcripts, prompts, tool packages). Referenced by id + sha256.</summary>
+    public string ObjectsDirectory => Combine("objects");
+    /// <summary>Rebuildable SQLite projections directory (feed, cases index, ready queue, approvals).</summary>
+    public string ProjectionsDirectory => Combine("projections");
+    /// <summary>SQLite file holding rebuildable projections.</summary>
+    public string ProjectionsDatabasePath => Combine("projections", "projections.sqlite");
+    /// <summary>Operation envelopes: <c>operations/{operationId}.json</c>.</summary>
+    public string OperationsDirectory => Combine("operations");
+    /// <summary>Isolated local harness runs: <c>.dev-runs/{run-id}/</c>.</summary>
+    public string DevRunsDirectory => Combine(".dev-runs");
+
     public string Combine(params string[] parts) => System.IO.Path.Combine([Path, .. parts]);
 
     /// <summary>Default per-user location, honouring the RELAY_DATA_ROOT override.</summary>
@@ -113,6 +128,7 @@ public sealed class DataRoot
             StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, SearchArtifactsDirectory, UsageDirectory,
             ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
             WorkflowsDirectory, WorkflowDraftsDirectory,
+            CasesDirectory, ObjectsDirectory, ProjectionsDirectory, OperationsDirectory, DevRunsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

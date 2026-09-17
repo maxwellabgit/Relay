@@ -285,7 +285,7 @@ The first Windows solution contains four projects:
 Initial implementation rules:
 
 - Target .NET 10 and the current supported Windows App SDK release installed by the official Visual Studio WinUI template.
-- Package with MSIX. Development certificates are acceptable only for development builds; release artifacts require a protected signing key.
+- Package with MSIX. Local certificates are acceptable only for local builds; release artifacts require a protected signing key.
 - Use the Win32 `RegisterHotKey` API for the two primary global toggles. Do not install a global low-level keyboard hook.
 - Recommend `F13` for `NOTE_KEY` and `F14` for `COMMAND_KEY` because they are rarely claimed by ordinary applications. Both remain configurable.
 - Configure Flow Hands-free Mode to a private three-key binding reserved for the adapter, provisionally `Ctrl+Win+F24`.

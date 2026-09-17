@@ -5,8 +5,10 @@
     <Project Path="src/Relay.Desktop/Relay.Desktop.csproj" />
     <Project Path="src/Relay.Windows/Relay.Windows.csproj" />
     <Project Path="src/Relay.Worker/Relay.Worker.csproj" />
+    <Project Path="src/Relay.DevHarness/Relay.DevHarness.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Relay.Tests/Relay.Tests.csproj" />
+    <Project Path="tests/Relay.Core.Tests/Relay.Core.Tests.csproj" />
   </Folder>
 </Solution>

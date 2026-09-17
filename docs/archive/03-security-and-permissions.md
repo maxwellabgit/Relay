@@ -108,7 +108,7 @@ Rules:
 | Protection | Where |
 | --- | --- |
 | Single process, no localhost port, no embedded browser | `Relay.Desktop` |
-| Unpackaged WinUI 3 with self-contained Windows App SDK for development; MSIX + signing for release | `Relay.Desktop.csproj`; see build plan |
+| Unpackaged WinUI 3 with self-contained Windows App SDK for local; MSIX + signing for release | `Relay.Desktop.csproj`; see build plan |
 | Data root ACL hardened on every start; failure is recorded and shown, not fatal | `Relay.Windows/DirectoryAcl.cs` |
 | Ledger: append-only stream, `FileShare.Read` for readers, explicit `Flush(flushToDisk: true)` per record | `Relay.Core/Ledger/FileLedger.cs` |
 | Atomic file replacement for drafts, notes, settings, sessions (`write temp → flush → File.Replace/Move`) | `Relay.Core/Storage/AtomicFile.cs` |
@@ -120,6 +120,6 @@ Rules:
 
 ## 6. Residual risks accepted for slice 1
 
-- Development builds are unsigned and unpackaged. Nothing prevents a same-user process from modifying `Relay.exe`; this is addressed by MSIX signing in phase 1b.
+- Local builds are unsigned and unpackaged. Nothing prevents a same-user process from modifying `Relay.exe`; this is addressed by MSIX signing in phase 1b.
 - `SendInput` of the Flow chord is a synthetic keypress and Flow could theoretically change its binding; the adapter is off by default and each emission is logged.
 - The ACL protects against other *users*; any process running as the same user can read the data root. Application-level encryption is deferred (contract §17.4).
