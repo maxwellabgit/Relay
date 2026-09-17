@@ -57,6 +57,8 @@ public sealed class CaseRecord
     [JsonPropertyName("result")] public string? Result { get; set; }
     [JsonPropertyName("completionCriteria")] public string? CompletionCriteria { get; set; }
     [JsonPropertyName("presentationPolicy")] public string? PresentationPolicy { get; set; }
+    [JsonPropertyName("parentCaseId")] public string? ParentCaseId { get; set; }
+    [JsonPropertyName("childCaseIds")] public List<string> ChildCaseIds { get; set; } = [];
     [JsonPropertyName("status")] public string Status { get; set; } = CaseStatus.Active;
     [JsonPropertyName("createdAt")] public DateTimeOffset CreatedAt { get; init; }
     [JsonPropertyName("updatedAt")] public DateTimeOffset UpdatedAt { get; set; }
@@ -88,6 +90,10 @@ public static class CaseEventTypes
     public const string MindStepped = "mind.stepped";
     public const string ToolCalled = "tool.called";
     public const string ToolResult = "tool.result";
+    public const string SegmentIngested = "stream.segment_ingested";
+    public const string ListeningStarted = "stream.listening_started";
+    public const string ListeningStopped = "stream.listening_stopped";
+    public const string TaskRaised = "case.task_raised";
     public const string OperationProposed = "operation.proposed";
     public const string OperationApproved = "operation.approved";
     public const string OperationDenied = "operation.denied";
@@ -101,6 +107,7 @@ public static class CaseEventTypes
     public const string CaseCancelled = "case.cancelled";
     public const string WaitEntered = "wait.entered";
     public const string DuplicateIgnored = "operation.duplicate_ignored";
+    public const string MoveRejected = "move.rejected";
 }
 
 /// <summary>Content-addressed object reference returned by <see cref="ObjectStore"/>.</summary>

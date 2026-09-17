@@ -62,7 +62,10 @@ public sealed record CaseMindRequest(
     IReadOnlyList<string> PendingOperationIds,
     IReadOnlyList<OperationEnvelope> PendingOperations,
     DateTimeOffset At,
-    int StepIndex);
+    int StepIndex,
+    IReadOnlyList<ListeningSegmentView> RecentSegments,
+    string? ParentCaseId = null,
+    string? PresentationPolicy = null);
 
 /// <summary>
 /// Slice 1 scripted mind: first step proposes a side-effecting operation; after that operation

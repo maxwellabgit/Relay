@@ -26,7 +26,7 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3]");
             return 2;
         }
 
@@ -34,6 +34,7 @@ public static class Program
         {
             "slice1" => await RunSlice1Async(dataRootPath, runId),
             "slice2" => await RunSlice2Async(dataRootPath, runId),
+            "slice3" => await RunSlice3Async(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }
@@ -164,6 +165,83 @@ public static class Program
             feedCount = runtime.Projections.ListFeedItems(started.Id).Count,
             diagnostics = diagnosticsPath,
         });
+    }
+
+    private static async Task<int> RunSlice3Async(string dataRootPath, string runId)
+    {
+        var root = new DataRoot(dataRootPath);
+        var clock = new HarnessClock(new DateTimeOffset(2026, 9, 17, 16, 0, 0, TimeSpan.Zero));
+        root.EnsureLayout(clock);
+
+        var runDir = Path.Combine(root.DevRunsDirectory, runId);
+        Directory.CreateDirectory(runDir);
+        var diagnosticsPath = Path.Combine(runDir, "runtime.jsonl");
+        var summaryPath = Path.Combine(runDir, "summary.json");
+
+        var local = new CaseLocalContext(root, clock);
+        var (project, note) = local.SeedAtlasBetaDecision();
+
+        using var diagnostics = new RuntimeDiagnostics(diagnosticsPath, runId);
+        var mind = new OriginRoutingMind(new ListeningScriptedMind(project.Id, note.Id), new SimpleDirectMind());
+        string listenId;
+        string childId;
+        string? pendingOpId = null;
+
+        using (var runtime = CaseRuntime.Open(root, clock, mind, diagnostics, local: local))
+        {
+            var listening = runtime.StartListening();
+            listenId = listening.Id;
+
+            runtime.IngestSegment("API means Application Programming Interface", clock.UtcNow);
+            await runtime.RunUntilIdleAsync(listenId);
+
+            runtime.IngestSegment("We should capture the onboarding checklist idea.", clock.UtcNow.AddSeconds(10));
+            var afterRaise = await runtime.RunUntilIdleAsync(listenId);
+            if (afterRaise.ChildCaseIds.Count == 0)
+                return Fail(summaryPath, runId, "expected raise_task child", 0);
+            childId = afterRaise.ChildCaseIds[0];
+
+            runtime.IngestSegment("Actually, the Atlas beta ships on October 21.", clock.UtcNow.AddSeconds(20));
+            var afterCorrect = await runtime.RunUntilIdleAsync(listenId);
+            var pending = runtime.GetPendingApproval(listenId);
+            if (pending is null)
+                return Fail(summaryPath, runId, "expected correction proposal", 0);
+            pendingOpId = pending.OperationId;
+
+            var direct = runtime.StartDirectCase("Status while listening?");
+            var answered = await runtime.RunUntilIdleAsync(direct.Id);
+            if (answered.Status != CaseStatus.Completed)
+                return Fail(summaryPath, runId, "direct ask failed while observed pending", 0);
+
+            runtime.SuspendAll();
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        using (var runtime = CaseRuntime.Open(root, clock, mind, diagnostics, local: local))
+        {
+            var resumed = runtime.GetListeningCase();
+            if (resumed is null || resumed.Id != listenId)
+                return Fail(summaryPath, runId, "listening case missing after restart", 0);
+            if (runtime.GetPendingApproval(listenId)?.OperationId != pendingOpId)
+                return Fail(summaryPath, runId, "pending approval lost after restart", 0);
+
+            var segments = runtime.Intake.LoadRecentSegments(listenId);
+            if (segments.Count < 3)
+                return Fail(summaryPath, runId, $"expected >=3 segments, got {segments.Count}", 0);
+
+            return Ok(summaryPath, new
+            {
+                ok = true,
+                scenario = "slice3",
+                runId,
+                listenId,
+                childId,
+                pendingOpId,
+                segmentCount = segments.Count,
+                feedCount = runtime.Projections.ListFeedItems(listenId).Count,
+                diagnostics = diagnosticsPath,
+            });
+        }
     }
 
     private static int Ok(string summaryPath, object summary)

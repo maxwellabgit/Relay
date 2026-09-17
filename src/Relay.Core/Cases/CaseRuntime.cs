@@ -25,6 +25,7 @@ public sealed class CaseRuntime : IDisposable
     private readonly InferenceLease _inference;
     private readonly CaseLocalContext _local;
     private readonly OperationBroker _broker;
+    private readonly StreamIntake _intake;
     private readonly Action _onSideEffect;
     private readonly string _leaseOwner;
     private readonly object _gate = new();
@@ -51,6 +52,7 @@ public sealed class CaseRuntime : IDisposable
         _inference = new InferenceLease();
         _local = local ?? new CaseLocalContext(root, clock);
         _broker = new OperationBroker(_local, _objects, clock, _onSideEffect);
+        _intake = new StreamIntake(root, _objects, _cases, clock);
         _leaseOwner = Ulid.NewUlid(clock.UtcNow);
     }
 
@@ -60,6 +62,7 @@ public sealed class CaseRuntime : IDisposable
     public ReadyQueue Ready => _ready;
     public ProjectionDatabase Projections => _projections;
     public CaseLocalContext Local => _local;
+    public StreamIntake Intake => _intake;
     public int SideEffectCount { get; private set; }
 
     /// <summary>Opens a runtime on an existing data root, reconstructing suspended work.</summary>
@@ -89,9 +92,7 @@ public sealed class CaseRuntime : IDisposable
 
             if (record.Status == CaseStatus.Suspended)
             {
-                var hasAwaiting = record.PendingOperationIds
-                    .Select(id => _operations.TryLoad(id))
-                    .Any(op => op is { Status: OperationStatus.AwaitingApproval });
+                var hasAwaiting = HasAwaiting(record);
 
                 if (hasAwaiting)
                 {
@@ -101,12 +102,15 @@ public sealed class CaseRuntime : IDisposable
                     _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "resumed_waiting",
                         caseId: record.Id, caseVersion: record.Version, status: record.Status);
                 }
-                else if (record.Status != CaseStatus.Completed && record.Status != CaseStatus.Cancelled)
+                else
                 {
                     record.Status = CaseStatus.Active;
                     record.UpdatedAt = _clock.UtcNow;
                     PersistRecord(record);
-                    _ready.TryEnqueue(record.Id, ReadyPriority.UserReplyOrApproval);
+                    var priority = record.Origin == CaseOrigin.Observed
+                        ? ReadyPriority.NormalObserved
+                        : ReadyPriority.UserReplyOrApproval;
+                    _ready.TryEnqueue(record.Id, priority);
                     AppendEvent(record, CaseEventTypes.CaseResumed, new { reason = "restart" });
                     _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "resumed_ready",
                         caseId: record.Id, caseVersion: record.Version, status: record.Status);
@@ -116,6 +120,195 @@ public sealed class CaseRuntime : IDisposable
 
         foreach (var op in _operations.ListAll())
             _projections.UpsertOperation(op);
+
+        var listening = _intake.LoadState();
+        if (listening.Active && listening.CaseId is { } listenId)
+        {
+            var listenCase = _cases.TryLoadRecord(listenId);
+            if (listenCase is not null
+                && listenCase.Status is not CaseStatus.Completed and not CaseStatus.Cancelled)
+            {
+                if (listening.PendingMindSegmentIds.Count > 0 && listenCase.Status == CaseStatus.Active)
+                    _ready.TryEnqueue(listenId, ReadyPriority.NormalObserved);
+
+                _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "listening_resumed",
+                    caseId: listenId, status: listenCase.Status);
+            }
+        }
+    }
+
+    private bool HasAwaiting(CaseRecord record)
+        => record.PendingOperationIds.Select(id => _operations.TryLoad(id))
+            .Any(op => op is { Status: OperationStatus.AwaitingApproval });
+
+    /// <summary>Opens (or returns) the long-lived observed listening case.</summary>
+    public CaseRecord StartListening()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var state = _intake.LoadState();
+            if (state.Active && state.CaseId is { } existingId)
+            {
+                var existing = _cases.TryLoadRecord(existingId);
+                if (existing is not null && existing.Status is not CaseStatus.Completed and not CaseStatus.Cancelled)
+                    return Clone(existing);
+            }
+
+            var now = _clock.UtcNow;
+            var id = Ulid.NewUlid(now);
+            var record = new CaseRecord
+            {
+                Id = id,
+                Version = 0,
+                Origin = CaseOrigin.Observed,
+                Kind = CaseKind.Check,
+                ApprovedObjective = "Listen to the enabled conversation stream.",
+                Status = CaseStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
+                PresentationPolicy = StreamIntake.PresentationListening,
+                AllowedCapabilities =
+                [
+                    CaseTools.LocalSearch,
+                    CaseTools.ReadNote,
+                    Actions.ModifyNote,
+                    Actions.CreateDraftNote,
+                    "file_note",
+                    CaseMove.RaiseTask,
+                ],
+            };
+            PersistRecord(record);
+            var evt = AppendEvent(record, CaseEventTypes.ListeningStarted, new { at = now });
+            record.ProcessedEventIds.Add(evt.EventId);
+            PersistRecord(record);
+
+            state = new ListeningSessionState
+            {
+                CaseId = id,
+                Active = true,
+                UpdatedAt = now,
+            };
+            _intake.SaveState(state);
+            Feed(id, "Listening started.", "ambient");
+            _diagnostics.Write(now, "info", "CaseRuntime", "listening_started", caseId: id, status: record.Status);
+            return Clone(record);
+        }
+    }
+
+    /// <summary>
+    /// Persists a transcript segment to the object store, then appends a case event and marks it ingested.
+    /// </summary>
+    public ListeningSegmentView IngestSegment(string text, DateTimeOffset? ts = null, string? speaker = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var listening = StartListeningUnlocked();
+            var at = ts ?? _clock.UtcNow;
+            var (segmentId, stored, payload) = _intake.PrepareSegment(text, at, speaker);
+
+            var evt = AppendEvent(listening, CaseEventTypes.SegmentIngested, payload);
+            listening.ProcessedEventIds.Add(evt.EventId);
+            // Listening case stays active; new talk becomes ready work at observed priority.
+            if (listening.Status is CaseStatus.Waiting)
+            {
+                // Still waiting on approval — do not steal focus; segment is persisted for later.
+            }
+            else
+            {
+                listening.Status = CaseStatus.Active;
+            }
+            PersistRecord(listening);
+
+            var state = _intake.LoadState();
+            state.CaseId = listening.Id;
+            state.Active = true;
+            if (!state.IngestedSegmentIds.Contains(segmentId))
+                state.IngestedSegmentIds.Add(segmentId);
+            if (!state.PendingMindSegmentIds.Contains(segmentId))
+                state.PendingMindSegmentIds.Add(segmentId);
+            _intake.SaveState(state);
+
+            if (listening.Status == CaseStatus.Active)
+                _ready.TryEnqueue(listening.Id, ReadyPriority.NormalObserved);
+
+            _diagnostics.Write(at, "info", "CaseRuntime", "segment_ingested",
+                caseId: listening.Id, caseVersion: listening.Version, resultRef: stored.ObjectId);
+            return new ListeningSegmentView(segmentId, evt.EventId, stored.ObjectId, stored.Sha256, at, speaker, text);
+        }
+    }
+
+    private CaseRecord StartListeningUnlocked()
+    {
+        var state = _intake.LoadState();
+        if (state.Active && state.CaseId is { } existingId)
+        {
+            var existing = _cases.TryLoadRecord(existingId);
+            if (existing is not null && existing.Status is not CaseStatus.Completed and not CaseStatus.Cancelled)
+                return existing;
+        }
+
+        // Nested create without re-entering StartListening lock.
+        var now = _clock.UtcNow;
+        var id = Ulid.NewUlid(now);
+        var record = new CaseRecord
+        {
+            Id = id,
+            Version = 0,
+            Origin = CaseOrigin.Observed,
+            Kind = CaseKind.Check,
+            ApprovedObjective = "Listen to the enabled conversation stream.",
+            Status = CaseStatus.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+            PresentationPolicy = StreamIntake.PresentationListening,
+            AllowedCapabilities =
+            [
+                CaseTools.LocalSearch,
+                CaseTools.ReadNote,
+                Actions.ModifyNote,
+                Actions.CreateDraftNote,
+                "file_note",
+                CaseMove.RaiseTask,
+            ],
+        };
+        PersistRecord(record);
+        var evt = AppendEvent(record, CaseEventTypes.ListeningStarted, new { at = now });
+        record.ProcessedEventIds.Add(evt.EventId);
+        PersistRecord(record);
+        _intake.SaveState(new ListeningSessionState { CaseId = id, Active = true, UpdatedAt = now });
+        return record;
+    }
+
+    public void StopListening()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var state = _intake.LoadState();
+            if (state.CaseId is { } id)
+            {
+                var record = _cases.TryLoadRecord(id);
+                if (record is not null && record.Status is not CaseStatus.Completed and not CaseStatus.Cancelled)
+                {
+                    AppendEvent(record, CaseEventTypes.ListeningStopped, new { at = _clock.UtcNow });
+                    // Listening case remains for history; mark completed when explicitly stopped.
+                    record.Status = CaseStatus.Completed;
+                    record.Result = "listening stopped";
+                    PersistRecord(record);
+                }
+            }
+            state.Active = false;
+            state.PendingMindSegmentIds.Clear();
+            _intake.SaveState(state);
+        }
+    }
+
+    public CaseRecord? GetListeningCase()
+    {
+        var state = _intake.LoadState();
+        return state.CaseId is null ? null : _cases.TryLoadRecord(state.CaseId);
     }
 
     public CaseRecord StartDirectCase(string objective, string kind = CaseKind.Answer)
@@ -182,7 +375,7 @@ public sealed class CaseRuntime : IDisposable
         }
     }
 
-    /// <summary>Steps until the case is waiting, completed, cancelled, or <paramref name="maxSteps"/> is hit.</summary>
+    /// <summary>Steps until the case is waiting, completed, cancelled, quiet (listening), or <paramref name="maxSteps"/> is hit.</summary>
     public async Task<CaseRecord> RunUntilIdleAsync(string caseId, int maxSteps = 16, CancellationToken cancellationToken = default)
     {
         CaseRecord? last = null;
@@ -191,6 +384,16 @@ public sealed class CaseRuntime : IDisposable
             last = await StepCaseAsync(caseId, cancellationToken).ConfigureAwait(false);
             if (last.Status is CaseStatus.Waiting or CaseStatus.Completed or CaseStatus.Cancelled or CaseStatus.Suspended)
                 return last;
+
+            if (last.Origin == CaseOrigin.Observed)
+            {
+                var state = _intake.LoadState();
+                var awaiting = last.PendingOperationIds
+                    .Select(id => _operations.TryLoad(id))
+                    .Any(op => op is { Status: OperationStatus.AwaitingApproval });
+                if (!awaiting && state.PendingMindSegmentIds.Count == 0)
+                    return last;
+            }
             // Tool path leaves Active; continue.
         }
         return last ?? throw new InvalidOperationException("Case not found.");
@@ -211,12 +414,21 @@ public sealed class CaseRuntime : IDisposable
                 if (record.Status is CaseStatus.Completed or CaseStatus.Cancelled)
                     return Clone(record);
 
+                // Do not step while blocked on approval — keeps observed proposals pending
+                // while unrelated direct cases continue on the ready queue.
+                if (record.Status == CaseStatus.Waiting && HasAwaiting(record))
+                    return Clone(record);
+
                 var events = _cases.LoadEvents(caseId);
                 var pendingOps = record.PendingOperationIds
                     .Select(id => _operations.TryLoad(id))
                     .Where(op => op is not null)
                     .Cast<OperationEnvelope>()
                     .ToList();
+
+                var segments = record.Origin == CaseOrigin.Observed
+                    ? _intake.LoadRecentSegments(caseId)
+                    : (IReadOnlyList<ListeningSegmentView>)[];
 
                 var request = new CaseMindRequest(
                     record.Id,
@@ -229,7 +441,10 @@ public sealed class CaseRuntime : IDisposable
                     record.PendingOperationIds,
                     pendingOps,
                     _clock.UtcNow,
-                    record.Budgets.StepsUsed);
+                    record.Budgets.StepsUsed,
+                    segments,
+                    record.ParentCaseId,
+                    record.PresentationPolicy);
 
                 CaseMindStep step;
                 try
@@ -254,9 +469,11 @@ public sealed class CaseRuntime : IDisposable
                 record.ProcessedEventIds.Add(stepEvt.EventId);
 
                 ApplyMove(record, step, stepEvt.EventId);
+                MarkListeningSegmentsHandled(record, step.Move);
                 PersistRecord(record);
 
-                Feed(record.Id, step.Feed, step.Move.Type == CaseMove.Say && step.Move.Done ? "finding" : "ambient");
+                var attention = ResolveAttention(record, step.Move, step.Feed);
+                Feed(record.Id, step.Feed, attention);
                 _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "case_stepped",
                     caseId: record.Id, caseVersion: record.Version, status: record.Status, latencyMs: sw.ElapsedMilliseconds);
 
@@ -271,6 +488,19 @@ public sealed class CaseRuntime : IDisposable
 
     private void ApplyMove(CaseRecord record, CaseMindStep step, string causedByEventId)
     {
+        if (!IsMoveAllowed(record, step.Move, out var denyReason))
+        {
+            AppendEvent(record, CaseEventTypes.MoveRejected, new
+            {
+                move = step.Move.Type,
+                name = step.Move.Name,
+                reason = denyReason,
+            });
+            if (record.Origin == CaseOrigin.Observed)
+                record.Status = CaseStatus.Active;
+            return;
+        }
+
         switch (step.Move.Type)
         {
             case CaseMove.UseTool:
@@ -279,14 +509,37 @@ public sealed class CaseRuntime : IDisposable
             case CaseMove.Propose:
                 ProposeOperation(record, step.Move, causedByEventId);
                 break;
+            case CaseMove.RaiseTask:
+                RaiseChildTask(record, step.Move, causedByEventId);
+                break;
             case CaseMove.Wait:
-                record.Status = CaseStatus.Waiting;
-                if (!record.PendingWaits.Contains(step.Move.Text))
-                    record.PendingWaits.Add(step.Move.Text);
-                AppendEvent(record, CaseEventTypes.WaitEntered, new { reason = step.Move.Text });
+                if (record.PresentationPolicy == StreamIntake.PresentationListening)
+                {
+                    record.Status = CaseStatus.Active;
+                    if (!record.PendingWaits.Contains(step.Move.Text))
+                        record.PendingWaits.Add(step.Move.Text);
+                    AppendEvent(record, CaseEventTypes.WaitEntered, new { reason = step.Move.Text, keepListening = true });
+                }
+                else
+                {
+                    record.Status = CaseStatus.Waiting;
+                    if (!record.PendingWaits.Contains(step.Move.Text))
+                        record.PendingWaits.Add(step.Move.Text);
+                    AppendEvent(record, CaseEventTypes.WaitEntered, new { reason = step.Move.Text });
+                }
                 break;
             case CaseMove.Stop:
-            case CaseMove.Say when step.Move.Done:
+                ApplyCitations(record, step.Move);
+                record.Status = CaseStatus.Completed;
+                record.Result = step.Move.Text;
+                AppendEvent(record, CaseEventTypes.CaseCompleted, new
+                {
+                    result = step.Move.Text,
+                    sourceRefs = record.SourceRefs,
+                });
+                break;
+            case CaseMove.Say when step.Move.Done
+                && record.PresentationPolicy != StreamIntake.PresentationListening:
                 ApplyCitations(record, step.Move);
                 record.Status = CaseStatus.Completed;
                 record.Result = step.Move.Text;
@@ -298,10 +551,149 @@ public sealed class CaseRuntime : IDisposable
                 break;
             case CaseMove.Say:
                 ApplyCitations(record, step.Move);
+                if (record.PresentationPolicy == StreamIntake.PresentationListening)
+                    record.Status = CaseStatus.Active;
                 break;
             default:
                 break;
         }
+    }
+
+    private static bool IsMoveAllowed(CaseRecord record, CaseMove move, out string? reason)
+    {
+        reason = null;
+        if (record.Origin != CaseOrigin.Observed) return true;
+
+        switch (move.Type)
+        {
+            case CaseMove.Say:
+            case CaseMove.Wait:
+            case CaseMove.Stop:
+            case CaseMove.RaiseTask:
+                return true;
+            case CaseMove.UseTool:
+            {
+                var tool = string.IsNullOrWhiteSpace(move.Name) ? CaseTools.ArgString(move.Args, "tool") : move.Name;
+                if (tool is CaseTools.LocalSearch or CaseTools.ReadNote) return true;
+                reason = $"Observed cases may only use read-only tools (got '{tool}').";
+                return false;
+            }
+            case CaseMove.Propose:
+            {
+                var cap = move.Name;
+                if (move.Args.TryGetValue("capability", out var c) && c.ValueKind == JsonValueKind.String)
+                    cap = c.GetString() ?? cap;
+                if (cap is Actions.ModifyNote or Actions.CreateDraftNote or "file_note") return true;
+                reason = $"Observed cases may not propose '{cap}'.";
+                return false;
+            }
+            default:
+                reason = $"Move '{move.Type}' is not allowed on observed cases.";
+                return false;
+        }
+    }
+
+    private void RaiseChildTask(CaseRecord parent, CaseMove move, string causedByEventId)
+    {
+        var objective = move.Text;
+        if (move.Args.TryGetValue("objective", out var objEl) && objEl.ValueKind == JsonValueKind.String)
+            objective = objEl.GetString() ?? objective;
+        if (string.IsNullOrWhiteSpace(objective))
+            objective = "Raised from listening.";
+
+        var kind = CaseKind.Remember;
+        if (move.Args.TryGetValue("kind", out var kindEl) && kindEl.ValueKind == JsonValueKind.String)
+            kind = kindEl.GetString() ?? kind;
+
+        var now = _clock.UtcNow;
+        var childId = Ulid.NewUlid(now);
+        var sourceRefs = new List<string>();
+        if (move.Args.TryGetValue("segmentId", out var segEl) && segEl.ValueKind == JsonValueKind.String)
+            sourceRefs.Add("segment:" + segEl.GetString());
+        if (move.Args.TryGetValue("sourceEventId", out var evEl) && evEl.ValueKind == JsonValueKind.String)
+            sourceRefs.Add("event:" + evEl.GetString());
+        sourceRefs.Add("parent:" + parent.Id);
+
+        var child = new CaseRecord
+        {
+            Id = childId,
+            Version = 0,
+            Origin = CaseOrigin.Direct,
+            Kind = kind,
+            ApprovedObjective = objective,
+            Status = CaseStatus.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+            ParentCaseId = parent.Id,
+            SourceRefs = sourceRefs,
+            AllowedCapabilities =
+            [
+                ScriptedCaseMind.DefaultCapability,
+                Actions.CreateProject,
+                Actions.ModifyNote,
+                Actions.CreateDraftNote,
+                "file_note",
+                CaseTools.LocalSearch,
+                CaseTools.ReadNote,
+            ],
+        };
+        PersistRecord(child);
+        var userEvt = AppendEvent(child, CaseEventTypes.UserInput, new
+        {
+            text = objective,
+            origin = CaseOrigin.Direct,
+            raisedFrom = parent.Id,
+            causedByEventId,
+        });
+        child.ProcessedEventIds.Add(userEvt.EventId);
+        PersistRecord(child);
+        _ready.TryEnqueue(childId, ReadyPriority.NewDirectRequest);
+
+        if (!parent.ChildCaseIds.Contains(childId))
+            parent.ChildCaseIds.Add(childId);
+        var raised = AppendEvent(parent, CaseEventTypes.TaskRaised, new
+        {
+            childCaseId = childId,
+            objective,
+            causedByEventId,
+            sourceRefs,
+        });
+        parent.ProcessedEventIds.Add(raised.EventId);
+        parent.Status = CaseStatus.Active;
+        Feed(childId, $"Raised: {Clip(objective, 120)}", "persistent");
+        Feed(parent.Id, $"Raised task {childId}.", "persistent");
+        _diagnostics.Write(now, "info", "CaseRuntime", "task_raised",
+            caseId: parent.Id, caseVersion: parent.Version, status: parent.Status);
+    }
+
+    private void MarkListeningSegmentsHandled(CaseRecord record, CaseMove move)
+    {
+        if (record.Origin != CaseOrigin.Observed) return;
+        var state = _intake.LoadState();
+        if (state.CaseId != record.Id) return;
+
+        if (move.Args.TryGetValue("segmentId", out var seg) && seg.ValueKind == JsonValueKind.String)
+        {
+            var id = seg.GetString();
+            if (id is not null) state.PendingMindSegmentIds.Remove(id);
+        }
+        else if (state.PendingMindSegmentIds.Count > 0)
+        {
+            state.PendingMindSegmentIds.RemoveAt(0);
+        }
+        _intake.SaveState(state);
+    }
+
+    private static string ResolveAttention(CaseRecord record, CaseMove move, string feed)
+    {
+        if (move.Args.TryGetValue("attention", out var att) && att.ValueKind == JsonValueKind.String)
+            return att.GetString() ?? "ambient";
+        if (move.Type == CaseMove.Say && move.Done && record.PresentationPolicy != StreamIntake.PresentationListening)
+            return "finding";
+        if (move.Type == CaseMove.Propose) return "proposal";
+        if (move.Type == CaseMove.RaiseTask) return "persistent";
+        if (feed.Contains(" means ", StringComparison.OrdinalIgnoreCase)) return "persistent";
+        return "ambient";
     }
 
     private static void ApplyCitations(CaseRecord record, CaseMove move)
