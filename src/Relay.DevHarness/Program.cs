@@ -68,12 +68,14 @@ public static class Program
             {
                 var started = runtime.StartDirectCase("harness: slice1 side effect");
                 caseId = started.Id;
-                var stepped = await runtime.StepNextAsync();
-                if (stepped is null || stepped.Status != CaseStatus.Waiting)
-                    return Fail(summaryPath, runId, "expected waiting case after propose", sideEffects);
+                // Step this case explicitly so a shared data root's ready queue cannot steal the turn.
+                var stepped = await runtime.StepCaseAsync(caseId);
+                if (stepped.Id != caseId || stepped.Status != CaseStatus.Waiting)
+                    return Fail(summaryPath, runId, $"expected waiting case after propose, got {stepped.Id}/{stepped.Status}", sideEffects);
 
-                var pending = runtime.GetPendingApproval(caseId)
-                    ?? throw new InvalidOperationException("missing pending approval");
+                var pending = runtime.GetPendingApproval(caseId);
+                if (pending is null)
+                    return Fail(summaryPath, runId, "missing pending approval after propose", sideEffects);
                 operationId = pending.OperationId;
                 envelopeHash = pending.CanonicalHash();
                 runtime.SuspendAll();
@@ -379,19 +381,26 @@ public static class Program
         using var runtime = CaseRuntime.Open(root, clock, new ScriptedCaseMind(), diagnostics, () => { });
         IRelaySurface surface = new CaseRuntimeSurface(runtime, clock);
 
-        var listen = surface.ToggleListening();
-        if (!listen.Ok || !surface.Snapshot().Listening)
-            return Fail(summaryPath, runId, "toggle listening failed", 0);
-        surface.ToggleListening();
+        // Ensure listening is on, then off — shared data roots may already be listening.
+        if (!surface.Snapshot().Listening)
+        {
+            var listen = surface.ToggleListening();
+            if (!listen.Ok || !surface.Snapshot().Listening)
+                return Fail(summaryPath, runId, "toggle listening failed", 0);
+        }
+        var stop = surface.ToggleListening();
+        if (!stop.Ok || surface.Snapshot().Listening)
+            return Fail(summaryPath, runId, "stop listening failed", 0);
 
         var submitted = surface.SubmitComposer("harness slice6 side effect");
         if (!submitted.Ok) return Fail(summaryPath, runId, submitted.Error ?? "submit failed", 0);
         await surface.RunUntilIdleAsync(submitted.CaseId);
         var snap = surface.Snapshot();
-        if (snap.PendingApprovals.Count != 1 || snap.Feed.Count == 0)
-            return Fail(summaryPath, runId, "expected one feed stream and one approval card", 0);
+        var mine = snap.PendingApprovals.Where(a => a.CaseId == submitted.CaseId).ToList();
+        if (mine.Count != 1 || snap.Feed.Count == 0)
+            return Fail(summaryPath, runId, $"expected one approval for composer case (mine={mine.Count}, feed={snap.Feed.Count}, allPending={snap.PendingApprovals.Count})", 0);
 
-        var card = snap.PendingApprovals[0];
+        var card = mine[0];
         var approved = surface.ApproveOperation(card.OperationId, card.EnvelopeHash, card.CaseVersion);
         if (!approved.Ok) return Fail(summaryPath, runId, approved.Error ?? "approve failed", 0);
         runtime.ExecuteOperation(card.OperationId);
@@ -404,7 +413,7 @@ public static class Program
             scenario = "slice6",
             runId,
             feedCount = final.Feed.Count,
-            pendingApprovals = final.PendingApprovals.Count,
+            pendingApprovals = final.PendingApprovals.Count(a => a.CaseId == submitted.CaseId),
             modelHealth = final.ModelHealth.Status,
             listening = final.Listening,
             caseId = submitted.CaseId,

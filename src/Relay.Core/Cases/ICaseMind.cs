@@ -101,11 +101,14 @@ public sealed class ScriptedCaseMind : ICaseMind
                 "Waiting on operation."));
         }
 
+        // Scope the key to the case so a second harness run on the same data root can still
+        // exercise propose→approve. Duplicate completions within one case keep the same key.
+        var idempotencyKey = DefaultIdempotencyKey + ":" + request.CaseId;
         var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
         {
             ["capability"] = JsonSerializer.SerializeToElement(DefaultCapability),
             ["capabilityVersion"] = JsonSerializer.SerializeToElement(1),
-            ["idempotencyKey"] = JsonSerializer.SerializeToElement(DefaultIdempotencyKey),
+            ["idempotencyKey"] = JsonSerializer.SerializeToElement(idempotencyKey),
             ["label"] = JsonSerializer.SerializeToElement("slice1-counter"),
         };
 

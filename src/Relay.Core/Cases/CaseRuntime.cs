@@ -1041,7 +1041,11 @@ public sealed class CaseRuntime : IDisposable
             && existing.Status is not OperationStatus.Denied and not OperationStatus.Cancelled)
         {
             AppendEvent(record, CaseEventTypes.DuplicateIgnored, new { operationId = existing.OperationId, idempotencyKey });
-            record.Status = CaseStatus.Waiting;
+            if (!record.PendingOperationIds.Contains(existing.OperationId))
+                record.PendingOperationIds.Add(existing.OperationId);
+            record.Status = existing.Status == OperationStatus.Completed
+                ? CaseStatus.Active
+                : CaseStatus.Waiting;
             return;
         }
 
