@@ -505,14 +505,53 @@ public sealed partial class CaseRuntime
     private async Task<CommandDispatchResult> DispatchJudgmentsAsync(RuntimeCommand command, CancellationToken cancellationToken)
     {
         // Hook for slow/fake Jev: payload may include a wait handle name used only in tests via callback.
-        if (command.Payload.TryGetValue("delayBarrier", out _))
+        if (command.Payload.TryGetValue("delayBarrier", out _) || _jevStallHook is not null)
         {
             if (_jevStallHook is not null)
                 await _jevStallHook(command, cancellationToken).ConfigureAwait(false);
         }
-        else if (_jevStallHook is not null)
+
+        // Hosted judgment path: never silently replace Jev with local judgment.
+        // When hosted is disabled or outbound blocks, record the block — local jobs may still run separately.
+        if (command.Payload.TryGetValue("artifactIds", out var arts) && arts.ValueKind == JsonValueKind.Array)
         {
-            await _jevStallHook(command, cancellationToken).ConfigureAwait(false);
+            var items = arts.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.String)
+                .Select(e => new OutboundContentItem
+                {
+                    ArtifactId = e.GetString()!,
+                    Role = "state",
+                    Required = true,
+                })
+                .ToList();
+            if (items.Count > 0)
+            {
+                var grantId = PayloadString(command, "grantId");
+                var prepared = _hosted.Outbound.PrepareAndDispatch(
+                    provider: PayloadString(command, "provider") ?? "jev",
+                    purpose: HostedPurposes.Judgment,
+                    items: items,
+                    grantId: grantId);
+                if (!prepared.Ok)
+                {
+                    lock (_gate)
+                    {
+                        var record = _cases.TryLoadRecord(command.CaseId);
+                        if (record is null) return new CommandDispatchResult(false, Error: "case missing", Cancelled: true);
+                        AppendEvent(record, CaseDomainEventTypes.CommandFailed, new
+                        {
+                            commandId = command.CommandId,
+                            kind = command.Kind,
+                            reason = prepared.BlockReason,
+                            // Explicit: do not masquerade as a complete judgment.
+                            judgmentComplete = false,
+                        });
+                        record.PendingCommandIds.Remove(command.CommandId);
+                        PersistRecord(record);
+                    }
+                    return new CommandDispatchResult(false, Error: prepared.BlockReason, Cancelled: true);
+                }
+            }
         }
 
         lock (_gate)

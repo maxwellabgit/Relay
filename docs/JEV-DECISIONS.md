@@ -37,6 +37,13 @@ Update this file whenever a default is chosen or an old test expectation is inte
 - Concurrency defaults (configurable via `RuntimeConcurrencyOptions`): local gen 1, Jev 4, search/fetch/delegate 4; case transitions serialized per case (runtime gate).
 - Waiting cases skip controller/model work until a relevant wake/result/retry (`CaseInput`).
 
+## Open questions for humans
+
+1. Confirm `refactor/jev-runtime` branch name is acceptable for merge to `main`.
+2. When will `TYPESAFE_API_KEY` be available in Cursor Cloud secrets?
+3. Local model endpoint for live jobs (host/port/model id)?
+4. Should WinUI Desktop binding wait for a Windows verification machine, or ship Core+harness first and stub Desktop composition?
+
 ## Decision log
 
 | Date (UTC) | Decision | Rationale |
@@ -46,3 +53,4 @@ Update this file whenever a default is chosen or an old test expectation is inte
 | 2026-09-17 | Proceed fixture-only until TypeSafe key arrives | Key absent; live gates must fail preflight |
 | 2026-09-17 | Keep historical `ICaseMind` tests until controller parity | Spec: retain temporarily for historical tests |
 | 2026-09-17 | §4 outbox + `LegacyMindBridgeController`; cancel-before-dispatch refuses execute | Spec §4; Slice4 expectation updated |
+| 2026-09-17 | §5 evidence + hosted grants; outbound policy before every hosted call | Spec §5; `hosted_eligible` ≠ permission |

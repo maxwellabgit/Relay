@@ -52,7 +52,7 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 | Gate | Status | Evidence level |
 | --- | --- | --- |
 | Persistence / async outbox tests (§4) | **Passed** — `AsyncPersistenceTests` 13/13; full `Relay.Core.Tests` 46/46 | deterministic |
-| Provenance / grant tests (§5) | pending | deterministic |
+| Provenance / grant tests (§5) | **Passed** — `ProvenanceGrantTests` 11/11 | deterministic |
 | Jev transport fixture tests (§6) | pending | fixture |
 | Decision catalog tests (§7) | pending | deterministic |
 | Context / local jobs tests (§8) | pending | deterministic |
@@ -68,3 +68,9 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 
 - `dotnet test tests/Relay.Core.Tests -c Release` → 46 passed (33 historical + 13 async/persistence).
 - Intentional expectation change: cancel-before-dispatch no longer executes (see `docs/JEV-DECISIONS.md`).
+
+### §5 notes
+
+- Evidence artifacts carry restriction (`local_only` | `hosted_eligible`); `hosted_eligible` does not grant permission.
+- Outbound package policy runs before hosted dispatch; `blocked_context_restriction` when required context cannot be exported.
+- Budget reservations are atomic per transport attempt; estimates are never displayed as exact billed amounts.

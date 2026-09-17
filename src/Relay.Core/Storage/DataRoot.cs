@@ -103,6 +103,10 @@ public sealed class DataRoot
     public string OperationsDirectory => Combine("operations");
     /// <summary>Persisted async command outbox: <c>commands/{commandId}.json</c>.</summary>
     public string CommandsDirectory => Combine("commands");
+    /// <summary>Evidence artifacts, statements, conflicts, and content blobs.</summary>
+    public string EvidenceDirectory => Combine("evidence");
+    /// <summary>Hosted processing grants, budget reservations, and outbound intents.</summary>
+    public string GrantsDirectory => Combine("grants");
     /// <summary>Isolated local harness runs: <c>.dev-runs/{run-id}/</c>.</summary>
     public string DevRunsDirectory => Combine(".dev-runs");
 
@@ -130,7 +134,8 @@ public sealed class DataRoot
             StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, SearchArtifactsDirectory, UsageDirectory,
             ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
             WorkflowsDirectory, WorkflowDraftsDirectory,
-            CasesDirectory, ObjectsDirectory, ProjectionsDirectory, OperationsDirectory, CommandsDirectory, DevRunsDirectory,
+            CasesDirectory, ObjectsDirectory, ProjectionsDirectory, OperationsDirectory, CommandsDirectory,
+            EvidenceDirectory, GrantsDirectory, DevRunsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

@@ -22,6 +22,7 @@ public sealed partial class CaseRuntime : IDisposable
     private readonly OperationStore _operations;
     private readonly CommandStore _commands;
     private readonly CommandDispatcher _dispatcher;
+    private readonly HostedAuthorization _hosted;
     private readonly ObjectStore _objects;
     private readonly ProjectionDatabase _projections;
     private readonly ReadyQueue _ready;
@@ -48,7 +49,8 @@ public sealed partial class CaseRuntime : IDisposable
         CaseLocalContext? local,
         ResearchServices? research,
         ToolServices? tools,
-        RuntimeConcurrencyOptions? concurrency)
+        RuntimeConcurrencyOptions? concurrency,
+        HostedAuthorization? hosted)
     {
         _root = root;
         _clock = clock;
@@ -75,6 +77,7 @@ public sealed partial class CaseRuntime : IDisposable
             ? new ToolWorkflowBroker(root, _objects, _toolServices, () => clock.UtcNow)
             : null;
         _leaseOwner = Ulid.NewUlid(clock.UtcNow);
+        _hosted = hosted ?? new HostedAuthorization(root, clock, hostedEnabled: false);
         _dispatcher = new CommandDispatcher(
             _commands,
             concurrency ?? new RuntimeConcurrencyOptions(),
@@ -95,6 +98,7 @@ public sealed partial class CaseRuntime : IDisposable
     public StreamIntake Intake => _intake;
     public ResearchBroker? Research => _research;
     public ToolWorkflowBroker? Tools => _tools;
+    public HostedAuthorization Hosted => _hosted;
     public bool SearchAvailable => _research?.SearchAvailable == true;
     public bool ToolBuildAvailable => _tools?.CanBuild == true;
     public int SideEffectCount { get; private set; }
@@ -110,11 +114,12 @@ public sealed partial class CaseRuntime : IDisposable
         ResearchServices? research = null,
         ToolServices? tools = null,
         ICaseController? controller = null,
-        RuntimeConcurrencyOptions? concurrency = null)
+        RuntimeConcurrencyOptions? concurrency = null,
+        HostedAuthorization? hosted = null)
     {
         root.EnsureLayout(clock);
         var resolvedController = controller ?? new LegacyMindBridgeController(mind);
-        var runtime = new CaseRuntime(root, clock, mind, resolvedController, diagnostics, onSideEffect, local, research, tools, concurrency);
+        var runtime = new CaseRuntime(root, clock, mind, resolvedController, diagnostics, onSideEffect, local, research, tools, concurrency, hosted);
         runtime.Reconstruct();
         diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened",
             status: research?.SearchAvailable == true
@@ -315,6 +320,16 @@ public sealed partial class CaseRuntime : IDisposable
 
             if (listening.Status == CaseStatus.Active)
                 _ready.TryEnqueue(listening.Id, ReadyPriority.NormalObserved);
+
+            // Transcript persists locally; default restriction is local_only (hosted_eligible ≠ permission).
+            _hosted.Evidence.PutText(
+                text,
+                sourceRefs: [$"segment:{segmentId}", $"object:{stored.ObjectId}"],
+                sessionIds: [listening.Id],
+                restriction: Relay.Core.Evidence.ContentRestriction.LocalOnly,
+                label: "transcript_segment",
+                artifactId: "seg:" + segmentId,
+                kind: "transcript");
 
             _diagnostics.Write(at, "info", "CaseRuntime", "segment_ingested",
                 caseId: listening.Id, caseVersion: listening.Version, resultRef: stored.ObjectId);
