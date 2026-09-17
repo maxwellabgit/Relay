@@ -71,7 +71,8 @@ public sealed class WorkflowStore
         if (IsPromoted(name)) return new ChangeSetResult(false, null, $"A workflow named '{name}' already exists.");
         var promoted = new WorkflowDefinition
         {
-            Name = draft.Name, Description = draft.Description, Version = draft.Version, Steps = draft.Steps,
+            Name = draft.Name, Description = draft.Description, Version = draft.Version,
+            Inputs = draft.Inputs, Outputs = draft.Outputs, Steps = draft.Steps, Fixtures = draft.Fixtures,
             BuiltBy = draft.BuiltBy, TaskId = draft.TaskId, Justification = draft.Justification, DraftedAt = draft.DraftedAt,
             TestedSha256 = draft.TestedSha256, TestedAt = draft.TestedAt, PromotedAt = now,
         };

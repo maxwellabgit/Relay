@@ -24,11 +24,11 @@ Live runners must fail preflight or report `SKIPPED: missing local model`. They 
 | `CaseRuntime` + `OperationEnvelope` | Slice 1–2 | `Slice1RecoveryTests`, `Slice2AtlasRecallTests`, `Relay.DevHarness` |
 | Persistent ready queue | Slice 1 | SQLite `ready_queue` via `ReadyQueue` |
 | SQLite projections | Slice 1–2 | `ProjectionDatabase` + feed items per step |
-| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (`--scenario slice1|slice2|slice3|slice4`) |
+| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (`--scenario slice1|slice2|slice3|slice4|slice5`) |
 | Direct vertical path (Slice 2) | Done | Atlas beta recall + citations; propose edit/reject |
 | Listening adapter (Slice 3) | Done | `StreamIntake` + observed case; `Slice3ListeningTests` |
 | Research path (Slice 4) | Done | `ResearchBroker` + Lightshift cited path; `Slice4ResearchTests` |
-| Tool/workflow generalization (Slice 5) | Not yet | — |
+| Tool/workflow generalization (Slice 5) | Done | `ToolWorkflowBroker` + `world_clock` reuse; `Slice5ToolWorkflowTests` |
 | UI projection coupling (Slice 6) | Not yet | — |
 | Measured personalization (Slice 7) | Not yet | — |
 

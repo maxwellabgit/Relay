@@ -10,7 +10,25 @@ namespace Relay.Core.Workflows;
 /// <summary>One step of a workflow: a kind the loop already understands, plus a flat string map of arguments.</summary>
 public sealed record WorkflowStep(
     [property: JsonPropertyName("kind")] string Kind,
-    [property: JsonPropertyName("args")] IReadOnlyDictionary<string, string> Args);
+    [property: JsonPropertyName("args")] IReadOnlyDictionary<string, string> Args,
+    [property: JsonPropertyName("id")] string? Id = null,
+    [property: JsonPropertyName("out")] string? Out = null);
+
+/// <summary>Typed workflow input slot.</summary>
+public sealed record WorkflowTypedSlot(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("required")] bool Required = true);
+
+/// <summary>
+/// Fixture for evaluating a workflow: concrete inputs, optional expected outputs / wait resume values.
+/// Promotion requires at least one fixture to execute successfully (not structural-only).
+/// </summary>
+public sealed record WorkflowFixture(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("inputs")] IReadOnlyDictionary<string, string> Inputs,
+    [property: JsonPropertyName("expected")] IReadOnlyDictionary<string, string>? Expected = null,
+    [property: JsonPropertyName("resume")] IReadOnlyDictionary<string, string>? Resume = null);
 
 /// <summary>What the mind is told about a promoted workflow: name, description, version, and the step kinds in order.</summary>
 public sealed record WorkflowDescriptor(string Name, string Description, int Version, IReadOnlyList<string> StepKinds);
@@ -29,7 +47,7 @@ public sealed partial class WorkflowDefinition
 
     public static readonly string[] StepKinds =
     [
-        "use_tool", "retrieve", "search", "delegate", "format", "say",
+        "use_tool", "retrieve", "search", "delegate", "format", "say", "wait", "set",
     ];
 
     [JsonPropertyName("formatVersion")] public int PackageVersion { get; init; } = FormatVersion;
@@ -37,7 +55,10 @@ public sealed partial class WorkflowDefinition
     [JsonPropertyName("description")] public required string Description { get; init; }
     /// <summary>The workflow's own revision number (not the package format version).</summary>
     [JsonPropertyName("version")] public int Version { get; init; } = 1;
+    [JsonPropertyName("inputs")] public IReadOnlyList<WorkflowTypedSlot> Inputs { get; init; } = [];
+    [JsonPropertyName("outputs")] public IReadOnlyList<WorkflowTypedSlot> Outputs { get; init; } = [];
     [JsonPropertyName("steps")] public IReadOnlyList<WorkflowStep> Steps { get; init; } = [];
+    [JsonPropertyName("fixtures")] public IReadOnlyList<WorkflowFixture> Fixtures { get; init; } = [];
     [JsonPropertyName("builtBy")] public string? BuiltBy { get; init; }
     [JsonPropertyName("taskId")] public string? TaskId { get; init; }
     [JsonPropertyName("justification")] public string? Justification { get; init; }
@@ -54,6 +75,30 @@ public sealed partial class WorkflowDefinition
 
     [JsonIgnore] public WorkflowDescriptor Descriptor => new(Name, Description, Version, Steps.Select(s => s.Kind).ToList());
 
+    /// <summary>Union of permissions implied by step kinds (what promotion advertises).</summary>
+    [JsonIgnore] public IReadOnlyList<string> PermissionUnion
+    {
+        get
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var step in Steps)
+            {
+                var kind = (step.Kind ?? "").Trim().ToLowerInvariant().Replace('-', '_');
+                switch (kind)
+                {
+                    case "use_tool": set.Add("tool:" + (step.Args.GetValueOrDefault("name") ?? step.Args.GetValueOrDefault("tool") ?? "*")); break;
+                    case "retrieve":
+                    case "search": set.Add("local_search"); break;
+                    case "delegate": set.Add("delegate:" + (step.Args.GetValueOrDefault("profile") ?? "*")); break;
+                    case "wait": set.Add("wait"); break;
+                    case "format":
+                    case "say":
+                    case "set": set.Add("local"); break;
+                }
+            }
+            return set.OrderBy(s => s, StringComparer.Ordinal).ToList();
+        }
+    }
     public string ToJson() => JsonSerializer.Serialize(this, RelayJson.Indented);
 
     public static WorkflowDefinition? FromJson(string json)
@@ -116,6 +161,16 @@ public sealed partial class WorkflowDefinition
                     if (string.IsNullOrWhiteSpace(args.GetValueOrDefault("text")))
                         problems.Add($"step {i + 1} ({kind}) needs args.text");
                     break;
+                case "wait":
+                    if (string.IsNullOrWhiteSpace(args.GetValueOrDefault("reason") ?? args.GetValueOrDefault("key")))
+                        problems.Add($"step {i + 1} (wait) needs args.reason or args.key");
+                    break;
+                case "set":
+                    if (string.IsNullOrWhiteSpace(args.GetValueOrDefault("name") ?? args.GetValueOrDefault("key")))
+                        problems.Add($"step {i + 1} (set) needs args.name");
+                    if (string.IsNullOrWhiteSpace(args.GetValueOrDefault("value") ?? args.GetValueOrDefault("from")))
+                        problems.Add($"step {i + 1} (set) needs args.value or args.from");
+                    break;
             }
         }
         return problems;
@@ -126,10 +181,24 @@ public sealed partial class WorkflowDefinition
     {
         var steps = Steps.Select(s => new
         {
+            id = s.Id,
+            outSlot = s.Out,
             kind = (s.Kind ?? "").Trim().ToLowerInvariant().Replace('-', '_'),
             args = (s.Args ?? new Dictionary<string, string>()).OrderBy(kv => kv.Key, StringComparer.Ordinal)
                 .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal),
         });
-        return JsonSerializer.Serialize(new { name = Name, description = Description, version = Version, steps }, RelayJson.Compact);
+        var inputs = Inputs.Select(i => new { i.Name, i.Type, i.Required });
+        var outputs = Outputs.Select(o => new { o.Name, o.Type, o.Required });
+        var fixtures = Fixtures.Select(f => new
+        {
+            f.Name,
+            inputs = (f.Inputs ?? new Dictionary<string, string>()).OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal),
+            expected = (f.Expected ?? new Dictionary<string, string>()).OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal),
+            resume = (f.Resume ?? new Dictionary<string, string>()).OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal),
+        });
+        return JsonSerializer.Serialize(new { name = Name, description = Description, version = Version, inputs, outputs, steps, fixtures }, RelayJson.Compact);
     }
 }

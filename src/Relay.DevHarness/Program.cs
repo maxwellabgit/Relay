@@ -4,6 +4,7 @@ using Relay.Core.Policy;
 using Relay.Core.Search;
 using Relay.Core.Storage;
 using Relay.Core.Time;
+using Relay.Core.Tools;
 
 namespace Relay.DevHarness;
 
@@ -27,7 +28,7 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4|slice5]");
             return 2;
         }
 
@@ -37,6 +38,7 @@ public static class Program
             "slice2" => await RunSlice2Async(dataRootPath, runId),
             "slice3" => await RunSlice3Async(dataRootPath, runId),
             "slice4" => await RunSlice4Async(dataRootPath, runId),
+            "slice5" => await RunSlice5Async(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }
@@ -293,6 +295,68 @@ public static class Program
             answer = finished.Result,
             sourceRefs = finished.SourceRefs,
             searchHost = search.Host,
+            diagnostics = diagnosticsPath,
+        });
+    }
+
+    private static async Task<int> RunSlice5Async(string dataRootPath, string runId)
+    {
+        var root = new DataRoot(dataRootPath);
+        var clock = new HarnessClock(new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero));
+        root.EnsureLayout(clock);
+
+        var runDir = Path.Combine(root.DevRunsDirectory, runId);
+        Directory.CreateDirectory(runDir);
+        var diagnosticsPath = Path.Combine(runDir, "runtime.jsonl");
+        var summaryPath = Path.Combine(runDir, "summary.json");
+
+        var host = new HostFunctions(() => clock.UtcNow);
+        var tools = new ToolServices
+        {
+            Runner = new InProcessJintToolRunner(host, () => clock.UtcNow),
+            Drafter = new WorldClockToolDrafter(),
+            Clock = () => clock.UtcNow,
+        };
+
+        using var diagnostics = new RuntimeDiagnostics(diagnosticsPath, runId);
+        using var runtime = CaseRuntime.Open(root, clock, new WorldClockToolMind(), diagnostics, tools: tools);
+
+        var tokyo = runtime.StartDirectCase(WorldClockToolMind.TokyoAsk, CaseKind.Answer);
+        await runtime.RunUntilIdleAsync(tokyo.Id);
+        var promote = runtime.GetPendingApproval(tokyo.Id);
+        if (promote is null) return Fail(summaryPath, runId, "missing promote approval", 0);
+        if (promote.Arguments["name"].GetString() != "world_clock")
+            return Fail(summaryPath, runId, "expected world_clock name on card", 0);
+        runtime.ApproveOperation(promote.OperationId, promote.CanonicalHash(), runtime.GetCase(tokyo.Id)!.Version);
+        runtime.ExecuteOperation(promote.OperationId);
+        var tokyoDone = await runtime.RunUntilIdleAsync(tokyo.Id);
+        if (tokyoDone.Status != CaseStatus.Completed || tokyoDone.Result is null || !tokyoDone.Result.Contains("21:00"))
+            return Fail(summaryPath, runId, $"tokyo answer bad: {tokyoDone.Result}", 0);
+
+        var ktm = runtime.StartDirectCase("What time is it in Kathmandu?", CaseKind.Answer);
+        var ktmDone = await runtime.RunUntilIdleAsync(ktm.Id);
+        if (ktmDone.Status != CaseStatus.Completed || runtime.GetPendingApproval(ktm.Id) is not null)
+            return Fail(summaryPath, runId, "kathmandu rebuilt or failed", 0);
+
+        var lon = runtime.StartDirectCase("What time is it in London?", CaseKind.Answer);
+        var lonDone = await runtime.RunUntilIdleAsync(lon.Id);
+        if (lonDone.Status != CaseStatus.Completed)
+            return Fail(summaryPath, runId, "london failed", 0);
+
+        var changeSet = runtime.Tools!.Changes.All().Single(c => c.Kind == "tool" && !c.Reverted);
+        var revertResult = runtime.Tools.Changes.Revert(changeSet.ChangeSetId, "harness rollback", clock.UtcNow);
+        if (!revertResult.Ok || runtime.Tools.Tools.IsPromoted("world_clock"))
+            return Fail(summaryPath, runId, "revert did not remove world_clock", 0);
+
+        return Ok(summaryPath, new
+        {
+            ok = true,
+            scenario = "slice5",
+            runId,
+            tokyo = tokyoDone.Result,
+            kathmandu = ktmDone.Result,
+            london = lonDone.Result,
+            reverted = true,
             diagnostics = diagnosticsPath,
         });
     }

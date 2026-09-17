@@ -28,6 +28,8 @@ public sealed class CaseRuntime : IDisposable
     private readonly StreamIntake _intake;
     private readonly ResearchBroker? _research;
     private readonly ResearchServices _researchServices;
+    private readonly ToolWorkflowBroker? _tools;
+    private readonly ToolServices _toolServices;
     private readonly Action _onSideEffect;
     private readonly string _leaseOwner;
     private readonly object _gate = new();
@@ -40,7 +42,8 @@ public sealed class CaseRuntime : IDisposable
         RuntimeDiagnostics diagnostics,
         Action? onSideEffect,
         CaseLocalContext? local,
-        ResearchServices? research)
+        ResearchServices? research,
+        ToolServices? tools)
     {
         _root = root;
         _clock = clock;
@@ -48,6 +51,7 @@ public sealed class CaseRuntime : IDisposable
         _diagnostics = diagnostics;
         _onSideEffect = onSideEffect ?? (() => { });
         _researchServices = research ?? new ResearchServices();
+        _toolServices = tools ?? new ToolServices();
         _cases = new CaseStore(root);
         _operations = new OperationStore(root);
         _objects = new ObjectStore(root, clock);
@@ -60,6 +64,9 @@ public sealed class CaseRuntime : IDisposable
         _research = _researchServices.Search is not null || _researchServices.Delegate is not null
             ? new ResearchBroker(root, _objects, clock, _researchServices)
             : null;
+        _tools = _toolServices.Runner is not null || _toolServices.Drafter is not null
+            ? new ToolWorkflowBroker(root, _objects, _toolServices, () => clock.UtcNow)
+            : null;
         _leaseOwner = Ulid.NewUlid(clock.UtcNow);
     }
 
@@ -71,7 +78,9 @@ public sealed class CaseRuntime : IDisposable
     public CaseLocalContext Local => _local;
     public StreamIntake Intake => _intake;
     public ResearchBroker? Research => _research;
+    public ToolWorkflowBroker? Tools => _tools;
     public bool SearchAvailable => _research?.SearchAvailable == true;
+    public bool ToolBuildAvailable => _tools?.CanBuild == true;
     public int SideEffectCount { get; private set; }
 
     /// <summary>Opens a runtime on an existing data root, reconstructing suspended work.</summary>
@@ -82,13 +91,16 @@ public sealed class CaseRuntime : IDisposable
         RuntimeDiagnostics diagnostics,
         Action? onSideEffect = null,
         CaseLocalContext? local = null,
-        ResearchServices? research = null)
+        ResearchServices? research = null,
+        ToolServices? tools = null)
     {
         root.EnsureLayout(clock);
-        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local, research);
+        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local, research, tools);
         runtime.Reconstruct();
         diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened",
-            status: research?.SearchAvailable == true ? "ok_search_bound" : "ok");
+            status: research?.SearchAvailable == true
+                ? "ok_search_bound"
+                : tools?.CanBuild == true ? "ok_tools_bound" : "ok");
         return runtime;
     }
 
@@ -354,12 +366,23 @@ public sealed class CaseRuntime : IDisposable
                     ResearchCapabilities.Search,
                     ResearchCapabilities.Delegate,
                     Actions.ModelRequest,
+                    ToolCapabilities.PromoteTool,
+                    ToolCapabilities.RevertTool,
+                    ToolCapabilities.PromoteWorkflow,
+                    ToolCapabilities.RevertWorkflow,
+                    CaseMove.Build,
+                    CaseMove.RunWorkflow,
                 ],
             };
 
             // Do not advertise search unless a real adapter is bound.
             if (!SearchAvailable)
                 record.AllowedCapabilities.Remove(ResearchCapabilities.Search);
+            if (!ToolBuildAvailable)
+            {
+                record.AllowedCapabilities.Remove(ToolCapabilities.PromoteTool);
+                record.AllowedCapabilities.Remove(CaseMove.Build);
+            }
 
             PersistRecord(record);
             var evt = AppendEvent(record, CaseEventTypes.UserInput, new { text = objective, origin = CaseOrigin.Direct });
@@ -449,6 +472,9 @@ public sealed class CaseRuntime : IDisposable
                     ? _intake.LoadRecentSegments(caseId)
                     : (IReadOnlyList<ListeningSegmentView>)[];
 
+                var availableTools = _tools?.Tools.Descriptors().Select(d => d.Name).ToList()
+                    ?? new List<string>();
+
                 var request = new CaseMindRequest(
                     record.Id,
                     record.Origin,
@@ -463,7 +489,8 @@ public sealed class CaseRuntime : IDisposable
                     record.Budgets.StepsUsed,
                     segments,
                     record.ParentCaseId,
-                    record.PresentationPolicy);
+                    record.PresentationPolicy,
+                    availableTools);
 
                 CaseMindStep step;
                 try
@@ -524,6 +551,12 @@ public sealed class CaseRuntime : IDisposable
         {
             case CaseMove.UseTool:
                 ExecuteTool(record, step.Move, causedByEventId);
+                break;
+            case CaseMove.Build:
+                BeginToolBuild(record, step.Move, causedByEventId);
+                break;
+            case CaseMove.RunWorkflow:
+                ExecuteWorkflow(record, step.Move, causedByEventId);
                 break;
             case CaseMove.Propose:
                 ProposeOperation(record, step.Move, causedByEventId);
@@ -760,7 +793,7 @@ public sealed class CaseRuntime : IDisposable
                 CaseTools.ReadArtifact => CaseTools.ReadArtifactResult(
                     _objects,
                     CaseTools.ArgString(move.Args, "objectId")),
-                _ => throw new InvalidOperationException($"Unknown tool '{tool}'."),
+                _ => RunPromotedTool(record, tool, move),
             };
         }
         catch (Exception ex)
@@ -786,6 +819,190 @@ public sealed class CaseRuntime : IDisposable
         Feed(record.Id, $"Tool {tool} returned.", "ambient");
         _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "tool_result",
             caseId: record.Id, caseVersion: record.Version, status: record.Status, resultRef: stored.ObjectId);
+    }
+
+    private object RunPromotedTool(CaseRecord record, string tool, CaseMove move)
+    {
+        if (_tools is null)
+            throw new InvalidOperationException($"Unknown tool '{tool}'.");
+        var args = move.Args
+            .Where(kv => kv.Value.ValueKind == JsonValueKind.String)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.GetString() ?? "", StringComparer.Ordinal);
+        // Also accept non-string JSON by raw text for flexibility.
+        foreach (var (k, v) in move.Args)
+        {
+            if (args.ContainsKey(k)) continue;
+            args[k] = v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "") : v.GetRawText();
+        }
+
+        var run = _tools.RunPromotedAsync(tool, args, record.ApprovedObjective ?? tool, record.Id, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        if (!run.Ok)
+            throw new InvalidOperationException(run.Error ?? "tool failed");
+        return JsonSerializer.Deserialize<JsonElement>(run.ResultJson!);
+    }
+
+    /// <summary>
+    /// Two-stage tool build: generalize → draft+test → propose promote (approval shows name + manifest).
+    /// </summary>
+    private void BeginToolBuild(CaseRecord record, CaseMove move, string causedByEventId)
+    {
+        if (_tools is null || !_tools.CanBuild)
+        {
+            AppendEvent(record, CaseEventTypes.MoveRejected, new
+            {
+                move = CaseMove.Build,
+                name = move.Name,
+                reason = "Tool build is not available (no drafter/runner bound).",
+            });
+            Feed(record.Id, "Tool build is not configured.", "alert");
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        var proposedName = string.IsNullOrWhiteSpace(move.Name) ? "world_clock" : move.Name;
+        var justification = move.Text;
+        if (move.Args.TryGetValue("justification", out var j) && j.ValueKind == JsonValueKind.String)
+            justification = j.GetString() ?? justification;
+        var inputs = CaseTools.ArgString(move.Args, "inputs");
+        var outputs = CaseTools.ArgString(move.Args, "outputs");
+        var ask = record.ApprovedObjective ?? justification;
+
+        AppendEvent(record, CaseEventTypes.ToolCalled, new
+        {
+            tool = "build",
+            stage = "generalize_draft_test",
+            name = proposedName,
+            causedByEventId,
+        });
+
+        ToolBuildResult build;
+        try
+        {
+            build = _tools.BuildToolAsync(proposedName, ask, justification, inputs, outputs, record.Id, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            AppendEvent(record, CaseEventTypes.ToolResult, new { tool = "build", ok = false, error = ex.Message });
+            Feed(record.Id, "Tool build failed.", "alert");
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        if (!build.Ok || build.Package is null || build.Generalization is null)
+        {
+            AppendEvent(record, CaseEventTypes.ToolResult, new { tool = "build", ok = false, error = build.Summary });
+            Feed(record.Id, "Tool build failed: " + Clip(build.Summary, 120), "alert");
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        var pkg = build.Package;
+        var gen = build.Generalization;
+        var buildEvt = AppendEvent(record, CaseEventTypes.ToolResult, new
+        {
+            tool = "build",
+            ok = true,
+            stage = "tested_draft",
+            name = pkg.Name,
+            generalization = gen,
+            manifest = new
+            {
+                pkg.Name,
+                pkg.Description,
+                arguments = pkg.Arguments,
+                hostFunctions = pkg.HostFunctionNames,
+                tests = pkg.Tests.Select(t => t.Args).ToList(),
+                sourceSha256 = pkg.SourceSha256,
+                tested = pkg.Tested,
+            },
+            summary = build.Summary,
+        });
+        record.ProcessedEventIds.Add(buildEvt.EventId);
+        Feed(record.Id, $"Drafted and tested '{pkg.Name}' — approval needed to promote.", "proposal");
+
+        // Approval card: final name + manifest (promotion only after evaluation already done).
+        var promoteArgs = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["capability"] = JsonSerializer.SerializeToElement(ToolCapabilities.PromoteTool),
+            ["name"] = JsonSerializer.SerializeToElement(pkg.Name),
+            ["reason"] = JsonSerializer.SerializeToElement(justification),
+            ["description"] = JsonSerializer.SerializeToElement(pkg.Description),
+            ["manifest"] = JsonSerializer.SerializeToElement(new
+            {
+                pkg.Name,
+                pkg.Description,
+                arguments = pkg.Arguments.Select(a => new { a.Name, a.Description, a.Required }),
+                hostFunctions = pkg.HostFunctionNames,
+                testCount = pkg.Tests.Count,
+                counterexamples = gen.Counterexamples,
+                sourceSha256 = pkg.SourceSha256,
+            }),
+            ["idempotencyKey"] = JsonSerializer.SerializeToElement("promote-tool-" + pkg.Name + "-" + record.Id),
+        };
+        ProposeOperation(record, new CaseMove
+        {
+            Type = CaseMove.Propose,
+            Name = ToolCapabilities.PromoteTool,
+            Text = $"Promote the tool '{pkg.Name}'",
+            Args = promoteArgs,
+        }, buildEvt.EventId);
+    }
+
+    private void ExecuteWorkflow(CaseRecord record, CaseMove move, string causedByEventId)
+    {
+        if (_tools is null)
+        {
+            AppendEvent(record, CaseEventTypes.MoveRejected, new
+            {
+                move = CaseMove.RunWorkflow,
+                name = move.Name,
+                reason = "Workflow runtime is not bound.",
+            });
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        var name = string.IsNullOrWhiteSpace(move.Name) ? CaseTools.ArgString(move.Args, "name") : move.Name;
+        AppendEvent(record, CaseEventTypes.ToolCalled, new { tool = "run_workflow", workflow = name, args = move.Args, causedByEventId });
+
+        var def = _tools.Workflows.Promoted(name);
+        if (def is null)
+        {
+            var fail = AppendEvent(record, CaseEventTypes.ToolResult, new { tool = "run_workflow", ok = false, error = $"No promoted workflow '{name}'." });
+            record.ProcessedEventIds.Add(fail.EventId);
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        var inputs = move.Args
+            .Where(kv => kv.Key is not "name" and not "resume")
+            .ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.ValueKind == JsonValueKind.String ? (kv.Value.GetString() ?? "") : kv.Value.GetRawText(),
+                StringComparer.Ordinal);
+        Dictionary<string, string>? resume = null;
+        if (move.Args.TryGetValue("resume", out var resumeEl) && resumeEl.ValueKind == JsonValueKind.Object)
+        {
+            resume = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var p in resumeEl.EnumerateObject())
+                resume[p.Name] = p.Value.ValueKind == JsonValueKind.String ? (p.Value.GetString() ?? "") : p.Value.GetRawText();
+        }
+
+        var run = Relay.Core.Workflows.WorkflowBuilder.Run(def, inputs, resume);
+        var stored = _objects.PutJson(new { workflow = name, ok = run.Passed, detail = run.Detail, values = run.Values, permissions = def.PermissionUnion });
+        var evt = AppendEvent(record, CaseEventTypes.ToolResult, new
+        {
+            tool = "run_workflow",
+            workflow = name,
+            ok = run.Passed,
+            result = new { run.Detail, values = run.Values },
+            resultRef = stored.ObjectId,
+        });
+        record.ProcessedEventIds.Add(evt.EventId);
+        record.Status = CaseStatus.Active;
+        Feed(record.Id, run.Passed ? $"Workflow '{name}' ran." : $"Workflow '{name}' failed.", run.Passed ? "ambient" : "alert");
     }
 
     private void ProposeOperation(CaseRecord record, CaseMove move, string causedByEventId)
@@ -1065,7 +1282,9 @@ public sealed class CaseRuntime : IDisposable
             _operations.Save(envelope);
 
             OperationApplyResult applied;
-            if (_research is not null && _research.Handles(envelope.Capability))
+            if (_tools is not null && _tools.Handles(envelope.Capability))
+                applied = _tools.ApplyAsync(envelope).GetAwaiter().GetResult();
+            else if (_research is not null && _research.Handles(envelope.Capability))
                 applied = _research.ApplyAsync(envelope).GetAwaiter().GetResult();
             else
                 applied = _broker.Apply(envelope);

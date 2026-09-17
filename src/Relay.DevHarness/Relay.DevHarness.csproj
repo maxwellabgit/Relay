@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Jint" Version="4.16.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Relay.Core\Relay.Core.csproj" />
   </ItemGroup>
 
