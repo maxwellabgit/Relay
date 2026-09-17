@@ -68,8 +68,8 @@ Production interface: `ICaseController.Handle(CaseSnapshot, CaseInput) → CaseT
 
 ## Implementation sequence
 
-1. Baseline (this document + VERIFICATION + JEV-DECISIONS) — current
-2. Persistence and asynchronous execution (controller, outbox, cancel/dispatch split)
+1. Baseline (this document + VERIFICATION + JEV-DECISIONS) — done
+2. Persistence and asynchronous execution (controller, outbox, cancel/dispatch split) — current
 3. Provenance and hosted authorization
 4. Real Jev transport with strict fixtures
 5. Atomic decisions composed in code

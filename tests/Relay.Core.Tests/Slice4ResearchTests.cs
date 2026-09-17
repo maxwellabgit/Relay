@@ -125,14 +125,19 @@ public class Slice4ResearchTests : IDisposable
         Assert.Equal(OperationStatus.Completed, runtime.GetOperation(searchOp.OperationId)!.Status);
         Assert.Equal(CaseStatus.Cancelled, runtime.GetCase(started.Id)!.Status);
 
-        // Stale execute also keeps the case cancelled.
+        // After cancel, not-yet-started ops must not be dispatched (intentional §4 correction).
         var started2 = runtime.StartDirectCase("Verify Lightshift sites again", CaseKind.Research);
         await runtime.RunUntilIdleAsync(started2.Id);
         var op2 = runtime.GetPendingApproval(started2.Id)!;
         runtime.ApproveOperation(op2.OperationId, op2.CanonicalHash(), runtime.GetCase(started2.Id)!.Version);
         runtime.CancelCase(started2.Id);
-        var executed = runtime.ExecuteOperation(op2.OperationId);
-        Assert.Equal(OperationStatus.Completed, executed.Status);
+        var refused = runtime.DispatchOperation(op2.OperationId);
+        Assert.Equal(OperationStatus.Cancelled, refused.Status);
+        Assert.Equal(CaseStatus.Cancelled, runtime.GetCase(started2.Id)!.Status);
+
+        // Late result accepted for audit without reopening.
+        var late = runtime.AcceptOperationResult(op2.OperationId, new OperationApplyResult(true, "late audit result", ResultRef: null));
+        Assert.Equal(OperationStatus.Completed, late.Status);
         Assert.Equal(CaseStatus.Cancelled, runtime.GetCase(started2.Id)!.Status);
     }
 

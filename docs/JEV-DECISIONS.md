@@ -26,14 +26,16 @@ Update this file whenever a default is chosen or an old test expectation is inte
 ## Cancellation semantics (intentional correction)
 
 - Spec requires: never dispatch after cancellation; accept late results for audit without reopening the case.
-- If an older test expected dispatch-after-cancel for “result capture,” replace that expectation and note it here.
+- **§4 (2026-09-17):** `DispatchOperation` refuses not-yet-started ops on a cancelled case (status stays `cancelled`, zero executor calls). `AcceptOperationResult` / `CompleteOperation` may still record a late result without reviving the case.
+- Slice 4 `Stale_completion_after_cancel_does_not_revive_case` updated: the former “stale execute after cancel completes the op” expectation is replaced by dispatch-refused + late `AcceptOperationResult`.
 
-## Open questions for humans
+## Persistence / outbox (§4)
 
-1. Confirm `refactor/jev-runtime` branch name is acceptable for merge to `main`.
-2. When will `TYPESAFE_API_KEY` be available in Cursor Cloud secrets?
-3. Local model endpoint for live jobs (host/port/model id)?
-4. Should WinUI Desktop binding wait for a Windows verification machine, or ship Core+harness first and stub Desktop composition?
+- Production stepping path: `ICaseController.Handle` → durable transition (events + commands) → dispatch **outside** the case lock.
+- Historical slice1–7 minds run through `LegacyMindBridgeController` (deprecated bridge; scripted minds only — no live inference inside `Handle`).
+- `objectiveRevision` is a separate field from case event `version`.
+- Concurrency defaults (configurable via `RuntimeConcurrencyOptions`): local gen 1, Jev 4, search/fetch/delegate 4; case transitions serialized per case (runtime gate).
+- Waiting cases skip controller/model work until a relevant wake/result/retry (`CaseInput`).
 
 ## Decision log
 
@@ -43,3 +45,4 @@ Update this file whenever a default is chosen or an old test expectation is inte
 | 2026-09-17 | Create branch `refactor/jev-runtime` | Spec §3 requirement |
 | 2026-09-17 | Proceed fixture-only until TypeSafe key arrives | Key absent; live gates must fail preflight |
 | 2026-09-17 | Keep historical `ICaseMind` tests until controller parity | Spec: retain temporarily for historical tests |
+| 2026-09-17 | §4 outbox + `LegacyMindBridgeController`; cancel-before-dispatch refuses execute | Spec §4; Slice4 expectation updated |

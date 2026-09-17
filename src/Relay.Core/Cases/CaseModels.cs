@@ -39,20 +39,35 @@ public static class CaseStatus
 }
 
 /// <summary>
-/// One durable unit of work. The mind steps cases; origin and kind only change allowed moves and presentation.
+/// One durable unit of work. Controllers step cases; origin and kind only change allowed moves and presentation.
+/// <see cref="ObjectiveRevision"/> is independent of event <see cref="Version"/>.
 /// </summary>
 public sealed class CaseRecord
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
     [JsonPropertyName("version")] public long Version { get; set; }
+    [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 1;
     [JsonPropertyName("origin")] public required string Origin { get; init; }
     [JsonPropertyName("kind")] public required string Kind { get; init; }
+    /// <summary>observation | unresolved_question | objective | improvement</summary>
+    [JsonPropertyName("purpose")] public string Purpose { get; set; } = CasePurpose.Objective;
+    /// <summary>none | proposed | authorized | revoked</summary>
+    [JsonPropertyName("authorizationStatus")] public string AuthorizationStatus { get; set; } = CaseAuthorizationStatus.None;
+    /// <summary>Increments when the approved objective changes; not the case event version.</summary>
+    [JsonPropertyName("objectiveRevision")] public long ObjectiveRevision { get; set; }
+    [JsonPropertyName("controllerId")] public string? ControllerId { get; set; }
+    [JsonPropertyName("controllerVersion")] public string? ControllerVersion { get; set; }
+    [JsonPropertyName("stage")] public string? Stage { get; set; }
+    [JsonPropertyName("waitingReason")] public string? WaitingReason { get; set; }
     [JsonPropertyName("approvedObjective")] public string? ApprovedObjective { get; set; }
     [JsonPropertyName("sourceRefs")] public List<string> SourceRefs { get; set; } = [];
     [JsonPropertyName("allowedCapabilities")] public List<string> AllowedCapabilities { get; set; } = [];
     [JsonPropertyName("budgets")] public CaseBudgets Budgets { get; set; } = new();
     [JsonPropertyName("pendingWaits")] public List<string> PendingWaits { get; set; } = [];
     [JsonPropertyName("pendingOperationIds")] public List<string> PendingOperationIds { get; set; } = [];
+    [JsonPropertyName("pendingCommandIds")] public List<string> PendingCommandIds { get; set; } = [];
+    [JsonPropertyName("decisionDependencyRefs")] public List<string> DecisionDependencyRefs { get; set; } = [];
+    [JsonPropertyName("unresolvedConflictIds")] public List<string> UnresolvedConflictIds { get; set; } = [];
     [JsonPropertyName("processedEventIds")] public List<string> ProcessedEventIds { get; set; } = [];
     [JsonPropertyName("result")] public string? Result { get; set; }
     [JsonPropertyName("completionCriteria")] public string? CompletionCriteria { get; set; }

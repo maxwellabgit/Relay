@@ -101,6 +101,8 @@ public sealed class DataRoot
     public string ProjectionsDatabasePath => Combine("projections", "projections.sqlite");
     /// <summary>Operation envelopes: <c>operations/{operationId}.json</c>.</summary>
     public string OperationsDirectory => Combine("operations");
+    /// <summary>Persisted async command outbox: <c>commands/{commandId}.json</c>.</summary>
+    public string CommandsDirectory => Combine("commands");
     /// <summary>Isolated local harness runs: <c>.dev-runs/{run-id}/</c>.</summary>
     public string DevRunsDirectory => Combine(".dev-runs");
 
@@ -128,7 +130,7 @@ public sealed class DataRoot
             StreamDirectory, ExcerptsDirectory, TasksDirectory, ChangeSetsDirectory, PromptsDirectory, ExternalArtifactsDirectory, SearchArtifactsDirectory, UsageDirectory,
             ToolsDirectory, ToolDraftsDirectory, ToolRunsDirectory,
             WorkflowsDirectory, WorkflowDraftsDirectory,
-            CasesDirectory, ObjectsDirectory, ProjectionsDirectory, OperationsDirectory, DevRunsDirectory,
+            CasesDirectory, ObjectsDirectory, ProjectionsDirectory, OperationsDirectory, CommandsDirectory, DevRunsDirectory,
         })
         {
             Directory.CreateDirectory(dir);

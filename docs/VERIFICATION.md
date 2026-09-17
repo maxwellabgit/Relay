@@ -47,15 +47,15 @@ Scripted/fixture evidence is never summarized as live evidence.
 
 Baseline results are recorded. Subsequent failures can be distinguished from the green Core.Tests + slice1–7 baseline above.
 
-## Post-refactor verification (to be filled)
+## Post-refactor verification
 
 | Gate | Status | Evidence level |
 | --- | --- | --- |
-| Persistence / async outbox tests (§4) | pending | deterministic |
+| Persistence / async outbox tests (§4) | **Passed** — `AsyncPersistenceTests` 13/13; full `Relay.Core.Tests` 46/46 | deterministic |
 | Provenance / grant tests (§5) | pending | deterministic |
 | Jev transport fixture tests (§6) | pending | fixture |
 | Decision catalog tests (§7) | pending | deterministic |
-| Context / local job tests (§8) | pending | deterministic |
+| Context / local jobs tests (§8) | pending | deterministic |
 | Listening window tests (§9) | pending | deterministic |
 | Workflow tests (§10) | pending | deterministic / fixture |
 | Retention / capability tests (§11) | pending | deterministic |
@@ -63,3 +63,8 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 | `bash dev/verify-cloud.sh` (§13) | pending | deterministic + fixture |
 | `bash dev/verify-live.sh` | blocked: missing credentials | live |
 | `dev/verify-windows.ps1` | blocked: not Windows | windows-live |
+
+### §4 notes
+
+- `dotnet test tests/Relay.Core.Tests -c Release` → 46 passed (33 historical + 13 async/persistence).
+- Intentional expectation change: cancel-before-dispatch no longer executes (see `docs/JEV-DECISIONS.md`).
