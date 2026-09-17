@@ -46,8 +46,7 @@ public sealed class ProjectionDatabase : IDisposable
               status TEXT NOT NULL,
               idempotency_key TEXT NOT NULL,
               approval_id TEXT,
-              canonical_hash TEXT,
-              UNIQUE(idempotency_key)
+              canonical_hash TEXT
             );
             CREATE TABLE IF NOT EXISTS ready_queue (
               case_id TEXT PRIMARY KEY,

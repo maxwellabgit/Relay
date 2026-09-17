@@ -4,11 +4,12 @@ using Relay.Core.Search;
 
 namespace Relay.Core.Cases;
 
-/// <summary>Deterministic local tools available to <see cref="CaseRuntime"/> for Slice 2.</summary>
+/// <summary>Deterministic local tools available to <see cref="CaseRuntime"/>.</summary>
 public static class CaseTools
 {
     public const string LocalSearch = "local_search";
     public const string ReadNote = "read_note";
+    public const string ReadArtifact = "read_artifact";
 
     public static object LocalSearchResult(CaseLocalContext local, string query, string? projectId, int limit = 8)
     {
@@ -51,6 +52,20 @@ public static class CaseTools
             spanEnd = span?.End ?? note.Body.Length,
             path = found.Value.Path,
         };
+    }
+
+    public static object ReadArtifactResult(ObjectStore objects, string objectId)
+    {
+        if (string.IsNullOrWhiteSpace(objectId))
+            throw new ArgumentException("objectId required.", nameof(objectId));
+        var metaPath = Path.Combine(objects.ObjectsDirectory, "by-id", objectId + ".json");
+        var meta = Storage.AtomicFile.ReadAllTextIfExists(metaPath)
+            ?? throw new FileNotFoundException($"Artifact '{objectId}' not found.");
+        using var doc = JsonDocument.Parse(meta);
+        var sha = doc.RootElement.GetProperty("sha256").GetString()!;
+        var body = objects.TryReadTextByHash(sha)
+            ?? throw new FileNotFoundException($"Artifact body for '{objectId}' missing.");
+        return new { objectId, sha256 = sha, body };
     }
 
     public static string ArgString(IReadOnlyDictionary<string, JsonElement> args, string key, string? fallback = null)

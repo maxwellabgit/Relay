@@ -26,6 +26,8 @@ public sealed class CaseRuntime : IDisposable
     private readonly CaseLocalContext _local;
     private readonly OperationBroker _broker;
     private readonly StreamIntake _intake;
+    private readonly ResearchBroker? _research;
+    private readonly ResearchServices _researchServices;
     private readonly Action _onSideEffect;
     private readonly string _leaseOwner;
     private readonly object _gate = new();
@@ -37,13 +39,15 @@ public sealed class CaseRuntime : IDisposable
         ICaseMind mind,
         RuntimeDiagnostics diagnostics,
         Action? onSideEffect,
-        CaseLocalContext? local)
+        CaseLocalContext? local,
+        ResearchServices? research)
     {
         _root = root;
         _clock = clock;
         _mind = mind;
         _diagnostics = diagnostics;
         _onSideEffect = onSideEffect ?? (() => { });
+        _researchServices = research ?? new ResearchServices();
         _cases = new CaseStore(root);
         _operations = new OperationStore(root);
         _objects = new ObjectStore(root, clock);
@@ -53,6 +57,9 @@ public sealed class CaseRuntime : IDisposable
         _local = local ?? new CaseLocalContext(root, clock);
         _broker = new OperationBroker(_local, _objects, clock, _onSideEffect);
         _intake = new StreamIntake(root, _objects, _cases, clock);
+        _research = _researchServices.Search is not null || _researchServices.Delegate is not null
+            ? new ResearchBroker(root, _objects, clock, _researchServices)
+            : null;
         _leaseOwner = Ulid.NewUlid(clock.UtcNow);
     }
 
@@ -63,6 +70,8 @@ public sealed class CaseRuntime : IDisposable
     public ProjectionDatabase Projections => _projections;
     public CaseLocalContext Local => _local;
     public StreamIntake Intake => _intake;
+    public ResearchBroker? Research => _research;
+    public bool SearchAvailable => _research?.SearchAvailable == true;
     public int SideEffectCount { get; private set; }
 
     /// <summary>Opens a runtime on an existing data root, reconstructing suspended work.</summary>
@@ -72,12 +81,14 @@ public sealed class CaseRuntime : IDisposable
         ICaseMind mind,
         RuntimeDiagnostics diagnostics,
         Action? onSideEffect = null,
-        CaseLocalContext? local = null)
+        CaseLocalContext? local = null,
+        ResearchServices? research = null)
     {
         root.EnsureLayout(clock);
-        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local);
+        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local, research);
         runtime.Reconstruct();
-        diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened", status: "ok");
+        diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened",
+            status: research?.SearchAvailable == true ? "ok_search_bound" : "ok");
         return runtime;
     }
 
@@ -339,8 +350,16 @@ public sealed class CaseRuntime : IDisposable
                     "file_note",
                     CaseTools.LocalSearch,
                     CaseTools.ReadNote,
+                    CaseTools.ReadArtifact,
+                    ResearchCapabilities.Search,
+                    ResearchCapabilities.Delegate,
+                    Actions.ModelRequest,
                 ],
             };
+
+            // Do not advertise search unless a real adapter is bound.
+            if (!SearchAvailable)
+                record.AllowedCapabilities.Remove(ResearchCapabilities.Search);
 
             PersistRecord(record);
             var evt = AppendEvent(record, CaseEventTypes.UserInput, new { text = objective, origin = CaseOrigin.Direct });
@@ -702,14 +721,21 @@ public sealed class CaseRuntime : IDisposable
             return;
         foreach (var c in cites.EnumerateArray())
         {
+            if (c.TryGetProperty("objectId", out var oid) && oid.ValueKind == JsonValueKind.String)
+            {
+                var refText = "artifact:" + oid.GetString();
+                if (!record.SourceRefs.Contains(refText))
+                    record.SourceRefs.Add(refText);
+                continue;
+            }
             var noteId = c.TryGetProperty("noteId", out var n) ? n.GetString() : null;
             var projectId = c.TryGetProperty("projectId", out var p) ? p.GetString() : null;
             var eventId = c.TryGetProperty("eventId", out var e) ? e.GetString() : null;
             var start = c.TryGetProperty("start", out var s) && s.TryGetInt32(out var si) ? si : 0;
             var end = c.TryGetProperty("end", out var en) && en.TryGetInt32(out var ei) ? ei : 0;
-            var refText = $"note:{projectId}/{noteId}#{eventId}:{start}-{end}";
-            if (!string.IsNullOrEmpty(noteId) && !record.SourceRefs.Contains(refText))
-                record.SourceRefs.Add(refText);
+            var refText2 = $"note:{projectId}/{noteId}#{eventId}:{start}-{end}";
+            if (!string.IsNullOrEmpty(noteId) && !record.SourceRefs.Contains(refText2))
+                record.SourceRefs.Add(refText2);
         }
     }
 
@@ -731,6 +757,9 @@ public sealed class CaseRuntime : IDisposable
                     _local,
                     CaseTools.ArgString(move.Args, "projectId"),
                     CaseTools.ArgString(move.Args, "noteId")),
+                CaseTools.ReadArtifact => CaseTools.ReadArtifactResult(
+                    _objects,
+                    CaseTools.ArgString(move.Args, "objectId")),
                 _ => throw new InvalidOperationException($"Unknown tool '{tool}'."),
             };
         }
@@ -764,6 +793,19 @@ public sealed class CaseRuntime : IDisposable
         var capability = move.Name;
         if (move.Args.TryGetValue("capability", out var capEl) && capEl.ValueKind == JsonValueKind.String)
             capability = capEl.GetString() ?? capability;
+
+        if (capability is ResearchCapabilities.Search && !SearchAvailable)
+        {
+            AppendEvent(record, CaseEventTypes.MoveRejected, new
+            {
+                move = CaseMove.Propose,
+                name = capability,
+                reason = "No search adapter bound; cannot claim online research.",
+            });
+            Feed(record.Id, "Online search is not configured.", "alert");
+            record.Status = CaseStatus.Active;
+            return;
+        }
 
         var capabilityVersion = 1;
         if (move.Args.TryGetValue("capabilityVersion", out var verEl) && verEl.TryGetInt32(out var v))
@@ -986,6 +1028,7 @@ public sealed class CaseRuntime : IDisposable
                 ?? throw new InvalidOperationException($"Operation '{operationId}' not found.");
             var record = _cases.TryLoadRecord(envelope.CaseId)
                 ?? throw new InvalidOperationException($"Case '{envelope.CaseId}' not found.");
+            var caseWasCancelled = record.Status == CaseStatus.Cancelled;
 
             if (envelope.Status is OperationStatus.Executing or OperationStatus.Completed)
             {
@@ -1008,23 +1051,33 @@ public sealed class CaseRuntime : IDisposable
                 return envelope;
             }
 
-            if (envelope.Status != OperationStatus.Approved)
-                throw new InvalidOperationException($"Operation status '{envelope.Status}' cannot be executed.");
+            if (record.Status == CaseStatus.Completed)
+                throw new InvalidOperationException($"Case '{record.Id}' is completed; refusing execute.");
 
-            if (record.Status is CaseStatus.Cancelled or CaseStatus.Completed)
-                throw new InvalidOperationException($"Case '{record.Id}' is {record.Status}; refusing execute.");
+            // Normal path requires approval. Cancelled cases may still record a stale result
+            // for an operation that was approved (or still awaiting) without reviving the case.
+            if (!caseWasCancelled && envelope.Status != OperationStatus.Approved)
+                throw new InvalidOperationException($"Operation status '{envelope.Status}' cannot be executed.");
+            if (caseWasCancelled && envelope.Status is not OperationStatus.Approved and not OperationStatus.AwaitingApproval and not OperationStatus.Cancelled)
+                throw new InvalidOperationException($"Stale execute refused for status '{envelope.Status}'.");
 
             envelope.Status = OperationStatus.Executing;
             _operations.Save(envelope);
 
-            var applied = _broker.Apply(envelope);
+            OperationApplyResult applied;
+            if (_research is not null && _research.Handles(envelope.Capability))
+                applied = _research.ApplyAsync(envelope).GetAwaiter().GetResult();
+            else
+                applied = _broker.Apply(envelope);
+
             if (!applied.Ok)
             {
                 envelope.Status = OperationStatus.Failed;
                 _operations.Save(envelope);
                 _projections.UpsertOperation(envelope);
-                AppendEvent(record, CaseEventTypes.OperationFailed, new { operationId, error = applied.Error });
+                AppendEvent(record, CaseEventTypes.OperationFailed, new { operationId, error = applied.Error, stale = caseWasCancelled });
                 PersistRecord(record);
+                if (caseWasCancelled) return envelope;
                 throw new InvalidOperationException(applied.Error ?? applied.Summary);
             }
 
@@ -1035,15 +1088,44 @@ public sealed class CaseRuntime : IDisposable
             _operations.Save(envelope);
             _projections.UpsertOperation(envelope);
 
+            object? resultBlob = null;
+            if (applied.ResultRef is not null)
+            {
+                try
+                {
+                    var read = CaseTools.ReadArtifactResult(_objects, applied.ResultRef);
+                    var bodyProp = read.GetType().GetProperty("body");
+                    var body = bodyProp?.GetValue(read) as string;
+                    if (body is not null)
+                        resultBlob = JsonSerializer.Deserialize<JsonElement>(body);
+                }
+                catch { /* best effort for mind */ }
+            }
+
+            var priorStatus = record.Status;
             var evt = AppendEvent(record, CaseEventTypes.OperationExecuted, new
             {
                 operationId,
+                capability = envelope.Capability,
                 resultRef = envelope.ResultRef,
                 sideEffectCount = envelope.SideEffectCount,
                 summary = applied.Summary,
+                result = resultBlob,
+                stale = caseWasCancelled,
             });
             record.ProcessedEventIds.Add(evt.EventId);
             record.PendingOperationIds.Remove(operationId);
+
+            if (caseWasCancelled)
+            {
+                // Store the result; do not revive the cancelled case.
+                record.Status = CaseStatus.Cancelled;
+                PersistRecord(record);
+                _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "stale_execute_ignored_for_case",
+                    caseId: record.Id, caseVersion: record.Version, operationId: operationId, status: priorStatus);
+                return envelope;
+            }
+
             record.Status = CaseStatus.Active;
             PersistRecord(record);
 
@@ -1053,6 +1135,39 @@ public sealed class CaseRuntime : IDisposable
                 caseId: record.Id, caseVersion: record.Version, operationId: operationId,
                 status: envelope.Status, resultRef: envelope.ResultRef);
             return envelope;
+        }
+    }
+
+    /// <summary>Cancels a case. Pending operations stay recorded; late completions are stale.</summary>
+    public CaseRecord CancelCase(string caseId, string? reason = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var record = _cases.TryLoadRecord(caseId)
+                ?? throw new InvalidOperationException($"Case '{caseId}' not found.");
+            if (record.Status is CaseStatus.Cancelled or CaseStatus.Completed)
+                return Clone(record);
+
+            foreach (var opId in record.PendingOperationIds.ToList())
+            {
+                var op = _operations.TryLoad(opId);
+                if (op is null) continue;
+                if (op.Status is OperationStatus.AwaitingApproval or OperationStatus.Approved or OperationStatus.Requested)
+                {
+                    op.Status = OperationStatus.Cancelled;
+                    _operations.Save(op);
+                    _projections.UpsertOperation(op);
+                }
+            }
+
+            record.Status = CaseStatus.Cancelled;
+            record.Result = reason ?? "cancelled";
+            AppendEvent(record, CaseEventTypes.CaseCancelled, new { reason = reason ?? "cancelled" });
+            PersistRecord(record);
+            _ready.Complete(caseId);
+            Feed(caseId, "Case cancelled.", "alert");
+            return Clone(record);
         }
     }
 
@@ -1069,6 +1184,7 @@ public sealed class CaseRuntime : IDisposable
                 ?? throw new InvalidOperationException($"Operation '{operationId}' not found.");
             var record = _cases.TryLoadRecord(envelope.CaseId)
                 ?? throw new InvalidOperationException($"Case '{envelope.CaseId}' not found.");
+            var caseWasCancelled = record.Status == CaseStatus.Cancelled;
 
             if (envelope.Status == OperationStatus.Completed)
             {
@@ -1112,8 +1228,11 @@ public sealed class CaseRuntime : IDisposable
             {
                 operationId,
                 resultRef = envelope.ResultRef,
+                stale = caseWasCancelled,
             });
             record.ProcessedEventIds.Add(evt.EventId);
+            if (caseWasCancelled)
+                record.Status = CaseStatus.Cancelled;
             PersistRecord(record);
             return envelope;
         }

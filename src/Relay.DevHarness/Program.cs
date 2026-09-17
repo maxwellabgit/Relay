@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Relay.Core.Cases;
 using Relay.Core.Policy;
+using Relay.Core.Search;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 
@@ -26,7 +27,7 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4]");
             return 2;
         }
 
@@ -35,6 +36,7 @@ public static class Program
             "slice1" => await RunSlice1Async(dataRootPath, runId),
             "slice2" => await RunSlice2Async(dataRootPath, runId),
             "slice3" => await RunSlice3Async(dataRootPath, runId),
+            "slice4" => await RunSlice4Async(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }
@@ -244,6 +246,57 @@ public static class Program
         }
     }
 
+    private static async Task<int> RunSlice4Async(string dataRootPath, string runId)
+    {
+        var root = new DataRoot(dataRootPath);
+        var clock = new HarnessClock(new DateTimeOffset(2026, 9, 17, 18, 0, 0, TimeSpan.Zero));
+        root.EnsureLayout(clock);
+
+        var runDir = Path.Combine(root.DevRunsDirectory, runId);
+        Directory.CreateDirectory(runDir);
+        var diagnosticsPath = Path.Combine(runDir, "runtime.jsonl");
+        var summaryPath = Path.Combine(runDir, "summary.json");
+
+        var search = new HarnessSearchClient();
+        var fetch = new HarnessPageFetch();
+        var del = new HarnessDelegateClient();
+        var research = new ResearchServices { Search = search, Fetch = fetch, Delegate = del };
+
+        using var diagnostics = new RuntimeDiagnostics(diagnosticsPath, runId);
+        using var runtime = CaseRuntime.Open(root, clock, new LightshiftResearchMind(), diagnostics, research: research);
+
+        var started = runtime.StartDirectCase(LightshiftResearchMind.Question, CaseKind.Research);
+        await runtime.RunUntilIdleAsync(started.Id);
+        var searchOp = runtime.GetPendingApproval(started.Id);
+        if (searchOp is null) return Fail(summaryPath, runId, "missing search approval", 0);
+        runtime.ApproveOperation(searchOp.OperationId, searchOp.CanonicalHash(), runtime.GetCase(started.Id)!.Version);
+        runtime.ExecuteOperation(searchOp.OperationId);
+
+        await runtime.RunUntilIdleAsync(started.Id);
+        var delOp = runtime.GetPendingApproval(started.Id);
+        if (delOp is null) return Fail(summaryPath, runId, "missing delegate approval", 0);
+        runtime.ApproveOperation(delOp.OperationId, delOp.CanonicalHash(), runtime.GetCase(started.Id)!.Version);
+        runtime.ExecuteOperation(delOp.OperationId);
+
+        var finished = await runtime.RunUntilIdleAsync(started.Id);
+        if (finished.Status != CaseStatus.Completed)
+            return Fail(summaryPath, runId, $"expected completed, got {finished.Status}", 0);
+        if (finished.SourceRefs.Count == 0 || finished.Result is null || !finished.Result.Contains("20"))
+            return Fail(summaryPath, runId, $"bad answer/citations: {finished.Result}", 0);
+
+        return Ok(summaryPath, new
+        {
+            ok = true,
+            scenario = "slice4",
+            runId,
+            caseId = started.Id,
+            answer = finished.Result,
+            sourceRefs = finished.SourceRefs,
+            searchHost = search.Host,
+            diagnostics = diagnosticsPath,
+        });
+    }
+
     private static int Ok(string summaryPath, object summary)
     {
         AtomicFile.WriteAllText(summaryPath, JsonSerializer.Serialize(summary, RelayJson.Indented));
@@ -270,5 +323,32 @@ public static class Program
         public HarnessClock(DateTimeOffset start) => UtcNow = start;
         public DateTimeOffset UtcNow { get; set; }
         public void Advance(TimeSpan by) => UtcNow += by;
+    }
+
+    private sealed class HarnessSearchClient : ISearchClient
+    {
+        public string Host => "search.test";
+        public Task<SearchResponse> SearchAsync(SearchRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new SearchResponse(true,
+            [
+                new SearchHitResult("Lightshift portfolio", "https://lightshift.example/sites", "Battery portfolio overview."),
+                new SearchHitResult("Industry brief", "https://news.example/lightshift-20", "20 operational battery sites."),
+            ], 10, null, 200));
+    }
+
+    private sealed class HarnessPageFetch : IPageFetch
+    {
+        public IReadOnlyList<string> AllowedHosts { get; } = ["lightshift.example", "news.example"];
+        public Task<PageFetchResult> FetchAsync(string url, CancellationToken cancellationToken = default)
+            => Task.FromResult(new PageFetchResult(true, url, "Lightshift operates 20 battery sites. Source: " + url, null, 2));
+    }
+
+    private sealed class HarnessDelegateClient : IDelegateClient
+    {
+        public string Profile => "research-delegate";
+        public Task<DelegateResponse> CompleteAsync(DelegateRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new DelegateResponse(true,
+                "Based on stored source artifacts, Lightshift operates 20 battery energy storage sites.",
+                null, 12));
     }
 }
