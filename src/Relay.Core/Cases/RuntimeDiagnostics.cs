@@ -17,11 +17,17 @@ public sealed class RuntimeDiagnosticEvent
     [JsonPropertyName("caseId")] public string? CaseId { get; init; }
     [JsonPropertyName("caseVersion")] public long? CaseVersion { get; init; }
     [JsonPropertyName("operationId")] public string? OperationId { get; init; }
+    [JsonPropertyName("commandId")] public string? CommandId { get; init; }
+    [JsonPropertyName("windowId")] public string? WindowId { get; init; }
+    [JsonPropertyName("decisionId")] public string? DecisionId { get; init; }
+    [JsonPropertyName("provider")] public string? Provider { get; init; }
     [JsonPropertyName("status")] public string? Status { get; init; }
     [JsonPropertyName("latencyMs")] public long? LatencyMs { get; init; }
     [JsonPropertyName("promptRef")] public string? PromptRef { get; init; }
     [JsonPropertyName("resultRef")] public string? ResultRef { get; init; }
+    [JsonPropertyName("contentHash")] public string? ContentHash { get; init; }
     [JsonPropertyName("error")] public string? Error { get; init; }
+    // Intentionally no raw private content / secrets fields.
 }
 
 /// <summary>Append-only structured JSONL diagnostics for a single run.</summary>
@@ -58,7 +64,12 @@ public sealed class RuntimeDiagnostics : IDisposable
         long? latencyMs = null,
         string? promptRef = null,
         string? resultRef = null,
-        string? error = null)
+        string? error = null,
+        string? commandId = null,
+        string? windowId = null,
+        string? decisionId = null,
+        string? provider = null,
+        string? contentHash = null)
     {
         lock (_gate)
         {
@@ -74,10 +85,15 @@ public sealed class RuntimeDiagnostics : IDisposable
                 CaseId = caseId,
                 CaseVersion = caseVersion,
                 OperationId = operationId,
+                CommandId = commandId,
+                WindowId = windowId,
+                DecisionId = decisionId,
+                Provider = provider,
                 Status = status,
                 LatencyMs = latencyMs,
                 PromptRef = promptRef,
                 ResultRef = resultRef,
+                ContentHash = contentHash,
                 Error = error,
             };
             var line = JsonSerializer.Serialize(evt, RelayJson.Compact) + "\n";
