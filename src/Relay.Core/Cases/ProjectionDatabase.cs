@@ -168,6 +168,35 @@ public sealed class ProjectionDatabase : IDisposable
         }
     }
 
+    public IReadOnlyList<FeedItemRow> ListFeedItems(string? caseId = null)
+    {
+        lock (_gate)
+        {
+            using var cmd = _connection.CreateCommand();
+            if (caseId is null)
+            {
+                cmd.CommandText = "SELECT feed_id, case_id, ts, text, level FROM feed_items ORDER BY ts ASC;";
+            }
+            else
+            {
+                cmd.CommandText = "SELECT feed_id, case_id, ts, text, level FROM feed_items WHERE case_id=$case ORDER BY ts ASC;";
+                cmd.Parameters.AddWithValue("$case", caseId);
+            }
+            var list = new List<FeedItemRow>();
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                list.Add(new FeedItemRow(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    DateTimeOffset.Parse(reader.GetString(2)),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4)));
+            }
+            return list;
+        }
+    }
+
     /// <summary>Rebuilds projections from on-disk case and operation stores.</summary>
     public void RebuildFromStores(CaseStore cases, OperationStore operations)
     {
@@ -199,3 +228,5 @@ public sealed class ProjectionDatabase : IDisposable
         _connection.Dispose();
     }
 }
+
+public sealed record FeedItemRow(string FeedId, string? CaseId, DateTimeOffset Ts, string Text, string? Level);

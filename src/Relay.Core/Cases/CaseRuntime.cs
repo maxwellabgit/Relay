@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Relay.Core.Ids;
+using Relay.Core.Policy;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 
@@ -22,6 +23,8 @@ public sealed class CaseRuntime : IDisposable
     private readonly ProjectionDatabase _projections;
     private readonly ReadyQueue _ready;
     private readonly InferenceLease _inference;
+    private readonly CaseLocalContext _local;
+    private readonly OperationBroker _broker;
     private readonly Action _onSideEffect;
     private readonly string _leaseOwner;
     private readonly object _gate = new();
@@ -32,7 +35,8 @@ public sealed class CaseRuntime : IDisposable
         IClock clock,
         ICaseMind mind,
         RuntimeDiagnostics diagnostics,
-        Action? onSideEffect)
+        Action? onSideEffect,
+        CaseLocalContext? local)
     {
         _root = root;
         _clock = clock;
@@ -45,6 +49,8 @@ public sealed class CaseRuntime : IDisposable
         _projections = ProjectionDatabase.Open(root);
         _ready = new ReadyQueue(_projections, clock);
         _inference = new InferenceLease();
+        _local = local ?? new CaseLocalContext(root, clock);
+        _broker = new OperationBroker(_local, _objects, clock, _onSideEffect);
         _leaseOwner = Ulid.NewUlid(clock.UtcNow);
     }
 
@@ -53,6 +59,7 @@ public sealed class CaseRuntime : IDisposable
     public ObjectStore Objects => _objects;
     public ReadyQueue Ready => _ready;
     public ProjectionDatabase Projections => _projections;
+    public CaseLocalContext Local => _local;
     public int SideEffectCount { get; private set; }
 
     /// <summary>Opens a runtime on an existing data root, reconstructing suspended work.</summary>
@@ -61,10 +68,11 @@ public sealed class CaseRuntime : IDisposable
         IClock clock,
         ICaseMind mind,
         RuntimeDiagnostics diagnostics,
-        Action? onSideEffect = null)
+        Action? onSideEffect = null,
+        CaseLocalContext? local = null)
     {
         root.EnsureLayout(clock);
-        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect);
+        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local);
         runtime.Reconstruct();
         diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened", status: "ok");
         return runtime;
@@ -72,6 +80,7 @@ public sealed class CaseRuntime : IDisposable
 
     private void Reconstruct()
     {
+        _local.RebuildIndex();
         foreach (var caseId in _cases.ListCaseIds())
         {
             var record = _cases.TryLoadRecord(caseId);
@@ -80,7 +89,6 @@ public sealed class CaseRuntime : IDisposable
 
             if (record.Status == CaseStatus.Suspended)
             {
-                // Suspended cases with pending approvals stay waiting; others return to ready.
                 var hasAwaiting = record.PendingOperationIds
                     .Select(id => _operations.TryLoad(id))
                     .Any(op => op is { Status: OperationStatus.AwaitingApproval });
@@ -129,7 +137,16 @@ public sealed class CaseRuntime : IDisposable
                 Status = CaseStatus.Active,
                 CreatedAt = now,
                 UpdatedAt = now,
-                AllowedCapabilities = [ScriptedCaseMind.DefaultCapability],
+                AllowedCapabilities =
+                [
+                    ScriptedCaseMind.DefaultCapability,
+                    Actions.CreateProject,
+                    Actions.ModifyNote,
+                    Actions.CreateDraftNote,
+                    "file_note",
+                    CaseTools.LocalSearch,
+                    CaseTools.ReadNote,
+                ],
             };
 
             PersistRecord(record);
@@ -138,6 +155,7 @@ public sealed class CaseRuntime : IDisposable
             PersistRecord(record);
 
             _ready.TryEnqueue(record.Id, ReadyPriority.NewDirectRequest);
+            Feed(record.Id, $"New direct ask: {Clip(objective, 120)}", "persistent");
             _diagnostics.Write(now, "info", "CaseRuntime", "case_started",
                 caseId: record.Id, caseVersion: record.Version, status: record.Status);
             return Clone(record);
@@ -156,8 +174,26 @@ public sealed class CaseRuntime : IDisposable
         }
         finally
         {
+            // Drop the lease, then re-queue if the case is still runnable (e.g. after a tool).
             _ready.Complete(lease.CaseId);
+            var record = _cases.TryLoadRecord(lease.CaseId);
+            if (record is { Status: CaseStatus.Active })
+                _ready.TryEnqueue(lease.CaseId, ReadyPriority.ToolOrDelegateCompletion);
         }
+    }
+
+    /// <summary>Steps until the case is waiting, completed, cancelled, or <paramref name="maxSteps"/> is hit.</summary>
+    public async Task<CaseRecord> RunUntilIdleAsync(string caseId, int maxSteps = 16, CancellationToken cancellationToken = default)
+    {
+        CaseRecord? last = null;
+        for (var i = 0; i < maxSteps; i++)
+        {
+            last = await StepCaseAsync(caseId, cancellationToken).ConfigureAwait(false);
+            if (last.Status is CaseStatus.Waiting or CaseStatus.Completed or CaseStatus.Cancelled or CaseStatus.Suspended)
+                return last;
+            // Tool path leaves Active; continue.
+        }
+        return last ?? throw new InvalidOperationException("Case not found.");
     }
 
     public async Task<CaseRecord> StepCaseAsync(string caseId, CancellationToken cancellationToken = default)
@@ -189,13 +225,12 @@ public sealed class CaseRuntime : IDisposable
                     record.ApprovedObjective,
                     record.Version,
                     record.Status,
-                    events.TakeLast(32).ToList(),
+                    events.TakeLast(64).ToList(),
                     record.PendingOperationIds,
                     pendingOps,
                     _clock.UtcNow,
                     record.Budgets.StepsUsed);
 
-                // Step the mind synchronously inside the lock for Slice 1 determinism.
                 CaseMindStep step;
                 try
                 {
@@ -221,7 +256,7 @@ public sealed class CaseRuntime : IDisposable
                 ApplyMove(record, step, stepEvt.EventId);
                 PersistRecord(record);
 
-                _projections.InsertFeedItem(Ulid.NewUlid(_clock.UtcNow), record.Id, _clock.UtcNow, step.Feed, "ambient");
+                Feed(record.Id, step.Feed, step.Move.Type == CaseMove.Say && step.Move.Done ? "finding" : "ambient");
                 _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "case_stepped",
                     caseId: record.Id, caseVersion: record.Version, status: record.Status, latencyMs: sw.ElapsedMilliseconds);
 
@@ -238,6 +273,9 @@ public sealed class CaseRuntime : IDisposable
     {
         switch (step.Move.Type)
         {
+            case CaseMove.UseTool:
+                ExecuteTool(record, step.Move, causedByEventId);
+                break;
             case CaseMove.Propose:
                 ProposeOperation(record, step.Move, causedByEventId);
                 break;
@@ -249,17 +287,84 @@ public sealed class CaseRuntime : IDisposable
                 break;
             case CaseMove.Stop:
             case CaseMove.Say when step.Move.Done:
+                ApplyCitations(record, step.Move);
                 record.Status = CaseStatus.Completed;
                 record.Result = step.Move.Text;
-                AppendEvent(record, CaseEventTypes.CaseCompleted, new { result = step.Move.Text });
+                AppendEvent(record, CaseEventTypes.CaseCompleted, new
+                {
+                    result = step.Move.Text,
+                    sourceRefs = record.SourceRefs,
+                });
                 break;
             case CaseMove.Say:
-                // Narration only; stay active / re-enqueue if caller wants another step.
+                ApplyCitations(record, step.Move);
                 break;
             default:
-                // Slice 1 ignores other move types.
                 break;
         }
+    }
+
+    private static void ApplyCitations(CaseRecord record, CaseMove move)
+    {
+        if (!move.Args.TryGetValue("citations", out var cites) || cites.ValueKind != JsonValueKind.Array)
+            return;
+        foreach (var c in cites.EnumerateArray())
+        {
+            var noteId = c.TryGetProperty("noteId", out var n) ? n.GetString() : null;
+            var projectId = c.TryGetProperty("projectId", out var p) ? p.GetString() : null;
+            var eventId = c.TryGetProperty("eventId", out var e) ? e.GetString() : null;
+            var start = c.TryGetProperty("start", out var s) && s.TryGetInt32(out var si) ? si : 0;
+            var end = c.TryGetProperty("end", out var en) && en.TryGetInt32(out var ei) ? ei : 0;
+            var refText = $"note:{projectId}/{noteId}#{eventId}:{start}-{end}";
+            if (!string.IsNullOrEmpty(noteId) && !record.SourceRefs.Contains(refText))
+                record.SourceRefs.Add(refText);
+        }
+    }
+
+    private void ExecuteTool(CaseRecord record, CaseMove move, string causedByEventId)
+    {
+        var tool = string.IsNullOrWhiteSpace(move.Name) ? CaseTools.ArgString(move.Args, "tool") : move.Name;
+        AppendEvent(record, CaseEventTypes.ToolCalled, new { tool, args = move.Args, causedByEventId });
+
+        object result;
+        try
+        {
+            result = tool switch
+            {
+                CaseTools.LocalSearch => CaseTools.LocalSearchResult(
+                    _local,
+                    CaseTools.ArgString(move.Args, "query", record.ApprovedObjective ?? ""),
+                    string.IsNullOrEmpty(CaseTools.ArgString(move.Args, "projectId")) ? null : CaseTools.ArgString(move.Args, "projectId")),
+                CaseTools.ReadNote => CaseTools.ReadNoteResult(
+                    _local,
+                    CaseTools.ArgString(move.Args, "projectId"),
+                    CaseTools.ArgString(move.Args, "noteId")),
+                _ => throw new InvalidOperationException($"Unknown tool '{tool}'."),
+            };
+        }
+        catch (Exception ex)
+        {
+            var failEvt = AppendEvent(record, CaseEventTypes.ToolResult, new { tool, ok = false, error = ex.Message });
+            record.ProcessedEventIds.Add(failEvt.EventId);
+            Feed(record.Id, $"Tool {tool} failed.", "alert");
+            record.Status = CaseStatus.Active;
+            return;
+        }
+
+        var stored = _objects.PutJson(result);
+        var evt = AppendEvent(record, CaseEventTypes.ToolResult, new
+        {
+            tool,
+            ok = true,
+            result,
+            resultRef = stored.ObjectId,
+            sha256 = stored.Sha256,
+        });
+        record.ProcessedEventIds.Add(evt.EventId);
+        record.Status = CaseStatus.Active;
+        Feed(record.Id, $"Tool {tool} returned.", "ambient");
+        _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "tool_result",
+            caseId: record.Id, caseVersion: record.Version, status: record.Status, resultRef: stored.ObjectId);
     }
 
     private void ProposeOperation(CaseRecord record, CaseMove move, string causedByEventId)
@@ -272,13 +377,13 @@ public sealed class CaseRuntime : IDisposable
         if (move.Args.TryGetValue("capabilityVersion", out var verEl) && verEl.TryGetInt32(out var v))
             capabilityVersion = v;
 
-        var idempotencyKey = ScriptedCaseMind.DefaultIdempotencyKey;
+        var idempotencyKey = Ulid.NewUlid(_clock.UtcNow);
         if (move.Args.TryGetValue("idempotencyKey", out var keyEl) && keyEl.ValueKind == JsonValueKind.String)
             idempotencyKey = keyEl.GetString() ?? idempotencyKey;
 
-        // Duplicate propose with same idempotency key is a no-op if already present.
         var existing = _operations.TryFindByIdempotencyKey(idempotencyKey);
-        if (existing is not null && existing.CaseId == record.Id)
+        if (existing is not null && existing.CaseId == record.Id
+            && existing.Status is not OperationStatus.Denied and not OperationStatus.Cancelled)
         {
             AppendEvent(record, CaseEventTypes.DuplicateIgnored, new { operationId = existing.OperationId, idempotencyKey });
             record.Status = CaseStatus.Waiting;
@@ -315,6 +420,7 @@ public sealed class CaseRuntime : IDisposable
             canonicalHash = envelope.CanonicalHashValue,
         });
         record.ProcessedEventIds.Add(evt.EventId);
+        Feed(record.Id, $"Approval needed: {capability}", "proposal");
 
         _diagnostics.Write(now, "info", "CaseRuntime", "operation_proposed",
             caseId: record.Id, caseVersion: record.Version, operationId: opId, status: envelope.Status);
@@ -365,6 +471,7 @@ public sealed class CaseRuntime : IDisposable
             PersistRecord(record);
 
             _ready.TryEnqueue(record.Id, ReadyPriority.UserReplyOrApproval);
+            Feed(record.Id, $"Approved {envelope.Capability}.", "proposal");
             _diagnostics.Write(now, "info", "CaseRuntime", "operation_approved",
                 caseId: record.Id, caseVersion: record.Version, operationId: operationId, status: envelope.Status);
             return envelope;
@@ -372,8 +479,111 @@ public sealed class CaseRuntime : IDisposable
     }
 
     /// <summary>
-    /// Executes an approved operation exactly once. Side effects are gated by status transition
-    /// and by idempotency key — a second call is a no-op.
+    /// Edits an awaiting envelope's arguments. Creates a new operation version with a new canonical
+    /// hash that requires fresh approval; the previous envelope is cancelled.
+    /// </summary>
+    public OperationEnvelope EditOperation(string operationId, Dictionary<string, JsonElement> newArguments)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var previous = _operations.TryLoad(operationId)
+                ?? throw new InvalidOperationException($"Operation '{operationId}' not found.");
+            var record = _cases.TryLoadRecord(previous.CaseId)
+                ?? throw new InvalidOperationException($"Case '{previous.CaseId}' not found.");
+
+            if (previous.Status != OperationStatus.AwaitingApproval)
+                throw new InvalidOperationException($"Only awaiting_approval operations can be edited (was '{previous.Status}').");
+
+            previous.Status = OperationStatus.Cancelled;
+            _operations.Save(previous);
+            _projections.UpsertOperation(previous);
+            record.PendingOperationIds.Remove(previous.OperationId);
+
+            var now = _clock.UtcNow;
+            var newId = Ulid.NewUlid(now);
+            var edited = new OperationEnvelope
+            {
+                OperationId = newId,
+                CaseId = previous.CaseId,
+                CaseVersion = record.Version,
+                CausedByEventId = previous.CausedByEventId,
+                Capability = previous.Capability,
+                CapabilityVersion = previous.CapabilityVersion + 1,
+                Arguments = new Dictionary<string, JsonElement>(newArguments, StringComparer.Ordinal),
+                InputRefs = previous.InputRefs.ToList(),
+                RequestedScope = new Dictionary<string, JsonElement>(previous.RequestedScope, StringComparer.Ordinal),
+                GrantedScope = new Dictionary<string, JsonElement>(previous.GrantedScope, StringComparer.Ordinal),
+                IdempotencyKey = previous.IdempotencyKey + ":edit:" + previous.CapabilityVersion,
+                Preconditions = previous.Preconditions.ToList(),
+                Status = OperationStatus.AwaitingApproval,
+            };
+            edited.CanonicalHashValue = edited.CanonicalHash();
+            _operations.Save(edited);
+            _projections.UpsertOperation(edited);
+            record.PendingOperationIds.Add(newId);
+            record.Status = CaseStatus.Waiting;
+
+            var evt = AppendEvent(record, CaseEventTypes.OperationEdited, new
+            {
+                previousOperationId = previous.OperationId,
+                operationId = newId,
+                previousHash = previous.CanonicalHashValue,
+                canonicalHash = edited.CanonicalHashValue,
+                capabilityVersion = edited.CapabilityVersion,
+            });
+            record.ProcessedEventIds.Add(evt.EventId);
+            PersistRecord(record);
+            Feed(record.Id, $"Edited proposal {previous.Capability} (new approval required).", "proposal");
+            _diagnostics.Write(now, "info", "CaseRuntime", "operation_edited",
+                caseId: record.Id, caseVersion: record.Version, operationId: newId, status: edited.Status);
+            return edited;
+        }
+    }
+
+    /// <summary>Rejects an awaiting operation; the case becomes active so the mind may continue or stop.</summary>
+    public OperationEnvelope RejectOperation(string operationId, string? reason = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            var envelope = _operations.TryLoad(operationId)
+                ?? throw new InvalidOperationException($"Operation '{operationId}' not found.");
+            var record = _cases.TryLoadRecord(envelope.CaseId)
+                ?? throw new InvalidOperationException($"Case '{envelope.CaseId}' not found.");
+
+            if (envelope.Status is OperationStatus.Denied)
+                return envelope;
+
+            if (envelope.Status is not OperationStatus.AwaitingApproval and not OperationStatus.Approved)
+                throw new InvalidOperationException($"Operation status '{envelope.Status}' cannot be rejected.");
+
+            var now = _clock.UtcNow;
+            envelope.Status = OperationStatus.Denied;
+            _operations.Save(envelope);
+            _projections.UpsertOperation(envelope);
+            _projections.UpsertApproval(Ulid.NewUlid(now), operationId, record.Id, envelope.CanonicalHashValue ?? envelope.CanonicalHash(), now, "denied");
+
+            var evt = AppendEvent(record, CaseEventTypes.OperationDenied, new
+            {
+                operationId,
+                reason = reason ?? "rejected",
+            });
+            record.ProcessedEventIds.Add(evt.EventId);
+            record.PendingWaits.Clear();
+            // Keep the denied id visible to the mind via pending list, but case is free to continue.
+            record.Status = CaseStatus.Active;
+            PersistRecord(record);
+            _ready.TryEnqueue(record.Id, ReadyPriority.UserReplyOrApproval);
+            Feed(record.Id, $"Rejected {envelope.Capability}.", "proposal");
+            _diagnostics.Write(now, "info", "CaseRuntime", "operation_denied",
+                caseId: record.Id, caseVersion: record.Version, operationId: operationId, status: envelope.Status);
+            return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Executes an approved operation exactly once through the operation broker.
     /// </summary>
     public OperationEnvelope ExecuteOperation(string operationId)
     {
@@ -385,7 +595,6 @@ public sealed class CaseRuntime : IDisposable
             var record = _cases.TryLoadRecord(envelope.CaseId)
                 ?? throw new InvalidOperationException($"Case '{envelope.CaseId}' not found.");
 
-            // Idempotency: already executed/completed → no new side effect.
             if (envelope.Status is OperationStatus.Executing or OperationStatus.Completed)
             {
                 AppendEvent(record, CaseEventTypes.DuplicateIgnored, new { operationId, reason = "already_executed" });
@@ -410,24 +619,26 @@ public sealed class CaseRuntime : IDisposable
             if (envelope.Status != OperationStatus.Approved)
                 throw new InvalidOperationException($"Operation status '{envelope.Status}' cannot be executed.");
 
-            // Case version check: envelope must still match the case version it was proposed against,
-            // or have been re-bound. For Slice 1 we require equality with current case version at propose time
-            // was stamped; after events the version advanced — require the envelope's caseVersion matches
-            // the version when proposed (already stored). Additional approve-time check already ran.
-            // On execute we only require the case is not cancelled/completed.
             if (record.Status is CaseStatus.Cancelled or CaseStatus.Completed)
                 throw new InvalidOperationException($"Case '{record.Id}' is {record.Status}; refusing execute.");
 
             envelope.Status = OperationStatus.Executing;
             _operations.Save(envelope);
 
-            // Side effect — exactly once on this transition.
+            var applied = _broker.Apply(envelope);
+            if (!applied.Ok)
+            {
+                envelope.Status = OperationStatus.Failed;
+                _operations.Save(envelope);
+                _projections.UpsertOperation(envelope);
+                AppendEvent(record, CaseEventTypes.OperationFailed, new { operationId, error = applied.Error });
+                PersistRecord(record);
+                throw new InvalidOperationException(applied.Error ?? applied.Summary);
+            }
+
             SideEffectCount++;
             envelope.SideEffectCount++;
-            _onSideEffect();
-
-            var result = _objects.PutJson(new { ok = true, sideEffectCount = envelope.SideEffectCount, at = _clock.UtcNow });
-            envelope.ResultRef = result.ObjectId;
+            envelope.ResultRef = applied.ResultRef;
             envelope.Status = OperationStatus.Completed;
             _operations.Save(envelope);
             _projections.UpsertOperation(envelope);
@@ -435,9 +646,9 @@ public sealed class CaseRuntime : IDisposable
             var evt = AppendEvent(record, CaseEventTypes.OperationExecuted, new
             {
                 operationId,
-                resultRef = result.ObjectId,
-                sha256 = result.Sha256,
+                resultRef = envelope.ResultRef,
                 sideEffectCount = envelope.SideEffectCount,
+                summary = applied.Summary,
             });
             record.ProcessedEventIds.Add(evt.EventId);
             record.PendingOperationIds.Remove(operationId);
@@ -445,9 +656,10 @@ public sealed class CaseRuntime : IDisposable
             PersistRecord(record);
 
             _ready.TryEnqueue(record.Id, ReadyPriority.ToolOrDelegateCompletion);
+            Feed(record.Id, applied.Summary, "persistent");
             _diagnostics.Write(_clock.UtcNow, "info", "CaseRuntime", "operation_executed",
                 caseId: record.Id, caseVersion: record.Version, operationId: operationId,
-                status: envelope.Status, resultRef: result.ObjectId);
+                status: envelope.Status, resultRef: envelope.ResultRef);
             return envelope;
         }
     }
@@ -553,6 +765,11 @@ public sealed class CaseRuntime : IDisposable
         return null;
     }
 
+    private void Feed(string? caseId, string text, string? level)
+    {
+        _projections.InsertFeedItem(Ulid.NewUlid(_clock.UtcNow), caseId, _clock.UtcNow, text, level);
+    }
+
     private CaseEvent AppendEvent(CaseRecord record, string type, object payload)
     {
         record.Version++;
@@ -580,6 +797,8 @@ public sealed class CaseRuntime : IDisposable
 
     private static CaseRecord Clone(CaseRecord r)
         => JsonSerializer.Deserialize<CaseRecord>(JsonSerializer.Serialize(r, RelayJson.Compact), RelayJson.Compact)!;
+
+    private static string Clip(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
 
     public void Dispose()
     {

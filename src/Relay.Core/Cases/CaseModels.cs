@@ -86,9 +86,12 @@ public static class CaseEventTypes
 {
     public const string UserInput = "user.input";
     public const string MindStepped = "mind.stepped";
+    public const string ToolCalled = "tool.called";
+    public const string ToolResult = "tool.result";
     public const string OperationProposed = "operation.proposed";
     public const string OperationApproved = "operation.approved";
     public const string OperationDenied = "operation.denied";
+    public const string OperationEdited = "operation.edited";
     public const string OperationExecuted = "operation.executed";
     public const string OperationCompleted = "operation.completed";
     public const string OperationFailed = "operation.failed";

@@ -21,11 +21,11 @@ Live runners must fail preflight or report `SKIPPED: missing local model`. They 
 | Historical docs archived | Done | `docs/archive/` |
 | Legacy prototype tag | `legacy-prototype-e7e9421` | Local git tag |
 | Characterization: ledger / PathGuard / AtomicFile / Ulid | Done | `tests/Relay.Core.Tests` deterministic |
-| `CaseRuntime` + `OperationEnvelope` | Slice 1 | `Slice1RecoveryTests` + `Relay.DevHarness` |
+| `CaseRuntime` + `OperationEnvelope` | Slice 1–2 | `Slice1RecoveryTests`, `Slice2AtlasRecallTests`, `Relay.DevHarness` |
 | Persistent ready queue | Slice 1 | SQLite `ready_queue` via `ReadyQueue` |
-| SQLite projections | Slice 1 | `ProjectionDatabase` under `projections/` |
-| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (Slice 1 scenario green) |
-| Direct vertical path (Slice 2) | In progress | — |
+| SQLite projections | Slice 1–2 | `ProjectionDatabase` + feed items per step |
+| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (`--scenario slice1|slice2`) |
+| Direct vertical path (Slice 2) | Done | Atlas beta recall + citations; propose edit/reject |
 | Listening adapter (Slice 3) | Not yet | — |
 | Research path (Slice 4) | Not yet | — |
 | Tool/workflow generalization (Slice 5) | Not yet | — |
