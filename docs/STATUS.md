@@ -21,16 +21,25 @@ Live runners must fail preflight or report `SKIPPED: missing local model`. They 
 | Historical docs archived | Done | `docs/archive/` |
 | Legacy prototype tag | `legacy-prototype-e7e9421` | Local git tag |
 | Characterization: ledger / PathGuard / AtomicFile / Ulid | Done | `tests/Relay.Core.Tests` deterministic |
-| `CaseRuntime` + `OperationEnvelope` | Slice 1–2 | `Slice1RecoveryTests`, `Slice2AtlasRecallTests`, `Relay.DevHarness` |
+| `CaseRuntime` + `OperationEnvelope` | Slice 1–5 | `Slice1`–`Slice5` tests + DevHarness |
 | Persistent ready queue | Slice 1 | SQLite `ready_queue` via `ReadyQueue` |
 | SQLite projections | Slice 1–2 | `ProjectionDatabase` + feed items per step |
-| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (`--scenario slice1|slice2|slice3|slice4|slice5`) |
-| Direct vertical path (Slice 2) | Done | Atlas beta recall + citations; propose edit/reject |
-| Listening adapter (Slice 3) | Done | `StreamIntake` + observed case; `Slice3ListeningTests` |
-| Research path (Slice 4) | Done | `ResearchBroker` + Lightshift cited path; `Slice4ResearchTests` |
-| Tool/workflow generalization (Slice 5) | Done | `ToolWorkflowBroker` + `world_clock` reuse; `Slice5ToolWorkflowTests` |
-| UI projection coupling (Slice 6) | Not yet | — |
-| Measured personalization (Slice 7) | Not yet | — |
+| Local harness (`dev/`) | Present | `Relay.DevHarness --scenario slice1`…`slice7` |
+| Direct vertical path (Slice 2) | Done (deterministic) | Atlas beta recall + citations |
+| Listening adapter (Slice 3) | Done (deterministic) | `StreamIntake` + observed case |
+| Research path (Slice 4) | Done (deterministic fakes) | Lightshift path; **live search/model not verified here** |
+| Tool/workflow generalization (Slice 5) | Done (deterministic Jint-in-tests) | `world_clock` reuse + revert; **live Worker process not required for Core.Tests** |
+| UI projection coupling (Slice 6) | Core surface done; WinUI bind pending | `IRelaySurface` / `CaseRuntimeSurface`; `Slice6SurfaceTests`; Desktop comment only — **WinUI not compiled on Linux** |
+| Measured personalization (Slice 7) | Deterministic store + proposals | `FrictionEvidenceStore` + typed `ImprovementProposal`; `Slice7PersonalizationTests` — **no live friction→apply loop** |
+| Alpha complete | **Not claimed** | Live Windows gates (model, WinUI, Wispr) still missing |
+
+## Deterministic vs live-missing
+
+| Verified on this host (Linux) | Still missing (needs Windows / live adapters) |
+| --- | --- |
+| CaseRuntime recovery, Atlas, listening, research fakes, tool/workflow Jint helper, surface API, friction→proposal contract | WinUI bind to `IRelaySurface`, real local model, real Worker job object, real search HTTPS, Wispr Flow |
+
+Open questions for humans: see repo-root `QUESTIONS.md`.
 
 ## Legacy prototype (tagged `legacy-prototype-e7e9421`)
 

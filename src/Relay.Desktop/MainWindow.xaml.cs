@@ -33,6 +33,12 @@ public sealed class ActivityRow
 /// no state of its own beyond render caches and which drawer / task diagnostics are open.
 /// Surface: one status line, one chronological feed, one composer; projects, review, tasks,
 /// inbox, ledger, preferences and diagnostics live in drawers.
+///
+/// Slice 6 (vNext): bind the feed + composer to <see cref="Relay.Core.Cases.IRelaySurface"/> /
+/// <see cref="Relay.Core.Cases.CaseRuntimeSurface"/> once CaseRuntime replaces SessionCoordinator
+/// on Windows. Do not put orchestration state in this window — read Snapshot(), submit
+/// RelaySurfaceCommands only. This Linux pass cannot compile WinUI; wiring is deferred to a
+/// Windows agent.
 /// </summary>
 public sealed partial class MainWindow : Window
 {

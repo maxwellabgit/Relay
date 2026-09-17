@@ -5,6 +5,7 @@ using Relay.Core.Search;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 using Relay.Core.Tools;
+using Relay.Core.Usage;
 
 namespace Relay.DevHarness;
 
@@ -28,7 +29,7 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4|slice5]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4|slice5|slice6|slice7]");
             return 2;
         }
 
@@ -39,6 +40,8 @@ public static class Program
             "slice3" => await RunSlice3Async(dataRootPath, runId),
             "slice4" => await RunSlice4Async(dataRootPath, runId),
             "slice5" => await RunSlice5Async(dataRootPath, runId),
+            "slice6" => await RunSlice6Async(dataRootPath, runId),
+            "slice7" => RunSlice7(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }
@@ -358,6 +361,105 @@ public static class Program
             london = lonDone.Result,
             reverted = true,
             diagnostics = diagnosticsPath,
+        });
+    }
+
+    private static async Task<int> RunSlice6Async(string dataRootPath, string runId)
+    {
+        var root = new DataRoot(dataRootPath);
+        var clock = new HarnessClock(new DateTimeOffset(2026, 9, 17, 12, 0, 0, TimeSpan.Zero));
+        root.EnsureLayout(clock);
+
+        var runDir = Path.Combine(root.DevRunsDirectory, runId);
+        Directory.CreateDirectory(runDir);
+        var diagnosticsPath = Path.Combine(runDir, "runtime.jsonl");
+        var summaryPath = Path.Combine(runDir, "summary.json");
+
+        using var diagnostics = new RuntimeDiagnostics(diagnosticsPath, runId);
+        using var runtime = CaseRuntime.Open(root, clock, new ScriptedCaseMind(), diagnostics, () => { });
+        IRelaySurface surface = new CaseRuntimeSurface(runtime, clock);
+
+        var listen = surface.ToggleListening();
+        if (!listen.Ok || !surface.Snapshot().Listening)
+            return Fail(summaryPath, runId, "toggle listening failed", 0);
+        surface.ToggleListening();
+
+        var submitted = surface.SubmitComposer("harness slice6 side effect");
+        if (!submitted.Ok) return Fail(summaryPath, runId, submitted.Error ?? "submit failed", 0);
+        await surface.RunUntilIdleAsync(submitted.CaseId);
+        var snap = surface.Snapshot();
+        if (snap.PendingApprovals.Count != 1 || snap.Feed.Count == 0)
+            return Fail(summaryPath, runId, "expected one feed stream and one approval card", 0);
+
+        var card = snap.PendingApprovals[0];
+        var approved = surface.ApproveOperation(card.OperationId, card.EnvelopeHash, card.CaseVersion);
+        if (!approved.Ok) return Fail(summaryPath, runId, approved.Error ?? "approve failed", 0);
+        runtime.ExecuteOperation(card.OperationId);
+        await surface.RunUntilIdleAsync(submitted.CaseId);
+
+        var final = surface.Snapshot();
+        return Ok(summaryPath, new
+        {
+            ok = true,
+            scenario = "slice6",
+            runId,
+            feedCount = final.Feed.Count,
+            pendingApprovals = final.PendingApprovals.Count,
+            modelHealth = final.ModelHealth.Status,
+            listening = final.Listening,
+            caseId = submitted.CaseId,
+            diagnostics = diagnosticsPath,
+        });
+    }
+
+    private static int RunSlice7(string dataRootPath, string runId)
+    {
+        var root = new DataRoot(dataRootPath);
+        var clock = new HarnessClock(new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero));
+        root.EnsureLayout(clock);
+
+        var runDir = Path.Combine(root.DevRunsDirectory, runId);
+        Directory.CreateDirectory(runDir);
+        var summaryPath = Path.Combine(runDir, "summary.json");
+
+        var store = new FrictionEvidenceStore(root);
+        for (var i = 0; i < 3; i++)
+        {
+            store.Capture(
+                FrictionKinds.FailedCapability,
+                clock.UtcNow.AddMinutes(i),
+                "need:world_clock",
+                "repeated capability gap",
+                "case-" + i,
+                ["example-" + i]);
+        }
+
+        var proposal = store.Suggest(clock.UtcNow.AddHours(1));
+        var problems = proposal.Validate();
+        if (proposal.Kind != ImprovementKinds.Tool || problems.Count > 0)
+            return Fail(summaryPath, runId, "expected valid tool improvement: " + string.Join("; ", problems), 0);
+
+        // Insufficient evidence → no_change
+        var emptyRoot = new DataRoot(Path.Combine(dataRootPath, "empty-friction"));
+        emptyRoot.EnsureLayout(clock);
+        var noChange = new FrictionEvidenceStore(emptyRoot).Suggest(clock.UtcNow);
+        if (noChange.Kind != ImprovementKinds.NoChange)
+            return Fail(summaryPath, runId, "expected no_change when evidence is thin", 0);
+
+        return Ok(summaryPath, new
+        {
+            ok = true,
+            scenario = "slice7",
+            runId,
+            kind = proposal.Kind,
+            frictionKind = proposal.FrictionKind,
+            title = proposal.Title,
+            examples = proposal.Examples.Count,
+            evaluationCases = proposal.EvaluationCases.Count,
+            successMetric = proposal.SuccessMetric,
+            reversionPlan = proposal.ReversionPlan,
+            proposalId = proposal.ProposalId,
+            noChangeKind = noChange.Kind,
         });
     }
 

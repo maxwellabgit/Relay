@@ -331,7 +331,11 @@ public sealed class CaseRuntime : IDisposable
     public CaseRecord? GetListeningCase()
     {
         var state = _intake.LoadState();
-        return state.CaseId is null ? null : _cases.TryLoadRecord(state.CaseId);
+        if (!state.Active || state.CaseId is null) return null;
+        var record = _cases.TryLoadRecord(state.CaseId);
+        if (record is null) return null;
+        if (record.Status is CaseStatus.Completed or CaseStatus.Cancelled) return null;
+        return record;
     }
 
     public CaseRecord StartDirectCase(string objective, string kind = CaseKind.Answer)
