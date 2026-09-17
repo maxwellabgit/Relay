@@ -56,7 +56,8 @@ public sealed class FrictionEvidenceStore
         string detail,
         string? caseId = null,
         IEnumerable<string>? exampleRefs = null,
-        int count = 1)
+        int count = 1,
+        string? sessionId = null)
     {
         var evidence = new FrictionEvidence
         {
@@ -64,6 +65,7 @@ public sealed class FrictionEvidenceStore
             Kind = kind,
             At = at,
             CaseId = caseId,
+            SessionId = sessionId,
             Pattern = pattern,
             Detail = detail,
             ExampleRefs = exampleRefs?.ToList() ?? [],

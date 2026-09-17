@@ -44,6 +44,7 @@ public sealed class FrictionEvidence
     [JsonPropertyName("kind")] public required string Kind { get; init; }
     [JsonPropertyName("at")] public required DateTimeOffset At { get; init; }
     [JsonPropertyName("caseId")] public string? CaseId { get; init; }
+    [JsonPropertyName("sessionId")] public string? SessionId { get; init; }
     [JsonPropertyName("pattern")] public string Pattern { get; init; } = "";
     [JsonPropertyName("detail")] public string Detail { get; init; } = "";
     [JsonPropertyName("exampleRefs")] public List<string> ExampleRefs { get; init; } = [];

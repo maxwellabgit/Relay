@@ -11,7 +11,7 @@ public interface IPageFetch
     Task<PageFetchResult> FetchAsync(string url, CancellationToken cancellationToken = default);
 }
 
-public sealed record PageFetchResult(bool Ok, string Url, string? Body, string? Error, long ElapsedMs);
+public sealed record PageFetchResult(bool Ok, string Url, string? Body, string? Error, long ElapsedMs, string? FinalUrl = null);
 
 /// <summary>External delegate transport for research packages. No canonical writes.</summary>
 public interface IDelegateClient
@@ -21,14 +21,29 @@ public interface IDelegateClient
     Task<DelegateResponse> CompleteAsync(DelegateRequest request, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Delegate package with permitted excerpt bodies (hashes + selectors).
+/// Does not imply every input is a citation — callers must pass explicit citation ids separately.
+/// </summary>
 public sealed record DelegateRequest(
     string PackageId,
     string Profile,
     string Objective,
     IReadOnlyList<string> ArtifactObjectIds,
-    IReadOnlyList<DelegateSource> Sources);
+    IReadOnlyList<DelegateSource> Sources,
+    IReadOnlyList<DelegateExcerpt> PermittedExcerpts,
+    IReadOnlyList<string> ExplicitCitationIds);
 
 public sealed record DelegateSource(string ObjectId, string Sha256, string Kind, string Title, string? Url);
+
+/// <summary>Permitted source excerpt body with content hash and selector offsets.</summary>
+public sealed record DelegateExcerpt(
+    string ArtifactId,
+    string ContentHash,
+    string Text,
+    int StartOffset,
+    int EndOffset,
+    string? Selector = null);
 
 public sealed record DelegateResponse(bool Ok, string Text, string? Error, long ElapsedMs);
 

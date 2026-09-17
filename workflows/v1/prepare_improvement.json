@@ -1,0 +1,27 @@
+{
+  "id": "prepare_improvement",
+  "version": "1",
+  "title": "Prepare a capability improvement proposal",
+  "description": "Auto friction detection; trigger on explicit request OR ≥3 supported occurrences across ≥2 sessions. Proposal includes evidence/benefit/impl/evals/access/rollback. No build without grant.",
+  "entry": "collect_friction",
+  "nodes": [
+    { "id": "collect_friction", "type": "retrieve", "label": "Collect friction evidence" },
+    { "id": "branch_trigger", "type": "branch", "label": "Explicit or threshold" },
+    { "id": "draft_spec", "type": "local_job", "jobType": "DraftImprovementSpecification" },
+    { "id": "draft_package", "type": "local_job", "jobType": "DraftCapabilityPackage" },
+    { "id": "present_proposal", "type": "present" },
+    { "id": "await_grant", "type": "approval", "label": "Build requires grant" },
+    { "id": "wait_more_evidence", "type": "wait" },
+    { "id": "done", "type": "complete" }
+  ],
+  "edges": [
+    { "from": "collect_friction", "to": "branch_trigger" },
+    { "from": "branch_trigger", "to": "draft_spec", "when": "triggered" },
+    { "from": "branch_trigger", "to": "wait_more_evidence", "when": "insufficient" },
+    { "from": "draft_spec", "to": "draft_package" },
+    { "from": "draft_package", "to": "present_proposal" },
+    { "from": "present_proposal", "to": "await_grant" },
+    { "from": "await_grant", "to": "done" },
+    { "from": "wait_more_evidence", "to": "done" }
+  ]
+}

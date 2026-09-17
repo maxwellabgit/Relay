@@ -1,0 +1,25 @@
+{
+  "id": "recall_fact",
+  "version": "1",
+  "title": "Recall a fact with provenance",
+  "description": "Retrieve candidates, judge claim relations, apply authority rules, present answer or conflict. Newer statements are not auto-accepted facts.",
+  "entry": "retrieve_candidates",
+  "nodes": [
+    { "id": "retrieve_candidates", "type": "retrieve", "label": "Retrieve candidate statements" },
+    { "id": "judge_claim_relations", "type": "judge", "decisionId": "evidence.claim_relation", "label": "Claim relations" },
+    { "id": "judge_revision", "type": "judge", "decisionId": "statement.revision_relation", "label": "Revision vs conflict" },
+    { "id": "branch_authority", "type": "branch", "label": "Authority rules" },
+    { "id": "present_answer", "type": "present", "label": "Answer with provenance" },
+    { "id": "present_conflict", "type": "present", "label": "Present unresolved conflict" },
+    { "id": "done", "type": "complete" }
+  ],
+  "edges": [
+    { "from": "retrieve_candidates", "to": "judge_claim_relations" },
+    { "from": "judge_claim_relations", "to": "judge_revision", "retry": { "maxAttempts": 2, "backoffMs": 100 } },
+    { "from": "judge_revision", "to": "branch_authority" },
+    { "from": "branch_authority", "to": "present_answer", "when": "resolved" },
+    { "from": "branch_authority", "to": "present_conflict", "when": "conflict" },
+    { "from": "present_answer", "to": "done" },
+    { "from": "present_conflict", "to": "done" }
+  ]
+}

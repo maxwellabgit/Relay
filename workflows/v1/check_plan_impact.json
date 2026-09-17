@@ -1,0 +1,30 @@
+{
+  "id": "check_plan_impact",
+  "version": "1",
+  "title": "Check plan impact of a change",
+  "description": "Identify change and objective, retrieve plan, verify deps, deterministic checks, optional reasoning, per-criterion present. Disputed dates block consequential ops.",
+  "entry": "identify_change",
+  "nodes": [
+    { "id": "identify_change", "type": "local_job", "jobType": "FillInterpretiveArguments", "label": "Identify change + objective" },
+    { "id": "retrieve_plan", "type": "retrieve", "label": "Retrieve plan artifacts" },
+    { "id": "verify_deps", "type": "tool", "tool": "local_search", "label": "Verify dependencies" },
+    { "id": "deterministic_checks", "type": "branch", "label": "Deterministic checks" },
+    { "id": "reasoning_if_needed", "type": "reasoning_job", "decisionId": "job.extended_reasoning", "label": "Extended reasoning" },
+    { "id": "criterion_loop", "type": "judge", "decisionId": "output.criterion_satisfied", "label": "Each criterion" },
+    { "id": "present_impact", "type": "present", "label": "Present impact" },
+    { "id": "block_disputed", "type": "wait", "label": "Block on disputed date" },
+    { "id": "done", "type": "complete" }
+  ],
+  "edges": [
+    { "from": "identify_change", "to": "retrieve_plan" },
+    { "from": "retrieve_plan", "to": "verify_deps" },
+    { "from": "verify_deps", "to": "deterministic_checks" },
+    { "from": "deterministic_checks", "to": "reasoning_if_needed", "when": "needs_reasoning" },
+    { "from": "deterministic_checks", "to": "criterion_loop", "when": "clear" },
+    { "from": "deterministic_checks", "to": "block_disputed", "when": "disputed_date" },
+    { "from": "reasoning_if_needed", "to": "criterion_loop", "retry": { "maxAttempts": 1, "backoffMs": 0 } },
+    { "from": "criterion_loop", "to": "present_impact" },
+    { "from": "present_impact", "to": "done" },
+    { "from": "block_disputed", "to": "done" }
+  ]
+}

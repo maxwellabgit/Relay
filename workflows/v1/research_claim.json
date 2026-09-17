@@ -1,0 +1,31 @@
+{
+  "id": "research_claim",
+  "version": "1",
+  "title": "Research a claim with evidence",
+  "description": "Search, fetch allow-listed pages, package permitted excerpts with hashes/selectors, validate claim support, reject unsupported. Exact arithmetic in code. Do not auto-attach all inputs as cited.",
+  "entry": "formulate_query",
+  "nodes": [
+    { "id": "formulate_query", "type": "local_job", "jobType": "FormulateSearchQuery" },
+    { "id": "search", "type": "tool", "tool": "research.search" },
+    { "id": "fetch_pages", "type": "tool", "tool": "research.fetch" },
+    { "id": "resolve_artifacts", "type": "retrieve", "label": "Resolve artifacts + selectors" },
+    { "id": "judge_claim_support", "type": "judge", "decisionId": "output.claim_support" },
+    { "id": "branch_support", "type": "branch", "label": "Supported vs reject" },
+    { "id": "present_supported", "type": "present" },
+    { "id": "present_rejected", "type": "present" },
+    { "id": "approval_if_needed", "type": "approval" },
+    { "id": "done", "type": "complete" }
+  ],
+  "edges": [
+    { "from": "formulate_query", "to": "search" },
+    { "from": "search", "to": "fetch_pages", "retry": { "maxAttempts": 2, "backoffMs": 200 } },
+    { "from": "fetch_pages", "to": "resolve_artifacts" },
+    { "from": "resolve_artifacts", "to": "judge_claim_support" },
+    { "from": "judge_claim_support", "to": "branch_support" },
+    { "from": "branch_support", "to": "present_supported", "when": "supported" },
+    { "from": "branch_support", "to": "present_rejected", "when": "unsupported" },
+    { "from": "present_supported", "to": "approval_if_needed" },
+    { "from": "present_rejected", "to": "done" },
+    { "from": "approval_if_needed", "to": "done" }
+  ]
+}

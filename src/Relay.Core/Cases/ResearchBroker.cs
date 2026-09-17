@@ -158,20 +158,47 @@ public sealed class ResearchBroker
         }
 
         var sources = new List<DelegateSource>();
+        var excerpts = new List<DelegateExcerpt>();
         foreach (var id in artifactIds)
         {
             var text = TryReadObjectText(id);
             if (text is null) continue;
-            using var doc = JsonDocument.Parse(text);
-            var root = doc.RootElement;
-            var kind = root.TryGetProperty("kind", out var k) ? k.GetString() ?? "artifact" : "artifact";
-            var title = root.TryGetProperty("title", out var t) ? t.GetString() ?? id : id;
-            var url = root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
-            var sha = root.TryGetProperty("sha256", out var s) && s.ValueKind == JsonValueKind.String
-                ? s.GetString()!
-                : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
-            sources.Add(new DelegateSource(id, sha, kind, title, url));
+            string kind = "artifact";
+            string title = id;
+            string? url = null;
+            string bodyText = text;
+            string contentHash;
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                var root = doc.RootElement;
+                kind = root.TryGetProperty("kind", out var k) ? k.GetString() ?? "artifact" : "artifact";
+                title = root.TryGetProperty("title", out var t) ? t.GetString() ?? id : id;
+                url = root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
+                if (root.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.String)
+                    bodyText = body.GetString() ?? text;
+                else if (root.TryGetProperty("snippet", out var sn) && sn.ValueKind == JsonValueKind.String)
+                    bodyText = sn.GetString() ?? text;
+                contentHash = root.TryGetProperty("sha256", out var s) && s.ValueKind == JsonValueKind.String
+                    ? s.GetString()!
+                    : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(bodyText)));
+            }
+            catch (JsonException)
+            {
+                contentHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+            }
+
+            sources.Add(new DelegateSource(id, contentHash, kind, title, url));
+            // Permitted excerpt body travels with the package — not an automatic citation.
+            excerpts.Add(new DelegateExcerpt(id, contentHash, bodyText, 0, bodyText.Length, Selector: "full"));
         }
+
+        var explicitCitations = OptStringList(envelope, "citationObjectIds");
+        // Never auto-attach all inputs as citations.
+        var citations = excerpts.Select(e => e.ArtifactId)
+            .Where(explicitCitations.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
         var packageId = Ulid.NewUlid(_clock.UtcNow);
         var packageBlob = new
@@ -182,13 +209,22 @@ public sealed class ResearchBroker
             objective,
             artifactObjectIds = artifactIds,
             sources = sources.Select(s => new { s.ObjectId, s.Sha256, s.Kind, s.Title, s.Url }),
+            permittedExcerpts = excerpts.Select(e => new
+            {
+                e.ArtifactId,
+                e.ContentHash,
+                text = e.Text,
+                e.StartOffset,
+                e.EndOffset,
+                e.Selector,
+            }),
+            explicitCitationIds = citations,
             at = _clock.UtcNow,
-            // Explicit: packages never include write capabilities.
             grants = Array.Empty<string>(),
         };
         var packageStored = _objects.PutJson(packageBlob);
 
-        var request = new DelegateRequest(packageId, profile, objective, artifactIds, sources);
+        var request = new DelegateRequest(packageId, profile, objective, artifactIds, sources, excerpts, citations);
         var sw = Stopwatch.StartNew();
         var response = await _services.Delegate.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
         sw.Stop();
