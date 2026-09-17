@@ -27,3 +27,4 @@ Generated Files/
 # Isolated local data roots
 .dev-data/
 .dev-runs/
+__pycache__/

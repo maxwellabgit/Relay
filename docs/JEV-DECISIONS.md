@@ -59,6 +59,10 @@ Update this file whenever a default is chosen or an old test expectation is inte
 | 2026-09-17 | §8 ContextAssembler bounds + LocalJobDispatcher; no Jev fallback | Spec §8 |
 | 2026-09-17 | §9 ListeningController windows; StreamIntake capture-only | Spec §9 |
 | 2026-09-17 | `ListeningScriptedMind` retained as harness bridge with keyword heuristics; coverage via explicit `segmentId` / controller | Spec: bridge for old harness; document in this file |
+| 2026-09-17 | §10 process graphs under `Relay.Core.Processes` (avoid clash with existing WorkflowDefinition) | Spec §10 |
+| 2026-09-17 | §11 RetentionService + CapabilityBundle activation | Spec §11 |
+| 2026-09-17 | §12 RelayCompositionFactory; Desktop still uses SessionCoordinator until WinUI cutover | Spec §12; Linux cannot compile WinUI |
+| 2026-09-17 | §13 verify-cloud/live/windows + 10 jev-* harness scenarios + 240 eval items | Spec §13 |
 
 ## §9 ListeningScriptedMind bridge
 
@@ -66,3 +70,9 @@ Update this file whenever a default is chosen or an old test expectation is inte
 - `ListeningScriptedMind` remains for slice3 harness scenarios only: keyword → move mapping.
 - Segment handling requires explicit `segmentId` (and optional `windowId`); the old first-pending fallback is removed.
 - In-memory `_handledSegmentIds` was replaced by `PendingMindSegmentIds` filtering in `BuildSnapshot`.
+
+## §12 Desktop remaining
+
+- `RelayCompositionFactory` rejects scripted minds in `Production` mode; Desktop `ModelComposition.CaseRuntimeOptions` points at it.
+- `MainWindow` / `App.xaml.cs` still construct `SessionCoordinator` for legacy paths — full removal deferred to Windows verification (`verify-windows.ps1`).
+- Headless surface coverage is in `SurfaceCompositionTests`.

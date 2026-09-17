@@ -57,11 +57,11 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 | Decision catalog tests (§7) | **Passed** — `DecisionPolicyTests` 9/9 | deterministic |
 | Context / local jobs tests (§8) | **Passed** — `ContextAndLocalJobTests` 10/10 | deterministic |
 | Listening window tests (§9) | **Passed** — `ListeningWindowTests` 9/9 | deterministic |
-| Workflow tests (§10) | pending | deterministic / fixture |
-| Retention / capability tests (§11) | pending | deterministic |
-| Desktop composition (§12) | pending | deterministic (headless); windows-live separate |
-| `bash dev/verify-cloud.sh` (§13) | pending | deterministic + fixture |
-| `bash dev/verify-live.sh` | blocked: missing credentials | live |
+| Workflow tests (§10) | **Passed** — `WorkflowProductionTests` 10/10; Gateway `HttpPageFetchTests` 2/2 | deterministic / fixture |
+| Retention / capability tests (§11) | **Passed** — `RetentionCapabilityTests` 8/8 | deterministic |
+| Desktop composition (§12) | **Passed** — `SurfaceCompositionTests` 5/5 headless; Desktop WinUI deferred | deterministic (headless); windows-live separate |
+| `bash dev/verify-cloud.sh` (§13) | **Passed** — Core 108, Gateway 20, builds, slice1–7 + 10 jev-* scenarios | deterministic + fixture |
+| `bash dev/verify-live.sh` | blocked: missing credentials (preflight fails closed) | live |
 | `dev/verify-windows.ps1` | blocked: not Windows | windows-live |
 
 ### §4 notes
@@ -102,4 +102,31 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 - `ListeningWindowTests` **9/9** including 120-segment outage/restart with no coverage gaps.
 - `StreamIntake` is capture-only; durable windows via `ListeningController` / `ListeningWindowStore`.
 - Removed first-pending `MarkListeningSegmentsHandled` / `ApplySegmentHandled` fallback without explicit `segmentId`.
-- Full suite: `Relay.Core.Tests` **85/85**; `Relay.Gateway.Tests` **18/18**; harness slice1–7 **PASS**.
+
+### §10 notes
+
+- `WorkflowProductionTests` **10/10**; process graphs under `workflows/v1/` (`recall_fact`, `check_plan_impact`, `research_claim`, `prepare_improvement`).
+- Newer statements are not auto-accepted facts; disputed dates block consequential plan ops.
+- `DelegateRequest` carries permitted excerpt bodies + hashes/selectors; citations must be explicit.
+- `HttpPageFetch` validates redirects against allow-list.
+
+### §11 notes
+
+- `RetentionCapabilityTests` **8/8**; default 30-day TTL; audit ids/hashes only; content-addressed blob ownership; `original_evidence_unavailable` on surviving summaries.
+- Capability bundles versioned with hash + eval report activation; permission expansion separate; case pins; Jint documented as test helper only.
+
+### §12 notes
+
+- `SurfaceCompositionTests` **5/5** headless: listening/hosted controls, capture backlog, service health, retention, composer→waiting case, production rejects scripted minds, replay refuses outbound research.
+- `RelayCompositionFactory` shared by Desktop options + DevHarness path.
+- Remaining: full WinUI Desktop cutover off `SessionCoordinator` (Linux cannot compile WinUI) — see `docs/JEV-DECISIONS.md`.
+
+### §13 notes
+
+- `bash dev/verify-cloud.sh` **PASSED** (machine-readable `/tmp/relay-verify-cloud/report.json`).
+- Suites: Core **108/108**, Gateway **20/20**; builds Gateway/Worker/DevHarness; harness slice1–7 + 10 `jev-*` scenarios all PASS.
+- Harness: `dotnet run --project src/Relay.DevHarness -- --scenario jev-atlas-stream --provider fixture --data-root .dev-data/jev-atlas-stream`
+- Evals: `evals/jev/v1/` schema + generator; **240** labeled items (target 240).
+- `verify-live.sh` fails closed without `TYPESAFE_API_KEY` + local model endpoint.
+- `verify-windows.ps1` documents Windows-only Desktop/`Relay.Tests` gates.
+- Integration tests folder scaffolded (README only; no csproj yet).

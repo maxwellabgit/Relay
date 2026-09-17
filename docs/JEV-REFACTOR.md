@@ -75,10 +75,10 @@ Production interface: `ICaseController.Handle(CaseSnapshot, CaseInput) → CaseT
 5. Atomic decisions composed in code — done
 6. Context retrieval and local jobs — done
 7. Durable listening windows — done
-8. Production workflows (recall, plan impact, research, improvement)
-9. Retention and capability bundles
-10. Desktop binding and diagnostics
-11. Cloud verification scripts and named harness scenarios
+8. Production workflows (recall, plan impact, research, improvement) — done
+9. Retention and capability bundles — done
+10. Desktop binding and diagnostics — headless done; WinUI cutover remaining
+11. Cloud verification scripts and named harness scenarios — done
 
 ## Explicit non-goals / corrections vs prior vNext mind
 
