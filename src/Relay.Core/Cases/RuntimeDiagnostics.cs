@@ -38,11 +38,12 @@ public sealed class RuntimeDiagnostics : IDisposable
     {
         _path = path;
         _runId = runId;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var dir = System.IO.Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         _stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
     }
 
-    public string Path => _path;
+    public string FilePath => _path;
     public string RunId => _runId;
 
     public void Write(
