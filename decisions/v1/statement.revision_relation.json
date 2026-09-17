@@ -1,0 +1,43 @@
+{
+  "id": "statement.revision_relation",
+  "version": "1",
+  "title": "Revision relation between statements",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "How does the later statement relate to the earlier one?",
+  "criteria": {
+    "revision": "Later statement revises the earlier",
+    "conflict": "Statements conflict",
+    "compatible": "Statements are compatible",
+    "unclear": "Relation unclear"
+  },
+  "requiredStateSchema": [
+    "earlier.text",
+    "later.text",
+    "earlier.sourceRefs",
+    "later.sourceRefs"
+  ],
+  "stateRequirements": [
+    "earlier.text",
+    "later.text",
+    "earlier.sourceRefs",
+    "later.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "revision_relation": {
+      "type": "choice",
+      "instructions": "How does the later statement relate to the earlier one?",
+      "criteria": {
+        "revision": "Later statement revises the earlier",
+        "conflict": "Statements conflict",
+        "compatible": "Statements are compatible",
+        "unclear": "Relation unclear"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "passage.unresolved_question",
+  "version": "1",
+  "title": "Passage is an unresolved question",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this passage ask an unresolved question that still needs an answer?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "stateRequirements": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "unresolved_question": {
+      "type": "noul",
+      "instructions": "Does this passage ask an unresolved question that still needs an answer?"
+    }
+  },
+  "interpretationNotes": "Provider confidence stored separately; never grants permission."
+}

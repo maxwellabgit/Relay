@@ -1,0 +1,28 @@
+{
+  "id": "job.extended_reasoning",
+  "version": "1",
+  "title": "Local job: extended reasoning needed",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this job require extended local reasoning beyond a single extraction?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "job.task",
+    "job.inputs"
+  ],
+  "stateRequirements": [
+    "job.task",
+    "job.inputs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "extended_reasoning": {
+      "type": "noul",
+      "instructions": "Does this job require extended local reasoning beyond a single extraction?"
+    }
+  },
+  "interpretationNotes": "Provider confidence stored separately; never grants permission."
+}

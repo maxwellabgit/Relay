@@ -1,0 +1,37 @@
+{
+  "id": "context.required_fact",
+  "version": "1",
+  "title": "Required fact status",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "What is the status of this required fact in context?",
+  "criteria": {
+    "established": "Fact is established",
+    "missing": "Fact is missing",
+    "conflicting": "Sources conflict on the fact"
+  },
+  "requiredStateSchema": [
+    "fact.requirement",
+    "context.excerpts"
+  ],
+  "stateRequirements": [
+    "fact.requirement",
+    "context.excerpts"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "required_fact": {
+      "type": "choice",
+      "instructions": "What is the status of this required fact in context?",
+      "criteria": {
+        "established": "Fact is established",
+        "missing": "Fact is missing",
+        "conflicting": "Sources conflict on the fact"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

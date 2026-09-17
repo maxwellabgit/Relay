@@ -1,0 +1,28 @@
+{
+  "id": "passage.commitment",
+  "version": "1",
+  "title": "Passage is a commitment",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this passage commit to future action or a decision?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "stateRequirements": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "commitment": {
+      "type": "noul",
+      "instructions": "Does this passage commit to future action or a decision?"
+    }
+  },
+  "interpretationNotes": "Provider confidence stored separately; never grants permission."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "passage.correction",
+  "version": "1",
+  "title": "Passage is a correction",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this passage correct or retract an earlier statement?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "stateRequirements": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "correction": {
+      "type": "noul",
+      "instructions": "Does this passage correct or retract an earlier statement?"
+    }
+  },
+  "interpretationNotes": "Provider confidence stored separately; never grants permission."
+}

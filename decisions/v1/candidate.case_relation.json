@@ -1,0 +1,39 @@
+{
+  "id": "candidate.case_relation",
+  "version": "1",
+  "title": "Candidate relates to an open case",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "How does this candidate relate to the open case?",
+  "criteria": {
+    "yes": "Clearly related to the open case",
+    "no": "Not related",
+    "unclear": "Relation cannot be determined"
+  },
+  "requiredStateSchema": [
+    "candidate.text",
+    "case.objective",
+    "case.sourceRefs"
+  ],
+  "stateRequirements": [
+    "candidate.text",
+    "case.objective",
+    "case.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "case_relation": {
+      "type": "choice",
+      "instructions": "How does this candidate relate to the open case?",
+      "criteria": {
+        "yes": "Clearly related to the open case",
+        "no": "Not related",
+        "unclear": "Relation cannot be determined"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

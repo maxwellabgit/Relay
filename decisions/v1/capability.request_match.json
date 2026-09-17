@@ -1,0 +1,37 @@
+{
+  "id": "capability.request_match",
+  "version": "1",
+  "title": "Capability match for a request",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "Does any capability candidate match this request?",
+  "criteria": {
+    "candidates": "One or more capability candidates match",
+    "none": "No matching capability",
+    "unclear": "Match is unclear"
+  },
+  "requiredStateSchema": [
+    "request.text",
+    "capabilityCandidates"
+  ],
+  "stateRequirements": [
+    "request.text",
+    "capabilityCandidates"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "request_match": {
+      "type": "choice",
+      "instructions": "Does any capability candidate match this request?",
+      "criteria": {
+        "candidates": "One or more capability candidates match",
+        "none": "No matching capability",
+        "unclear": "Match is unclear"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

@@ -1,0 +1,37 @@
+{
+  "id": "reference.resolution",
+  "version": "1",
+  "title": "Resolve a reference",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "Which referent, if any, does this reference resolve to?",
+  "criteria": {
+    "candidates": "One or more concrete candidates match",
+    "none": "No matching referent",
+    "unclear": "Insufficient to resolve"
+  },
+  "requiredStateSchema": [
+    "reference.text",
+    "candidateRefs"
+  ],
+  "stateRequirements": [
+    "reference.text",
+    "candidateRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "resolution": {
+      "type": "choice",
+      "instructions": "Which referent, if any, does this reference resolve to?",
+      "criteria": {
+        "candidates": "One or more concrete candidates match",
+        "none": "No matching referent",
+        "unclear": "Insufficient to resolve"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

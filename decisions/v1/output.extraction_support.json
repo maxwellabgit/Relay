@@ -1,0 +1,41 @@
+{
+  "id": "output.extraction_support",
+  "version": "1",
+  "title": "Extraction support",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "Is this extraction supported by the cited passages?",
+  "criteria": {
+    "supported": "Fully supported by cited sources",
+    "unsupported": "Not supported by cited sources",
+    "insufficient": "Evidence insufficient",
+    "unclear": "Support cannot be determined"
+  },
+  "requiredStateSchema": [
+    "output.text",
+    "output.sourceRefs",
+    "passages"
+  ],
+  "stateRequirements": [
+    "output.text",
+    "output.sourceRefs",
+    "passages"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "extraction_support": {
+      "type": "choice",
+      "instructions": "Is this extraction supported by the cited passages?",
+      "criteria": {
+        "supported": "Fully supported by cited sources",
+        "unsupported": "Not supported by cited sources",
+        "insufficient": "Evidence insufficient",
+        "unclear": "Support cannot be determined"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

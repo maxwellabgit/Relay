@@ -1,0 +1,28 @@
+{
+  "id": "passage.explicit_urgency",
+  "version": "1",
+  "title": "Passage expresses explicit urgency",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this passage express explicit urgency or time pressure?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "stateRequirements": [
+    "passage.text",
+    "passage.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "explicit_urgency": {
+      "type": "noul",
+      "instructions": "Does this passage express explicit urgency or time pressure?"
+    }
+  },
+  "interpretationNotes": "Urgency never grants permission or overrides conflict; permissions are independent of semantics."
+}

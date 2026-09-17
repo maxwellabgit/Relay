@@ -1,0 +1,43 @@
+{
+  "id": "evidence.claim_relation",
+  "version": "1",
+  "title": "Evidence relation to a claim",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "How does this evidence relate to the claim?",
+  "criteria": {
+    "supports": "Evidence supports the claim",
+    "contradicts": "Evidence contradicts the claim",
+    "unrelated": "Evidence is unrelated",
+    "insufficient": "Evidence is insufficient to judge"
+  },
+  "requiredStateSchema": [
+    "claim.text",
+    "evidence.text",
+    "claim.sourceRefs",
+    "evidence.sourceRefs"
+  ],
+  "stateRequirements": [
+    "claim.text",
+    "evidence.text",
+    "claim.sourceRefs",
+    "evidence.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "claim_relation": {
+      "type": "choice",
+      "instructions": "How does this evidence relate to the claim?",
+      "criteria": {
+        "supports": "Evidence supports the claim",
+        "contradicts": "Evidence contradicts the claim",
+        "unrelated": "Evidence is unrelated",
+        "insufficient": "Evidence is insufficient to judge"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

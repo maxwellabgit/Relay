@@ -1,0 +1,28 @@
+{
+  "id": "job.reference_interpretation",
+  "version": "1",
+  "title": "Local job: reference interpretation needed",
+  "purpose": "judgment",
+  "primitive": "noul",
+  "instructions": "Does this job require interpreting references before acting?",
+  "criteria": null,
+  "requiredStateSchema": [
+    "job.task",
+    "job.inputs"
+  ],
+  "stateRequirements": [
+    "job.task",
+    "job.inputs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_uncertain",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "reference_interpretation": {
+      "type": "noul",
+      "instructions": "Does this job require interpreting references before acting?"
+    }
+  },
+  "interpretationNotes": "Provider confidence stored separately; never grants permission."
+}

@@ -1,0 +1,37 @@
+{
+  "id": "context.target_identified",
+  "version": "1",
+  "title": "Target identified in context",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "Is the decision target established in context?",
+  "criteria": {
+    "established": "Target is established",
+    "missing": "Target is missing",
+    "conflicting": "Targets conflict"
+  },
+  "requiredStateSchema": [
+    "context.excerpts",
+    "decision.targetHint"
+  ],
+  "stateRequirements": [
+    "context.excerpts",
+    "decision.targetHint"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "target_identified": {
+      "type": "choice",
+      "instructions": "Is the decision target established in context?",
+      "criteria": {
+        "established": "Target is established",
+        "missing": "Target is missing",
+        "conflicting": "Targets conflict"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

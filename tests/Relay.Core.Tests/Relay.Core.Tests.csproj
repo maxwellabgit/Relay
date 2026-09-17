@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\Relay.Core\Relay.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\decisions\v1\**\*" Link="decisions\v1\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,39 @@
+{
+  "id": "output.criterion_satisfied",
+  "version": "1",
+  "title": "Completion criterion satisfied",
+  "purpose": "judgment",
+  "primitive": "choice",
+  "instructions": "Is this completion criterion satisfied?",
+  "criteria": {
+    "satisfied": "Criterion is satisfied",
+    "unsatisfied": "Criterion is not satisfied",
+    "unclear": "Cannot determine"
+  },
+  "requiredStateSchema": [
+    "criterion.text",
+    "output.text",
+    "output.sourceRefs"
+  ],
+  "stateRequirements": [
+    "criterion.text",
+    "output.text",
+    "output.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "threshold_v1",
+  "uncertainNoFitBehavior": "return_unclear_or_no_fit",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "criterion_satisfied": {
+      "type": "choice",
+      "instructions": "Is this completion criterion satisfied?",
+      "criteria": {
+        "satisfied": "Criterion is satisfied",
+        "unsatisfied": "Criterion is not satisfied",
+        "unclear": "Cannot determine"
+      }
+    }
+  },
+  "interpretationNotes": "Win probability and margin thresholds apply; no highest-confidence-wins."
+}

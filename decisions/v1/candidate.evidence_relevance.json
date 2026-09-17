@@ -1,0 +1,41 @@
+{
+  "id": "candidate.evidence_relevance",
+  "version": "1",
+  "title": "Evidence relevance of a candidate",
+  "purpose": "judgment",
+  "primitive": "score",
+  "instructions": "How relevant is this candidate as evidence for the decision?",
+  "criteria": [
+    "unrelated",
+    "background",
+    "partial",
+    "direct"
+  ],
+  "requiredStateSchema": [
+    "candidate.text",
+    "decision.target",
+    "candidate.sourceRefs"
+  ],
+  "stateRequirements": [
+    "candidate.text",
+    "decision.target",
+    "candidate.sourceRefs"
+  ],
+  "applicability": "when_state_satisfies_schema",
+  "interpretationPolicy": "rank_preserve_refs_v1",
+  "uncertainNoFitBehavior": "preserve_exact_refs_and_conflicts",
+  "evaluationDatasetVersion": "eval-v1",
+  "questions": {
+    "evidence_relevance": {
+      "type": "score",
+      "instructions": "How relevant is this candidate as evidence for the decision?",
+      "criteria": [
+        "unrelated",
+        "background",
+        "partial",
+        "direct"
+      ]
+    }
+  },
+  "interpretationNotes": "Rank by score; preserve exact refs and conflicts; never average away unsupported claims."
+}
