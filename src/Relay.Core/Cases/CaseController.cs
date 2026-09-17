@@ -210,17 +210,22 @@ public sealed class LegacyMindBridgeController : ICaseController
                 break;
         }
 
-        // Segment coverage for listening cases (explicit segmentId preferred).
-        if (snapshot.Origin == CaseOrigin.Observed)
+        // Segment coverage for listening cases — only with explicit segmentId (§9).
+        if (snapshot.Origin == CaseOrigin.Observed
+            && step.Move.Args.TryGetValue("segmentId", out var segEl)
+            && segEl.ValueKind == JsonValueKind.String
+            && segEl.GetString() is { Length: > 0 } explicitSegmentId)
         {
+            string? windowId = null;
+            if (step.Move.Args.TryGetValue("windowId", out var winEl) && winEl.ValueKind == JsonValueKind.String)
+                windowId = winEl.GetString();
             events.Add(new CaseDomainEvent
             {
                 Type = CaseDomainEventTypes.SegmentHandled,
                 Payload = JsonSerializer.SerializeToElement(new
                 {
-                    segmentId = step.Move.Args.TryGetValue("segmentId", out var seg) && seg.ValueKind == JsonValueKind.String
-                        ? seg.GetString()
-                        : null,
+                    segmentId = explicitSegmentId,
+                    windowId,
                 }),
             });
         }

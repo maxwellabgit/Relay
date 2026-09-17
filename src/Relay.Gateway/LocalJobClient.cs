@@ -20,12 +20,15 @@ public sealed class LocalJobClient
         if (_model is null)
             throw new InvalidOperationException("No local model client bound.");
 
-        var response = await _model.CompleteAsync(new ModelRequest
-        {
-            System = "You perform bounded local extraction/drafting jobs. Do not claim external judgments. Cite source artifact ids when required.",
-            User = prompt,
-            MaxTokens = Math.Min(2048, Math.Max(64, job.OutputCharLimit / 4)),
-        }, cancellationToken).ConfigureAwait(false);
+        var maxTokens = Math.Min(2048, Math.Max(64, job.OutputCharLimit / 4));
+        var response = await _model.CompleteAsync(new ModelRequest(
+            _model.Model,
+            [
+                new ModelMessage("system", "You perform bounded local extraction/drafting jobs. Do not claim external judgments. Cite source artifact ids when required."),
+                new ModelMessage("user", prompt),
+            ],
+            maxTokens,
+            JsonObject: job.OutputSchema.Contains("json", StringComparison.OrdinalIgnoreCase)), cancellationToken).ConfigureAwait(false);
 
         if (!response.Ok)
             throw new InvalidOperationException(response.Error ?? "local_job_failed");

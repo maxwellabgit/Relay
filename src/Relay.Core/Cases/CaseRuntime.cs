@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Relay.Core.Ids;
+using Relay.Core.Listening;
 using Relay.Core.Policy;
 using Relay.Core.Storage;
 using Relay.Core.Time;
@@ -30,6 +31,8 @@ public sealed partial class CaseRuntime : IDisposable
     private readonly CaseLocalContext _local;
     private readonly OperationBroker _broker;
     private readonly StreamIntake _intake;
+    private readonly ListeningWindowStore _listeningWindows;
+    private readonly ListeningController _listening;
     private readonly ResearchBroker? _research;
     private readonly ResearchServices _researchServices;
     private readonly ToolWorkflowBroker? _tools;
@@ -70,6 +73,8 @@ public sealed partial class CaseRuntime : IDisposable
         _local = local ?? new CaseLocalContext(root, clock);
         _broker = new OperationBroker(_local, _objects, clock, _onSideEffect);
         _intake = new StreamIntake(root, _objects, _cases, clock);
+        _listeningWindows = new ListeningWindowStore(root, clock);
+        _listening = new ListeningController(_listeningWindows, clock);
         _research = _researchServices.Search is not null || _researchServices.Delegate is not null
             ? new ResearchBroker(root, _objects, clock, _researchServices)
             : null;
@@ -96,6 +101,8 @@ public sealed partial class CaseRuntime : IDisposable
     public ProjectionDatabase Projections => _projections;
     public CaseLocalContext Local => _local;
     public StreamIntake Intake => _intake;
+    public ListeningController Listening => _listening;
+    public ListeningWindowStore ListeningWindows => _listeningWindows;
     public ResearchBroker? Research => _research;
     public ToolWorkflowBroker? Tools => _tools;
     public HostedAuthorization Hosted => _hosted;
@@ -274,7 +281,10 @@ public sealed partial class CaseRuntime : IDisposable
             state = new ListeningSessionState
             {
                 CaseId = id,
+                SessionId = id,
                 Active = true,
+                CaptureEnabled = true,
+                RetentionPolicy = "transcript_30d",
                 UpdatedAt = now,
             };
             _intake.SaveState(state);
@@ -294,7 +304,7 @@ public sealed partial class CaseRuntime : IDisposable
         {
             var listening = StartListeningUnlocked();
             var at = ts ?? _clock.UtcNow;
-            var (segmentId, stored, payload) = _intake.PrepareSegment(text, at, speaker);
+            var (segmentId, sequence, stored, payload) = _intake.PrepareSegment(text, at, speaker);
 
             var evt = AppendEvent(listening, CaseEventTypes.SegmentIngested, payload);
             listening.ProcessedEventIds.Add(evt.EventId);
@@ -311,11 +321,24 @@ public sealed partial class CaseRuntime : IDisposable
 
             var state = _intake.LoadState();
             state.CaseId = listening.Id;
+            state.SessionId ??= listening.Id;
             state.Active = true;
+            state.CaptureEnabled = true;
             if (!state.IngestedSegmentIds.Contains(segmentId))
                 state.IngestedSegmentIds.Add(segmentId);
             if (!state.PendingMindSegmentIds.Contains(segmentId))
                 state.PendingMindSegmentIds.Add(segmentId);
+
+            // Durable windows: form/extend coverage from full backlog (not recent-32 only).
+            var sessionId = state.SessionId ?? listening.Id;
+            var sequenced = _intake.ToSequenced(listening.Id);
+            var covered = _listening.CoveredPrimarySegmentIds(sessionId);
+            var windows = _listening.FormWindows(sessionId, listening.Id, sequenced, covered);
+            foreach (var w in windows)
+            {
+                if (!state.PendingWindowIds.Contains(w.WindowId))
+                    state.PendingWindowIds.Add(w.WindowId);
+            }
             _intake.SaveState(state);
 
             if (listening.Status == CaseStatus.Active)
@@ -333,7 +356,7 @@ public sealed partial class CaseRuntime : IDisposable
 
             _diagnostics.Write(at, "info", "CaseRuntime", "segment_ingested",
                 caseId: listening.Id, caseVersion: listening.Version, resultRef: stored.ObjectId);
-            return new ListeningSegmentView(segmentId, evt.EventId, stored.ObjectId, stored.Sha256, at, speaker, text);
+            return new ListeningSegmentView(segmentId, evt.EventId, stored.ObjectId, stored.Sha256, at, speaker, text, sequence);
         }
     }
 
@@ -375,7 +398,15 @@ public sealed partial class CaseRuntime : IDisposable
         var evt = AppendEvent(record, CaseEventTypes.ListeningStarted, new { at = now });
         record.ProcessedEventIds.Add(evt.EventId);
         PersistRecord(record);
-        _intake.SaveState(new ListeningSessionState { CaseId = id, Active = true, UpdatedAt = now });
+        _intake.SaveState(new ListeningSessionState
+        {
+            CaseId = id,
+            SessionId = id,
+            Active = true,
+            CaptureEnabled = true,
+            RetentionPolicy = "transcript_30d",
+            UpdatedAt = now,
+        });
         return record;
     }
 
@@ -844,6 +875,10 @@ public sealed partial class CaseRuntime : IDisposable
             caseId: parent.Id, caseVersion: parent.Version, status: parent.Status);
     }
 
+    /// <summary>
+    /// Marks segments handled only when explicit coverage (segmentId) is provided.
+    /// The former first-pending fallback without explicit coverage is removed (§9).
+    /// </summary>
     private void MarkListeningSegmentsHandled(CaseRecord record, CaseMove move)
     {
         if (record.Origin != CaseOrigin.Observed) return;
@@ -854,12 +889,9 @@ public sealed partial class CaseRuntime : IDisposable
         {
             var id = seg.GetString();
             if (id is not null) state.PendingMindSegmentIds.Remove(id);
+            _intake.SaveState(state);
         }
-        else if (state.PendingMindSegmentIds.Count > 0)
-        {
-            state.PendingMindSegmentIds.RemoveAt(0);
-        }
-        _intake.SaveState(state);
+        // No fallback: do not mark the first pending segment without explicit coverage.
     }
 
     private static string ResolveAttention(CaseRecord record, CaseMove move, string feed)

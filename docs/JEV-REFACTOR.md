@@ -71,10 +71,10 @@ Production interface: `ICaseController.Handle(CaseSnapshot, CaseInput) → CaseT
 1. Baseline (this document + VERIFICATION + JEV-DECISIONS) — done
 2. Persistence and asynchronous execution (controller, outbox, cancel/dispatch split) — done
 3. Provenance and hosted authorization — done
-4. Real Jev transport with strict fixtures — current
-5. Atomic decisions composed in code
-6. Context retrieval and local jobs
-7. Durable listening windows
+4. Real Jev transport with strict fixtures — done
+5. Atomic decisions composed in code — done
+6. Context retrieval and local jobs — done
+7. Durable listening windows — done
 8. Production workflows (recall, plan impact, research, improvement)
 9. Retention and capability bundles
 10. Desktop binding and diagnostics

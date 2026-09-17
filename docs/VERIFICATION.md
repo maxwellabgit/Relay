@@ -54,9 +54,9 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 | Persistence / async outbox tests (§4) | **Passed** — `AsyncPersistenceTests` 13/13; full `Relay.Core.Tests` 46/46 | deterministic |
 | Provenance / grant tests (§5) | **Passed** — `ProvenanceGrantTests` 11/11 | deterministic |
 | Jev transport fixture tests (§6) | **Passed** — `Relay.Gateway.Tests` 18/18 | fixture |
-| Decision catalog tests (§7) | pending | deterministic |
-| Context / local jobs tests (§8) | pending | deterministic |
-| Listening window tests (§9) | pending | deterministic |
+| Decision catalog tests (§7) | **Passed** — `DecisionPolicyTests` 9/9 | deterministic |
+| Context / local jobs tests (§8) | **Passed** — `ContextAndLocalJobTests` 10/10 | deterministic |
+| Listening window tests (§9) | **Passed** — `ListeningWindowTests` 9/9 | deterministic |
 | Workflow tests (§10) | pending | deterministic / fixture |
 | Retention / capability tests (§11) | pending | deterministic |
 | Desktop composition (§12) | pending | deterministic (headless); windows-live separate |
@@ -83,3 +83,23 @@ Baseline results are recorded. Subsequent failures can be distinguished from the
 - Malformed provider payloads → `provider_contract_error` (never invented answers).
 - Live preflight without a key fails explicitly.
 - `decisions/v1/` stubs present for catalog load; full catalog content is §7.
+
+### §7 notes
+
+- `DecisionPolicyTests` **9/9**; catalog loads all 20 PDF decision ids under `decisions/v1/`.
+- Thresholds: Noul ≥0.8 / ≤0.2; Choice win ≥0.8 and margin ≥0.2; Score ranks with preserved refs/conflicts.
+- Permissions independent of semantics; urgency cannot grant permission or override conflicts.
+
+### §8 notes
+
+- `ContextAndLocalJobTests` **10/10**; bounds ≤20 candidates / ≤8 excerpts / ≤24000 state chars.
+- Mandatory overflow → `context_too_large` / split (no silent truncate); hosted filtering before rerank.
+- Local jobs never invoke tools; Jev unavailability never enables local judgment fallback.
+- Resolution rounds persist by logical decision id; transport retries do not advance rounds.
+
+### §9 notes
+
+- `ListeningWindowTests` **9/9** including 120-segment outage/restart with no coverage gaps.
+- `StreamIntake` is capture-only; durable windows via `ListeningController` / `ListeningWindowStore`.
+- Removed first-pending `MarkListeningSegmentsHandled` / `ApplySegmentHandled` fallback without explicit `segmentId`.
+- Full suite: `Relay.Core.Tests` **85/85**; `Relay.Gateway.Tests` **18/18**; harness slice1–7 **PASS**.

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Relay.Core.Ids;
+using Relay.Core.Listening;
 using Relay.Core.Policy;
 
 namespace Relay.Core.Cases;
@@ -663,10 +664,19 @@ public sealed partial class CaseRuntime
         var state = _intake.LoadState();
         if (state.CaseId != record.Id) return;
         var segId = PayloadString(command, "segmentId");
-        if (segId is not null)
-            state.PendingMindSegmentIds.Remove(segId);
-        else if (state.PendingMindSegmentIds.Count > 0)
-            state.PendingMindSegmentIds.RemoveAt(0);
+        // Explicit coverage required — no first-pending fallback (§9).
+        if (segId is null) return;
+        state.PendingMindSegmentIds.Remove(segId);
+
+        var windowId = PayloadString(command, "windowId");
+        if (windowId is not null)
+        {
+            _listening.MarkCovered(windowId, [segId]);
+            var window = _listeningWindows.TryLoad(windowId);
+            if (window?.Status == ListeningWindowStatus.Completed)
+                state.PendingWindowIds.Remove(windowId);
+        }
+
         _intake.SaveState(state);
     }
 
@@ -676,14 +686,26 @@ public sealed partial class CaseRuntime
         var state = _intake.LoadState();
         if (state.CaseId != record.Id) return;
         string? segId = null;
-        if (domainEvent.Payload.ValueKind == JsonValueKind.Object
-            && domainEvent.Payload.TryGetProperty("segmentId", out var seg)
-            && seg.ValueKind == JsonValueKind.String)
-            segId = seg.GetString();
-        if (segId is not null)
-            state.PendingMindSegmentIds.Remove(segId);
-        else if (state.PendingMindSegmentIds.Count > 0)
-            state.PendingMindSegmentIds.RemoveAt(0);
+        string? windowId = null;
+        if (domainEvent.Payload.ValueKind == JsonValueKind.Object)
+        {
+            if (domainEvent.Payload.TryGetProperty("segmentId", out var seg)
+                && seg.ValueKind == JsonValueKind.String)
+                segId = seg.GetString();
+            if (domainEvent.Payload.TryGetProperty("windowId", out var win)
+                && win.ValueKind == JsonValueKind.String)
+                windowId = win.GetString();
+        }
+        // Explicit coverage required — no first-pending fallback (§9).
+        if (segId is null) return;
+        state.PendingMindSegmentIds.Remove(segId);
+        if (windowId is not null)
+        {
+            _listening.MarkCovered(windowId, [segId]);
+            var window = _listeningWindows.TryLoad(windowId);
+            if (window?.Status == ListeningWindowStatus.Completed)
+                state.PendingWindowIds.Remove(windowId);
+        }
         _intake.SaveState(state);
     }
 
@@ -740,7 +762,7 @@ public sealed partial class CaseRuntime
             .Cast<OperationEnvelope>()
             .ToList();
         var segments = record.Origin == CaseOrigin.Observed
-            ? _intake.LoadRecentSegments(record.Id)
+            ? FilterPendingSegments(record.Id)
             : (IReadOnlyList<ListeningSegmentView>)[];
         var availableTools = _tools?.Tools.Descriptors().Select(d => d.Name).ToList()
             ?? new List<string>();
@@ -782,6 +804,16 @@ public sealed partial class CaseRuntime
             At = _clock.UtcNow,
             StepsUsed = record.Budgets.StepsUsed,
         };
+    }
+
+    private IReadOnlyList<ListeningSegmentView> FilterPendingSegments(string caseId)
+    {
+        // Full backlog for durability; mind/controller only see uncovered/pending coverage.
+        var all = _intake.LoadAllSegments(caseId);
+        var state = _intake.LoadState();
+        if (state.PendingMindSegmentIds.Count == 0) return [];
+        var pending = new HashSet<string>(state.PendingMindSegmentIds, StringComparer.Ordinal);
+        return all.Where(s => pending.Contains(s.SegmentId)).OrderBy(s => s.Sequence).ToList();
     }
 
     private static string? PayloadString(RuntimeCommand command, string key)

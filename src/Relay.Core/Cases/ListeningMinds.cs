@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Relay.Core.Listening;
 using Relay.Core.Policy;
 
 namespace Relay.Core.Cases;
@@ -24,19 +25,28 @@ public sealed class OriginRoutingMind : ICaseMind
 }
 
 /// <summary>
-/// Slice 3 scripted listening mind: acronym → persistent say; ideation → raise_task;
-/// correction → propose modify_note; otherwise wait. Never stops the listening case.
+/// Historical slice-3 harness bridge. Semantic coverage is owned by <see cref="ListeningController"/>;
+/// this mind only maps already-captured window text to deterministic moves for old harness scenarios.
+/// Keyword heuristics are retained temporarily — see docs/JEV-DECISIONS.md (§9).
+/// Production orchestration must not rely on this mind.
 /// </summary>
 public sealed class ListeningScriptedMind : ICaseMind
 {
     private readonly string? _correctionNoteId;
     private readonly string? _correctionProjectId;
-    private readonly HashSet<string> _handledSegmentIds = new(StringComparer.Ordinal);
+    private readonly ListeningController? _listening;
+    private readonly Func<string?>? _sessionId;
 
-    public ListeningScriptedMind(string? correctionProjectId = null, string? correctionNoteId = null)
+    public ListeningScriptedMind(
+        string? correctionProjectId = null,
+        string? correctionNoteId = null,
+        ListeningController? listening = null,
+        Func<string?>? sessionId = null)
     {
         _correctionProjectId = correctionProjectId;
         _correctionNoteId = correctionNoteId;
+        _listening = listening;
+        _sessionId = sessionId;
     }
 
     public string Name => "scripted-listening";
@@ -53,10 +63,9 @@ public sealed class ListeningScriptedMind : ICaseMind
                 "Waiting on observed proposal."));
         }
 
-        var fresh = request.RecentSegments
-            .Where(s => !_handledSegmentIds.Contains(s.SegmentId))
-            .ToList();
-        if (fresh.Count == 0)
+        // Prefer older uncovered segments (controller path); never invent coverage without segmentId.
+        var segment = SelectNextSegment(request);
+        if (segment is null)
         {
             return Task.FromResult(Step(
                 "quiet",
@@ -64,9 +73,8 @@ public sealed class ListeningScriptedMind : ICaseMind
                 "Listening."));
         }
 
-        var segment = fresh[^1];
-        _handledSegmentIds.Add(segment.SegmentId);
         var text = segment.Text;
+        var windowId = TryPendingWindowId(segment.SegmentId);
 
         if (LooksLikeAcronym(text, out var expansion))
         {
@@ -75,12 +83,7 @@ public sealed class ListeningScriptedMind : ICaseMind
                 Type = CaseMove.Say,
                 Text = expansion,
                 Done = false,
-                Args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-                {
-                    ["attention"] = JsonSerializer.SerializeToElement("persistent"),
-                    ["segmentId"] = JsonSerializer.SerializeToElement(segment.SegmentId),
-                    ["sourceEventId"] = JsonSerializer.SerializeToElement(segment.EventId),
-                },
+                Args = ArgsWithCoverage(segment, windowId, ("attention", "persistent")),
             };
             return Task.FromResult(Step("acronym", say, expansion));
         }
@@ -88,15 +91,13 @@ public sealed class ListeningScriptedMind : ICaseMind
         if (LooksLikeCorrection(text) && _correctionNoteId is not null && _correctionProjectId is not null)
         {
             var body = ExtractCorrectedBody(text);
-            var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["capability"] = JsonSerializer.SerializeToElement(Actions.ModifyNote),
-                ["idempotencyKey"] = JsonSerializer.SerializeToElement("listen-correct-" + segment.SegmentId),
-                ["projectId"] = JsonSerializer.SerializeToElement(_correctionProjectId),
-                ["noteId"] = JsonSerializer.SerializeToElement(_correctionNoteId),
-                ["body"] = JsonSerializer.SerializeToElement(body),
-                ["sourceSegmentId"] = JsonSerializer.SerializeToElement(segment.SegmentId),
-            };
+            var args = ArgsWithCoverage(segment, windowId,
+                ("capability", Actions.ModifyNote),
+                ("idempotencyKey", "listen-correct-" + segment.SegmentId),
+                ("projectId", _correctionProjectId),
+                ("noteId", _correctionNoteId),
+                ("body", body),
+                ("sourceSegmentId", segment.SegmentId));
             return Task.FromResult(Step(
                 "correct earlier note",
                 new CaseMove
@@ -112,13 +113,10 @@ public sealed class ListeningScriptedMind : ICaseMind
         if (LooksLikeIdeation(text))
         {
             var objective = "Follow up on: " + TrimTo(text, 160);
-            var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["objective"] = JsonSerializer.SerializeToElement(objective),
-                ["kind"] = JsonSerializer.SerializeToElement(CaseKind.Remember),
-                ["segmentId"] = JsonSerializer.SerializeToElement(segment.SegmentId),
-                ["sourceEventId"] = JsonSerializer.SerializeToElement(segment.EventId),
-            };
+            var args = ArgsWithCoverage(segment, windowId,
+                ("objective", objective),
+                ("kind", CaseKind.Remember),
+                ("sourceEventId", segment.EventId));
             return Task.FromResult(Step(
                 "raise work from talk",
                 new CaseMove
@@ -130,7 +128,6 @@ public sealed class ListeningScriptedMind : ICaseMind
                 "Raising a task from the conversation."));
         }
 
-        // Low-signal chatter: ambient acknowledgment, keep listening.
         return Task.FromResult(Step(
             "ambient",
             new CaseMove
@@ -138,13 +135,62 @@ public sealed class ListeningScriptedMind : ICaseMind
                 Type = CaseMove.Say,
                 Text = "Noted.",
                 Done = false,
-                Args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-                {
-                    ["attention"] = JsonSerializer.SerializeToElement("ambient"),
-                    ["segmentId"] = JsonSerializer.SerializeToElement(segment.SegmentId),
-                },
+                Args = ArgsWithCoverage(segment, windowId, ("attention", "ambient")),
             },
             "Ambient note."));
+    }
+
+    private ListeningSegmentView? SelectNextSegment(CaseMindRequest request)
+    {
+        var ordered = request.RecentSegments.OrderBy(s => s.Sequence).ThenBy(s => s.Ts).ToList();
+        if (ordered.Count == 0) return null;
+
+        var sessionId = _sessionId?.Invoke() ?? request.CaseId;
+        if (_listening is not null)
+        {
+            // Process oldest pending window's primary segments first.
+            var pending = _listening.PendingThroughOutage(sessionId);
+            foreach (var window in pending)
+            {
+                foreach (var id in window.Primary.SegmentIds)
+                {
+                    var match = ordered.FirstOrDefault(s => s.SegmentId == id);
+                    if (match is not null) return match;
+                }
+            }
+            // All windows completed/absent — nothing to process.
+            return null;
+        }
+
+        // Bridge without injected controller: oldest segment (explicit coverage still required on moves).
+        return ordered[0];
+    }
+
+    private string? TryPendingWindowId(string segmentId)
+    {
+        if (_listening is null) return null;
+        var sessionId = _sessionId?.Invoke();
+        if (sessionId is null) return null;
+        return _listening.Store.ListPending(sessionId)
+            .FirstOrDefault(w => w.Primary.ContainsSegment(segmentId))
+            ?.WindowId;
+    }
+
+    private static Dictionary<string, JsonElement> ArgsWithCoverage(
+        ListeningSegmentView segment,
+        string? windowId,
+        params (string Key, string Value)[] extras)
+    {
+        var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["segmentId"] = JsonSerializer.SerializeToElement(segment.SegmentId),
+            ["sourceEventId"] = JsonSerializer.SerializeToElement(segment.EventId),
+        };
+        if (windowId is not null)
+            args["windowId"] = JsonSerializer.SerializeToElement(windowId);
+        foreach (var (key, value) in extras)
+            args[key] = JsonSerializer.SerializeToElement(value);
+        return args;
     }
 
     private static CaseMindStep Step(string intent, CaseMove move, string feed) => new(
@@ -155,7 +201,6 @@ public sealed class ListeningScriptedMind : ICaseMind
     private static bool LooksLikeAcronym(string text, out string expansion)
     {
         expansion = "";
-        // e.g. "API means Application Programming Interface"
         var lower = text.ToLowerInvariant();
         if (lower.Contains(" means ", StringComparison.Ordinal) || lower.Contains(" stands for ", StringComparison.Ordinal))
         {
@@ -189,7 +234,6 @@ public sealed class ListeningScriptedMind : ICaseMind
 
     private static string ExtractCorrectedBody(string text)
     {
-        // Prefer an explicit replacement after "actually" / "correction:"
         var markers = new[] { "correction:", "actually,", "actually ", "i meant " };
         var lower = text.ToLowerInvariant();
         foreach (var m in markers)

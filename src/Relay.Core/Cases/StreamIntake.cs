@@ -1,18 +1,29 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Relay.Core.Ids;
+using Relay.Core.Listening;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 
 namespace Relay.Core.Cases;
 
-/// <summary>Persisted listening-session pointer so an interrupted stream can resume after restart.</summary>
+/// <summary>
+/// Persisted listening-session pointer so an interrupted stream can resume after restart.
+/// Capture state only — semantic processing lives in <see cref="ListeningController"/>.
+/// </summary>
 public sealed class ListeningSessionState
 {
     [JsonPropertyName("caseId")] public string? CaseId { get; set; }
+    [JsonPropertyName("sessionId")] public string? SessionId { get; set; }
     [JsonPropertyName("active")] public bool Active { get; set; }
+    /// <summary>Independent of hosted processing — capture may continue during Jev outages.</summary>
+    [JsonPropertyName("captureEnabled")] public bool CaptureEnabled { get; set; } = true;
+    [JsonPropertyName("hostedGrantId")] public string? HostedGrantId { get; set; }
+    [JsonPropertyName("nextSegmentSequence")] public int NextSegmentSequence { get; set; }
+    [JsonPropertyName("pendingWindowIds")] public List<string> PendingWindowIds { get; set; } = [];
+    [JsonPropertyName("retentionPolicy")] public string RetentionPolicy { get; set; } = "transcript_30d";
     [JsonPropertyName("ingestedSegmentIds")] public List<string> IngestedSegmentIds { get; set; } = [];
-    /// <summary>Segments written to the object store and case log but not yet stepped by the mind.</summary>
+    /// <summary>Segments written to the object store and case log but not yet covered by a completed window.</summary>
     [JsonPropertyName("pendingMindSegmentIds")] public List<string> PendingMindSegmentIds { get; set; } = [];
     [JsonPropertyName("updatedAt")] public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -25,11 +36,13 @@ public sealed record ListeningSegmentView(
     string Sha256,
     DateTimeOffset Ts,
     string? Speaker,
-    string Text);
+    string Text,
+    int Sequence = 0,
+    bool Finalized = true);
 
 /// <summary>
 /// Dictation / Wispr Flow input adapter: persist timestamped segments to the object store first,
-/// then open or extend a long-lived observed case. Not a second mind loop.
+/// then open or extend a long-lived observed case. Capture only — no semantic processing.
 /// </summary>
 public sealed class StreamIntake
 {
@@ -64,6 +77,8 @@ public sealed class StreamIntake
         lock (_gate)
         {
             state.UpdatedAt = _clock.UtcNow;
+            if (string.IsNullOrEmpty(state.SessionId) && state.CaseId is not null)
+                state.SessionId = state.CaseId;
             Directory.CreateDirectory(_root.StreamDirectory);
             AtomicFile.WriteAllText(SessionPath, JsonSerializer.Serialize(state, RelayJson.Indented));
         }
@@ -71,35 +86,49 @@ public sealed class StreamIntake
 
     /// <summary>
     /// Writes segment bytes to the object store, then returns refs for the case event.
-    /// Callers must persist the case event before treating the segment as ingested for the mind.
+    /// Callers must persist the case event before treating the segment as ingested for coverage.
     /// </summary>
-    public (string SegmentId, StoredObject Stored, object EventPayload) PrepareSegment(
+    public (string SegmentId, int Sequence, StoredObject Stored, object EventPayload) PrepareSegment(
         string text,
         DateTimeOffset ts,
-        string? speaker)
+        string? speaker,
+        bool finalized = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        var state = LoadState();
+        if (!state.CaptureEnabled)
+            throw new InvalidOperationException("capture_disabled");
+
+        var sequence = state.NextSegmentSequence;
+        state.NextSegmentSequence = sequence + 1;
+        // Persist sequence bump immediately so restarts do not reuse sequences.
+        SaveState(state);
+
         var segmentId = Ulid.NewUlid(_clock.UtcNow);
         var blob = new
         {
             kind = SegmentObjectKind,
             segmentId,
+            sequence,
             ts,
             speaker,
             text,
+            finalized,
         };
         // Persist content BEFORE the case marks the segment ingested.
         var stored = _objects.PutJson(blob, objectId: segmentId);
         var payload = new
         {
             segmentId,
+            sequence,
             objectId = stored.ObjectId,
             sha256 = stored.Sha256,
             ts,
             speaker,
             charCount = text.Length,
+            finalized,
         };
-        return (segmentId, stored, payload);
+        return (segmentId, sequence, stored, payload);
     }
 
     public string? TryLoadSegmentText(string objectIdOrHash)
@@ -137,7 +166,20 @@ public sealed class StreamIntake
         return null;
     }
 
+    /// <summary>
+    /// Loads ALL ingested segments for a case (no recent-N truncation).
+    /// Processing backlog must never collapse to the most recent 32 only.
+    /// </summary>
+    public IReadOnlyList<ListeningSegmentView> LoadAllSegments(string caseId)
+        => LoadSegments(caseId, limit: null);
+
+    /// <summary>
+    /// Optional limited view for UI/diagnostics. Semantic processing must use <see cref="LoadAllSegments"/>.
+    /// </summary>
     public IReadOnlyList<ListeningSegmentView> LoadRecentSegments(string caseId, int limit = 32)
+        => LoadSegments(caseId, limit);
+
+    private IReadOnlyList<ListeningSegmentView> LoadSegments(string caseId, int? limit)
     {
         var events = _cases.LoadEvents(caseId);
         var list = new List<ListeningSegmentView>();
@@ -150,10 +192,23 @@ public sealed class StreamIntake
             var sha = p.TryGetProperty("sha256", out var h) ? h.GetString() ?? "" : "";
             var speaker = p.TryGetProperty("speaker", out var sp) && sp.ValueKind == JsonValueKind.String ? sp.GetString() : null;
             var ts = p.TryGetProperty("ts", out var tsEl) && tsEl.TryGetDateTimeOffset(out var dto) ? dto : evt.Ts;
+            var sequence = p.TryGetProperty("sequence", out var seqEl) && seqEl.TryGetInt32(out var seq) ? seq : list.Count;
+            var finalized = !p.TryGetProperty("finalized", out var fin) || fin.ValueKind != JsonValueKind.False;
             var text = TryLoadSegmentText(objectId) ?? "";
-            list.Add(new ListeningSegmentView(segmentId, evt.EventId, objectId, sha, ts, speaker, text));
+            list.Add(new ListeningSegmentView(segmentId, evt.EventId, objectId, sha, ts, speaker, text, sequence, finalized));
         }
-        if (list.Count <= limit) return list;
-        return list.TakeLast(limit).ToList();
+        if (limit is null || list.Count <= limit.Value) return list;
+        return list.TakeLast(limit.Value).ToList();
+    }
+
+    public IReadOnlyList<SequencedSegment> ToSequenced(string caseId)
+    {
+        var views = LoadAllSegments(caseId);
+        // Prefer finalized utterances when both interim and final exist for the same text span —
+        // keep chronological order; callers can filter Finalized.
+        return views
+            .OrderBy(v => v.Sequence)
+            .Select(v => new SequencedSegment(v.SegmentId, v.Sequence, v.Ts, v.Text, v.Speaker, v.Finalized))
+            .ToList();
     }
 }

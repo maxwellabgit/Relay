@@ -55,3 +55,14 @@ Update this file whenever a default is chosen or an old test expectation is inte
 | 2026-09-17 | §4 outbox + `LegacyMindBridgeController`; cancel-before-dispatch refuses execute | Spec §4; Slice4 expectation updated |
 | 2026-09-17 | §5 evidence + hosted grants; outbound policy before every hosted call | Spec §5; `hosted_eligible` ≠ permission |
 | 2026-09-17 | §6 TypeSafe Jev transport + Fixture/Replay clients; Gateway.Tests | Spec §6; live requires `TYPESAFE_API_KEY` |
+| 2026-09-17 | §7 DecisionPolicy thresholds; full `decisions/v1` catalog | Spec §7; permissions ≠ semantics |
+| 2026-09-17 | §8 ContextAssembler bounds + LocalJobDispatcher; no Jev fallback | Spec §8 |
+| 2026-09-17 | §9 ListeningController windows; StreamIntake capture-only | Spec §9 |
+| 2026-09-17 | `ListeningScriptedMind` retained as harness bridge with keyword heuristics; coverage via explicit `segmentId` / controller | Spec: bridge for old harness; document in this file |
+
+## §9 ListeningScriptedMind bridge
+
+- Production coverage is owned by `ListeningController` + durable windows.
+- `ListeningScriptedMind` remains for slice3 harness scenarios only: keyword → move mapping.
+- Segment handling requires explicit `segmentId` (and optional `windowId`); the old first-pending fallback is removed.
+- In-memory `_handledSegmentIds` was replaced by `PendingMindSegmentIds` filtering in `BuildSnapshot`.
