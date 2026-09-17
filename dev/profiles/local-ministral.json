@@ -1,0 +1,19 @@
+{
+  "name": "local-ministral",
+  "model": {
+    "endpoint": "http://127.0.0.1:8080/v1",
+    "modelId": "ministral-8b-instruct-2410-q4",
+    "apiStyle": "openai-compatible",
+    "maxTokens": 1024,
+    "temperature": 0.2
+  },
+  "search": {
+    "enabled": false,
+    "provider": null
+  },
+  "diagnostics": {
+    "preserveFocusedPayloads": true,
+    "jsonl": true
+  },
+  "notes": "Dev-only profile. preserveFocusedPayloads must never be silently enabled for the normal user profile."
+}

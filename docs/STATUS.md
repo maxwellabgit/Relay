@@ -24,8 +24,8 @@ Live runners must fail preflight or report `SKIPPED: missing local model`. They 
 | `CaseRuntime` + `OperationEnvelope` | Slice 1 | `Slice1RecoveryTests` + `Relay.DevHarness` |
 | Persistent ready queue | Slice 1 | SQLite `ready_queue` via `ReadyQueue` |
 | SQLite projections | Slice 1 | `ProjectionDatabase` under `projections/` |
-| Local harness (`dev/`) | Minimal | `src/Relay.DevHarness` (Slice 1 scenario) |
-| Direct vertical path (Slice 2) | Not yet | — |
+| Local harness (`dev/`) | Present | `dev/*.ps1` + `src/Relay.DevHarness` (Slice 1 scenario green) |
+| Direct vertical path (Slice 2) | In progress | — |
 | Listening adapter (Slice 3) | Not yet | — |
 | Research path (Slice 4) | Not yet | — |
 | Tool/workflow generalization (Slice 5) | Not yet | — |

@@ -8,6 +8,8 @@ It understands enabled conversations, direct requests, and connected workstreams
 
 This README is the essential target. It is not a status report.
 
+**Authoritative docs (vNext):** [`docs/PRODUCT.md`](docs/PRODUCT.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/STATUS.md`](docs/STATUS.md). Historical documents live under [`docs/archive/`](docs/archive/). local testing ground: [`dev/`](dev/).
+
 Windows 11 is the first surface. The architecture is not Windows-specific.
 
 ## Observe, decide, act, resume
