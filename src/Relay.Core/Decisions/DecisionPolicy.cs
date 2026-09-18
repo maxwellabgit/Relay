@@ -200,4 +200,101 @@ public sealed class DecisionPolicy
         FeedText = text,
         Reason = "clarify",
     };
+
+    public CaseDecision ApplyAcronymSelect(
+        JudgmentSuccess answers,
+        string acronym,
+        IReadOnlyList<Capabilities.AcronymCandidate> candidates)
+    {
+        if (!answers.Answers.TryGetValue("select", out var raw) || raw is not ChoiceAnswer select)
+        {
+            return UnresolvedAcronym(acronym, "invalid_answer");
+        }
+
+        if (select.Choice == ChoiceQuestion.NoMatch ||
+            select.Confidence < _thresholds.AcronymConfidence ||
+            !select.Probabilities.TryGetValue(select.Choice, out var win) ||
+            win < _thresholds.AcronymConfidence)
+        {
+            return UnresolvedAcronym(acronym, select.Choice == ChoiceQuestion.NoMatch ? "no_match" : "low_confidence");
+        }
+
+        var match = candidates.FirstOrDefault(c =>
+            string.Equals(c.CandidateId, select.Choice, StringComparison.Ordinal));
+        if (match is null)
+            return UnresolvedAcronym(acronym, "unknown_choice");
+
+        return new CaseDecision
+        {
+            Kind = CaseDecisionKinds.PublishFeed,
+            CapabilityId = "glossary.acronym.resolve",
+            CapabilityVersion = 1,
+            PresentationLevel = "persistent",
+            FeedText = $"{acronym} — {match.Expansion}",
+            Done = true,
+            Reason = "acronym_selected",
+            Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+            {
+                ["candidateId"] = System.Text.Json.JsonSerializer.SerializeToElement(match.CandidateId),
+                ["expansion"] = System.Text.Json.JsonSerializer.SerializeToElement(match.Expansion),
+                ["scope"] = System.Text.Json.JsonSerializer.SerializeToElement(match.Scope),
+            },
+            SourceRefs = match.EntryId is null ? [] : [match.CandidateId],
+        };
+    }
+
+    public CaseDecision ApplyNoteSupport(JudgmentSuccess answers, string generatedDraft, string verbatimExcerpt)
+    {
+        var supported = answers.Answers.TryGetValue("supported", out var s) && s is NoulAnswer sn
+            ? sn.ProbabilityYes
+            : 0;
+        var unsupported = answers.Answers.TryGetValue("unsupported_claim", out var u) && u is NoulAnswer un
+            ? un.ProbabilityYes
+            : 1;
+
+        if (supported >= _thresholds.NoteSupportMin && unsupported <= _thresholds.NoteUnsupportedMax)
+        {
+            return new CaseDecision
+            {
+                Kind = CaseDecisionKinds.RequestOperation,
+                CapabilityId = "conversation.note.capture",
+                CapabilityVersion = 1,
+                FeedText = "Draft note verified against sources.",
+                PresentationLevel = "persistent",
+                Reason = "note_support_pass",
+                Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+                {
+                    ["body"] = System.Text.Json.JsonSerializer.SerializeToElement(generatedDraft),
+                    ["verified"] = System.Text.Json.JsonSerializer.SerializeToElement(true),
+                },
+            };
+        }
+
+        return new CaseDecision
+        {
+            Kind = CaseDecisionKinds.RequestOperation,
+            CapabilityId = "conversation.note.capture",
+            CapabilityVersion = 1,
+            FeedText = "Generated draft was not fully supported; retaining verbatim excerpt for review.",
+            PresentationLevel = "alert",
+            Reason = "note_support_fail",
+            Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+            {
+                ["body"] = System.Text.Json.JsonSerializer.SerializeToElement(verbatimExcerpt),
+                ["verified"] = System.Text.Json.JsonSerializer.SerializeToElement(false),
+                ["rejectedDraft"] = System.Text.Json.JsonSerializer.SerializeToElement(generatedDraft),
+            },
+        };
+    }
+
+    private static CaseDecision UnresolvedAcronym(string acronym, string reason) => new()
+    {
+        Kind = CaseDecisionKinds.PublishFeed,
+        CapabilityId = "glossary.acronym.resolve",
+        CapabilityVersion = 1,
+        PresentationLevel = "persistent",
+        FeedText = $"Unresolved: {acronym}",
+        Done = true,
+        Reason = reason,
+    };
 }

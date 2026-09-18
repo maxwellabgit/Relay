@@ -113,4 +113,28 @@ public static class QuestionSets
             },
         },
     };
+
+    /// <summary>Clone acronym.select with runtime candidate criteria; instructions stay asset-owned.</summary>
+    public static QuestionSetDefinition BuildAcronymSelect(IReadOnlyDictionary<string, string> candidateCriteria)
+    {
+        ArgumentNullException.ThrowIfNull(candidateCriteria);
+        var criteria = new Dictionary<string, string>(candidateCriteria, StringComparer.Ordinal)
+        {
+            [ChoiceQuestion.NoMatch] = "None of the candidate expansions fit.",
+        };
+        return new QuestionSetDefinition
+        {
+            Id = AcronymSelectId,
+            Version = AcronymSelectVersion,
+            Questions = new Dictionary<string, JudgmentQuestion>(StringComparer.Ordinal)
+            {
+                ["select"] = new ChoiceQuestion
+                {
+                    Instructions = "Which glossary expansion best fits this acronym in the supplied project context?",
+                    RequireNoMatch = true,
+                    Criteria = criteria,
+                },
+            },
+        };
+    }
 }

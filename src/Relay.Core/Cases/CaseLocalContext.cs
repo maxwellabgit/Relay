@@ -97,6 +97,47 @@ public sealed class CaseLocalContext
         return (project, note);
     }
 
+    /// <summary>Seeds a Lightshift project with a project-scoped BESS glossary entry.</summary>
+    public (ProjectRecord Project, Memory.GlossaryEntry Entry) SeedLightshiftBess(
+        string expansion = "Battery Energy Storage System",
+        string? projectId = null,
+        DateTimeOffset? at = null)
+    {
+        Directory.CreateDirectory(ProjectsHome);
+        var now = at ?? Clock.UtcNow;
+        var project = new ProjectRecord
+        {
+            Id = projectId ?? Ulid.NewUlid(now),
+            Slug = "lightshift",
+            Name = "Lightshift",
+            RootPath = Path.Combine(ProjectsHome, "lightshift"),
+            CreatedAt = now,
+        };
+        if (Registry.ById(project.Id) is null && !Registry.SlugInUse(project.Slug))
+        {
+            ProjectLayout.Create(project, now);
+            Registry.Add(project);
+        }
+        else
+        {
+            project = Registry.FindActive("lightshift") ?? Registry.ById(project.Id)
+                ?? throw new InvalidOperationException("Lightshift project could not be resolved.");
+        }
+
+        var store = new Memory.GlossaryStore(Root);
+        var entry = new Memory.GlossaryEntry
+        {
+            Id = "bess-lightshift",
+            Acronym = "BESS",
+            Expansion = expansion,
+            Scope = Memory.GlossaryScopes.Project,
+            ProjectId = project.Id,
+            SourceRefs = ["seed:lightshift-bess"],
+        };
+        store.SaveProject(project.RootPath, [entry]);
+        return (project, entry);
+    }
+
     public (NoteDocument Note, string Path, ProjectRecord Project)? FindNote(string projectId, string noteId)
     {
         var project = Registry.ById(projectId);

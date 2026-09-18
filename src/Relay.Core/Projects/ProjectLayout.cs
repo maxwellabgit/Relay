@@ -37,6 +37,7 @@ public static class ProjectLayout
     public static string ArtifactsManifest(string root) => Path.Combine(root, OrchestratorDirectoryName, "artifacts.jsonl");
     public static string SourcesFile(string root) => Path.Combine(root, OrchestratorDirectoryName, "sources.jsonl");
     public static string VersionsDirectory(string root) => Path.Combine(root, OrchestratorDirectoryName, "versions");
+    public static string GlossaryPath(string root) => Path.Combine(root, OrchestratorDirectoryName, "glossary.json");
 
     /// <summary>Creates the folder tree. Fails if the root already exists and is not empty.</summary>
     public static void Create(ProjectRecord record, DateTimeOffset now)

@@ -19,7 +19,7 @@ Live runners must fail preflight or report `SKIPPED: missing …`. They must not
 | Tag | `pre-jev-refactor-55551224` |
 | Branch | `refactor/jev-decision-engine` |
 | Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
-| Phase | **6 decision engine landed; Phase 7 capabilities next** |
+| Phase | **7 four v0.1 capabilities landed; Phase 8 improvement next** |
 | Alpha complete | **Not claimed** |
 
 Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
@@ -56,7 +56,7 @@ Do not treat these as Phase 0 regressions. They live in code Phase 11 deletes.
 | Jev / judgment contracts / TypeSafe client | Contracts + fake + HTTP client + persistence/cache/lifecycle | Core 49; Gateway 12 |
 | Hosted grant / disclosure | Source classification + grants + DisclosurePolicy + surface commands | `HostedDisclosureTests` (10) |
 | Decision engine (`ICaseDecisionEngine`) | Engine + policy + question sets + mind adapter; mind step outside lock; multi-raise | `DecisionPolicyTests` (8) + `DecisionEngineRuntimeTests` (5) |
-| Four v0.1 capability registry | **Absent** | — |
+| Four v0.1 capability registry | acronym + note + task + direct.answer | `AcronymResolveTests` (3) + `NoteCaptureTests` (3) + `TaskCaptureTests` (3) + `DirectAnswerTests` (3) |
 | Improvement `PatternSignature` / evaluator | **Absent** (friction still groups by kind alone) | `FrictionEvidenceStore.Suggest` |
 
 ## Historical slices (still valid as characterization)

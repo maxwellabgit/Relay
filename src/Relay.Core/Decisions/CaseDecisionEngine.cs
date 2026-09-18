@@ -121,4 +121,24 @@ public sealed class ContextAssembler
             kind = request.Kind,
         });
     }
+
+    public JsonElement AssembleAcronymState(
+        string acronym,
+        string span,
+        string? projectId,
+        IReadOnlyList<Capabilities.AcronymCandidate> candidates)
+    {
+        return JudgmentState.FromObject(new
+        {
+            acronym,
+            span,
+            projectId,
+            candidates = candidates.Select(c => new
+            {
+                id = c.CandidateId,
+                expansion = c.Expansion,
+                scope = c.Scope,
+            }).ToList(),
+        });
+    }
 }
