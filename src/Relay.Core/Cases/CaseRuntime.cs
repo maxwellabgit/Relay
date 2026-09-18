@@ -453,6 +453,8 @@ public sealed class CaseRuntime : IDisposable
         await _inference.AcquireAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CaseMindRequest request;
+            long expectedVersion;
             lock (_gate)
             {
                 var record = _cases.TryLoadRecord(caseId)
@@ -465,6 +467,7 @@ public sealed class CaseRuntime : IDisposable
                 if (record.Status == CaseStatus.Waiting && HasAwaiting(record))
                     return Clone(record);
 
+                expectedVersion = record.Version;
                 var events = _cases.LoadEvents(caseId);
                 var pendingOps = record.PendingOperationIds
                     .Select(id => _operations.TryLoad(id))
@@ -479,7 +482,7 @@ public sealed class CaseRuntime : IDisposable
                 var availableTools = _tools?.Tools.Descriptors().Select(d => d.Name).ToList()
                     ?? new List<string>();
 
-                var request = new CaseMindRequest(
+                request = new CaseMindRequest(
                     record.Id,
                     record.Origin,
                     record.Kind,
@@ -495,17 +498,36 @@ public sealed class CaseRuntime : IDisposable
                     record.ParentCaseId,
                     record.PresentationPolicy,
                     availableTools);
+            }
 
-                CaseMindStep step;
-                try
+            // Decision / mind work runs outside _gate so a slow judgment cannot stall
+            // ingest, direct case creation, or other case bookkeeping.
+            CaseMindStep step;
+            try
+            {
+                step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.Write(_clock.UtcNow, "error", "CaseRuntime", "mind_failed",
+                    caseId: caseId, error: ex.Message, latencyMs: sw.ElapsedMilliseconds);
+                throw;
+            }
+
+            lock (_gate)
+            {
+                var record = _cases.TryLoadRecord(caseId)
+                    ?? throw new InvalidOperationException($"Case '{caseId}' not found.");
+                if (record.Status is CaseStatus.Completed or CaseStatus.Cancelled)
+                    return Clone(record);
+                if (record.Status == CaseStatus.Waiting && HasAwaiting(record))
+                    return Clone(record);
+                if (record.Version != expectedVersion)
                 {
-                    step = _mind.StepAsync(request, cancellationToken).GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    _diagnostics.Write(_clock.UtcNow, "error", "CaseRuntime", "mind_failed",
-                        caseId: record.Id, caseVersion: record.Version, error: ex.Message, latencyMs: sw.ElapsedMilliseconds);
-                    throw;
+                    // Concurrent mutation while deciding — re-queue rather than apply a stale move.
+                    if (record.Status == CaseStatus.Active)
+                        _ready.TryEnqueue(caseId, ReadyPriority.ToolOrDelegateCompletion);
+                    return Clone(record);
                 }
 
                 record.Budgets.StepsUsed++;
@@ -651,14 +673,45 @@ public sealed class CaseRuntime : IDisposable
 
     private void RaiseChildTask(CaseRecord parent, CaseMove move, string causedByEventId)
     {
-        var objective = move.Text;
-        if (move.Args.TryGetValue("objective", out var objEl) && objEl.ValueKind == JsonValueKind.String)
+        RaiseOneChild(parent, move, causedByEventId,
+            objectiveOverride: null,
+            kindOverride: null);
+
+        if (move.Args.TryGetValue("siblingRaises", out var siblings) &&
+            siblings.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var sibling in siblings.EnumerateArray())
+            {
+                string? objective = null;
+                string? kind = null;
+                if (sibling.TryGetProperty("feedText", out var feed) && feed.ValueKind == JsonValueKind.String)
+                    objective = feed.GetString();
+                if (sibling.TryGetProperty("kind", out var kindEl) && kindEl.ValueKind == JsonValueKind.String)
+                    kind = kindEl.GetString();
+                RaiseOneChild(parent, move, causedByEventId, objective, kind);
+            }
+        }
+    }
+
+    private void RaiseOneChild(
+        CaseRecord parent,
+        CaseMove move,
+        string causedByEventId,
+        string? objectiveOverride,
+        string? kindOverride)
+    {
+        var objective = objectiveOverride ?? move.Text;
+        if (objectiveOverride is null &&
+            move.Args.TryGetValue("objective", out var objEl) &&
+            objEl.ValueKind == JsonValueKind.String)
             objective = objEl.GetString() ?? objective;
         if (string.IsNullOrWhiteSpace(objective))
             objective = "Raised from listening.";
 
-        var kind = CaseKind.Remember;
-        if (move.Args.TryGetValue("kind", out var kindEl) && kindEl.ValueKind == JsonValueKind.String)
+        var kind = kindOverride ?? CaseKind.Remember;
+        if (kindOverride is null &&
+            move.Args.TryGetValue("kind", out var kindEl) &&
+            kindEl.ValueKind == JsonValueKind.String)
             kind = kindEl.GetString() ?? kind;
 
         var now = _clock.UtcNow;
