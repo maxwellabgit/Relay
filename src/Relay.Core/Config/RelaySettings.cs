@@ -22,6 +22,7 @@ public sealed class RelaySettings
     [JsonPropertyName("diagnostics")] public DiagnosticsSettings Diagnostics { get; set; } = new();
     [JsonPropertyName("orchestrator")] public OrchestratorSettings Orchestrator { get; set; } = new();
     [JsonPropertyName("model")] public ModelSettings Model { get; set; } = new();
+    [JsonPropertyName("jev")] public JevSettings Jev { get; set; } = new();
     [JsonPropertyName("externalModels")] public List<ExternalModelProfile> ExternalModels { get; set; } = new();
     [JsonPropertyName("search")] public SearchSettings Search { get; set; } = new();
     [JsonPropertyName("workers")] public WorkerSettings Workers { get; set; } = new();
@@ -41,6 +42,14 @@ public sealed class RelaySettings
             if (!ModelSettings.IsAllowedEndpoint(Model.Endpoint, out var why)) problems.Add("model.endpoint: " + why);
             if (string.IsNullOrWhiteSpace(Model.Model)) problems.Add("model.model must name a model.");
             if (Model.TimeoutMs < 1000) problems.Add("model.timeoutMs must be at least 1000.");
+        }
+        if (Jev.Enabled)
+        {
+            if (!JevSettings.IsAllowedEndpoint(Jev.Endpoint, out var jevWhy)) problems.Add("jev.endpoint: " + jevWhy);
+            if (string.IsNullOrWhiteSpace(Jev.Model)) problems.Add("jev.model must name a pinned model.");
+            if (string.IsNullOrWhiteSpace(Jev.SecretName)) problems.Add("jev.secretName is required when jev is enabled.");
+            if (Jev.TimeoutMs < 1000) problems.Add("jev.timeoutMs must be at least 1000.");
+            if (Jev.MaxAttempts is < 1 or > 5) problems.Add("jev.maxAttempts must be 1–5.");
         }
         foreach (var profile in ExternalModels)
         {
@@ -182,6 +191,27 @@ public sealed class ExternalModelProfile
     public ModelSettings AsModelSettings() => new() { Enabled = true, Endpoint = Endpoint, Model = Model, SecretName = SecretName, TimeoutMs = TimeoutMs, MaxOutputTokens = MaxOutputTokens };
 }
 
+/// <summary>TypeSafe System One (Jev) judgment provider. Off until enabled with an https endpoint and a secret.</summary>
+public sealed class JevSettings
+{
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    [JsonPropertyName("endpoint")] public string Endpoint { get; set; } = "https://api.typesafe.ai/v1/systemone";
+    /// <summary>Pinned production model. Evaluate upgrades explicitly; do not silently track jev-latest.</summary>
+    [JsonPropertyName("model")] public string Model { get; set; } = "jev-1.13.0";
+    [JsonPropertyName("secretName")] public string SecretName { get; set; } = "typesafe-jev";
+    [JsonPropertyName("timeoutMs")] public int TimeoutMs { get; set; } = 10_000;
+    [JsonPropertyName("maxAttempts")] public int MaxAttempts { get; set; } = 3;
+
+    /// <summary>https only — Jev never uses plain http.</summary>
+    public static bool IsAllowedEndpoint(string? endpoint, out string reason)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) { reason = "must be an absolute URL."; return false; }
+        if (uri.Scheme == Uri.UriSchemeHttps) { reason = ""; return true; }
+        reason = "must be https.";
+        return false;
+    }
+}
+
 /// <summary>Online search provider (called only through Relay.Gateway). Off until enabled with an https endpoint and a secret.</summary>
 public sealed class SearchSettings
 {
@@ -293,6 +323,7 @@ public static class SettingsStore
             if (validation.Any(p => p.StartsWith("capture", StringComparison.Ordinal))) settings.Capture = defaults.Capture;
             if (validation.Any(p => p.StartsWith("orchestrator", StringComparison.Ordinal))) settings.Orchestrator = defaults.Orchestrator;
             if (validation.Any(p => p.StartsWith("model", StringComparison.Ordinal))) settings.Model = defaults.Model;
+            if (validation.Any(p => p.StartsWith("jev", StringComparison.Ordinal))) settings.Jev = defaults.Jev;
             if (validation.Any(p => p.StartsWith("externalModels", StringComparison.Ordinal))) settings.ExternalModels = defaults.ExternalModels;
             if (validation.Any(p => p.StartsWith("search", StringComparison.Ordinal))) settings.Search = defaults.Search;
             if (validation.Any(p => p.StartsWith("listening", StringComparison.Ordinal))) settings.Listening = defaults.Listening;

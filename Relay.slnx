@@ -10,5 +10,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Relay.Tests/Relay.Tests.csproj" />
     <Project Path="tests/Relay.Core.Tests/Relay.Core.Tests.csproj" />
+    <Project Path="tests/Relay.Gateway.Tests/Relay.Gateway.Tests.csproj" />
   </Folder>
 </Solution>
