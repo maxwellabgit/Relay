@@ -20,6 +20,7 @@ namespace Relay.Desktop;
 public sealed class CaseRelayHost : IDisposable
 {
     private readonly TypeSafeJudgmentClient? _judgmentClient;
+    private readonly IModelClient? _modelClient;
     private readonly RuntimeDiagnostics _diagnostics;
     private bool _disposed;
 
@@ -32,6 +33,7 @@ public sealed class CaseRelayHost : IDisposable
         ISecretStore secrets,
         RelaySettings settings,
         TypeSafeJudgmentClient? judgmentClient,
+        IModelClient? modelClient,
         RuntimeDiagnostics diagnostics)
     {
         Root = root;
@@ -42,6 +44,7 @@ public sealed class CaseRelayHost : IDisposable
         Secrets = secrets;
         Settings = settings;
         _judgmentClient = judgmentClient;
+        _modelClient = modelClient;
         _diagnostics = diagnostics;
     }
 
@@ -72,6 +75,15 @@ public sealed class CaseRelayHost : IDisposable
         }
 
         IJudgmentClient judgmentClient = (IJudgmentClient?)judgment ?? new NullJudgmentClient();
+        var objects = new ObjectStore(root, clock);
+        var judgmentStore = new JudgmentStore(root, objects, clock);
+        var lifecycle = new JudgmentLifecycle(
+            judgmentStore,
+            new JudgmentCache(judgmentStore),
+            judgmentClient,
+            clock,
+            disclosure: new DisclosurePolicy(grants, objects, () => clock.UtcNow),
+            grants: grants);
         var engine = new RelayDecisionEngine(client: judgmentClient, model: settings.Jev.Model);
         var mind = new CaseMindDecisionAdapter(engine);
 
@@ -80,11 +92,41 @@ public sealed class CaseRelayHost : IDisposable
         var diagnostics = new RuntimeDiagnostics(Path.Combine(runDir, "runtime.jsonl"), "desktop");
 
         var local = new CaseLocalContext(root, clock);
-        var runtime = CaseRuntime.Open(root, clock, mind, diagnostics, local: local);
+        var modelClient = ModelComposition.Client(settings.Model, root);
+        ITextGenerator? generator = modelClient is null
+            ? null
+            : new ModelTextGenerator(modelClient, settings.Model.MaxOutputTokens);
+
+        var capabilities = new CapabilityRegistry();
+        var glossary = new GlossaryStore(root);
+        capabilities.Register(AcronymResolveCapability.Definition,
+            new AcronymResolveCapability(
+                glossary,
+                id => local.Registry.ById(id)?.RootPath,
+                lifecycle: lifecycle,
+                client: judgmentClient));
+        capabilities.Register(NoteCaptureCapability.Definition,
+            new NoteCaptureCapability(generator: generator, client: judgmentClient, lifecycle: lifecycle));
+        capabilities.Register(TaskCaptureCapability.Definition, new TaskCaptureCapability());
+        capabilities.Register(DirectAnswerCapability.Definition,
+            new DirectAnswerCapability(
+                generator: generator,
+                retrieve: q => local.Index.Search(q)
+                    .Select(h => new EvidenceHit
+                    {
+                        SourceRef = $"note:{h.ProjectId}/{h.Id}",
+                        Excerpt = h.Excerpt,
+                    })
+                    .ToList()));
+
+        var runtime = CaseRuntime.Open(
+            root, clock, mind, diagnostics, local: local, capabilities: capabilities);
         var surface = new CaseRuntimeSurface(
             runtime,
             clock,
-            modelHealth: () => ModelHealthView.Placeholder,
+            modelHealth: () => modelClient is null
+                ? ModelHealthView.Placeholder
+                : new ModelHealthView(ModelHealthView.Ok, modelClient.Model),
             grants: grants,
             jevStatus: () => judgment is null
                 ? HostedJudgmentView.Unavailable
@@ -93,15 +135,8 @@ public sealed class CaseRelayHost : IDisposable
                     : HostedJudgmentView.Disabled,
             sessionId: UlidSession(clock));
 
-        var capabilities = new CapabilityRegistry();
-        var glossary = new GlossaryStore(root);
-        capabilities.Register(AcronymResolveCapability.Definition,
-            new AcronymResolveCapability(glossary, id => local.Registry.ById(id)?.RootPath, client: judgmentClient));
-        capabilities.Register(NoteCaptureCapability.Definition, new NoteCaptureCapability(client: judgmentClient));
-        capabilities.Register(TaskCaptureCapability.Definition, new TaskCaptureCapability());
-        capabilities.Register(DirectAnswerCapability.Definition, new DirectAnswerCapability());
-
-        return new CaseRelayHost(root, runtime, surface, capabilities, grants, secrets, settings, judgment, diagnostics);
+        return new CaseRelayHost(
+            root, runtime, surface, capabilities, grants, secrets, settings, judgment, modelClient, diagnostics);
     }
 
     public async Task PumpAsync(CancellationToken cancellationToken = default)
@@ -120,6 +155,7 @@ public sealed class CaseRelayHost : IDisposable
         try { Runtime.SuspendAll(); } catch { /* best effort */ }
         Runtime.Dispose();
         _judgmentClient?.Dispose();
+        (_modelClient as IDisposable)?.Dispose();
         _diagnostics.Dispose();
     }
 

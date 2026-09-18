@@ -126,8 +126,17 @@ public sealed partial class MainWindow : Window
         _surfaceMode = true;
         _coordinator = null;
         _runtime = null;
+        OrchestratorChip.Tapped -= OrchestratorChip_Tapped;
+        OrchestratorChip.Tapped += OrchestratorChip_Tapped;
         if (!_tick.IsRunning) _tick.Start();
         Render();
+    }
+
+    private void OrchestratorChip_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (!_surfaceMode) return;
+        ToggleHostedFromChip();
+        e.Handled = true;
     }
 
     public void ShowStartupFailure(DataRoot root, Exception ex)
@@ -249,12 +258,14 @@ public sealed partial class MainWindow : Window
         StateDot.Fill = new SolidColorBrush(snap.Listening ? Palette.Good : Palette.Neutral);
         ModeLabel.Text = snap.Listening ? "observed" : "direct";
         StateDetail.Text = snap.HostedJudgments is { } hj
-            ? $"Jev {hj.JevStatus} · grants {hj.ActiveGrantIds.Count}"
+            ? $"Jev {hj.JevStatus} · grants {hj.ActiveGrantIds.Count}" +
+              (snap.PendingApprovals.Count > 0 ? $" · {snap.PendingApprovals.Count} approval(s)" : "")
             : $"model {snap.ModelHealth.Status}";
         ListeningChip.Text = snap.Listening ? "Listening · CaseRuntime" : "Listening off · CaseRuntime";
         ListeningDot.Fill = new SolidColorBrush(snap.Listening ? Palette.Good : Palette.Neutral);
-        OrchestratorChip.Text = "Decision engine";
-        OrchestratorDot.Fill = new SolidColorBrush(Palette.Good);
+        var hostedOn = snap.HostedJudgments?.HasActiveGrant == true;
+        OrchestratorChip.Text = hostedOn ? "Hosted Jev · on (tap)" : "Hosted Jev · off (tap)";
+        OrchestratorDot.Fill = new SolidColorBrush(hostedOn ? Palette.Good : Palette.Neutral);
         TitleSubtitle.Text = $"case-runtime · v{App.Version}";
 
         FeedItems.Children.Clear();
@@ -269,7 +280,6 @@ public sealed partial class MainWindow : Window
         }
         FeedEmpty.Visibility = Vis(snap.Feed.Count == 0);
 
-        // Approvals: reuse review panel list if present.
         try
         {
             RenderSurfaceApprovals(snap);
@@ -284,9 +294,41 @@ public sealed partial class MainWindow : Window
 
     private void RenderSurfaceApprovals(Relay.Core.Cases.RelaySurfaceSnapshot snap)
     {
-        // Best-effort: status detail already shows grant/Jev health; pending count in StateDetail.
-        if (snap.PendingApprovals.Count > 0)
-            StateDetail.Text += $" · {snap.PendingApprovals.Count} approval(s)";
+        // Inline approval actions in the feed area when pending.
+        foreach (var pending in snap.PendingApprovals.Take(5))
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 0, 8) };
+            row.Children.Add(new TextBlock
+            {
+                Text = $"Approve {pending.Title}?",
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var approve = new Button { Content = "Approve", Tag = pending };
+            approve.Click += (_, _) =>
+            {
+                if (_surface is null) return;
+                _surface.ApproveOperation(pending.OperationId, pending.EnvelopeHash, pending.CaseVersion);
+                Render();
+            };
+            var reject = new Button { Content = "Reject", Tag = pending };
+            reject.Click += (_, _) =>
+            {
+                if (_surface is null) return;
+                _surface.RejectOperation(pending.OperationId);
+                Render();
+            };
+            row.Children.Add(approve);
+            row.Children.Add(reject);
+            FeedItems.Children.Insert(0, row);
+        }
+    }
+
+    private void ToggleHostedFromChip()
+    {
+        if (_surface is null) return;
+        _surface.ToggleHostedJudgments();
+        Render();
     }
 
     private void RenderStatus(RelaySnapshot s)

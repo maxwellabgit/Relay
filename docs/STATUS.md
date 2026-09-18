@@ -17,12 +17,12 @@ Live runners must fail preflight or report `SKIPPED: missing …`. They must not
 | --- | --- |
 | Baseline | `55551224b7a7fb5006f752d1015a9937aeea4f10` |
 | Tag | `pre-jev-refactor-55551224` |
-| Branch | `refactor/jev-decision-engine` |
+| Branch | `main` (landed from `refactor/jev-decision-engine`) |
 | Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
-| Phase | **11 production path cut over; legacy SessionCoordinator retained for Relay.Tests only** |
-| Alpha complete | **Not claimed** — SessionCoordinator retained for legacy `Relay.Tests`; Windows live gate not yet run on this host |
+| Phase | **11 production path cut over; capability dispatch wired; live runners honest** |
+| Alpha complete | **Not claimed** — DoD §14 still requires Windows live gates with real WinUI + Wispr + Jev + local generation + restart/replay on a host that has secrets. Code build + SKIPPED live scaffolding is done. |
 
-Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
+Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision).
 
 ## Phase 0 baseline characterization (this Windows host)
 
@@ -37,34 +37,29 @@ Host: Windows 11, SDK `10.0.400` at `%LOCALAPPDATA%\Microsoft\dotnet` (not on de
 
 ### Known failures at baseline (legacy `SessionCoordinator` path)
 
-Do not treat these as Phase 0 regressions. They live in code Phase 11 deletes.
+Do not treat these as Phase 0 regressions. They live in code retained for `Relay.Tests` only.
 
 1. `Relay.Tests.RecoveryAndFailureTests.LedgerWriteFailureLocksAndPreservesTheDraft` — expected `Locked`, got `Ready` (`RecoveryAndFailureTests.cs` ~177).
 2. `Relay.Tests.RecoveryAndFailureTests.CrashDuringCaptureIsDetectedAndTheDraftIsRecoverable` — no `StateChanged` to `ORGANIZING` (`RecoveryAndFailureTests.cs` ~44).
 
-### Phase 0 script fix
-
-`dev/run-relay.ps1` now forwards `--scenario` to DevHarness (previously harness-only runs always defaulted to `slice1`).
-
-## Current tree (pre–decision-engine cutover)
+## Current tree (alpha code build)
 
 | Area | State | Evidence |
 | --- | --- | --- |
 | Product / architecture docs | Rewritten for decision engine + Jev + v0.1 scope | `PRODUCT.md`, `ARCHITECTURE.md`, `README.md`, `JEV_REFACTOR.md` |
-| `CaseRuntime` + envelopes + projections | Present (Slices 1–7 scripted) | `Relay.Core.Tests` + DevHarness |
-| Production Desktop composition | `CaseRelayHost` → `CaseRuntime` + `CaseRuntimeSurface` (no SessionCoordinator) | Desktop Debug build |
-| Jev / judgment contracts / TypeSafe client | Contracts + fake + HTTP client + persistence/cache/lifecycle | Core 49; Gateway 12 |
-| Hosted grant / disclosure | Source classification + grants + DisclosurePolicy + surface commands | `HostedDisclosureTests` (10) |
-| Decision engine (`ICaseDecisionEngine`) | Engine + policy + question sets + mind adapter; mind step outside lock; multi-raise | `DecisionPolicyTests` (8) + `DecisionEngineRuntimeTests` (5) |
-| Four v0.1 capability registry | acronym + note + task + direct.answer | `AcronymResolveTests` (3) + `NoteCaptureTests` (3) + `TaskCaptureTests` (3) + `DirectAnswerTests` (3) |
-| Improvement `PatternSignature` / evaluator | Signature grouping + glossary lifecycle (draft→eval→approve→shadow→active→revert) | `ImprovementLifecycleTests` (2) |
-
-## Historical slices (still valid as characterization)
-
-Slices 1–7 on `CaseRuntime` with scripted minds remain the pre-Jev characterization suite. They are not the v0.1 production architecture. See archived slice table in git history of `ARCHITECTURE.md` and `docs/archive/`.
+| `CaseRuntime` + capability dispatch | Raised children with v0.1 `AllowedCapabilities` invoke registered handlers | `CapabilityDispatchTests` |
+| Production Desktop composition | `CaseRelayHost` → registry + generator + lifecycle → `CaseRuntime` + surface | Desktop Debug build |
+| Hosted toggle (independent of listening) | Surface `ToggleHostedJudgments`; Desktop chip tap | `CaseRuntimeSurface` |
+| Transcript ingest | Surface `IngestTranscript` → `StreamIntake` while listening | `IRelaySurface` |
+| Jev / judgment contracts / TypeSafe client | Contracts + fake + HTTP client + persistence/cache/lifecycle | Core + Gateway tests |
+| Decision engine | Engine + policy + mind adapter; multi-raise preserves `capabilityId` | `DecisionEngineRuntimeTests` |
+| Four v0.1 capabilities | acronym + note + task + direct.answer | capability unit tests |
+| Improvement `PatternSignature` / evaluator | draft→eval→approve→shadow→active→revert | `ImprovementLifecycleTests` |
+| DevHarness `jev-*` | scripted / outage / privacy / improvement; `jev-live` calls TypeSafe or `SKIPPED` | `JevScenarios.cs` |
+| Windows live gate runner | `dev/run-live-gates.ps1` — honest SKIPPED preflight | exit 3 when env incomplete |
 
 ## Environment note
 
-This verification host is **Windows**. `Relay.Desktop` (WinUI) and `net10.0-windows` test projects compile and run here. Cross-platform Core projects also build. Live Jev and local-generator gates still require secrets/endpoints and are not claimed.
+This verification host is **Windows**. Live Jev and local-generator gates still require `TYPESAFE_API_KEY` / `RELAY_MODEL_ENDPOINT` (and Wispr for listening proof). Until those pass on a real Desktop session, alpha remains **not complete**.
 
 Open questions: repo-root `QUESTIONS.md`.

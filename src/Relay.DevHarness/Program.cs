@@ -46,7 +46,7 @@ public static partial class Program
             "jev-outage" => await RunJevOutageAsync(dataRootPath, runId),
             "jev-privacy" => await RunJevPrivacyAsync(dataRootPath, runId),
             "jev-improvement" => RunJevImprovement(dataRootPath, runId),
-            "jev-live" => RunJevLive(dataRootPath, runId),
+            "jev-live" => await RunJevLiveAsync(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }

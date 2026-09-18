@@ -110,6 +110,23 @@ public sealed class CaseRuntimeSurface : IRelaySurface
         }
     }
 
+    public SurfaceResult IngestTranscript(string text, string? speaker = null)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return SurfaceResult.Fail("Transcript text is required.");
+        try
+        {
+            if (_runtime.GetListeningCase() is null)
+                return SurfaceResult.Fail("Listening is not active.");
+            var segment = _runtime.IngestSegment(text.Trim(), speaker: speaker);
+            return SurfaceResult.Success("Segment ingested.", segment.EventId);
+        }
+        catch (Exception ex)
+        {
+            return SurfaceResult.Fail(ex.Message);
+        }
+    }
+
     public SurfaceResult ApproveOperation(string operationId, string envelopeHash, long expectedCaseVersion)
     {
         try
@@ -220,6 +237,36 @@ public sealed class CaseRuntimeSurface : IRelaySurface
         {
             var grant = _grants.Revoke(grantId);
             return SurfaceResult.Success("Hosted grant revoked.", grantId: grant.GrantId);
+        }
+        catch (Exception ex)
+        {
+            return SurfaceResult.Fail(ex.Message);
+        }
+    }
+
+    public SurfaceResult ToggleHostedJudgments(int maximumInputTokenBudget = 50_000)
+    {
+        if (_grants is null)
+            return SurfaceResult.Fail("Hosted grant store is not configured.");
+        try
+        {
+            var active = _grants.ListActive(_clock.UtcNow);
+            if (active.Count > 0)
+            {
+                foreach (var g in active)
+                    _grants.Revoke(g.GrantId);
+                return SurfaceResult.Success("Hosted judgments disabled.");
+            }
+
+            var sessionId = _sessionId ?? Relay.Core.Ids.Ulid.NewUlid(_clock.UtcNow);
+            _sessionId = sessionId;
+            var grant = _grants.CreateSessionGrant(
+                sessionId,
+                HostedPurposes.All,
+                [SourceClassification.HostedAllowedSession, SourceClassification.Public],
+                maximumInputTokenBudget,
+                expiresAt: _clock.UtcNow.AddHours(8));
+            return SurfaceResult.Success("Hosted judgments enabled for this session.", grantId: grant.GrantId);
         }
         catch (Exception ex)
         {

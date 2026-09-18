@@ -4,9 +4,11 @@ using Relay.Core.Cases;
 using Relay.Core.Decisions;
 using Relay.Core.Judgments;
 using Relay.Core.Memory;
+using Relay.Core.Model;
 using Relay.Core.Privacy;
 using Relay.Core.Storage;
 using Relay.Core.Usage;
+using Relay.Gateway;
 
 namespace Relay.DevHarness;
 
@@ -169,7 +171,7 @@ public static partial class Program
         });
     }
 
-    private static int RunJevLive(string dataRootPath, string runId)
+    private static async Task<int> RunJevLiveAsync(string dataRootPath, string runId)
     {
         var clock = new HarnessClock(DateTimeOffset.UtcNow);
         var root = new DataRoot(dataRootPath);
@@ -182,17 +184,68 @@ public static partial class Program
         if (string.IsNullOrWhiteSpace(key))
             return Skip(summaryPath, runId, "SKIPPED: missing TYPESAFE_API_KEY");
 
-        // Live path is intentionally not auto-run without an explicit client binding in this harness.
-        // Presence of the key means the environment can run Windows live gates; report readiness.
-        return Ok(summaryPath, new
+        // Synthetic, non-personal state — verify typed response structure against live TypeSafe.
+        var secrets = new MemorySecretStore();
+        secrets.Set("typesafe-jev", key);
+        var settings = new Relay.Core.Config.JevSettings
         {
-            ok = true,
-            scenario = "jev-live",
-            runId,
-            ready = true,
-            note = "Key present; use Desktop DPAPI settings + hosted grant for the full live gate.",
-            keyPresent = true,
-        });
+            Enabled = true,
+            Endpoint = TypeSafeJudgmentClient.DefaultEndpoint,
+            Model = TypeSafeJudgmentClient.DefaultModel,
+            SecretName = "typesafe-jev",
+            TimeoutMs = 15_000,
+            MaxAttempts = 2,
+        };
+
+        try
+        {
+            using var client = new TypeSafeJudgmentClient(settings, secrets);
+            var request = new JudgmentRequest
+            {
+                QuestionSetId = "relay.live.smoke",
+                QuestionSetVersion = "1",
+                Model = settings.Model,
+                State = JudgmentState.Parse("""{"text":"Synthetic RELAY live-gate probe. Is this urgent?"}"""),
+                CaseId = "live-smoke",
+                CaseVersion = 1,
+                Questions = new Dictionary<string, JudgmentQuestion>(StringComparer.Ordinal)
+                {
+                    ["is_urgent"] = new NoulQuestion
+                    {
+                        Instructions = "Does this convey urgency? Answer for a synthetic non-personal probe.",
+                    },
+                },
+            };
+
+            var response = await client.JudgeAsync(request, CancellationToken.None).ConfigureAwait(false);
+            if (!response.Ok)
+            {
+                return Fail(summaryPath, runId,
+                    $"live TypeSafe call failed: {response.Failure?.Category}: {response.Failure?.Message}", 1);
+            }
+
+            if (response.Success is null ||
+                !response.Success.Answers.TryGetValue("is_urgent", out var answer) ||
+                answer is not NoulAnswer)
+            {
+                return Fail(summaryPath, runId, "live response missing typed noul answer is_urgent", 1);
+            }
+
+            return Ok(summaryPath, new
+            {
+                ok = true,
+                scenario = "jev-live",
+                runId,
+                model = response.Success.Model,
+                inputTokens = response.Success.InputTokens,
+                keyPresent = true,
+                note = "Live TypeSafe smoke passed; Desktop DPAPI + hosted grant still required for full Windows UI gate.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return Fail(summaryPath, runId, "live TypeSafe exception: " + ex.Message, 1);
+        }
     }
 
     private static int Skip(string summaryPath, string runId, string message)

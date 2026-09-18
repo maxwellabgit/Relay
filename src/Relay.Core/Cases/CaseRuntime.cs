@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Relay.Core.Capabilities;
 using Relay.Core.Ids;
 using Relay.Core.Policy;
 using Relay.Core.Storage;
@@ -30,6 +31,7 @@ public sealed class CaseRuntime : IDisposable
     private readonly ResearchServices _researchServices;
     private readonly ToolWorkflowBroker? _tools;
     private readonly ToolServices _toolServices;
+    private readonly CapabilityRegistry? _capabilities;
     private readonly Action _onSideEffect;
     private readonly string _leaseOwner;
     private readonly object _gate = new();
@@ -43,7 +45,8 @@ public sealed class CaseRuntime : IDisposable
         Action? onSideEffect,
         CaseLocalContext? local,
         ResearchServices? research,
-        ToolServices? tools)
+        ToolServices? tools,
+        CapabilityRegistry? capabilities)
     {
         _root = root;
         _clock = clock;
@@ -52,6 +55,7 @@ public sealed class CaseRuntime : IDisposable
         _onSideEffect = onSideEffect ?? (() => { });
         _researchServices = research ?? new ResearchServices();
         _toolServices = tools ?? new ToolServices();
+        _capabilities = capabilities;
         _cases = new CaseStore(root);
         _operations = new OperationStore(root);
         _objects = new ObjectStore(root, clock);
@@ -92,10 +96,11 @@ public sealed class CaseRuntime : IDisposable
         Action? onSideEffect = null,
         CaseLocalContext? local = null,
         ResearchServices? research = null,
-        ToolServices? tools = null)
+        ToolServices? tools = null,
+        CapabilityRegistry? capabilities = null)
     {
         root.EnsureLayout(clock);
-        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local, research, tools);
+        var runtime = new CaseRuntime(root, clock, mind, diagnostics, onSideEffect, local, research, tools, capabilities);
         runtime.Reconstruct();
         diagnostics.Write(clock.UtcNow, "info", "CaseRuntime", "opened",
             status: research?.SearchAvailable == true
@@ -455,6 +460,8 @@ public sealed class CaseRuntime : IDisposable
         {
             CaseMindRequest request;
             long expectedVersion;
+            string? runnableCapability = null;
+            CaseRecord? capabilitySnapshot = null;
             lock (_gate)
             {
                 var record = _cases.TryLoadRecord(caseId)
@@ -468,6 +475,10 @@ public sealed class CaseRuntime : IDisposable
                     return Clone(record);
 
                 expectedVersion = record.Version;
+                runnableCapability = FindRunnableCapability(record);
+                if (runnableCapability is not null)
+                    capabilitySnapshot = Clone(record);
+
                 var events = _cases.LoadEvents(caseId);
                 var pendingOps = record.PendingOperationIds
                     .Select(id => _operations.TryLoad(id))
@@ -481,6 +492,14 @@ public sealed class CaseRuntime : IDisposable
 
                 var availableTools = _tools?.Tools.Descriptors().Select(d => d.Name).ToList()
                     ?? new List<string>();
+                if (_capabilities is not null)
+                {
+                    foreach (var cap in _capabilities.Enabled)
+                    {
+                        if (!availableTools.Contains(cap, StringComparer.Ordinal))
+                            availableTools.Add(cap);
+                    }
+                }
 
                 request = new CaseMindRequest(
                     record.Id,
@@ -500,12 +519,24 @@ public sealed class CaseRuntime : IDisposable
                     availableTools);
             }
 
-            // Decision / mind work runs outside _gate so a slow judgment cannot stall
+            // Decision / mind / capability work runs outside _gate so a slow judgment cannot stall
             // ingest, direct case creation, or other case bookkeeping.
             CaseMindStep step;
             try
             {
-                step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
+                if (runnableCapability is not null &&
+                    capabilitySnapshot is not null &&
+                    _capabilities is not null &&
+                    _capabilities.TryGet(runnableCapability, out _, out var handler) &&
+                    handler is not null)
+                {
+                    step = await DispatchCapabilityAsync(
+                        capabilitySnapshot, runnableCapability, handler, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    step = await _mind.StepAsync(request, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
@@ -533,7 +564,7 @@ public sealed class CaseRuntime : IDisposable
                 record.Budgets.StepsUsed++;
                 var stepEvt = AppendEvent(record, CaseEventTypes.MindStepped, new
                 {
-                    mind = _mind.Name,
+                    mind = runnableCapability is not null ? "capability:" + runnableCapability : _mind.Name,
                     move = step.Move,
                     feed = step.Feed,
                     read = step.Read,
@@ -556,6 +587,74 @@ public sealed class CaseRuntime : IDisposable
         {
             _inference.Release();
         }
+    }
+
+    private string? FindRunnableCapability(CaseRecord record)
+    {
+        if (_capabilities is null) return null;
+        // Listening / observed screening cases stay on the decision engine — only raised
+        // capability children (or direct cases that advertise a single v0.1 capability) run handlers.
+        if (record.PresentationPolicy == StreamIntake.PresentationListening)
+            return null;
+
+        foreach (var raw in record.AllowedCapabilities)
+        {
+            var key = NormalizeCapabilityKey(raw);
+            if (_capabilities.TryGet(key, out _, out _))
+                return key;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeCapabilityKey(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw;
+        return raw.Contains('@', StringComparison.Ordinal) ? raw : raw + "@1";
+    }
+
+    private async Task<CaseMindStep> DispatchCapabilityAsync(
+        CaseRecord record,
+        string capabilityAtVersion,
+        ICapabilityHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var parts = capabilityAtVersion.Split('@');
+        var args = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(record.ApprovedObjective))
+            args["objective"] = record.ApprovedObjective;
+
+        // Carry raise-time arguments from the first UserInput event payload when present.
+        var events = _cases.LoadEvents(record.Id);
+        foreach (var evt in events)
+        {
+            if (evt.Type != CaseEventTypes.UserInput) continue;
+            if (evt.Payload.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in evt.Payload.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                        args[prop.Name] = prop.Value.GetString() ?? "";
+                }
+            }
+            break;
+        }
+
+        var request = new CapabilityRequest
+        {
+            CapabilityId = parts[0],
+            CapabilityVersion = parts.Length > 1 && int.TryParse(parts[1], out var v) ? v : 1,
+            CaseId = record.Id,
+            Origin = record.Origin,
+            ProjectId = null,
+            Objective = record.ApprovedObjective,
+            Arguments = args,
+            SourceRefs = record.SourceRefs,
+            At = _clock.UtcNow,
+        };
+
+        var result = await handler.HandleAsync(request, cancellationToken).ConfigureAwait(false);
+        return CapabilityResultMapper.ToMindStep(result);
     }
 
     private void ApplyMove(CaseRecord record, CaseMindStep step, string causedByEventId)
@@ -675,7 +774,8 @@ public sealed class CaseRuntime : IDisposable
     {
         RaiseOneChild(parent, move, causedByEventId,
             objectiveOverride: null,
-            kindOverride: null);
+            kindOverride: null,
+            capabilityOverride: null);
 
         if (move.Args.TryGetValue("siblingRaises", out var siblings) &&
             siblings.ValueKind == JsonValueKind.Array)
@@ -684,12 +784,28 @@ public sealed class CaseRuntime : IDisposable
             {
                 string? objective = null;
                 string? kind = null;
+                string? capabilityId = null;
                 if (sibling.TryGetProperty("feedText", out var feed) && feed.ValueKind == JsonValueKind.String)
                     objective = feed.GetString();
                 if (sibling.TryGetProperty("kind", out var kindEl) && kindEl.ValueKind == JsonValueKind.String)
                     kind = kindEl.GetString();
-                RaiseOneChild(parent, move, causedByEventId, objective, kind);
+                if (sibling.TryGetProperty("capabilityId", out var capEl) && capEl.ValueKind == JsonValueKind.String)
+                    capabilityId = capEl.GetString();
+                RaiseOneChild(parent, move, causedByEventId, objective, kind, capabilityId);
             }
+        }
+
+        // Direct parents finish after routing to a capability child so they do not re-raise forever.
+        if (parent.Origin == CaseOrigin.Direct &&
+            parent.PresentationPolicy != StreamIntake.PresentationListening)
+        {
+            parent.Status = CaseStatus.Completed;
+            parent.Result = string.IsNullOrWhiteSpace(move.Text) ? "routed" : move.Text;
+            AppendEvent(parent, CaseEventTypes.CaseCompleted, new
+            {
+                result = parent.Result,
+                routed = true,
+            });
         }
     }
 
@@ -698,7 +814,8 @@ public sealed class CaseRuntime : IDisposable
         CaseMove move,
         string causedByEventId,
         string? objectiveOverride,
-        string? kindOverride)
+        string? kindOverride,
+        string? capabilityOverride)
     {
         var objective = objectiveOverride ?? move.Text;
         if (objectiveOverride is null &&
@@ -714,6 +831,18 @@ public sealed class CaseRuntime : IDisposable
             kindEl.ValueKind == JsonValueKind.String)
             kind = kindEl.GetString() ?? kind;
 
+        var capabilityId = capabilityOverride;
+        if (string.IsNullOrWhiteSpace(capabilityId) &&
+            move.Args.TryGetValue("capabilityId", out var capEl) &&
+            capEl.ValueKind == JsonValueKind.String)
+            capabilityId = capEl.GetString();
+        if (string.IsNullOrWhiteSpace(capabilityId) && !string.IsNullOrWhiteSpace(move.Name))
+            capabilityId = move.Name;
+
+        var capabilityKey = string.IsNullOrWhiteSpace(capabilityId)
+            ? null
+            : NormalizeCapabilityKey(capabilityId);
+
         var now = _clock.UtcNow;
         var childId = Ulid.NewUlid(now);
         var sourceRefs = new List<string>();
@@ -722,6 +851,17 @@ public sealed class CaseRuntime : IDisposable
         if (move.Args.TryGetValue("sourceEventId", out var evEl) && evEl.ValueKind == JsonValueKind.String)
             sourceRefs.Add("event:" + evEl.GetString());
         sourceRefs.Add("parent:" + parent.Id);
+
+        var allowed = new List<string>
+        {
+            Actions.ModifyNote,
+            Actions.CreateDraftNote,
+            "file_note",
+            CaseTools.LocalSearch,
+            CaseTools.ReadNote,
+        };
+        if (capabilityKey is not null)
+            allowed.Insert(0, capabilityKey);
 
         var child = new CaseRecord
         {
@@ -735,16 +875,7 @@ public sealed class CaseRuntime : IDisposable
             UpdatedAt = now,
             ParentCaseId = parent.Id,
             SourceRefs = sourceRefs,
-            AllowedCapabilities =
-            [
-                ScriptedCaseMind.DefaultCapability,
-                Actions.CreateProject,
-                Actions.ModifyNote,
-                Actions.CreateDraftNote,
-                "file_note",
-                CaseTools.LocalSearch,
-                CaseTools.ReadNote,
-            ],
+            AllowedCapabilities = allowed,
         };
         PersistRecord(child);
         var userEvt = AppendEvent(child, CaseEventTypes.UserInput, new
@@ -753,6 +884,15 @@ public sealed class CaseRuntime : IDisposable
             origin = CaseOrigin.Direct,
             raisedFrom = parent.Id,
             causedByEventId,
+            capabilityId = capabilityKey,
+            mode = CaseTools.ArgString(move.Args, "mode"),
+            projectId = CaseTools.ArgString(move.Args, "projectId"),
+            noteId = CaseTools.ArgString(move.Args, "noteId"),
+            body = CaseTools.ArgString(move.Args, "body"),
+            span = CaseTools.ArgString(move.Args, "span"),
+            acronym = CaseTools.ArgString(move.Args, "acronym"),
+            owner = CaseTools.ArgString(move.Args, "owner"),
+            due = CaseTools.ArgString(move.Args, "due"),
         });
         child.ProcessedEventIds.Add(userEvt.EventId);
         PersistRecord(child);
@@ -764,6 +904,7 @@ public sealed class CaseRuntime : IDisposable
         {
             childCaseId = childId,
             objective,
+            capabilityId = capabilityKey,
             causedByEventId,
             sourceRefs,
         });

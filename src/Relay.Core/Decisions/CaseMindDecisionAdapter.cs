@@ -71,13 +71,9 @@ public sealed class CaseMindDecisionAdapter : ICaseMind
                 Args = AttentionArgs(decision),
             },
             CaseDecisionKinds.RaiseCase => BuildRaiseMove(decision),
-            CaseDecisionKinds.RequestGeneration => new CaseMove
-            {
-                Type = CaseMove.Say,
-                Text = decision.FeedText,
-                Done = false,
-                Args = MergeArgs(decision, AttentionArgs(decision)),
-            },
+            // Code selected a generation/capability task — raise a child that the runtime
+            // dispatches to the registered handler (never unconstrained model next-action).
+            CaseDecisionKinds.RequestGeneration => BuildRaiseMove(decision),
             CaseDecisionKinds.RequestOperation => new CaseMove
             {
                 Type = CaseMove.Propose,

@@ -72,6 +72,8 @@ public interface IRelaySurface
 
     SurfaceResult ToggleListening();
     SurfaceResult SubmitComposer(string text, string kind = CaseKind.Answer);
+    /// <summary>While listening, persist a transcript segment (Wispr / typed) into StreamIntake.</summary>
+    SurfaceResult IngestTranscript(string text, string? speaker = null);
     SurfaceResult ApproveOperation(string operationId, string envelopeHash, long expectedCaseVersion);
     SurfaceResult RejectOperation(string operationId, string? reason = null);
     SurfaceResult EditOperation(string operationId, Dictionary<string, JsonElement> newArguments);
@@ -89,6 +91,9 @@ public interface IRelaySurface
         DateTimeOffset? expiresAt = null);
     SurfaceResult RevokeHostedGrant(string grantId);
 
+    /// <summary>Independent of listening: create or revoke the current session hosted grant.</summary>
+    SurfaceResult ToggleHostedJudgments(int maximumInputTokenBudget = 50_000);
+
     /// <summary>Advance work after a command (tests / harness). UI may poll Snapshot instead.</summary>
     Task<SurfaceResult> RunUntilIdleAsync(string? caseId = null, int maxSteps = 16, CancellationToken cancellationToken = default);
 }
@@ -98,6 +103,7 @@ public static class RelaySurfaceCommands
 {
     public const string ToggleListening = "ToggleListening";
     public const string SubmitComposer = "SubmitComposer";
+    public const string IngestTranscript = "IngestTranscript";
     public const string ApproveOperation = "ApproveOperation";
     public const string RejectOperation = "RejectOperation";
     public const string EditOperation = "EditOperation";
@@ -105,4 +111,5 @@ public static class RelaySurfaceCommands
     public const string GrantHostedSession = "GrantHostedSession";
     public const string GrantHostedProject = "GrantHostedProject";
     public const string RevokeHostedGrant = "RevokeHostedGrant";
+    public const string ToggleHostedJudgments = "ToggleHostedJudgments";
 }
