@@ -78,7 +78,7 @@ Write-Host "  manifest: $manifestPath"
 if ($HarnessOnly -or -not $IsWindows) {
   Write-Host "Starting Relay.DevHarness ($Scenario)..."
   dotnet run --project (Join-Path $RepoRoot "src/Relay.DevHarness") --no-launch-profile -- `
-    --data-root $env:RELAY_DATA_ROOT --run-id $RunId
+    --data-root $env:RELAY_DATA_ROOT --run-id $RunId --scenario $Scenario
   exit $LASTEXITCODE
 }
 

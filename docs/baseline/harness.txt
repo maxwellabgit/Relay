@@ -1,0 +1,84 @@
+﻿slice1 exit=0 {
+  "ok": true,
+  "scenario": "slice1",
+  "runId": "slice1-baseline",
+  "caseId": "01M2QKSTG0Y2MWAYWH4VZX7JA1",
+  "operationId": "01M2QKSTG0V0WB8D8H5NFA7TX6",
+  "sideEffects": 1,
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice1\\.dev-runs\\slice1-baseline\\runtime.jsonl"
+}
+slice2 exit=0 {
+  "ok": true,
+  "scenario": "slice2",
+  "runId": "slice2-baseline",
+  "caseId": "01M2QTNHR0ZR4VCS3A72FQ206E",
+  "answer": "The Atlas beta ships on October 14.",
+  "sourceRefs": [
+    "note:01M2QTNHR0KWD7XV6X4Z0FXM2M/01M2QTNHR0Q745B27ZWS4CY060#evt-atlas-beta-source:0-35"
+  ],
+  "noteId": "01M2QTNHR0Q745B27ZWS4CY060",
+  "projectId": "01M2QTNHR0KWD7XV6X4Z0FXM2M",
+  "feedCount": 6,
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice2\\.dev-runs\\slice2-baseline\\runtime.jsonl"
+}
+slice3 exit=0 {
+  "ok": true,
+  "scenario": "slice3",
+  "runId": "slice3-baseline",
+  "listenId": "01M2R1H900NQ7KAGTRQWQ3X2TP",
+  "childId": "01M2R1H900S9W18YX5TJXS7N62",
+  "pendingOpId": "01M2R1H90098FZSXZT18PTSDG1",
+  "segmentCount": 3,
+  "feedCount": 6,
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice3\\.dev-runs\\slice3-baseline\\runtime.jsonl"
+}
+slice4 exit=0 {
+  "ok": true,
+  "scenario": "slice4",
+  "runId": "slice4-baseline",
+  "caseId": "01M2R8D080ZAX6AE1MDQ62R07W",
+  "answer": "Based on stored source artifacts, Lightshift operates 20 battery energy storage sites.",
+  "sourceRefs": [
+    "artifact:01M2R8D080N1SC018N5YYZ6PEA",
+    "artifact:01M2R8D080T60F3MVVF15JSPGC",
+    "artifact:01M2R8D080HDDS7YED7BSSDK4B",
+    "artifact:01M2R8D080DR7XJ0106752BCBV"
+  ],
+  "searchHost": "search.test",
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice4\\.dev-runs\\slice4-baseline\\runtime.jsonl"
+}
+slice5 exit=0 {
+  "ok": true,
+  "scenario": "slice5",
+  "runId": "slice5-baseline",
+  "tokyo": "It is 21:00 in Asia/Tokyo.",
+  "kathmandu": "It is 17:45 in Asia/Kathmandu.",
+  "london": "It is 13:00 in Europe/London.",
+  "reverted": true,
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice5\\.dev-runs\\slice5-baseline\\runtime.jsonl"
+}
+slice6 exit=0 {
+  "ok": true,
+  "scenario": "slice6",
+  "runId": "slice6-baseline",
+  "feedCount": 8,
+  "pendingApprovals": 0,
+  "modelHealth": "unavailable",
+  "listening": false,
+  "caseId": "01M2QKSTG0KSBRZSA7N0N8B15V",
+  "diagnostics": "C:\\Users\\maxwe\\Documents\\projects\\Relay\\.dev-data\\scenarios\\slice6\\.dev-runs\\slice6-baseline\\runtime.jsonl"
+}
+slice7 exit=0 {
+  "ok": true,
+  "scenario": "slice7",
+  "runId": "slice7-baseline",
+  "kind": "tool",
+  "frictionKind": "failed_capability",
+  "title": "Build a tool for a repeated capability gap",
+  "examples": 3,
+  "evaluationCases": 2,
+  "successMetric": "Capability succeeds on the next similar ask without a new build.",
+  "reversionPlan": "Revert tool change set; file removed.",
+  "proposalId": "01M2RJPK40C5NDK04SNA4B1T6P",
+  "noChangeKind": "no_change"
+}

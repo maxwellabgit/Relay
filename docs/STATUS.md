@@ -5,58 +5,66 @@ What has been verified, and how. Scripted evidence is never summarized as live e
 ## Verification levels
 
 1. **Deterministic unit** — ledger, schemas, policy, path guards, idempotency, recovery, stores, executors.
-2. **Runtime scenario** — scripted model moves exercising complete case behavior.
-3. **Replay** — recorded real model request/response pairs rerun against later runtime or prompt versions.
-4. **Live Windows gate** — real WinUI, real local model, real Jint worker, real search adapter, Wispr Flow where applicable.
+2. **Runtime scenario** — scripted minds / decision fixtures exercising complete case behavior.
+3. **Replay** — recorded real provider request/response pairs rerun against later runtime versions.
+4. **Live Windows gate** — real WinUI, real Jev (when granted), real local generator, Wispr Flow where applicable.
 
-Live runners must fail preflight or report `SKIPPED: missing local model`. They must not return as passing when the environment is absent.
+Live runners must fail preflight or report `SKIPPED: missing …`. They must not return as passing when the environment is absent.
 
-## Current tree (vNext branch)
+## Refactor state
+
+| Field | Value |
+| --- | --- |
+| Baseline | `55551224b7a7fb5006f752d1015a9937aeea4f10` |
+| Tag | `pre-jev-refactor-55551224` |
+| Branch | `refactor/jev-decision-engine` |
+| Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
+| Phase | **0 complete characterization; Phase 1 docs next** |
+| Alpha complete | **Not claimed** |
+
+Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
+
+## Phase 0 baseline characterization (this Windows host)
+
+Host: Windows 11, SDK `10.0.400` at `%LOCALAPPDATA%\Microsoft\dotnet` (not on default PATH). Desktop **does** compile here.
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `dotnet build Relay.slnx -c Debug` | Succeeded — 0 errors, 15 xUnit analyzer warnings | `docs/baseline/build.txt` |
+| `dotnet test` → `Relay.Core.Tests` | **33/33 passed** | `docs/baseline/test.txt` |
+| `dotnet test` → `Relay.Tests` | **396 passed / 2 failed / 398 total** | `docs/baseline/test.txt` |
+| DevHarness `slice1`–`slice7` | **All exit 0**, isolated `.dev-runs` artifacts | `docs/baseline/harness.txt` |
+
+### Known failures at baseline (legacy `SessionCoordinator` path)
+
+Do not treat these as Phase 0 regressions. They live in code Phase 11 deletes.
+
+1. `Relay.Tests.RecoveryAndFailureTests.LedgerWriteFailureLocksAndPreservesTheDraft` — expected `Locked`, got `Ready` (`RecoveryAndFailureTests.cs` ~177).
+2. `Relay.Tests.RecoveryAndFailureTests.CrashDuringCaptureIsDetectedAndTheDraftIsRecoverable` — no `StateChanged` to `ORGANIZING` (`RecoveryAndFailureTests.cs` ~44).
+
+### Phase 0 script fix
+
+`dev/run-relay.ps1` now forwards `--scenario` to DevHarness (previously harness-only runs always defaulted to `slice1`).
+
+## Current tree (pre–decision-engine cutover)
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Product contract (`PRODUCT.md`) | Written | Doc review |
-| Architecture contract (`ARCHITECTURE.md`) | Written | Doc review |
-| Retention ledger (`RETENTION.md`) | Written | Doc review |
-| Historical docs archived | Done | `docs/archive/` |
-| Legacy prototype tag | `legacy-prototype-e7e9421` | Local git tag |
-| Characterization: ledger / PathGuard / AtomicFile / Ulid | Done | `tests/Relay.Core.Tests` deterministic |
-| `CaseRuntime` + `OperationEnvelope` | Slice 1–5 | `Slice1`–`Slice5` tests + DevHarness |
-| Persistent ready queue | Slice 1 | SQLite `ready_queue` via `ReadyQueue` |
-| SQLite projections | Slice 1–2 | `ProjectionDatabase` + feed items per step |
-| Local harness (`dev/`) | Present | `Relay.DevHarness --scenario slice1`…`slice7` |
-| Direct vertical path (Slice 2) | Done (deterministic) | Atlas beta recall + citations |
-| Listening adapter (Slice 3) | Done (deterministic) | `StreamIntake` + observed case |
-| Research path (Slice 4) | Done (deterministic fakes) | Lightshift path; **live search/model not verified here** |
-| Tool/workflow generalization (Slice 5) | Done (deterministic Jint-in-tests) | `world_clock` reuse + revert; **live Worker process not required for Core.Tests** |
-| UI projection coupling (Slice 6) | Core surface done; WinUI bind pending | `IRelaySurface` / `CaseRuntimeSurface`; `Slice6SurfaceTests`; Desktop comment only — **WinUI not compiled on Linux** |
-| Measured personalization (Slice 7) | Deterministic store + proposals | `FrictionEvidenceStore` + typed `ImprovementProposal`; `Slice7PersonalizationTests` — **no live friction→apply loop** |
-| Alpha complete | **Not claimed** | Live Windows gates (model, WinUI, Wispr) still missing |
+| Product / architecture docs | Still describe “one local mind” — Phase 1 rewrites | `PRODUCT.md`, `ARCHITECTURE.md`, `README.md` |
+| `CaseRuntime` + envelopes + projections | Present (Slices 1–7 scripted) | `Relay.Core.Tests` + DevHarness |
+| Production Desktop composition | Still `SessionCoordinator` / `RelayRuntime` | `App.xaml.cs` |
+| Jev / judgment contracts / TypeSafe client | **Absent on this branch** | — |
+| Hosted grant / disclosure | **Absent** | — |
+| Decision engine (`ICaseDecisionEngine`) | **Absent** | — |
+| Four v0.1 capability registry | **Absent** | — |
+| Improvement `PatternSignature` / evaluator | **Absent** (friction still groups by kind alone) | `FrictionEvidenceStore.Suggest` |
 
-## Deterministic vs live-missing
+## Historical slices (still valid as characterization)
 
-| Verified on this host (Linux) | Still missing (needs Windows / live adapters) |
-| --- | --- |
-| CaseRuntime recovery, Atlas, listening, research fakes, tool/workflow Jint helper, surface API, friction→proposal contract | WinUI bind to `IRelaySurface`, real local model, real Worker job object, real search HTTPS, Wispr Flow |
-
-Open questions for humans: see repo-root `QUESTIONS.md`.
-
-## Legacy prototype (tagged `legacy-prototype-e7e9421`)
-
-The prior tree at `e7e9421` retains useful primitives (ledger, PathGuard, policy/proposals, Windows integration, Jint worker, change sets, project/note stores) but still carries:
-
-- Two model-driving loops (`TaskLoop` + `ObservingLoop`)
-- Partial task durability
-- No universal operation envelope
-- Non-persistent scheduler (`TaskEngine`)
-- Incomplete search↔delegate binding
-- Prototype tool naming / structural-only workflow tests
-- Heuristic-heavy memory
-- Live tests that can pass without a model
-- Documentation that over-claims completeness
-
-Those components remain in the tree until vNext replacements pass equivalent characterization. They are not the authoritative product contract.
+Slices 1–7 on `CaseRuntime` with scripted minds remain the pre-Jev characterization suite. They are not the v0.1 production architecture. See archived slice table in git history of `ARCHITECTURE.md` and `docs/archive/`.
 
 ## Environment note
 
-This agent’s verification host is Linux. `Relay.Core`, `Relay.Gateway`, and `Relay.Worker` are buildable here. `Relay.Desktop` (WinUI) and `net10.0-windows` projects require a Windows machine for compile and live gates.
+This verification host is **Windows**. `Relay.Desktop` (WinUI) and `net10.0-windows` test projects compile and run here. Cross-platform Core projects also build. Live Jev and local-generator gates still require secrets/endpoints and are not claimed.
+
+Open questions: repo-root `QUESTIONS.md`.
