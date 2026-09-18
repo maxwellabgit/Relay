@@ -40,6 +40,14 @@ public sealed class JudgmentResponse
             throw new JudgmentValidationException("Failed response must not include success.");
         Failure.Validate();
     }
+
+    public void ValidateAgainst(JudgmentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        Validate();
+        if (Ok)
+            Success!.ValidateAgainst(request);
+    }
 }
 
 public sealed class JudgmentSuccess
@@ -69,14 +77,47 @@ public sealed class JudgmentSuccess
             answer.Validate(id);
         }
     }
+
+    public void ValidateAgainst(JudgmentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        Validate();
+        foreach (var (id, question) in request.Questions)
+        {
+            if (!Answers.TryGetValue(id, out var answer))
+                throw new JudgmentValidationException($"Answer for question '{id}' is missing.");
+            switch (question, answer)
+            {
+                case (NoulQuestion, NoulAnswer):
+                    break;
+                case (ChoiceQuestion q, ChoiceAnswer a):
+                    a.ValidateAgainstCriteria(id, q.Criteria);
+                    break;
+                case (ScoreQuestion q, ScoreAnswer a):
+                    a.ValidateAgainstLevels(id, q.Criteria);
+                    break;
+                default:
+                    throw new JudgmentValidationException($"Answer for '{id}' has the wrong type for its question.");
+            }
+        }
+
+        foreach (var id in Answers.Keys)
+        {
+            if (!request.Questions.ContainsKey(id))
+                throw new JudgmentValidationException($"Answer '{id}' does not match any asked question.");
+        }
+    }
 }
 
 public sealed class JudgmentFailure
 {
     [JsonPropertyName("category")] public required string Category { get; init; }
     [JsonPropertyName("message")] public required string Message { get; init; }
-    [JsonPropertyName("retryable")] public bool Retryable { get; init; }
     [JsonPropertyName("httpStatus")] public int? HttpStatus { get; init; }
+
+    /// <summary>Derived from category — authentication/validation are never retryable.</summary>
+    [JsonPropertyName("retryable")]
+    public bool Retryable => JudgmentFailureCategories.IsRetryable(Category);
 
     public void Validate()
     {
@@ -86,7 +127,7 @@ public sealed class JudgmentFailure
             throw new JudgmentValidationException("failure message is required.");
     }
 
-    public static JudgmentFailure Create(string category, string message, bool retryable = false, int? httpStatus = null)
+    public static JudgmentFailure Create(string category, string message, int? httpStatus = null)
     {
         if (!JudgmentFailureCategories.IsKnown(category))
             throw new JudgmentValidationException($"Unknown failure category '{category}'.");
@@ -97,7 +138,6 @@ public sealed class JudgmentFailure
         {
             Category = category,
             Message = message,
-            Retryable = retryable,
             HttpStatus = httpStatus,
         };
     }
@@ -115,16 +155,42 @@ public static class JudgmentFailureCategories
     public const string Validation = "validation";
     public const string InvalidResponse = "invalid_response";
     public const string Network = "network";
+    /// <summary>Client-local cancellation; surfaces as OperationCanceledException from JudgeAsync when requested.</summary>
     public const string Cancelled = "cancelled";
 
-    private static readonly HashSet<string> Known = new(StringComparer.Ordinal)
-    {
+    public static readonly string[] All =
+    [
         Disabled, NotAuthorized, MissingSecret, Timeout, RateLimited, Overloaded,
         Authentication, Validation, InvalidResponse, Network, Cancelled,
+    ];
+
+    private static readonly HashSet<string> Known = new(All, StringComparer.Ordinal);
+
+    private static readonly HashSet<string> Retryables = new(StringComparer.Ordinal)
+    {
+        Timeout, RateLimited, Overloaded, Network,
     };
 
     public static bool IsKnown(string category) =>
         !string.IsNullOrWhiteSpace(category) && Known.Contains(category);
+
+    public static bool IsRetryable(string? category) =>
+        category is not null && Retryables.Contains(category);
+}
+
+internal static class JudgmentProbability
+{
+    public static void RequireUnitInterval(double value, string what)
+    {
+        if (!double.IsFinite(value) || value < 0 || value > 1)
+            throw new JudgmentValidationException($"{what} must be a finite number in [0,1].");
+    }
+
+    public static void RequireFinite(double value, string what)
+    {
+        if (!double.IsFinite(value))
+            throw new JudgmentValidationException($"{what} must be a finite number.");
+    }
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
@@ -142,8 +208,7 @@ public sealed class NoulAnswer : JudgmentAnswer
 
     public override void Validate(string questionId)
     {
-        if (ProbabilityYes is < 0 or > 1)
-            throw new JudgmentValidationException($"Noul '{questionId}' probabilityYes must be in [0,1].");
+        JudgmentProbability.RequireUnitInterval(ProbabilityYes, $"Noul '{questionId}' probabilityYes");
     }
 }
 
@@ -159,15 +224,13 @@ public sealed class ChoiceAnswer : JudgmentAnswer
             throw new JudgmentValidationException($"Choice '{questionId}' winner must be non-empty.");
         if (Probabilities is null || Probabilities.Count == 0)
             throw new JudgmentValidationException($"Choice '{questionId}' probabilities are required.");
-        if (Confidence is < 0 or > 1)
-            throw new JudgmentValidationException($"Choice '{questionId}' confidence must be in [0,1].");
+        JudgmentProbability.RequireUnitInterval(Confidence, $"Choice '{questionId}' confidence");
 
         foreach (var (option, p) in Probabilities)
         {
             if (string.IsNullOrWhiteSpace(option))
                 throw new JudgmentValidationException($"Choice '{questionId}' probability keys must be non-empty.");
-            if (p is < 0 or > 1)
-                throw new JudgmentValidationException($"Choice '{questionId}' probability for '{option}' must be in [0,1].");
+            JudgmentProbability.RequireUnitInterval(p, $"Choice '{questionId}' probability for '{option}'");
         }
 
         if (!Probabilities.ContainsKey(Choice))
@@ -195,19 +258,29 @@ public sealed class ScoreAnswer : JudgmentAnswer
 
     public override void Validate(string questionId)
     {
+        JudgmentProbability.RequireFinite(Score, $"Score '{questionId}' score");
         if (Legend is null || Legend.Count == 0)
             throw new JudgmentValidationException($"Score '{questionId}' legend is required.");
         if (Probabilities is null || Probabilities.Count == 0)
             throw new JudgmentValidationException($"Score '{questionId}' probabilities are required.");
-        if (Confidence is < 0 or > 1)
-            throw new JudgmentValidationException($"Score '{questionId}' confidence must be in [0,1].");
+        JudgmentProbability.RequireUnitInterval(Confidence, $"Score '{questionId}' confidence");
 
         foreach (var (level, p) in Probabilities)
         {
             if (string.IsNullOrWhiteSpace(level))
                 throw new JudgmentValidationException($"Score '{questionId}' probability keys must be non-empty.");
-            if (p is < 0 or > 1)
-                throw new JudgmentValidationException($"Score '{questionId}' probability for '{level}' must be in [0,1].");
+            JudgmentProbability.RequireUnitInterval(p, $"Score '{questionId}' probability for '{level}'");
+        }
+    }
+
+    public void ValidateAgainstLevels(string questionId, IReadOnlyList<string> criteria)
+    {
+        Validate(questionId);
+        for (var i = 0; i < criteria.Count; i++)
+        {
+            var key = i.ToString();
+            if (!Probabilities.ContainsKey(key))
+                throw new JudgmentValidationException($"Score '{questionId}' probabilities missing level '{key}'.");
         }
     }
 }

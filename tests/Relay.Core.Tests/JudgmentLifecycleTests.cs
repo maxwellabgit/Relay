@@ -187,7 +187,7 @@ public sealed class JudgmentLifecycleTests : IDisposable
         var store = new JudgmentStore(_tmp.Root, objects, _clock);
         var handle = store.BeginRequest(BuildRequest(Secret), "fake");
         store.CompleteFailure(handle.Record.JudgmentId, JudgmentFailure.Create(
-            JudgmentFailureCategories.Timeout, "provider timed out", retryable: true));
+            JudgmentFailureCategories.Timeout, "provider timed out"));
 
         var again = store.BeginRequest(BuildRequest(Secret), "fake");
         Assert.False(again.AlreadyComplete);

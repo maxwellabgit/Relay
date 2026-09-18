@@ -77,6 +77,7 @@ public sealed class JudgmentStore
             var record = new JudgmentRecord
             {
                 JudgmentId = id,
+                Provider = provider,
                 QuestionSetId = request.QuestionSetId,
                 QuestionSetVersion = request.QuestionSetVersion,
                 Model = request.Model,
@@ -228,6 +229,7 @@ public sealed class JudgmentStore
     public static object ToAuditPayload(JudgmentRecord record) => new
     {
         judgmentId = record.JudgmentId,
+        provider = record.Provider,
         requestObjectId = record.RequestObjectId,
         requestHash = record.RequestHash,
         responseObjectId = record.ResponseObjectId,

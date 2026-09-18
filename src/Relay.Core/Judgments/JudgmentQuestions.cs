@@ -16,6 +16,8 @@ public sealed class JudgmentRequest
     [JsonPropertyName("caseVersion")] public long? CaseVersion { get; init; }
     [JsonPropertyName("disclosureGrantId")] public string? DisclosureGrantId { get; init; }
     [JsonPropertyName("requestHash")] public string? RequestHash { get; init; }
+    /// <summary>Provider name used for cache/idempotency hashing (e.g. typesafe, fake).</summary>
+    [JsonPropertyName("provider")] public string? Provider { get; init; }
 
     public void Validate()
     {
@@ -35,6 +37,20 @@ public sealed class JudgmentRequest
             question.Validate(id);
         }
     }
+
+    /// <summary>
+    /// Stable request hash for cache/idempotency. Excludes case id/version, grant id, and timestamps
+    /// so the same state in another case can reuse a completed judgment.
+    /// </summary>
+    public string ComputeRequestHash(string provider) =>
+        JudgmentRequestHasher.Compute(
+            provider,
+            Model,
+            QuestionSetId,
+            QuestionSetVersion,
+            JudgmentRequestHasher.HashQuestions(Questions),
+            JudgmentRequestHasher.HashJsonElement(State),
+            SourceObjectRefs.Select(r => r.Sha256));
 }
 
 public sealed record JudgmentSourceRef(
@@ -65,7 +81,12 @@ public sealed class NoulQuestion : JudgmentQuestion
 
 public sealed class ChoiceQuestion : JudgmentQuestion
 {
+    public const string NoMatch = "no_match";
+
     [JsonPropertyName("criteria")] public required IReadOnlyDictionary<string, string> Criteria { get; init; }
+
+    /// <summary>False only when the criteria provably cover every candidate.</summary>
+    [JsonPropertyName("requireNoMatch")] public bool RequireNoMatch { get; init; } = true;
 
     public override void Validate(string questionId)
     {
@@ -77,6 +98,9 @@ public sealed class ChoiceQuestion : JudgmentQuestion
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
                 throw new JudgmentValidationException($"Choice '{questionId}' criteria entries must be non-empty.");
         }
+
+        if (RequireNoMatch && !Criteria.ContainsKey(NoMatch))
+            throw new JudgmentValidationException($"Choice '{questionId}' requires a '{NoMatch}' option when coverage may be incomplete.");
     }
 }
 

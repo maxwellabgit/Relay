@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Relay.Core.Judgments;
@@ -8,6 +10,7 @@ namespace Relay.Core.Judgments;
 public sealed record JudgmentRecord
 {
     [JsonPropertyName("judgmentId")] public required string JudgmentId { get; init; }
+    [JsonPropertyName("provider")] public string? Provider { get; init; }
     [JsonPropertyName("questionSetId")] public required string QuestionSetId { get; init; }
     [JsonPropertyName("questionSetVersion")] public required string QuestionSetVersion { get; init; }
     [JsonPropertyName("model")] public required string Model { get; init; }
@@ -32,6 +35,8 @@ public static class JudgmentStatuses
     public const string Completed = "completed";
     public const string Failed = "failed";
     public const string Deferred = "deferred";
+
+    public static readonly string[] All = [Requested, Completed, Failed, Deferred];
 }
 
 /// <summary>Stable SHA-256 over the canonical cache/idempotency material.</summary>
@@ -55,22 +60,52 @@ public static class JudgmentRequestHasher
             questionDefinitionsHash.Trim(),
             stateHash.Trim(),
             sources);
-        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(material));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return ToHex(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
-    public static string HashJsonElement(System.Text.Json.JsonElement element)
+    public static string HashJsonElement(JsonElement element)
     {
-        var json = System.Text.Json.JsonSerializer.Serialize(element, Storage.RelayJson.Compact);
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            WriteCanonical(writer, element);
+        }
+        return ToHex(System.Security.Cryptography.SHA256.HashData(stream.ToArray()));
     }
 
     public static string HashQuestions(IReadOnlyDictionary<string, JudgmentQuestion> questions)
     {
-        var ordered = questions
-            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        var ordered = new SortedDictionary<string, JudgmentQuestion>(StringComparer.Ordinal);
+        foreach (var (key, value) in questions)
+            ordered[key] = value;
         var json = JudgmentJson.Serialize(ordered);
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        return ToHex(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+    }
+
+    private static string ToHex(byte[] bytes) => Convert.ToHexStringLower(bytes);
+
+    private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var prop in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(prop.Name);
+                    WriteCanonical(writer, prop.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                    WriteCanonical(writer, item);
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
     }
 }

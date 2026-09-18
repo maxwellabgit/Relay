@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Relay.Core.Judgments;
 
 namespace Relay.Core.Tests.Support;
@@ -7,6 +6,7 @@ namespace Relay.Core.Tests.Support;
 /// <summary>
 /// Scripted judgment provider for deterministic tests. Never calls TypeSafe.
 /// Matches by question-set id and optionally state hash.
+/// <see cref="OperationCanceledException"/> is the only exception that leaves <see cref="JudgeAsync"/>.
 /// </summary>
 public sealed class FakeJudgmentClient : IJudgmentClient
 {
@@ -24,14 +24,32 @@ public sealed class FakeJudgmentClient : IJudgmentClient
 
     public FakeJudgmentClient Script(string questionSetId, JudgmentResponse response, string? stateHash = null)
     {
-        _scripts.Add(new ScriptedJudgment(questionSetId, stateHash, response));
+        _scripts.Add(new ScriptedJudgment(questionSetId, stateHash, response, Validated: true));
         return this;
     }
+
+    /// <summary>Script a response without validating it first (parser / engine negative fixtures).</summary>
+    public FakeJudgmentClient ScriptUnvalidated(string questionSetId, JudgmentResponse response, string? stateHash = null)
+    {
+        _scripts.Add(new ScriptedJudgment(questionSetId, stateHash, response, Validated: false));
+        return this;
+    }
+
+    public int CallsFor(string questionSetId) =>
+        Calls.Count(c => string.Equals(c.QuestionSetId, questionSetId, StringComparison.Ordinal));
 
     public async Task<JudgmentResponse> JudgeAsync(JudgmentRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        request.Validate();
+        try
+        {
+            request.Validate();
+        }
+        catch (JudgmentValidationException ex)
+        {
+            return JudgmentResponse.FromFailure(
+                JudgmentFailure.Create(JudgmentFailureCategories.Validation, ex.Message));
+        }
 
         Interlocked.Increment(ref _callCount);
         var stateHash = JudgmentRequestHasher.HashJsonElement(request.State);
@@ -45,11 +63,11 @@ public sealed class FakeJudgmentClient : IJudgmentClient
         return Behavior switch
         {
             FakeJudgmentBehavior.Timeout => JudgmentResponse.FromFailure(
-                JudgmentFailure.Create(JudgmentFailureCategories.Timeout, "Fake provider timed out.", retryable: true)),
+                JudgmentFailure.Create(JudgmentFailureCategories.Timeout, "Fake provider timed out.")),
             FakeJudgmentBehavior.RateLimited => JudgmentResponse.FromFailure(
-                JudgmentFailure.Create(JudgmentFailureCategories.RateLimited, "Fake provider rate limited.", retryable: true, httpStatus: 429)),
+                JudgmentFailure.Create(JudgmentFailureCategories.RateLimited, "Fake provider rate limited.", httpStatus: 429)),
             FakeJudgmentBehavior.Overloaded => JudgmentResponse.FromFailure(
-                JudgmentFailure.Create(JudgmentFailureCategories.Overloaded, "Fake provider overloaded.", retryable: true, httpStatus: 529)),
+                JudgmentFailure.Create(JudgmentFailureCategories.Overloaded, "Fake provider overloaded.", httpStatus: 529)),
             FakeJudgmentBehavior.Malformed => JudgmentResponse.FromFailure(
                 JudgmentFailure.Create(JudgmentFailureCategories.InvalidResponse, "Fake provider returned a malformed payload.")),
             FakeJudgmentBehavior.Cancel => throw new OperationCanceledException(cancellationToken),
@@ -66,13 +84,34 @@ public sealed class FakeJudgmentClient : IJudgmentClient
             if (script.StateHash is not null &&
                 !string.Equals(script.StateHash, stateHash, StringComparison.Ordinal))
                 continue;
-            script.Response.Validate();
+
+            if (script.Validated)
+            {
+                try
+                {
+                    script.Response.ValidateAgainst(request);
+                }
+                catch (JudgmentValidationException ex)
+                {
+                    return JudgmentResponse.FromFailure(
+                        JudgmentFailure.Create(JudgmentFailureCategories.InvalidResponse, ex.Message));
+                }
+            }
+
             return script.Response;
         }
 
         if (DefaultResponse is not null)
         {
-            DefaultResponse.Validate();
+            try
+            {
+                DefaultResponse.ValidateAgainst(request);
+            }
+            catch (JudgmentValidationException ex)
+            {
+                return JudgmentResponse.FromFailure(
+                    JudgmentFailure.Create(JudgmentFailureCategories.InvalidResponse, ex.Message));
+            }
             return DefaultResponse;
         }
 
@@ -82,7 +121,11 @@ public sealed class FakeJudgmentClient : IJudgmentClient
                 $"No scripted response for question set '{request.QuestionSetId}'."));
     }
 
-    private sealed record ScriptedJudgment(string QuestionSetId, string? StateHash, JudgmentResponse Response);
+    private sealed record ScriptedJudgment(
+        string QuestionSetId,
+        string? StateHash,
+        JudgmentResponse Response,
+        bool Validated);
 }
 
 public enum FakeJudgmentBehavior

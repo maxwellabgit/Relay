@@ -66,7 +66,15 @@ public sealed class TypeSafeJudgmentClient : IJudgmentClient, IDisposable
     public async Task<JudgmentResponse> JudgeAsync(JudgmentRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        request.Validate();
+        try
+        {
+            request.Validate();
+        }
+        catch (JudgmentValidationException ex)
+        {
+            return JudgmentResponse.FromFailure(
+                JudgmentFailure.Create(JudgmentFailureCategories.Validation, ex.Message));
+        }
 
         if (!_enabled)
         {
@@ -106,7 +114,7 @@ public sealed class TypeSafeJudgmentClient : IJudgmentClient, IDisposable
                             ? JudgmentFailureCategories.RateLimited
                             : JudgmentFailureCategories.Overloaded;
                         return JudgmentResponse.FromFailure(
-                            JudgmentFailure.Create(category, status == 429 ? "TypeSafe rate limited the request." : "TypeSafe is temporarily overloaded.", retryable: true, httpStatus: status));
+                            JudgmentFailure.Create(category, status == 429 ? "TypeSafe rate limited the request." : "TypeSafe is temporarily overloaded.", httpStatus: status));
                     }
 
                     await DelayBeforeRetryAsync(response, attempt, cancellationToken).ConfigureAwait(false);
@@ -137,13 +145,22 @@ public sealed class TypeSafeJudgmentClient : IJudgmentClient, IDisposable
                         JudgmentFailure.Create(JudgmentFailureCategories.InvalidResponse, parseError ?? "TypeSafe response failed validation."));
                 }
 
-                success!.Validate();
+                try
+                {
+                    success!.ValidateAgainst(request);
+                }
+                catch (JudgmentValidationException ex)
+                {
+                    return JudgmentResponse.FromFailure(
+                        JudgmentFailure.Create(JudgmentFailureCategories.InvalidResponse, ex.Message));
+                }
+
                 return JudgmentResponse.FromSuccess(success);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 return JudgmentResponse.FromFailure(
-                    JudgmentFailure.Create(JudgmentFailureCategories.Timeout, "TypeSafe request timed out.", retryable: true));
+                    JudgmentFailure.Create(JudgmentFailureCategories.Timeout, "TypeSafe request timed out."));
             }
             catch (OperationCanceledException)
             {
@@ -167,7 +184,7 @@ public sealed class TypeSafeJudgmentClient : IJudgmentClient, IDisposable
 
         _ = lastConnectionError;
         return JudgmentResponse.FromFailure(
-            JudgmentFailure.Create(JudgmentFailureCategories.Network, "TypeSafe connection failed before a response.", retryable: true));
+            JudgmentFailure.Create(JudgmentFailureCategories.Network, "TypeSafe connection failed before a response."));
     }
 
     public static decimal EstimateCostUsd(int inputTokens) =>

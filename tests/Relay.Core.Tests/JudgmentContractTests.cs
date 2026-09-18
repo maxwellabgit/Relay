@@ -219,6 +219,123 @@ public sealed class JudgmentContractTests
         Assert.Throws<JudgmentValidationException>(() => new QuestionSetRegistry([def, def]));
     }
 
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(-0.1)]
+    [InlineData(1.2)]
+    public void Noul_rejects_non_finite_or_out_of_range_probability(double value)
+    {
+        var answer = new NoulAnswer { ProbabilityYes = value };
+        Assert.Throws<JudgmentValidationException>(() => answer.Validate("q"));
+    }
+
+    [Fact]
+    public void Choice_without_no_match_is_rejected_by_default()
+    {
+        var question = new ChoiceQuestion
+        {
+            Instructions = "Pick a route.",
+            Criteria = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["answer"] = "Answer",
+            },
+        };
+        var ex = Assert.Throws<JudgmentValidationException>(() => question.Validate("route"));
+        Assert.Contains(ChoiceQuestion.NoMatch, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Authentication_failure_is_never_retryable()
+    {
+        var failure = JudgmentFailure.Create(JudgmentFailureCategories.Authentication, "bad key");
+        Assert.False(failure.Retryable);
+        Assert.True(JudgmentFailure.Create(JudgmentFailureCategories.Timeout, "slow").Retryable);
+    }
+
+    [Fact]
+    public async Task Invalid_request_returns_validation_failure_not_throw()
+    {
+        var client = new FakeJudgmentClient();
+        var request = new JudgmentRequest
+        {
+            QuestionSetId = "direct.route.v1",
+            QuestionSetVersion = "1",
+            Model = "jev-1.13.0",
+            State = JudgmentState.Parse("""{"text":"x"}"""),
+            Questions = new Dictionary<string, JudgmentQuestion>(StringComparer.Ordinal)
+            {
+                ["route"] = new ChoiceQuestion
+                {
+                    Instructions = " ",
+                    Criteria = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["answer"] = "Answer",
+                        ["no_match"] = "No match",
+                    },
+                },
+            },
+        };
+
+        var result = await client.JudgeAsync(request, CancellationToken.None);
+        Assert.False(result.Ok);
+        Assert.Equal(JudgmentFailureCategories.Validation, result.Failure!.Category);
+        Assert.Equal(0, client.CallCount);
+    }
+
+    [Fact]
+    public void Success_validate_against_rejects_wrong_answer_type()
+    {
+        var request = BuildMinimalRequest();
+        var success = new JudgmentSuccess
+        {
+            Model = "jev-1.13.0",
+            Answers = new Dictionary<string, JudgmentAnswer>(StringComparer.Ordinal)
+            {
+                ["contains_correction"] = new ChoiceAnswer
+                {
+                    Choice = "yes",
+                    Confidence = 0.9,
+                    Probabilities = new Dictionary<string, double>(StringComparer.Ordinal) { ["yes"] = 1 },
+                },
+            },
+        };
+
+        var ex = Assert.Throws<JudgmentValidationException>(() => success.ValidateAgainst(request));
+        Assert.Contains("wrong type", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Canonical_state_hash_is_key_order_independent()
+    {
+        var a = JudgmentState.Parse("""{"b":1,"a":2}""");
+        var b = JudgmentState.Parse("""{"a":2,"b":1}""");
+        Assert.Equal(
+            JudgmentRequestHasher.HashJsonElement(a),
+            JudgmentRequestHasher.HashJsonElement(b));
+    }
+
+    [Fact]
+    public void Judgment_record_serialization_omits_state_and_answers()
+    {
+        const string secret = "secret transcript words must not appear";
+        var record = new JudgmentRecord
+        {
+            JudgmentId = "j1",
+            Provider = "fake",
+            QuestionSetId = "conversation.screen.v1",
+            QuestionSetVersion = "1",
+            Model = "jev-1.13.0",
+            Status = JudgmentStatuses.Completed,
+            RequestHash = "abc",
+            CreatedAt = DateTimeOffset.UnixEpoch,
+        };
+        var json = JudgmentJson.Serialize(record);
+        Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("probabilityYes", json, StringComparison.Ordinal);
+        Assert.Contains("\"provider\":\"fake\"", json, StringComparison.Ordinal);
+    }
+
     private static JudgmentRequest BuildMinimalRequest() => new()
     {
         QuestionSetId = "conversation.screen.v1",
