@@ -48,6 +48,24 @@ public sealed class FrictionEvidence
     [JsonPropertyName("detail")] public string Detail { get; init; } = "";
     [JsonPropertyName("exampleRefs")] public List<string> ExampleRefs { get; init; } = [];
     [JsonPropertyName("count")] public int Count { get; init; } = 1;
+    [JsonPropertyName("signatureKey")] public string? SignatureKey { get; init; }
+    [JsonPropertyName("projectId")] public string? ProjectId { get; init; }
+    [JsonPropertyName("subject")] public string? Subject { get; init; }
+    [JsonPropertyName("capabilityId")] public string? CapabilityId { get; init; }
+    [JsonPropertyName("category")] public string? Category { get; init; }
+}
+
+public static class ImprovementStatuses
+{
+    public const string Draft = "draft";
+    public const string Evaluating = "evaluating";
+    public const string EvaluationFailed = "evaluation_failed";
+    public const string ReadyForApproval = "ready_for_approval";
+    public const string Rejected = "rejected";
+    public const string ActiveShadow = "active_shadow";
+    public const string Active = "active";
+    public const string Reverted = "reverted";
+    public const string UnsupportedForActivation = "unsupported_for_activation";
 }
 
 /// <summary>One evaluation case attached to an improvement proposal.</summary>

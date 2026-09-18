@@ -56,7 +56,8 @@ public sealed class FrictionEvidenceStore
         string detail,
         string? caseId = null,
         IEnumerable<string>? exampleRefs = null,
-        int count = 1)
+        int count = 1,
+        PatternSignature? signature = null)
     {
         var evidence = new FrictionEvidence
         {
@@ -68,6 +69,11 @@ public sealed class FrictionEvidenceStore
             Detail = detail,
             ExampleRefs = exampleRefs?.ToList() ?? [],
             Count = count,
+            SignatureKey = signature?.Key,
+            ProjectId = signature?.ProjectId,
+            Subject = signature?.Subject,
+            CapabilityId = signature?.CapabilityId,
+            Category = signature?.Category,
         };
         Record(evidence);
         return evidence;
@@ -95,14 +101,24 @@ public sealed class FrictionEvidenceStore
     }
 
     /// <summary>
-    /// Builds a typed improvement proposal when one friction kind reaches threshold.
-    /// Returns a <see cref="ImprovementKinds.NoChange"/> proposal when evidence is insufficient.
+    /// Builds a typed improvement proposal when one <see cref="PatternSignature"/> reaches threshold.
+    /// Groups by complete signature — not friction kind alone.
     /// </summary>
     public ImprovementProposal Suggest(DateTimeOffset now, int threshold = DefaultThreshold)
     {
         var recent = ReadRecent(now);
-        var grouped = recent.GroupBy(e => e.Kind, StringComparer.Ordinal)
-            .Select(g => (Kind: g.Key, Items: g.ToList(), Score: g.Sum(x => Math.Max(1, x.Count))))
+        var grouped = recent
+            .GroupBy(e => e.SignatureKey ?? $"legacy|{e.Kind}|{e.Pattern}", StringComparer.Ordinal)
+            .Select(g => (
+                Signature: g.Key,
+                Kind: g.First().Kind,
+                Items: g.ToList(),
+                Score: g.Sum(x => Math.Max(1, x.Count)),
+                ProjectId: g.First().ProjectId,
+                Subject: g.First().Subject,
+                CapabilityId: g.First().CapabilityId,
+                Category: g.First().Category,
+                Pattern: g.First().Pattern))
             .Where(g => g.Score >= threshold)
             .OrderByDescending(g => g.Score)
             .ToList();
@@ -119,14 +135,24 @@ public sealed class FrictionEvidenceStore
                 ReversionPlan = "n/a",
                 SuccessMetric = "n/a",
                 DraftedAt = now,
-                Status = "no_change",
+                Status = ImprovementStatuses.Draft,
             };
         }
 
         var top = grouped[0];
         var examples = top.Items.SelectMany(i => i.ExampleRefs.DefaultIfEmpty(i.EvidenceId)).Distinct().Take(8).ToList();
         var evidenceIds = top.Items.Select(i => i.EvidenceId).ToList();
-        var proposal = BuildForKind(top.Kind, examples, evidenceIds, top.Items[0].Pattern, now);
+        var proposal = BuildForKind(
+            top.Kind,
+            examples,
+            evidenceIds,
+            top.Pattern,
+            now,
+            top.ProjectId,
+            top.Subject,
+            top.CapabilityId);
+        if (proposal.Kind is ImprovementKinds.Workflow or ImprovementKinds.Tool or ImprovementKinds.HostCapability)
+            proposal.Status = ImprovementStatuses.UnsupportedForActivation;
         SaveProposal(proposal);
         return proposal;
     }
@@ -151,7 +177,10 @@ public sealed class FrictionEvidenceStore
         IReadOnlyList<string> examples,
         IReadOnlyList<string> evidenceIds,
         string pattern,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? projectId = null,
+        string? subject = null,
+        string? capabilityId = null)
     {
         return frictionKind switch
         {
@@ -159,23 +188,29 @@ public sealed class FrictionEvidenceStore
             {
                 ProposalId = Ulid.NewUlid(now),
                 Kind = ImprovementKinds.Memory,
-                Title = "Record a durable correction memory",
+                Title = string.IsNullOrWhiteSpace(subject)
+                    ? "Record a durable correction memory"
+                    : $"Project glossary: {subject}",
                 Examples = examples,
                 ExpectedBenefit = "Stop re-asking the user to correct the same fact.",
-                Inputs = ["corrected_fact", "project_or_topic"],
-                Outputs = ["filed_note_or_memory_ref"],
+                Inputs = ["corrected_fact", "project_or_topic", subject ?? "", projectId ?? ""],
+                Outputs = ["filed_note_or_memory_ref", "glossary_entry"],
                 Permissions = ["note.write", "memory.write"],
                 EvaluationCases =
                 [
                     new("same_topic_recall", "Ask the corrected fact again", "Answer cites the stored correction without re-prompting"),
                     new("unrelated_topic", "Ask a different topic", "Does not invent the correction for unrelated asks"),
+                    new("other_project", "Same acronym in another project", "Does not inherit this project's expansion"),
                 ],
-                ActivationScope = "project-or-global memory for this fact",
+                ActivationScope = string.IsNullOrWhiteSpace(projectId)
+                    ? "project-or-global memory for this fact"
+                    : $"project:{projectId}",
                 ReversionPlan = "Supersede or archive the memory note; prior absence restored.",
                 SuccessMetric = "Zero repeated corrections on the same fact in the next 5 related asks.",
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
+                Status = ImprovementStatuses.Draft,
             },
             FrictionKinds.RepeatedToolSequence => new ImprovementProposal
             {
@@ -198,6 +233,7 @@ public sealed class FrictionEvidenceStore
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
+                Status = ImprovementStatuses.UnsupportedForActivation,
             },
             FrictionKinds.FailedCapability => new ImprovementProposal
             {
@@ -220,6 +256,7 @@ public sealed class FrictionEvidenceStore
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
+                Status = ImprovementStatuses.UnsupportedForActivation,
             },
             FrictionKinds.RepeatedFiling => new ImprovementProposal
             {
@@ -241,6 +278,7 @@ public sealed class FrictionEvidenceStore
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
+                Status = ImprovementStatuses.Draft,
             },
             FrictionKinds.ExcessiveIntervention => new ImprovementProposal
             {
@@ -263,6 +301,7 @@ public sealed class FrictionEvidenceStore
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
+                Status = ImprovementStatuses.UnsupportedForActivation,
             },
             _ => new ImprovementProposal
             {
@@ -276,7 +315,7 @@ public sealed class FrictionEvidenceStore
                 FrictionKind = frictionKind,
                 EvidenceIds = evidenceIds,
                 DraftedAt = now,
-                Status = "no_change",
+                Status = ImprovementStatuses.Draft,
             },
         };
     }
