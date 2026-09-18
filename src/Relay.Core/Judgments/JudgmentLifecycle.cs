@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Relay.Core.Cases;
 using Relay.Core.Ids;
+using Relay.Core.Privacy;
 using Relay.Core.Time;
 
 namespace Relay.Core.Judgments;
@@ -17,19 +18,25 @@ public sealed class JudgmentLifecycle
     private readonly IJudgmentClient _client;
     private readonly IClock _clock;
     private readonly CaseStore? _cases;
+    private readonly DisclosurePolicy? _disclosure;
+    private readonly HostedGrantStore? _grants;
 
     public JudgmentLifecycle(
         JudgmentStore store,
         JudgmentCache cache,
         IJudgmentClient client,
         IClock clock,
-        CaseStore? cases = null)
+        CaseStore? cases = null,
+        DisclosurePolicy? disclosure = null,
+        HostedGrantStore? grants = null)
     {
         _store = store;
         _cache = cache;
         _client = client;
         _clock = clock;
         _cases = cases;
+        _disclosure = disclosure;
+        _grants = grants;
     }
 
     public JudgmentStore Store => _store;
@@ -38,12 +45,47 @@ public sealed class JudgmentLifecycle
     /// <summary>
     /// Persist request, call provider unless a completed cache hit exists, persist response,
     /// optionally append a case event with audit metadata only.
+    /// When <see cref="DisclosurePolicy"/> is configured, authorize before dispatch.
     /// </summary>
     public async Task<JudgmentLifecycleResult> ExecuteAsync(
         JudgmentRequest request,
         CancellationToken cancellationToken,
-        bool appendCaseEvent = true)
+        bool appendCaseEvent = true,
+        string? purpose = null,
+        string? sessionId = null,
+        string? projectId = null,
+        int conservativeInputTokenEstimate = 256)
     {
+        DisclosureDecision? disclosure = null;
+        if (_disclosure is not null)
+        {
+            if (string.IsNullOrWhiteSpace(purpose))
+            {
+                return FailWithoutDispatch(
+                    request,
+                    JudgmentFailure.Create(JudgmentFailureCategories.Validation, "Disclosure purpose is required."));
+            }
+
+            try
+            {
+                disclosure = _disclosure.Authorize(
+                    request,
+                    purpose!,
+                    _client.ProviderName,
+                    sessionId,
+                    projectId,
+                    conservativeInputTokenEstimate);
+                request = WithGrant(request, disclosure.Grant.GrantId);
+            }
+            catch (DisclosureException ex)
+            {
+                var category = ex.Category == "validation"
+                    ? JudgmentFailureCategories.Validation
+                    : JudgmentFailureCategories.NotAuthorized;
+                return FailWithoutDispatch(request, JudgmentFailure.Create(category, ex.Message));
+            }
+        }
+
         var handle = _store.BeginRequest(request, _client.ProviderName);
         if (handle.AlreadyComplete)
         {
@@ -52,7 +94,8 @@ public sealed class JudgmentLifecycle
             return new JudgmentLifecycleResult(handle.Record, JudgmentResponse.FromSuccess(success), ProviderCalled: false);
         }
 
-        AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentRequested, handle.Record);
+        if (appendCaseEvent)
+            AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentRequested, handle.Record, disclosure?.Audit);
 
         var watch = Stopwatch.StartNew();
         JudgmentResponse response;
@@ -65,7 +108,8 @@ public sealed class JudgmentLifecycle
             var cancelled = _store.CompleteFailure(
                 handle.Record.JudgmentId,
                 JudgmentFailure.Create(JudgmentFailureCategories.Cancelled, "Judgment cancelled."));
-            AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentFailed, cancelled);
+            if (appendCaseEvent)
+                AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentFailed, cancelled, disclosure?.Audit);
             throw;
         }
 
@@ -74,12 +118,16 @@ public sealed class JudgmentLifecycle
         if (response.Ok)
         {
             terminal = _store.CompleteSuccess(handle.Record.JudgmentId, response.Success!);
-            AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentCompleted, terminal);
+            if (_grants is not null && disclosure is not null && response.Success!.InputTokens > 0)
+                _grants.RecordTokenUse(disclosure.Grant.GrantId, response.Success.InputTokens);
+            if (appendCaseEvent)
+                AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentCompleted, terminal, disclosure?.Audit);
         }
         else
         {
             terminal = _store.CompleteFailure(handle.Record.JudgmentId, response.Failure!);
-            AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentFailed, terminal);
+            if (appendCaseEvent)
+                AppendEventIfPossible(request.CaseId, CaseEventTypes.JudgmentFailed, terminal, disclosure?.Audit);
         }
 
         _ = watch;
@@ -103,13 +151,60 @@ public sealed class JudgmentLifecycle
 
     public IReadOnlyList<JudgmentRecord> ListRecoverable() => _store.ListUnresolved();
 
-    private void AppendEventIfPossible(string? caseId, string eventType, JudgmentRecord record)
+    private JudgmentLifecycleResult FailWithoutDispatch(JudgmentRequest request, JudgmentFailure failure)
+    {
+        _ = request;
+        return new JudgmentLifecycleResult(
+            new JudgmentRecord
+            {
+                JudgmentId = "undispatched",
+                Provider = _client.ProviderName,
+                QuestionSetId = request.QuestionSetId,
+                QuestionSetVersion = request.QuestionSetVersion,
+                Model = request.Model,
+                Status = JudgmentStatuses.Failed,
+                CaseId = request.CaseId,
+                CaseVersion = request.CaseVersion,
+                FailureCategory = failure.Category,
+                CreatedAt = _clock.UtcNow,
+                CompletedAt = _clock.UtcNow,
+            },
+            JudgmentResponse.FromFailure(failure),
+            ProviderCalled: false);
+    }
+
+    private static JudgmentRequest WithGrant(JudgmentRequest request, string grantId) => new()
+    {
+        QuestionSetId = request.QuestionSetId,
+        QuestionSetVersion = request.QuestionSetVersion,
+        Model = request.Model,
+        State = request.State,
+        Questions = request.Questions,
+        SourceObjectRefs = request.SourceObjectRefs,
+        CaseId = request.CaseId,
+        CaseVersion = request.CaseVersion,
+        DisclosureGrantId = grantId,
+        RequestHash = request.RequestHash,
+        Provider = request.Provider,
+    };
+
+    private void AppendEventIfPossible(string? caseId, string eventType, JudgmentRecord record, DisclosureAudit? audit)
     {
         if (_cases is null || string.IsNullOrWhiteSpace(caseId)) return;
         var caseRecord = _cases.TryLoadRecord(caseId);
         if (caseRecord is null) return;
 
-        var payload = JsonSerializer.SerializeToElement(JudgmentStore.ToAuditPayload(record), Storage.RelayJson.Compact);
+        var payloadObj = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var prop in JsonSerializer.SerializeToElement(JudgmentStore.ToAuditPayload(record), Storage.RelayJson.Compact).EnumerateObject())
+            payloadObj[prop.Name] = prop.Value.Clone();
+        if (audit is not null)
+        {
+            payloadObj["grantId"] = audit.GrantId;
+            payloadObj["purpose"] = audit.Purpose;
+            payloadObj["sourceHashes"] = audit.SourceHashes;
+        }
+
+        var payload = JsonSerializer.SerializeToElement(payloadObj, Storage.RelayJson.Compact);
         _cases.AppendEvent(new CaseEvent
         {
             EventId = Ulid.NewUlid(_clock.UtcNow),

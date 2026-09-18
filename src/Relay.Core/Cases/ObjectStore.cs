@@ -27,16 +27,20 @@ public sealed class ObjectStore
     public string ObjectsDirectory => _root.ObjectsDirectory;
 
     /// <summary>Stores UTF-8 JSON (or any text) content-addressed by SHA-256. Returns objectId + hash.</summary>
-    public StoredObject PutJson(object value, string? objectId = null)
+    public StoredObject PutJson(object value, string? objectId = null, string? classification = null)
     {
         var json = JsonSerializer.Serialize(value, RelayJson.Compact);
-        return PutBytes(Encoding.UTF8.GetBytes(json), objectId, contentType: "application/json");
+        return PutBytes(Encoding.UTF8.GetBytes(json), objectId, contentType: "application/json", classification: classification);
     }
 
-    public StoredObject PutText(string text, string? objectId = null, string contentType = "text/plain")
-        => PutBytes(Encoding.UTF8.GetBytes(text), objectId, contentType);
+    public StoredObject PutText(string text, string? objectId = null, string contentType = "text/plain", string? classification = null)
+        => PutBytes(Encoding.UTF8.GetBytes(text), objectId, contentType, classification);
 
-    public StoredObject PutBytes(ReadOnlySpan<byte> bytes, string? objectId = null, string contentType = "application/octet-stream")
+    public StoredObject PutBytes(
+        ReadOnlySpan<byte> bytes,
+        string? objectId = null,
+        string contentType = "application/octet-stream",
+        string? classification = null)
     {
         var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
         var id = objectId ?? Ulid.NewUlid(_clock.UtcNow);
@@ -53,7 +57,14 @@ public sealed class ObjectStore
             // Sidecar id → hash so callers can look up by objectId.
             var metaPath = Path.Combine(_root.ObjectsDirectory, "by-id", id + ".json");
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-            var meta = new { objectId = id, sha256 = hash, contentType, storedAt = _clock.UtcNow };
+            var meta = new
+            {
+                objectId = id,
+                sha256 = hash,
+                contentType,
+                classification,
+                storedAt = _clock.UtcNow,
+            };
             AtomicFile.WriteAllText(metaPath, JsonSerializer.Serialize(meta, RelayJson.Indented));
         }
 
@@ -75,6 +86,17 @@ public sealed class ObjectStore
         if (!doc.RootElement.TryGetProperty("sha256", out var hashEl)) return null;
         var hash = hashEl.GetString();
         return hash is null ? null : TryReadTextByHash(hash);
+    }
+
+    public string? TryGetClassification(string objectId)
+    {
+        var metaPath = Path.Combine(_root.ObjectsDirectory, "by-id", objectId + ".json");
+        var metaText = AtomicFile.ReadAllTextIfExists(metaPath);
+        if (metaText is null) return null;
+        using var doc = JsonDocument.Parse(metaText);
+        if (!doc.RootElement.TryGetProperty("classification", out var el) || el.ValueKind == JsonValueKind.Null)
+            return null;
+        return el.GetString();
     }
 
     public string PathForHash(string sha256)

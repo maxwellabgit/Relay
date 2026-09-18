@@ -14,7 +14,7 @@ public sealed class FakeJudgmentClient : IJudgmentClient
     private readonly ConcurrentQueue<FakeJudgmentCall> _calls = new();
     private int _callCount;
 
-    public string ProviderName => "fake";
+    public string ProviderName { get; set; } = "fake";
     public int CallCount => Volatile.Read(ref _callCount);
     public IReadOnlyList<FakeJudgmentCall> Calls => _calls.ToArray();
 

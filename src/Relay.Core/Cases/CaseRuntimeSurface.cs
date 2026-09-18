@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Relay.Core.Privacy;
 using Relay.Core.Time;
 
 namespace Relay.Core.Cases;
@@ -12,16 +13,29 @@ public sealed class CaseRuntimeSurface : IRelaySurface
     private readonly CaseRuntime _runtime;
     private readonly IClock _clock;
     private readonly Func<ModelHealthView>? _modelHealth;
+    private readonly HostedGrantStore? _grants;
+    private readonly Func<string>? _jevStatus;
     private string? _composerCaseId;
+    private string? _sessionId;
 
-    public CaseRuntimeSurface(CaseRuntime runtime, IClock clock, Func<ModelHealthView>? modelHealth = null)
+    public CaseRuntimeSurface(
+        CaseRuntime runtime,
+        IClock clock,
+        Func<ModelHealthView>? modelHealth = null,
+        HostedGrantStore? grants = null,
+        Func<string>? jevStatus = null,
+        string? sessionId = null)
     {
         _runtime = runtime;
         _clock = clock;
         _modelHealth = modelHealth;
+        _grants = grants;
+        _jevStatus = jevStatus;
+        _sessionId = sessionId;
     }
 
     public CaseRuntime Runtime => _runtime;
+    public HostedGrantStore? Grants => _grants;
 
     public RelaySurfaceSnapshot Snapshot()
     {
@@ -57,7 +71,8 @@ public sealed class CaseRuntimeSurface : IRelaySurface
             Listening: listening is not null,
             ListeningCaseId: listening?.Id,
             ComposerCaseId: _composerCaseId,
-            At: _clock.UtcNow);
+            At: _clock.UtcNow,
+            HostedJudgments: BuildHostedView());
     }
 
     public SurfaceResult ToggleListening()
@@ -148,6 +163,70 @@ public sealed class CaseRuntimeSurface : IRelaySurface
         }
     }
 
+    public SurfaceResult GrantHostedSession(
+        string sessionId,
+        IReadOnlyList<string> purposes,
+        int maximumInputTokenBudget,
+        DateTimeOffset? expiresAt = null)
+    {
+        if (_grants is null)
+            return SurfaceResult.Fail("Hosted grant store is not configured.");
+        try
+        {
+            _sessionId = sessionId;
+            var grant = _grants.CreateSessionGrant(
+                sessionId,
+                purposes,
+                [SourceClassification.HostedAllowedSession, SourceClassification.Public],
+                maximumInputTokenBudget,
+                expiresAt);
+            return SurfaceResult.Success("Hosted session grant created.", grantId: grant.GrantId);
+        }
+        catch (Exception ex)
+        {
+            return SurfaceResult.Fail(ex.Message);
+        }
+    }
+
+    public SurfaceResult GrantHostedProject(
+        string projectId,
+        IReadOnlyList<string> purposes,
+        int maximumInputTokenBudget,
+        DateTimeOffset? expiresAt = null)
+    {
+        if (_grants is null)
+            return SurfaceResult.Fail("Hosted grant store is not configured.");
+        try
+        {
+            var grant = _grants.CreateProjectGrant(
+                projectId,
+                purposes,
+                [SourceClassification.HostedAllowedProject, SourceClassification.HostedAllowedSession, SourceClassification.Public],
+                maximumInputTokenBudget,
+                expiresAt);
+            return SurfaceResult.Success("Hosted project grant created.", grantId: grant.GrantId);
+        }
+        catch (Exception ex)
+        {
+            return SurfaceResult.Fail(ex.Message);
+        }
+    }
+
+    public SurfaceResult RevokeHostedGrant(string grantId)
+    {
+        if (_grants is null)
+            return SurfaceResult.Fail("Hosted grant store is not configured.");
+        try
+        {
+            var grant = _grants.Revoke(grantId);
+            return SurfaceResult.Success("Hosted grant revoked.", grantId: grant.GrantId);
+        }
+        catch (Exception ex)
+        {
+            return SurfaceResult.Fail(ex.Message);
+        }
+    }
+
     public async Task<SurfaceResult> RunUntilIdleAsync(string? caseId = null, int maxSteps = 16, CancellationToken cancellationToken = default)
     {
         try
@@ -155,7 +234,6 @@ public sealed class CaseRuntimeSurface : IRelaySurface
             var id = caseId ?? _composerCaseId;
             if (id is null)
             {
-                // Drain ready queue once if no specific case.
                 var stepped = await _runtime.StepNextAsync(cancellationToken).ConfigureAwait(false);
                 return stepped is null
                     ? SurfaceResult.Success("Idle.")
@@ -168,6 +246,33 @@ public sealed class CaseRuntimeSurface : IRelaySurface
         {
             return SurfaceResult.Fail(ex.Message);
         }
+    }
+
+    private HostedJudgmentView BuildHostedView()
+    {
+        if (_grants is null)
+        {
+            return new HostedJudgmentView(
+                ListeningIndependent: true,
+                HasActiveGrant: false,
+                ActiveGrantIds: [],
+                TokensUsed: 0,
+                TokenBudget: 0,
+                JevStatus: HostedJudgmentView.WaitingGrant,
+                Detail: "Hosted grant store not configured.");
+        }
+
+        var active = _grants.ListActive(_clock.UtcNow);
+        var tokensUsed = active.Sum(g => g.TokensUsed);
+        var budget = active.Sum(g => g.MaximumInputTokenBudget);
+        var jev = _jevStatus?.Invoke() ?? (active.Count > 0 ? HostedJudgmentView.Ready : HostedJudgmentView.WaitingGrant);
+        return new HostedJudgmentView(
+            ListeningIndependent: true,
+            HasActiveGrant: active.Count > 0,
+            ActiveGrantIds: active.Select(g => g.GrantId).ToList(),
+            TokensUsed: tokensUsed,
+            TokenBudget: budget,
+            JevStatus: jev);
     }
 
     private static string TitleFor(OperationEnvelope op)

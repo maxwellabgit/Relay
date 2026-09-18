@@ -76,7 +76,8 @@ public sealed class StreamIntake
     public (string SegmentId, StoredObject Stored, object EventPayload) PrepareSegment(
         string text,
         DateTimeOffset ts,
-        string? speaker)
+        string? speaker,
+        string? classification = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         var segmentId = Ulid.NewUlid(_clock.UtcNow);
@@ -89,7 +90,11 @@ public sealed class StreamIntake
             text,
         };
         // Persist content BEFORE the case marks the segment ingested.
-        var stored = _objects.PutJson(blob, objectId: segmentId);
+        // Default: eligible for session-scoped hosted use once a grant exists (listening ≠ hosted).
+        var stored = _objects.PutJson(
+            blob,
+            objectId: segmentId,
+            classification: classification ?? Privacy.SourceClassification.HostedAllowedSession);
         var payload = new
         {
             segmentId,
@@ -98,6 +103,7 @@ public sealed class StreamIntake
             ts,
             speaker,
             charCount = text.Length,
+            classification = classification ?? Privacy.SourceClassification.HostedAllowedSession,
         };
         return (segmentId, stored, payload);
     }
