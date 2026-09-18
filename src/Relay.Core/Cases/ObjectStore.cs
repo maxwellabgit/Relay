@@ -66,6 +66,17 @@ public sealed class ObjectStore
         return AtomicFile.ReadAllTextIfExists(path);
     }
 
+    public string? TryReadTextById(string objectId)
+    {
+        var metaPath = Path.Combine(_root.ObjectsDirectory, "by-id", objectId + ".json");
+        var metaText = AtomicFile.ReadAllTextIfExists(metaPath);
+        if (metaText is null) return null;
+        using var doc = JsonDocument.Parse(metaText);
+        if (!doc.RootElement.TryGetProperty("sha256", out var hashEl)) return null;
+        var hash = hashEl.GetString();
+        return hash is null ? null : TryReadTextByHash(hash);
+    }
+
     public string PathForHash(string sha256)
     {
         if (string.IsNullOrWhiteSpace(sha256) || sha256.Length < 4)

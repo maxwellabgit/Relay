@@ -70,6 +70,25 @@ public sealed class ProjectionDatabase : IDisposable
               decided_at TEXT NOT NULL,
               decision TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS judgments (
+              judgment_id TEXT PRIMARY KEY,
+              case_id TEXT,
+              case_version INTEGER,
+              question_set_id TEXT NOT NULL,
+              question_set_version TEXT NOT NULL,
+              model TEXT NOT NULL,
+              status TEXT NOT NULL,
+              request_hash TEXT,
+              request_object_id TEXT,
+              response_object_id TEXT,
+              response_hash TEXT,
+              failure_category TEXT,
+              input_tokens INTEGER,
+              output_tokens INTEGER,
+              elapsed_ms INTEGER,
+              created_at TEXT NOT NULL,
+              completed_at TEXT
+            );
             """;
         cmd.ExecuteNonQuery();
     }
@@ -196,14 +215,103 @@ public sealed class ProjectionDatabase : IDisposable
         }
     }
 
-    /// <summary>Rebuilds projections from on-disk case and operation stores.</summary>
-    public void RebuildFromStores(CaseStore cases, OperationStore operations)
+    public void UpsertJudgment(Judgments.JudgmentRecord record)
+    {
+        lock (_gate)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO judgments(
+                  judgment_id, case_id, case_version, question_set_id, question_set_version, model, status,
+                  request_hash, request_object_id, response_object_id, response_hash, failure_category,
+                  input_tokens, output_tokens, elapsed_ms, created_at, completed_at)
+                VALUES(
+                  $id, $case, $ver, $qs, $qsv, $model, $status,
+                  $reqHash, $reqObj, $respObj, $respHash, $fail,
+                  $inTok, $outTok, $elapsed, $created, $completed)
+                ON CONFLICT(judgment_id) DO UPDATE SET
+                  case_id=excluded.case_id,
+                  case_version=excluded.case_version,
+                  status=excluded.status,
+                  request_hash=excluded.request_hash,
+                  request_object_id=excluded.request_object_id,
+                  response_object_id=excluded.response_object_id,
+                  response_hash=excluded.response_hash,
+                  failure_category=excluded.failure_category,
+                  input_tokens=excluded.input_tokens,
+                  output_tokens=excluded.output_tokens,
+                  elapsed_ms=excluded.elapsed_ms,
+                  completed_at=excluded.completed_at;
+                """;
+            cmd.Parameters.AddWithValue("$id", record.JudgmentId);
+            cmd.Parameters.AddWithValue("$case", (object?)record.CaseId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ver", (object?)record.CaseVersion ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$qs", record.QuestionSetId);
+            cmd.Parameters.AddWithValue("$qsv", record.QuestionSetVersion);
+            cmd.Parameters.AddWithValue("$model", record.Model);
+            cmd.Parameters.AddWithValue("$status", record.Status);
+            cmd.Parameters.AddWithValue("$reqHash", (object?)record.RequestHash ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$reqObj", (object?)record.RequestObjectId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$respObj", (object?)record.ResponseObjectId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$respHash", (object?)record.ResponseHash ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$fail", (object?)record.FailureCategory ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$inTok", (object?)record.InputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$outTok", (object?)record.OutputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$elapsed", (object?)record.ElapsedMs ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$created", record.CreatedAt.UtcDateTime.ToString("O"));
+            cmd.Parameters.AddWithValue("$completed", record.CompletedAt is { } c ? c.UtcDateTime.ToString("O") : DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<JudgmentProjectionRow> ListJudgments()
+    {
+        lock (_gate)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText =
+                """
+                SELECT judgment_id, case_id, case_version, question_set_id, question_set_version, model, status,
+                       request_hash, request_object_id, response_object_id, response_hash, failure_category,
+                       input_tokens, output_tokens, elapsed_ms, created_at, completed_at
+                FROM judgments ORDER BY created_at ASC;
+                """;
+            var list = new List<JudgmentProjectionRow>();
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                list.Add(new JudgmentProjectionRow(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.GetString(5),
+                    reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    reader.IsDBNull(8) ? null : reader.GetString(8),
+                    reader.IsDBNull(9) ? null : reader.GetString(9),
+                    reader.IsDBNull(10) ? null : reader.GetString(10),
+                    reader.IsDBNull(11) ? null : reader.GetString(11),
+                    reader.IsDBNull(12) ? null : reader.GetInt32(12),
+                    reader.IsDBNull(13) ? null : reader.GetInt32(13),
+                    reader.IsDBNull(14) ? null : reader.GetInt64(14),
+                    DateTimeOffset.Parse(reader.GetString(15)),
+                    reader.IsDBNull(16) ? null : DateTimeOffset.Parse(reader.GetString(16))));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>Rebuilds projections from on-disk case, operation, and judgment stores.</summary>
+    public void RebuildFromStores(CaseStore cases, OperationStore operations, Judgments.JudgmentStore? judgments = null)
     {
         lock (_gate)
         {
             using (var clear = _connection.CreateCommand())
             {
-                clear.CommandText = "DELETE FROM cases; DELETE FROM operations; DELETE FROM approvals; DELETE FROM feed_items;";
+                clear.CommandText = "DELETE FROM cases; DELETE FROM operations; DELETE FROM approvals; DELETE FROM feed_items; DELETE FROM judgments;";
                 clear.ExecuteNonQuery();
             }
 
@@ -215,6 +323,12 @@ public sealed class ProjectionDatabase : IDisposable
 
             foreach (var op in operations.ListAll())
                 UpsertOperation(op);
+
+            if (judgments is not null)
+            {
+                foreach (var judgment in judgments.ListAll())
+                    UpsertJudgment(judgment);
+            }
         }
     }
 
@@ -229,3 +343,23 @@ public sealed class ProjectionDatabase : IDisposable
 }
 
 public sealed record FeedItemRow(string FeedId, string? CaseId, DateTimeOffset Ts, string Text, string? Level);
+
+public sealed record JudgmentProjectionRow(
+    string JudgmentId,
+    string? CaseId,
+    long? CaseVersion,
+    string QuestionSetId,
+    string QuestionSetVersion,
+    string Model,
+    string Status,
+    string? RequestHash,
+    string? RequestObjectId,
+    string? ResponseObjectId,
+    string? ResponseHash,
+    string? FailureCategory,
+    int? InputTokens,
+    int? OutputTokens,
+    long? ElapsedMs,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt);
+

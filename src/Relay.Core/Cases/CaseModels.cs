@@ -108,6 +108,10 @@ public static class CaseEventTypes
     public const string WaitEntered = "wait.entered";
     public const string DuplicateIgnored = "operation.duplicate_ignored";
     public const string MoveRejected = "move.rejected";
+    public const string JudgmentRequested = "judgment.requested";
+    public const string JudgmentCompleted = "judgment.completed";
+    public const string JudgmentFailed = "judgment.failed";
+    public const string JudgmentDeferred = "judgment.deferred";
 }
 
 /// <summary>Content-addressed object reference returned by <see cref="ObjectStore"/>.</summary>

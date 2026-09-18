@@ -1,33 +1,29 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using Relay.Core.Storage;
+using System.Text.Json.Serialization;
 
 namespace Relay.Core.Judgments;
 
 /// <summary>
-/// Metadata retained for projections/ledger. Raw state and answers live only in the object store
-/// (Phase 4). Included here so request hashing and IDs are stable early.
+/// Metadata retained for projections/ledger. Raw state and answers live only in the object store.
 /// </summary>
-public sealed class JudgmentRecord
+public sealed record JudgmentRecord
 {
-    public required string JudgmentId { get; init; }
-    public required string QuestionSetId { get; init; }
-    public required string QuestionSetVersion { get; init; }
-    public required string Model { get; init; }
-    public required string Status { get; init; }
-    public string? CaseId { get; init; }
-    public long? CaseVersion { get; init; }
-    public string? RequestObjectId { get; init; }
-    public string? RequestHash { get; init; }
-    public string? ResponseObjectId { get; init; }
-    public string? ResponseHash { get; init; }
-    public string? FailureCategory { get; init; }
-    public int? InputTokens { get; init; }
-    public int? OutputTokens { get; init; }
-    public long? ElapsedMs { get; init; }
-    public DateTimeOffset CreatedAt { get; init; }
-    public DateTimeOffset? CompletedAt { get; init; }
+    [JsonPropertyName("judgmentId")] public required string JudgmentId { get; init; }
+    [JsonPropertyName("questionSetId")] public required string QuestionSetId { get; init; }
+    [JsonPropertyName("questionSetVersion")] public required string QuestionSetVersion { get; init; }
+    [JsonPropertyName("model")] public required string Model { get; init; }
+    [JsonPropertyName("status")] public required string Status { get; init; }
+    [JsonPropertyName("caseId")] public string? CaseId { get; init; }
+    [JsonPropertyName("caseVersion")] public long? CaseVersion { get; init; }
+    [JsonPropertyName("requestObjectId")] public string? RequestObjectId { get; init; }
+    [JsonPropertyName("requestHash")] public string? RequestHash { get; init; }
+    [JsonPropertyName("responseObjectId")] public string? ResponseObjectId { get; init; }
+    [JsonPropertyName("responseHash")] public string? ResponseHash { get; init; }
+    [JsonPropertyName("failureCategory")] public string? FailureCategory { get; init; }
+    [JsonPropertyName("inputTokens")] public int? InputTokens { get; init; }
+    [JsonPropertyName("outputTokens")] public int? OutputTokens { get; init; }
+    [JsonPropertyName("elapsedMs")] public long? ElapsedMs { get; init; }
+    [JsonPropertyName("createdAt")] public DateTimeOffset CreatedAt { get; init; }
+    [JsonPropertyName("completedAt")] public DateTimeOffset? CompletedAt { get; init; }
 }
 
 public static class JudgmentStatuses
@@ -59,14 +55,14 @@ public static class JudgmentRequestHasher
             questionDefinitionsHash.Trim(),
             stateHash.Trim(),
             sources);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(material));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    public static string HashJsonElement(JsonElement element)
+    public static string HashJsonElement(System.Text.Json.JsonElement element)
     {
-        var json = JsonSerializer.Serialize(element, RelayJson.Compact);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        var json = System.Text.Json.JsonSerializer.Serialize(element, Storage.RelayJson.Compact);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
     }
 
     public static string HashQuestions(IReadOnlyDictionary<string, JudgmentQuestion> questions)
@@ -75,6 +71,6 @@ public static class JudgmentRequestHasher
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var json = JudgmentJson.Serialize(ordered);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
     }
 }
