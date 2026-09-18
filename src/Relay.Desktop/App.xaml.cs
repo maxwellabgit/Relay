@@ -4,7 +4,6 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Relay.Core.Config;
 using Relay.Core.Input;
-using Relay.Core.Session;
 using Relay.Core.Storage;
 using Relay.Core.Time;
 using Relay.Windows;
@@ -17,7 +16,7 @@ public partial class App : Application
     private const int CommandHotkeyId = 2;
 
     private SingleInstance? _instance;
-    private RelayRuntime? _runtime;
+    private CaseRelayHost? _host;
     private HotkeyListener? _hotkeys;
     private MainWindow? _window;
     private DispatcherQueue? _dispatcher;
@@ -43,7 +42,6 @@ public partial class App : Application
         _instance = SingleInstance.Acquire(root.Path);
         if (!_instance.IsFirstInstance)
         {
-            // The running instance was signalled to come forward; this one has nothing to own.
             _instance.Dispose();
             Exit();
             return;
@@ -52,26 +50,7 @@ public partial class App : Application
         try
         {
             _window = new MainWindow();
-            var host = _window.CaptureHost;
-            var options = new RuntimeOptions
-            {
-                WorkerHostFactory = settings =>
-                {
-                    var worker = Relay.Core.Agents.ProcessWorkerHost.Locate(settings.Workers.Executable, AppContext.BaseDirectory);
-                    return worker is null ? null : new JobObjectWorkerHost(worker);
-                },
-                ModelClientFactory = settings => ModelComposition.Client(settings, root),
-                SearchClientFactory = settings => ModelComposition.Search(settings, root),
-                Secrets = ModelComposition.Secrets(root),
-            };
-            _runtime = RelayRuntime.Create(
-                root,
-                host,
-                options,
-                SystemClock.Instance,
-                new DispatcherScheduler(_dispatcher),
-                Version,
-                ProcessIdentity.CurrentProcessId);
+            _host = CaseRelayHost.Create(root, SystemClock.Instance, Version);
         }
         catch (Exception ex)
         {
@@ -82,32 +61,26 @@ public partial class App : Application
             return;
         }
 
-        var coordinator = _runtime.Coordinator;
-        _window.Attach(coordinator, _runtime);
+        _window.AttachSurface(_host);
         _window.Closed += OnWindowClosed;
         _instance.ActivationRequested += () => _dispatcher.TryEnqueue(() => _window.BringForward());
 
-        _runtime.Start();
-
-        var acl = DirectoryAcl.Harden(root.Path);
-        coordinator.ReportStorageAcl(acl.Applied, acl.Error);
-
-        RegisterHotkeys(coordinator, _runtime.Settings.Settings);
+        RegisterHotkeys(_host.Settings.Hotkeys);
 
         _window.Activate();
     }
 
-    private void RegisterHotkeys(SessionCoordinator coordinator, RelaySettings settings)
+    private void RegisterHotkeys(HotkeySettings settings)
     {
-        if (settings.Hotkeys.IsWindowScoped)
+        if (settings.IsWindowScoped)
         {
-            // Window-scoped chords: handled by the Relay window itself, only while it is the active window.
-            // Nothing is registered system-wide, so a chord like Ctrl+X keeps meaning "cut" everywhere else.
-            var noteOk = KeyChord.TryParse(settings.Hotkeys.NoteKey, allowModifierOnly: true, out var note, out var noteError);
-            var commandOk = KeyChord.TryParse(settings.Hotkeys.CommandKey, allowModifierOnly: true, out var command, out var commandError);
-            _window!.SetWindowChords(noteOk ? note : null, commandOk ? command : null, coordinator.PressNoteKey, coordinator.PressCommandKey);
-            coordinator.ReportHotkey("NOTE_KEY", noteOk ? note.ToString() : settings.Hotkeys.NoteKey, noteOk, noteOk ? null : noteError, HotkeySettings.WindowScope);
-            coordinator.ReportHotkey("COMMAND_KEY", commandOk ? command.ToString() : settings.Hotkeys.CommandKey, commandOk, commandOk ? null : commandError, HotkeySettings.WindowScope);
+            var noteOk = KeyChord.TryParse(settings.NoteKey, allowModifierOnly: true, out var note, out _);
+            var commandOk = KeyChord.TryParse(settings.CommandKey, allowModifierOnly: true, out var command, out _);
+            _window!.SetWindowChords(
+                noteOk ? note : null,
+                commandOk ? command : null,
+                () => _host?.Surface.ToggleListening(),
+                () => { /* ask focus handled in window */ });
             return;
         }
 
@@ -115,103 +88,58 @@ public partial class App : Application
         {
             _hotkeys = new HotkeyListener();
         }
-        catch (Exception ex)
+        catch
         {
-            coordinator.ReportHotkey("NOTE_KEY", settings.Hotkeys.NoteKey, false, "hotkey listener failed: " + ex.Message);
-            coordinator.ReportHotkey("COMMAND_KEY", settings.Hotkeys.CommandKey, false, "hotkey listener failed: " + ex.Message);
             return;
         }
 
         _hotkeys.Pressed += id => _dispatcher!.TryEnqueue(() =>
         {
-            if (id == NoteHotkeyId) coordinator.PressNoteKey();
-            else if (id == CommandHotkeyId) coordinator.PressCommandKey();
+            if (id == NoteHotkeyId) _host?.Surface.ToggleListening();
         });
 
-        Register("NOTE_KEY", NoteHotkeyId, settings.Hotkeys.NoteKey);
-        Register("COMMAND_KEY", CommandHotkeyId, settings.Hotkeys.CommandKey);
-
-        void Register(string name, int id, string chordText)
-        {
-            if (!KeyChord.TryParse(chordText, out var chord, out var error))
-            {
-                coordinator.ReportHotkey(name, chordText, false, error);
-                return;
-            }
-            var result = _hotkeys.Register(id, chord);
-            coordinator.ReportHotkey(name, chord.ToString(), result.Registered, result.Error);
-        }
+        if (KeyChord.TryParse(settings.NoteKey, out var noteChord, out _))
+            _hotkeys.Register(NoteHotkeyId, noteChord);
+        if (KeyChord.TryParse(settings.CommandKey, out var cmdChord, out _))
+            _hotkeys.Register(CommandHotkeyId, cmdChord);
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         try
         {
-            _runtime?.Coordinator.Shutdown("user_exit");
+            _host?.Dispose();
         }
         finally
         {
             _hotkeys?.Dispose();
-            _runtime?.Dispose();
             _instance?.Dispose();
         }
     }
 
-    // ------------------------------------------------------------------------------------
-    // Failure handling: nothing is swallowed silently. Each path records the exception in the
-    // ledger (when it can be written) and an incident file, then either keeps the UI alive in
-    // FAILED or, for a dying process, flushes what it can.
-    // ------------------------------------------------------------------------------------
-
     private void OnXamlUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        if (_handlingFailure || _runtime is null)
-        {
-            return; // let it terminate; the domain handler records it
-        }
+        if (_handlingFailure || _host is null) return;
         _handlingFailure = true;
         try
         {
             e.Handled = true;
-            _runtime.Coordinator.ReportFailure(e.Exception, "ui");
+            WriteStartupIncident(_host.Root, e.Exception);
         }
-        catch
-        {
-            e.Handled = false;
-        }
-        finally
-        {
-            _handlingFailure = false;
-        }
+        catch { /* best effort */ }
+        finally { _handlingFailure = false; }
     }
 
-    private void OnDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+    private void OnDomainUnhandledException(object? sender, System.UnhandledExceptionEventArgs e)
     {
-        var exception = e.ExceptionObject as Exception ?? new InvalidOperationException(e.ExceptionObject?.ToString() ?? "unknown");
-        try
-        {
-            if (_runtime is not null)
-            {
-                _runtime.Coordinator.ReportFailure(exception, "process");
-                _runtime.Coordinator.Shutdown("crash");
-                _runtime.Dispose();
-            }
-            else
-            {
-                WriteStartupIncident(DataRoot.Resolve(), exception);
-            }
-        }
-        catch
-        {
-            // The process is terminating; there is nothing further to do safely.
-        }
+        if (e.ExceptionObject is Exception ex && _host is not null)
+            WriteStartupIncident(_host.Root, ex);
     }
 
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
+        if (_host is not null) WriteStartupIncident(_host.Root, e.Exception);
         e.SetObserved();
-        var exception = e.Exception;
-        _dispatcher?.TryEnqueue(() => _runtime?.Coordinator.ReportFailure(exception, "background task"));
     }
 
     private static void WriteStartupIncident(DataRoot root, Exception ex)
@@ -219,13 +147,13 @@ public partial class App : Application
         try
         {
             Directory.CreateDirectory(root.IncidentsDirectory);
-            var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'");
-            var payload = new { kind = "startup_failed", at = DateTimeOffset.UtcNow, exceptionType = ex.GetType().FullName, message = ex.Message, detail = ex.ToString(), pid = Environment.ProcessId };
-            AtomicFile.WriteAllText(Path.Combine(root.IncidentsDirectory, $"{stamp}-startup_failed.json"), JsonSerializer.Serialize(payload, RelayJson.Indented));
+            var path = Path.Combine(root.IncidentsDirectory, $"startup-{DateTime.UtcNow:yyyyMMddTHHmmss}.json");
+            File.WriteAllText(path, JsonSerializer.Serialize(new
+            {
+                at = DateTimeOffset.UtcNow,
+                error = ex.ToString(),
+            }, RelayJson.Indented));
         }
-        catch
-        {
-            // Nowhere left to record it.
-        }
+        catch { /* best effort */ }
     }
 }

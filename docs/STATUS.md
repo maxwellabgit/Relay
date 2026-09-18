@@ -19,7 +19,7 @@ Live runners must fail preflight or report `SKIPPED: missing …`. They must not
 | Tag | `pre-jev-refactor-55551224` |
 | Branch | `refactor/jev-decision-engine` |
 | Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
-| Phase | **8 improvement lifecycle landed; Phase 9 desktop bind next** |
+| Phase | **9 desktop bound to CaseRuntimeSurface; Phase 10 gates next** |
 | Alpha complete | **Not claimed** |
 
 Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
@@ -52,7 +52,7 @@ Do not treat these as Phase 0 regressions. They live in code Phase 11 deletes.
 | --- | --- | --- |
 | Product / architecture docs | Rewritten for decision engine + Jev + v0.1 scope | `PRODUCT.md`, `ARCHITECTURE.md`, `README.md`, `JEV_REFACTOR.md` |
 | `CaseRuntime` + envelopes + projections | Present (Slices 1–7 scripted) | `Relay.Core.Tests` + DevHarness |
-| Production Desktop composition | Still `SessionCoordinator` / `RelayRuntime` | `App.xaml.cs` |
+| Production Desktop composition | `CaseRelayHost` → `CaseRuntime` + `CaseRuntimeSurface` (no SessionCoordinator) | Desktop Debug build |
 | Jev / judgment contracts / TypeSafe client | Contracts + fake + HTTP client + persistence/cache/lifecycle | Core 49; Gateway 12 |
 | Hosted grant / disclosure | Source classification + grants + DisclosurePolicy + surface commands | `HostedDisclosureTests` (10) |
 | Decision engine (`ICaseDecisionEngine`) | Engine + policy + question sets + mind adapter; mind step outside lock; multi-raise | `DecisionPolicyTests` (8) + `DecisionEngineRuntimeTests` (5) |

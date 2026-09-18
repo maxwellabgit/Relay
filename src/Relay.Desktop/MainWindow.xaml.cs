@@ -47,6 +47,10 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherQueueTimer _tick;
     private SessionCoordinator? _coordinator;
     private RelayRuntime? _runtime;
+    private CaseRelayHost? _host;
+    private Relay.Core.Cases.IRelaySurface? _surface;
+    private Relay.Core.Cases.RelaySurfaceSnapshot? _surfaceSnapshot;
+    private bool _surfaceMode;
     private bool _suppressTextChanged;
     private long _lastActivitySeq;
     private string _reviewSignature = "";
@@ -109,7 +113,20 @@ public sealed partial class MainWindow : Window
     {
         _coordinator = coordinator;
         _runtime = runtime;
+        _surfaceMode = false;
         coordinator.Changed += Render;
+        Render();
+    }
+
+    /// <summary>Production bind: CaseRuntimeSurface only — no SessionCoordinator.</summary>
+    public void AttachSurface(CaseRelayHost host)
+    {
+        _host = host;
+        _surface = host.Surface;
+        _surfaceMode = true;
+        _coordinator = null;
+        _runtime = null;
+        if (!_tick.IsRunning) _tick.Start();
         Render();
     }
 
@@ -192,6 +209,12 @@ public sealed partial class MainWindow : Window
 
     private void Render()
     {
+        if (_surfaceMode)
+        {
+            RenderSurface();
+            return;
+        }
+
         if (_coordinator is null) return;
         var s = _coordinator.Snapshot;
         _snapshot = s;
@@ -213,6 +236,57 @@ public sealed partial class MainWindow : Window
         var moving = s.Capture.IsCapturing() || s.Capture == CapturePhase.Organizing || s.TurnActive || s.Listening is not null || s.LiveTasks.Any();
         if (moving) { if (!_tick.IsRunning) _tick.Start(); }
         else if (_tick.IsRunning && _openDrawer != "diagnostics") _tick.Stop();
+    }
+
+    private void RenderSurface()
+    {
+        if (_surface is null || _host is null) return;
+        _ = _host.PumpAsync();
+        var snap = _surface.Snapshot();
+        _surfaceSnapshot = snap;
+
+        StateLabel.Text = snap.Listening ? "LISTENING" : "READY";
+        StateDot.Fill = new SolidColorBrush(snap.Listening ? Palette.Good : Palette.Neutral);
+        ModeLabel.Text = snap.Listening ? "observed" : "direct";
+        StateDetail.Text = snap.HostedJudgments is { } hj
+            ? $"Jev {hj.JevStatus} · grants {hj.ActiveGrantIds.Count}"
+            : $"model {snap.ModelHealth.Status}";
+        ListeningChip.Text = snap.Listening ? "Listening · CaseRuntime" : "Listening off · CaseRuntime";
+        ListeningDot.Fill = new SolidColorBrush(snap.Listening ? Palette.Good : Palette.Neutral);
+        OrchestratorChip.Text = "Decision engine";
+        OrchestratorDot.Fill = new SolidColorBrush(Palette.Good);
+        TitleSubtitle.Text = $"case-runtime · v{App.Version}";
+
+        FeedItems.Children.Clear();
+        foreach (var item in snap.Feed.OrderByDescending(f => f.Ts).Take(40))
+        {
+            FeedItems.Children.Add(new TextBlock
+            {
+                Text = $"[{item.Ts.ToLocalTime():HH:mm:ss}] {item.Text}",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+        }
+        FeedEmpty.Visibility = Vis(snap.Feed.Count == 0);
+
+        // Approvals: reuse review panel list if present.
+        try
+        {
+            RenderSurfaceApprovals(snap);
+        }
+        catch
+        {
+            /* drawer may not be loaded */
+        }
+
+        if (!_tick.IsRunning) _tick.Start();
+    }
+
+    private void RenderSurfaceApprovals(Relay.Core.Cases.RelaySurfaceSnapshot snap)
+    {
+        // Best-effort: status detail already shows grant/Jev health; pending count in StateDetail.
+        if (snap.PendingApprovals.Count > 0)
+            StateDetail.Text += $" · {snap.PendingApprovals.Count} approval(s)";
     }
 
     private void RenderStatus(RelaySnapshot s)
@@ -519,6 +593,19 @@ public sealed partial class MainWindow : Window
     /// <summary>The ask box submits a direct task. While listening it runs beside the stream; the capture surface keeps the focus it had.</summary>
     private void SubmitAsk()
     {
+        if (_surfaceMode)
+        {
+            if (_surface is null) return;
+            var ask = AskBox.Text.Trim();
+            if (ask.Length == 0) return;
+            if (_surface.SubmitComposer(ask).Ok)
+            {
+                AskBox.Text = "";
+                Render();
+            }
+            return;
+        }
+
         if (_coordinator is null) return;
         var text = AskBox.Text.Trim();
         if (text.Length == 0) return;
