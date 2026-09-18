@@ -19,8 +19,8 @@ Live runners must fail preflight or report `SKIPPED: missing …`. They must not
 | Tag | `pre-jev-refactor-55551224` |
 | Branch | `refactor/jev-decision-engine` |
 | Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
-| Phase | **10 DevHarness jev-* scenarios landed; Phase 11 cleanup next** |
-| Alpha complete | **Not claimed** |
+| Phase | **11 production path cut over; legacy SessionCoordinator retained for Relay.Tests only** |
+| Alpha complete | **Not claimed** — SessionCoordinator retained for legacy `Relay.Tests`; Windows live gate not yet run on this host |
 
 Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
 

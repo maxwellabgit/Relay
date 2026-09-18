@@ -7,6 +7,7 @@ namespace Relay.Core.Cases;
 /// Slice 2 scripted mind: local_search → read_note → say with citations from the stored note.
 /// Never invents a date; answers only from the read note body.
 /// </summary>
+[Obsolete("Characterization and DevHarness only. Production uses CaseMindDecisionAdapter + RelayDecisionEngine.")]
 public sealed class AtlasRecallMind : ICaseMind
 {
     public const string Question = "What did we decide about the Atlas beta date?";

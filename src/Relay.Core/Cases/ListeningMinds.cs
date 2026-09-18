@@ -4,6 +4,7 @@ using Relay.Core.Policy;
 namespace Relay.Core.Cases;
 
 /// <summary>Routes to different scripted minds by case origin so listening and direct share one runtime.</summary>
+[Obsolete("Characterization and DevHarness only. Production uses CaseMindDecisionAdapter + RelayDecisionEngine.")]
 public sealed class OriginRoutingMind : ICaseMind
 {
     private readonly ICaseMind _observed;
@@ -27,6 +28,7 @@ public sealed class OriginRoutingMind : ICaseMind
 /// Slice 3 scripted listening mind: acronym → persistent say; ideation → raise_task;
 /// correction → propose modify_note; otherwise wait. Never stops the listening case.
 /// </summary>
+[Obsolete("Characterization and DevHarness only. Production uses CaseMindDecisionAdapter + RelayDecisionEngine.")]
 public sealed class ListeningScriptedMind : ICaseMind
 {
     private readonly string? _correctionNoteId;
@@ -204,6 +206,7 @@ public sealed class ListeningScriptedMind : ICaseMind
 }
 
 /// <summary>Minimal direct mind used alongside listening: answers briefly or waits.</summary>
+[Obsolete("Characterization and DevHarness only. Production uses CaseMindDecisionAdapter + RelayDecisionEngine.")]
 public sealed class SimpleDirectMind : ICaseMind
 {
     public string Name => "scripted-direct-simple";

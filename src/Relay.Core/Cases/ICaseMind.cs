@@ -72,6 +72,7 @@ public sealed record CaseMindRequest(
 /// Slice 1 scripted mind: first step proposes a side-effecting operation; after that operation
 /// is approved/executed it stops. Deterministic for recovery and idempotency tests.
 /// </summary>
+[Obsolete("Characterization and DevHarness only. Production uses CaseMindDecisionAdapter + RelayDecisionEngine.")]
 public sealed class ScriptedCaseMind : ICaseMind
 {
     public const string DefaultCapability = "slice1.side_effect";
