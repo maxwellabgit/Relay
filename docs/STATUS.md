@@ -19,7 +19,7 @@ Live runners must fail preflight or report `SKIPPED: missing …`. They must not
 | Tag | `pre-jev-refactor-55551224` |
 | Branch | `refactor/jev-decision-engine` |
 | Spec | `docs/JEV_REFACTOR.md` + plan `RELAY_Jev_Refactor_Plan.md` |
-| Phase | **0 complete characterization; Phase 1 docs next** |
+| Phase | **1 product contract rewritten; Phase 2 judgment contracts next** |
 | Alpha complete | **Not claimed** |
 
 Prior branch `origin/refactor/jev-runtime` is **reference-only** (supersede decision). This branch re-implements against `docs/JEV_REFACTOR.md` / the plan contracts.
@@ -50,7 +50,7 @@ Do not treat these as Phase 0 regressions. They live in code Phase 11 deletes.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Product / architecture docs | Still describe “one local mind” — Phase 1 rewrites | `PRODUCT.md`, `ARCHITECTURE.md`, `README.md` |
+| Product / architecture docs | Rewritten for decision engine + Jev + v0.1 scope | `PRODUCT.md`, `ARCHITECTURE.md`, `README.md`, `JEV_REFACTOR.md` |
 | `CaseRuntime` + envelopes + projections | Present (Slices 1–7 scripted) | `Relay.Core.Tests` + DevHarness |
 | Production Desktop composition | Still `SessionCoordinator` / `RelayRuntime` | `App.xaml.cs` |
 | Jev / judgment contracts / TypeSafe client | **Absent on this branch** | — |
