@@ -12,8 +12,18 @@ namespace Relay.Core.Decisions;
 public sealed class CaseMindDecisionAdapter : ICaseMind
 {
     private readonly ICaseDecisionEngine _engine;
+    private readonly string? _sessionId;
+    private readonly string? _projectId;
 
-    public CaseMindDecisionAdapter(ICaseDecisionEngine engine) => _engine = engine;
+    public CaseMindDecisionAdapter(
+        ICaseDecisionEngine engine,
+        string? sessionId = null,
+        string? projectId = null)
+    {
+        _engine = engine;
+        _sessionId = sessionId;
+        _projectId = projectId;
+    }
 
     public string Name => "decision-engine";
 
@@ -35,6 +45,8 @@ public sealed class CaseMindDecisionAdapter : ICaseMind
             PresentationPolicy = request.PresentationPolicy,
             At = request.At,
             StepIndex = request.StepIndex,
+            SessionId = request.SessionId ?? _sessionId,
+            ProjectId = request.ProjectId ?? _projectId,
         };
 
         var decision = await _engine.DecideAsync(decisionRequest, cancellationToken).ConfigureAwait(false);
@@ -115,19 +127,48 @@ public sealed class CaseMindDecisionAdapter : ICaseMind
         var args = MergeArgs(primary, new Dictionary<string, JsonElement>(StringComparer.Ordinal)
         {
             ["kind"] = JsonSerializer.SerializeToElement(MapKind(primary.CapabilityId)),
-            ["objective"] = JsonSerializer.SerializeToElement(primary.FeedText),
+            ["objective"] = JsonSerializer.SerializeToElement(
+                primary.Arguments.TryGetValue("acronym", out var acr) && acr.ValueKind == JsonValueKind.String
+                    ? (acr.GetString() ?? primary.FeedText)
+                    : primary.FeedText),
             ["capabilityId"] = JsonSerializer.SerializeToElement(primary.CapabilityId ?? "follow_up"),
         });
+        if (primary.SourceRefs.Count > 0 && !args.ContainsKey("sourceRefs"))
+            args["sourceRefs"] = JsonSerializer.SerializeToElement(primary.SourceRefs);
 
         if (children.Count > 1)
         {
             args["siblingRaises"] = JsonSerializer.SerializeToElement(
-                children.Skip(1).Select(c => new
+                children.Skip(1).Select(c =>
                 {
-                    capabilityId = c.CapabilityId,
-                    feedText = c.FeedText,
-                    kind = MapKind(c.CapabilityId),
-                    presentationLevel = c.PresentationLevel,
+                    var feed = c.Arguments.TryGetValue("acronym", out var a) && a.ValueKind == JsonValueKind.String
+                        ? (a.GetString() ?? c.FeedText)
+                        : c.FeedText;
+                    return new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["capabilityId"] = c.CapabilityId,
+                        ["feedText"] = feed,
+                        ["kind"] = MapKind(c.CapabilityId),
+                        ["presentationLevel"] = c.PresentationLevel,
+                        ["acronym"] = c.Arguments.TryGetValue("acronym", out var ac) && ac.ValueKind == JsonValueKind.String
+                            ? ac.GetString()
+                            : null,
+                        ["span"] = c.Arguments.TryGetValue("span", out var sp) && sp.ValueKind == JsonValueKind.String
+                            ? sp.GetString()
+                            : null,
+                        ["sourceObjectId"] = c.Arguments.TryGetValue("sourceObjectId", out var so) && so.ValueKind == JsonValueKind.String
+                            ? so.GetString()
+                            : c.SourceRefs.FirstOrDefault(),
+                        ["segmentId"] = c.Arguments.TryGetValue("segmentId", out var sg) && sg.ValueKind == JsonValueKind.String
+                            ? sg.GetString()
+                            : null,
+                        ["sourceEventId"] = c.Arguments.TryGetValue("sourceEventId", out var se) && se.ValueKind == JsonValueKind.String
+                            ? se.GetString()
+                            : null,
+                        ["origin"] = c.Arguments.TryGetValue("origin", out var og) && og.ValueKind == JsonValueKind.String
+                            ? og.GetString()
+                            : null,
+                    };
                 }).ToList());
         }
 

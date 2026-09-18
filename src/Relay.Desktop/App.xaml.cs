@@ -133,12 +133,19 @@ public partial class App : Application
     private void OnDomainUnhandledException(object? sender, System.UnhandledExceptionEventArgs e)
     {
         if (e.ExceptionObject is Exception ex && _host is not null)
+        {
+            try { _host.ReportCrash(ex.GetType().FullName ?? "unhandled"); } catch { /* best effort */ }
             WriteStartupIncident(_host.Root, ex);
+        }
     }
 
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        if (_host is not null) WriteStartupIncident(_host.Root, e.Exception);
+        if (_host is not null)
+        {
+            try { _host.ReportCrash(e.Exception.GetType().FullName ?? "unobserved_task"); } catch { /* best effort */ }
+            WriteStartupIncident(_host.Root, e.Exception);
+        }
         e.SetObserved();
     }
 

@@ -1,0 +1,19 @@
+---
+description: Handles RELAY runtime failures from dogfood telemetry and problem reports
+alwaysApply: false
+---
+
+# RELAY dogfood triage
+
+When the user asks to fix a RELAY runtime failure, dogfood problem, or open detector finding:
+
+1. Read `.dev-data/.dev-runs/CURRENT` for `runId` and `runDir`.
+2. Read `{runDir}/latest-problems.md`.
+3. Inspect **only** the event sequence ranges referenced by each open problem in `{runDir}/events.jsonl`.
+4. Locate the first violated invariant; do not broaden into unrelated refactors.
+5. Reproduce the failure before editing production code.
+6. Add a regression test that fails without the fix.
+7. Never read object-store text unless the user explicitly authorizes it.
+8. Never close a problem merely because compilation succeeds — verify with the regression test and, when possible, a dogfood re-run.
+
+RELAY records facts; deterministic detectors create problems; Cursor analyzes them. Do not invent bugs from normal telemetry.

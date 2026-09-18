@@ -218,7 +218,7 @@ public sealed class CaseRuntimeSurface : IRelaySurface
             var grant = _grants.CreateProjectGrant(
                 projectId,
                 purposes,
-                [SourceClassification.HostedAllowedProject, SourceClassification.HostedAllowedSession, SourceClassification.Public],
+                [SourceClassification.HostedAllowedProject, SourceClassification.Public],
                 maximumInputTokenBudget,
                 expiresAt);
             return SurfaceResult.Success("Hosted project grant created.", grantId: grant.GrantId);

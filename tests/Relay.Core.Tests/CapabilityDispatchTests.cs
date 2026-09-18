@@ -66,15 +66,18 @@ public sealed class CapabilityDispatchTests : IDisposable
         Assert.Contains(AcronymResolveCapability.AtVersion, child.AllowedCapabilities);
 
         var stepped = await runtime.StepCaseAsync(childId);
+        Assert.Equal(CaseOrigin.Observed, child.Origin);
+        Assert.Contains("BESS", child.ApprovedObjective ?? "", StringComparison.Ordinal);
         Assert.True(
             stepped.Status is CaseStatus.Completed or CaseStatus.Waiting or CaseStatus.Active,
             stepped.Status);
         // Unresolved without glossary entry — never invents an expansion.
         var feed = runtime.Projections.ListFeedItems().Select(f => f.Text).ToList();
-        Assert.Contains(feed, t => t.Contains("BESS", StringComparison.OrdinalIgnoreCase) ||
-                                   t.Contains("unresolved", StringComparison.OrdinalIgnoreCase) ||
-                                   t.Contains("Waiting", StringComparison.OrdinalIgnoreCase) ||
-                                   t.Length > 0);
+        Assert.Contains(feed, t => t.Contains("BESS", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(feed, t =>
+            t.Contains("Battery Energy Storage", StringComparison.OrdinalIgnoreCase) &&
+            !t.Contains("Unresolved", StringComparison.OrdinalIgnoreCase) &&
+            !t.Contains("Waiting", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -59,13 +59,21 @@ public sealed class HostedGrantStore
         DateTimeOffset? expiresAt = null,
         string? grantId = null)
     {
+        var classifications = allowedClassifications.Distinct(StringComparer.Ordinal).ToList();
+        if (classifications.Contains(SourceClassification.HostedAllowedSession, StringComparer.Ordinal))
+        {
+            throw new DisclosureException(
+                "Project grants cannot authorize hosted_allowed_session classifications.",
+                "validation");
+        }
+
         var grant = new HostedProcessingGrant
         {
             GrantId = grantId ?? Ulid.NewUlid(_clock.UtcNow),
             Scope = HostedGrantScopes.Project,
             ProjectId = projectId,
             AllowedProvider = HostedProviders.TypeSafe,
-            AllowedSourceClassifications = allowedClassifications.Distinct(StringComparer.Ordinal).ToList(),
+            AllowedSourceClassifications = classifications,
             AllowedPurposes = purposes.Distinct(StringComparer.Ordinal).ToList(),
             MaximumInputTokenBudget = maximumInputTokenBudget,
             TokensUsed = 0,

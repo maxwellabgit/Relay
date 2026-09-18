@@ -63,8 +63,15 @@ $manifestPath = Join-Path $runDir "manifest.json"
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $manifestPath -Encoding utf8
 
 $pointer = Join-Path $DataRoot ".dev-runs" "CURRENT"
-@{ runId = $RunId; runDir = $runDir; dataRoot = (Resolve-Path $DataRoot).Path; pid = $null } |
-  ConvertTo-Json | Set-Content -Path $pointer -Encoding utf8
+$startedAt = (Get-Date).ToUniversalTime().ToString("o")
+[ordered]@{
+  runId = $RunId
+  runDir = $runDir
+  dataRoot = (Resolve-Path $DataRoot).Path
+  pid = $null
+  commit = $gitCommit
+  startedAt = $startedAt
+} | ConvertTo-Json | Set-Content -Path $pointer -Encoding utf8
 
 $env:RELAY_DATA_ROOT = (Resolve-Path $DataRoot).Path
 $env:RELAY_RUN_ID = $RunId
@@ -94,5 +101,8 @@ if (-not $exe) { throw "Relay.exe not found after build" }
 $proc = Start-Process -FilePath $exe.FullName -PassThru
 $ptr = Get-Content $pointer -Raw | ConvertFrom-Json
 $ptr.pid = $proc.Id
-$ptr | ConvertTo-Json | Set-Content -Path $pointer -Encoding utf8
+if (-not $ptr.commit) { $ptr | Add-Member -NotePropertyName commit -NotePropertyValue $gitCommit -Force }
+if (-not $ptr.startedAt) { $ptr | Add-Member -NotePropertyName startedAt -NotePropertyValue $startedAt -Force }
+$ptr | Select-Object runId, runDir, dataRoot, pid, commit, startedAt |
+  ConvertTo-Json | Set-Content -Path $pointer -Encoding utf8
 Write-Host "Relay PID $($proc.Id). Tail with: ./dev/tail-relay.ps1 -DataRoot `"$DataRoot`""

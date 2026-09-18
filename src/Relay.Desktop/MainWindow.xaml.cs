@@ -168,6 +168,17 @@ public sealed partial class MainWindow : Window
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.KeyStatus.WasKeyDown) return; // auto-repeat while held
+
+        // Dev shortcut: Ctrl+Shift+F12 opens the problem report dialog.
+        if (e.Key == VirtualKey.F12 &&
+            Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down) &&
+            Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down))
+        {
+            e.Handled = true;
+            _ = ShowReportProblemDialogAsync();
+            return;
+        }
+
         if (_noteChord is { } note && WindowChords.Matches(note, e.Key))
         {
             e.Handled = true;
@@ -178,6 +189,86 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
             _commandAction?.Invoke();
         }
+    }
+
+    private void ReportProblem_Click(object sender, RoutedEventArgs e) => _ = ShowReportProblemDialogAsync();
+
+    private async Task ShowReportProblemDialogAsync()
+    {
+        if (_host is null) return;
+
+        var whatBox = new TextBox
+        {
+            Header = "What happened?",
+            PlaceholderText = "Describe the incorrect behavior.",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 88,
+        };
+        var expectedBox = new TextBox
+        {
+            Header = "What was expected?",
+            PlaceholderText = "Describe the expected behavior.",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 72,
+        };
+        var severityBox = new ComboBox
+        {
+            Header = "Severity",
+            ItemsSource = new[] { "info", "warn", "error", "critical" },
+            SelectedIndex = 2,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MinWidth = 160,
+        };
+        var includeInput = new CheckBox
+        {
+            Content = "Include current input text",
+            IsChecked = false,
+        };
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(whatBox);
+        panel.Children.Add(expectedBox);
+        panel.Children.Add(severityBox);
+        panel.Children.Add(includeInput);
+
+        var dialog = new ContentDialog
+        {
+            Title = "Report problem",
+            Content = panel,
+            PrimaryButtonText = "Submit",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot,
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return;
+
+        var what = whatBox.Text?.Trim() ?? "";
+        var expected = expectedBox.Text?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(what) && string.IsNullOrWhiteSpace(expected))
+            return;
+
+        string? inputText = null;
+        if (includeInput.IsChecked == true)
+        {
+            var ask = AskBox.Text;
+            var capture = CaptureBox.Text;
+            inputText = string.IsNullOrWhiteSpace(ask) ? capture : ask;
+        }
+
+        var snap = _surface?.Snapshot();
+        var caseId = snap?.ComposerCaseId ?? snap?.ListeningCaseId;
+        var pending = caseId is null ? null : _host.Runtime.GetPendingApproval(caseId);
+        _host.ReportProblem(
+            whatHappened: what,
+            whatExpected: expected,
+            severity: severityBox.SelectedItem as string ?? "error",
+            includeInputText: inputText,
+            caseId: caseId,
+            operationId: pending?.OperationId,
+            appVersion: App.Version);
     }
 
     private static class WindowChords

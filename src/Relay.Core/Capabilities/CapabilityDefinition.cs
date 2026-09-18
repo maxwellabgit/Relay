@@ -28,6 +28,7 @@ public sealed class CapabilityRequest
     public required int CapabilityVersion { get; init; }
     public required string CaseId { get; init; }
     public required string Origin { get; init; }
+    public string? SessionId { get; init; }
     public string? ProjectId { get; init; }
     public string? Objective { get; init; }
     public IReadOnlyDictionary<string, string> Arguments { get; init; } =

@@ -98,6 +98,15 @@ public sealed class DisclosurePolicy
 
     private string ResolveClassification(JudgmentSourceRef sourceRef)
     {
+        // Object store classification is authoritative when present.
+        var fromStore = _objects.TryGetClassification(sourceRef.ObjectId);
+        if (!string.IsNullOrWhiteSpace(fromStore))
+        {
+            if (!SourceClassification.IsKnown(fromStore))
+                throw new DisclosureException("Stored source classification is invalid.", "validation");
+            return fromStore;
+        }
+
         if (!string.IsNullOrWhiteSpace(sourceRef.Classification))
         {
             if (!SourceClassification.IsKnown(sourceRef.Classification))
@@ -105,12 +114,7 @@ public sealed class DisclosurePolicy
             return sourceRef.Classification!;
         }
 
-        var fromStore = _objects.TryGetClassification(sourceRef.ObjectId);
-        if (fromStore is null)
-            throw new DisclosureException("Source object classification is missing.", "validation");
-        if (!SourceClassification.IsKnown(fromStore))
-            throw new DisclosureException("Stored source classification is invalid.", "validation");
-        return fromStore;
+        throw new DisclosureException("Source object classification is missing.", "validation");
     }
 
     private HostedProcessingGrant? FindApplicableGrant(
@@ -176,6 +180,17 @@ public sealed class DisclosurePolicy
             if (string.IsNullOrWhiteSpace(projectId) ||
                 !string.Equals(grant.ProjectId, projectId, StringComparison.Ordinal))
                 throw new DisclosureException("Project grant cannot authorize another project.", "not_authorized");
+
+            // Project grants may authorize matching-project or public sources only — never session.
+            foreach (var source in sources)
+            {
+                if (source.Classification == SourceClassification.HostedAllowedSession)
+                {
+                    throw new DisclosureException(
+                        "Project grant cannot authorize session-classified data.",
+                        "not_authorized");
+                }
+            }
         }
 
         foreach (var source in sources)

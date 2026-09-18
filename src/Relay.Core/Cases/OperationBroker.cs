@@ -40,6 +40,7 @@ public sealed class OperationBroker
                 Actions.ModifyNote => ApplyModifyNote(envelope),
                 Actions.CreateDraftNote => ApplyCreateDraftNote(envelope),
                 "file_note" => ApplyFileNote(envelope),
+                "task.create" => ApplyCreateTask(envelope),
                 _ => new OperationApplyResult(false, "Unknown capability.", Error: $"Unknown capability '{envelope.Capability}'."),
             };
         }
@@ -146,6 +147,26 @@ public sealed class OperationBroker
         _onSideEffect();
         var stored = _objects.PutJson(new { noteId = note.Id, projectId, path = written.Path, sha256 = written.Sha256 });
         return new OperationApplyResult(true, $"Filed note {note.Id}.", stored.ObjectId);
+    }
+
+    private OperationApplyResult ApplyCreateTask(OperationEnvelope envelope)
+    {
+        var title = OptString(envelope, "title") ?? OptString(envelope, "commitment") ?? "Task";
+        var owner = OptString(envelope, "owner");
+        var due = OptString(envelope, "dueDate") ?? OptString(envelope, "due");
+        var commitment = OptString(envelope, "commitment") ?? title;
+        _onSideEffect();
+        var stored = _objects.PutJson(new
+        {
+            capability = "task.create",
+            title,
+            owner,
+            dueDate = due,
+            commitment,
+            at = _clock.UtcNow,
+            operationId = envelope.OperationId,
+        });
+        return new OperationApplyResult(true, $"Created task '{title}'.", stored.ObjectId);
     }
 
     private static string ReqString(OperationEnvelope envelope, string key)

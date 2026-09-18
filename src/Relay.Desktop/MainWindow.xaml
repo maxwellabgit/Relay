@@ -96,6 +96,7 @@
                         <TextBlock x:Name="StateDetail" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxWidth="360" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Button x:Name="ReportProblemButton" Style="{StaticResource SmallButton}" Content="Report problem" Click="ReportProblem_Click" />
                         <Button x:Name="SettingsButton" Style="{StaticResource SmallButton}" Content="Settings" Click="Settings_Click" />
                     </StackPanel>
                 </Grid>

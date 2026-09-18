@@ -191,10 +191,12 @@ public sealed class NoteCaptureCapability : ICapabilityHandler
                 cancellationToken,
                 appendCaseEvent: true,
                 purpose: HostedPurposes.NoteVerification,
+                sessionId: request.SessionId,
                 projectId: request.ProjectId).ConfigureAwait(false);
             return result.Response.Ok ? result.Response.Success : null;
         }
 
+        // Tests only — production composition always provides JudgmentLifecycle.
         if (_client is null) return null;
         var response = await _client.JudgeAsync(judgmentRequest, cancellationToken).ConfigureAwait(false);
         if (!response.Ok) return null;

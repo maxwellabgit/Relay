@@ -44,11 +44,24 @@ public sealed class DecisionPolicy
 
         if (noul("contains_actionable_commitment") >= _thresholds.CommitmentCandidate)
         {
+            var span = request.RecentSegments.FirstOrDefault()?.Text ?? request.Objective ?? "";
             raises.Add(FeedOrCapability(
                 "conversation.task.capture@1",
-                "Possible commitment noted.",
+                string.IsNullOrWhiteSpace(span) ? "Possible commitment noted." : span,
                 "persistent",
-                request));
+                request,
+                extraArgs: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                {
+                    ["span"] = JsonSerializer.SerializeToElement(span),
+                    ["sourceRefs"] = JsonSerializer.SerializeToElement(
+                        request.RecentSegments.Select(s => s.ObjectId).ToList()),
+                    ["sourceObjectId"] = JsonSerializer.SerializeToElement(
+                        request.RecentSegments.FirstOrDefault()?.ObjectId ?? ""),
+                    ["segmentId"] = JsonSerializer.SerializeToElement(
+                        request.RecentSegments.FirstOrDefault()?.SegmentId ?? ""),
+                    ["sourceEventId"] = JsonSerializer.SerializeToElement(
+                        request.RecentSegments.FirstOrDefault()?.EventId ?? ""),
+                }));
         }
 
         if (noul("contains_correction") >= _thresholds.CorrectionCandidate)
@@ -62,11 +75,14 @@ public sealed class DecisionPolicy
 
         if (noul("contains_unresolved_term_request") >= _thresholds.UnresolvedTermCandidate)
         {
+            var acronym = ExtractAcronym(request);
+            var span = ExtractSpan(request, acronym);
             raises.Add(FeedOrCapability(
                 "glossary.acronym.resolve@1",
-                "Unresolved term noted.",
+                string.IsNullOrWhiteSpace(acronym) ? "Unresolved term noted." : acronym,
                 "persistent",
-                request));
+                request,
+                extraArgs: BuildTermArgs(acronym, span, request)));
         }
 
         var attention = "ambient";
@@ -172,12 +188,23 @@ public sealed class DecisionPolicy
         string capabilityAtVersion,
         string feed,
         string level,
-        CaseDecisionRequest request)
+        CaseDecisionRequest request,
+        Dictionary<string, JsonElement>? extraArgs = null)
     {
         if (!_enabledCapabilities.Contains(capabilityAtVersion))
             return UnknownCapabilityRejected(capabilityAtVersion);
 
         var parts = capabilityAtVersion.Split('@');
+        var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["origin"] = JsonSerializer.SerializeToElement(request.Origin),
+        };
+        if (extraArgs is not null)
+        {
+            foreach (var (k, v) in extraArgs)
+                args[k] = v;
+        }
+
         return new CaseDecision
         {
             Kind = CaseDecisionKinds.RaiseCase,
@@ -186,11 +213,57 @@ public sealed class DecisionPolicy
             PresentationLevel = level,
             FeedText = feed,
             SourceRefs = request.RecentSegments.Select(s => s.ObjectId).ToList(),
-            Arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                ["origin"] = JsonSerializer.SerializeToElement(request.Origin),
-            },
+            Arguments = args,
         };
+    }
+
+    private static Dictionary<string, JsonElement> BuildTermArgs(
+        string? acronym,
+        string span,
+        CaseDecisionRequest request)
+    {
+        var args = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["span"] = JsonSerializer.SerializeToElement(span),
+            ["sourceRefs"] = JsonSerializer.SerializeToElement(
+                request.RecentSegments.Select(s => s.ObjectId).ToList()),
+            ["sourceObjectId"] = JsonSerializer.SerializeToElement(
+                request.RecentSegments.FirstOrDefault()?.ObjectId ?? ""),
+            ["segmentId"] = JsonSerializer.SerializeToElement(
+                request.RecentSegments.FirstOrDefault()?.SegmentId ?? ""),
+            ["sourceEventId"] = JsonSerializer.SerializeToElement(
+                request.RecentSegments.FirstOrDefault()?.EventId ?? ""),
+        };
+        if (!string.IsNullOrWhiteSpace(acronym))
+            args["acronym"] = JsonSerializer.SerializeToElement(acronym);
+        return args;
+    }
+
+    private static string? ExtractAcronym(CaseDecisionRequest request)
+    {
+        foreach (var segment in request.RecentSegments)
+        {
+            var token = Capabilities.AcronymCandidateBuilder.PrimaryToken(segment.Text);
+            if (!string.IsNullOrWhiteSpace(token))
+                return token;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Objective))
+            return Capabilities.AcronymCandidateBuilder.PrimaryToken(request.Objective);
+        return null;
+    }
+
+    private static string ExtractSpan(CaseDecisionRequest request, string? acronym)
+    {
+        var segment = request.RecentSegments.FirstOrDefault(s =>
+            string.IsNullOrWhiteSpace(acronym) ||
+            s.Text.Contains(acronym!, StringComparison.Ordinal));
+        if (segment is not null)
+            return segment.Text;
+        return request.RecentSegments.FirstOrDefault()?.Text
+               ?? request.Objective
+               ?? acronym
+               ?? "";
     }
 
     private static CaseDecision Clarify(string text) => new()

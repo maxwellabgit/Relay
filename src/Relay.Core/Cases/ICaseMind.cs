@@ -66,7 +66,9 @@ public sealed record CaseMindRequest(
     IReadOnlyList<ListeningSegmentView> RecentSegments,
     string? ParentCaseId = null,
     string? PresentationPolicy = null,
-    IReadOnlyList<string>? AvailableTools = null);
+    IReadOnlyList<string>? AvailableTools = null,
+    string? SessionId = null,
+    string? ProjectId = null);
 
 /// <summary>
 /// Slice 1 scripted mind: first step proposes a side-effecting operation; after that operation

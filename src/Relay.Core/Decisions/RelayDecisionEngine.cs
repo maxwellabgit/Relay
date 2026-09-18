@@ -69,7 +69,7 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
         var set = _questionSets.Get(QuestionSets.ConversationScreenId, QuestionSets.ConversationScreenVersion);
         var state = request.AssembledState ?? _assembler.AssembleScreenState(request);
         var questions = FilterScreenQuestions(set, request);
-        var success = await JudgeAsync(
+        var (success, failure) = await JudgeAsync(
             set,
             questions,
             state,
@@ -79,11 +79,30 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
 
         if (success is null)
         {
+            if (failure is { Retryable: true })
+            {
+                return new CaseDecision
+                {
+                    Kind = CaseDecisionKinds.Wait,
+                    FeedText = "Waiting for judgment.",
+                    Reason = "waiting_for_judgment",
+                    Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+                    {
+                        ["failureCategory"] = System.Text.Json.JsonSerializer.SerializeToElement(failure.Category),
+                        ["retryable"] = System.Text.Json.JsonSerializer.SerializeToElement(true),
+                    },
+                };
+            }
+
             return new CaseDecision
             {
                 Kind = CaseDecisionKinds.Wait,
-                FeedText = "Waiting for judgment.",
-                Reason = "waiting_for_judgment",
+                FeedText = "Hosted judgment is not available for this input.",
+                Reason = failure?.Category ?? "judgment_unavailable",
+                Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+                {
+                    ["retryable"] = System.Text.Json.JsonSerializer.SerializeToElement(false),
+                },
             };
         }
 
@@ -94,7 +113,7 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
     {
         var set = _questionSets.Get(QuestionSets.DirectRouteId, QuestionSets.DirectRouteVersion);
         var state = request.AssembledState ?? _assembler.AssembleDirectState(request);
-        var success = await JudgeAsync(
+        var (success, failure) = await JudgeAsync(
             set,
             set.Questions,
             state,
@@ -104,12 +123,22 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
 
         if (success is null)
         {
+            if (failure is { Retryable: true })
+            {
+                return new CaseDecision
+                {
+                    Kind = CaseDecisionKinds.Wait,
+                    FeedText = "Waiting for judgment.",
+                    Reason = "waiting_for_judgment",
+                };
+            }
+
             return new CaseDecision
             {
                 Kind = CaseDecisionKinds.PublishFeed,
                 FeedText = "Hosted routing is unavailable; try again when judgments are allowed.",
                 PresentationLevel = "persistent",
-                Reason = "waiting_for_judgment",
+                Reason = failure?.Category ?? "waiting_for_judgment",
             };
         }
 
@@ -131,7 +160,7 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
     }
 
-    private async Task<JudgmentSuccess?> JudgeAsync(
+    private async Task<(JudgmentSuccess? Success, JudgmentFailure? Failure)> JudgeAsync(
         QuestionSetDefinition set,
         IReadOnlyDictionary<string, JudgmentQuestion> questions,
         System.Text.Json.JsonElement state,
@@ -148,9 +177,7 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
             Questions = questions,
             CaseId = request.CaseId,
             CaseVersion = request.Version,
-            SourceObjectRefs = request.RecentSegments
-                .Select(s => new JudgmentSourceRef(s.ObjectId, s.Sha256, SourceClassification.HostedAllowedSession))
-                .ToList(),
+            SourceObjectRefs = BuildSourceRefs(request),
         };
 
         if (_lifecycle is not null)
@@ -162,15 +189,48 @@ public sealed class RelayDecisionEngine : ICaseDecisionEngine
                 purpose: purpose,
                 sessionId: request.SessionId,
                 projectId: request.ProjectId).ConfigureAwait(false);
-            return result.Response.Ok ? result.Response.Success : null;
+            if (result.Response.Ok)
+                return (result.Response.Success, null);
+            return (null, result.Response.Failure);
         }
 
+        // Tests only — production composition (RelayComposition / CaseRelayHost) must pass lifecycle, not a raw client.
         if (_client is null)
-            return null;
+            return (null, null);
 
         var response = await _client.JudgeAsync(judgmentRequest, cancellationToken).ConfigureAwait(false);
-        if (!response.Ok) return null;
+        if (!response.Ok)
+            return (null, response.Failure);
         response.ValidateAgainst(judgmentRequest);
-        return response.Success;
+        return (response.Success, null);
+    }
+
+    private static List<JudgmentSourceRef> BuildSourceRefs(CaseDecisionRequest request)
+    {
+        if (request.RecentSegments.Count > 0)
+        {
+            return request.RecentSegments
+                .Select(s => new JudgmentSourceRef(s.ObjectId, s.Sha256, SourceClassification.HostedAllowedSession))
+                .ToList();
+        }
+
+        // Direct cases persist object refs on user.input (no raw text in the event).
+        foreach (var evt in request.RecentEvents)
+        {
+            if (evt.Type != CaseEventTypes.UserInput) continue;
+            if (!evt.Payload.TryGetProperty("objectId", out var idEl) || idEl.ValueKind != System.Text.Json.JsonValueKind.String)
+                continue;
+            var objectId = idEl.GetString();
+            if (string.IsNullOrWhiteSpace(objectId)) continue;
+            var sha = evt.Payload.TryGetProperty("sha256", out var shaEl) && shaEl.ValueKind == System.Text.Json.JsonValueKind.String
+                ? shaEl.GetString() ?? ""
+                : "";
+            var classification = evt.Payload.TryGetProperty("classification", out var classEl) && classEl.ValueKind == System.Text.Json.JsonValueKind.String
+                ? classEl.GetString() ?? SourceClassification.HostedAllowedSession
+                : SourceClassification.HostedAllowedSession;
+            return [new JudgmentSourceRef(objectId!, sha, classification)];
+        }
+
+        return [];
     }
 }

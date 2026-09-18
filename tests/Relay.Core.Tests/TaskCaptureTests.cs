@@ -24,10 +24,12 @@ public sealed class TaskCaptureTests
             At = FridayAsOf,
         }, CancellationToken.None);
 
-        Assert.Equal("task_proposal", result.Kind);
+        Assert.Equal(CapabilityResultKinds.ProposeOperation, result.Kind);
         Assert.Equal("Max", result.Artifacts["owner"]);
         Assert.Equal("2026-09-18", result.Artifacts["dueDate"]); // next Friday from Thursday Sep 17
+        Assert.Equal(TaskCaptureCapability.CreateTaskCapability, result.Artifacts["capability"]);
         Assert.Contains("Max", result.FeedText, StringComparison.Ordinal);
+        Assert.StartsWith("task.create:", result.Artifacts["idempotencyKey"], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -47,7 +49,7 @@ public sealed class TaskCaptureTests
             At = FridayAsOf,
         }, CancellationToken.None);
 
-        Assert.Equal("ownerless_or_clarify", result.Kind);
+        Assert.Equal(CapabilityResultKinds.Clarification, result.Kind);
         Assert.Equal("no_inferred_owner", result.Reason);
         Assert.Equal("", result.Artifacts["owner"]);
         Assert.DoesNotContain("will", result.Artifacts["owner"], StringComparison.Ordinal);
