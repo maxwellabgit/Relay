@@ -10,9 +10,9 @@ using Relay.Core.Usage;
 namespace Relay.DevHarness;
 
 /// <summary>
-/// Console harness for Slice 1 recovery and Slice 2 Atlas recall scenarios.
+/// Console harness for Slice 1–7 and Jev decision-engine scenarios.
 /// </summary>
-public static class Program
+public static partial class Program
 {
     public static async Task<int> Main(string[] args)
     {
@@ -29,7 +29,7 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(dataRootPath))
         {
-            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|slice2|slice3|slice4|slice5|slice6|slice7]");
+            Console.Error.WriteLine("Usage: Relay.DevHarness --data-root <path> [--run-id <id>] [--scenario slice1|…|slice7|jev-scripted|jev-outage|jev-privacy|jev-improvement|jev-live]");
             return 2;
         }
 
@@ -42,6 +42,11 @@ public static class Program
             "slice5" => await RunSlice5Async(dataRootPath, runId),
             "slice6" => await RunSlice6Async(dataRootPath, runId),
             "slice7" => RunSlice7(dataRootPath, runId),
+            "jev-scripted" => await RunJevScriptedAsync(dataRootPath, runId),
+            "jev-outage" => await RunJevOutageAsync(dataRootPath, runId),
+            "jev-privacy" => await RunJevPrivacyAsync(dataRootPath, runId),
+            "jev-improvement" => RunJevImprovement(dataRootPath, runId),
+            "jev-live" => RunJevLive(dataRootPath, runId),
             _ => FailUsage($"Unknown scenario '{scenario}'."),
         };
     }
