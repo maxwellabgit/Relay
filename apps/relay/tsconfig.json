@@ -13,6 +13,8 @@
   "references": [
     { "path": "../../packages/contracts" },
     { "path": "../../packages/engine" },
+    { "path": "../../packages/reflexes" },
+    { "path": "../../packages/testkit" },
     { "path": "../../packages/ui" }
   ]
 }

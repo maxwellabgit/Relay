@@ -14,6 +14,8 @@
   "dependencies": {
     "@relay/contracts": "0.1.0",
     "@relay/engine": "0.1.0",
+    "@relay/reflexes": "0.1.0",
+    "@relay/testkit": "0.1.0",
     "@relay/ui": "0.1.0",
     "expo": "~57.0.7",
     "expo-status-bar": "~57.0.1",
