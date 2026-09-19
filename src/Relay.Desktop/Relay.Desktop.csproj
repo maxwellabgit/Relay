@@ -12,8 +12,6 @@
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
-    <!-- Unpackaged development build. MSIX packaging requires the Visual Studio AppX
-         targets; see docs/09-build-plan.md for the packaging step. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>false</SelfContained>
@@ -34,18 +32,6 @@
     <ProjectReference Include="..\Relay.Core\Relay.Core.csproj" />
     <ProjectReference Include="..\Relay.Windows\Relay.Windows.csproj" />
     <ProjectReference Include="..\Relay.Gateway\Relay.Gateway.csproj" />
-    <!-- Built alongside so Relay.Worker.exe sits beside Relay.exe; the app never loads it, only launches it. -->
-    <ProjectReference Include="..\Relay.Worker\Relay.Worker.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
-
-  <!-- Copy the worker's build output next to Relay.exe after each build: the executable and its whole closure
-       (Jint and its parser, which run the tools Relay builds for itself). The worker has no reference to Relay.Core,
-       so nothing here shadows the app's own assemblies. -->
-  <Target Name="CopyWorkerBesideApp" AfterTargets="Build">
-    <ItemGroup>
-      <WorkerFiles Include="..\Relay.Worker\bin\$(Configuration)\net10.0\Relay.Worker.*;..\Relay.Worker\bin\$(Configuration)\net10.0\*.dll" />
-    </ItemGroup>
-    <Copy SourceFiles="@(WorkerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
-  </Target>
 
 </Project>
