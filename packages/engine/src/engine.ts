@@ -1,5 +1,6 @@
 import type {
   ArtifactStorePort,
+  GlassesDisplayPort,
   JudgmentPort,
   ReflexModule,
   RelayChange,
@@ -25,6 +26,7 @@ export type EngineDeps = {
   readonly ids: IdFactory;
   readonly sessionId: string;
   readonly reflexModules?: readonly ReflexModule[];
+  readonly glasses?: GlassesDisplayPort;
 };
 
 function encodeText(text: string): Uint8Array {
@@ -233,8 +235,16 @@ export class RelayEngine {
       sourceEventId,
     });
 
+    const findingSummaries: string[] = [];
     if (this.deps.reflexModules?.length) {
-      await this.runReflexesOnFinal(text, isAsk, caseId, updated.version, sourceEventId);
+      const findings = await this.runReflexesOnFinal(
+        text,
+        isAsk,
+        caseId,
+        updated.version,
+        sourceEventId,
+      );
+      findingSummaries.push(...findings);
     }
 
     const latest = await this.deps.store.getCase(caseId);
@@ -246,16 +256,46 @@ export class RelayEngine {
     });
     if (!completed) return;
 
-    await this.deps.store.addFeedItem({
-      itemId: this.deps.ids.next("feed"),
-      kind: current.origin === "direct" ? "ask" : "observation",
-      summary:
-        current.origin === "direct"
-          ? "Ask accepted"
-          : `Observed source ${String(item.payload.segmentId)}`,
-      createdAt: completed.updatedAt,
-      caseId,
-    });
+    if (current.origin === "direct") {
+      await this.deps.store.addFeedItem({
+        itemId: this.deps.ids.next("feed"),
+        kind: "ask",
+        summary: text,
+        createdAt: completed.updatedAt,
+        caseId,
+      });
+      if (findingSummaries.length > 0) {
+        await this.deps.store.addFeedItem({
+          itemId: this.deps.ids.next("feed"),
+          kind: "answer",
+          summary: findingSummaries.join(" · "),
+          createdAt: this.deps.clock.now().toISOString(),
+          caseId,
+        });
+      } else {
+        const generated = await this.deps.model.generate(
+          { taskKind: "direct_answer", prompt: text, caseId },
+          this.abort?.signal ?? new AbortController().signal,
+        );
+        await this.deps.store.addFeedItem({
+          itemId: this.deps.ids.next("feed"),
+          kind: "answer",
+          summary: generated.ok
+            ? generated.text
+            : "No matching reflex fired for this Ask yet. Try an acronym like API, or enable listening for observed findings.",
+          createdAt: this.deps.clock.now().toISOString(),
+          caseId,
+        });
+      }
+    } else {
+      await this.deps.store.addFeedItem({
+        itemId: this.deps.ids.next("feed"),
+        kind: "observation",
+        summary: text,
+        createdAt: completed.updatedAt,
+        caseId,
+      });
+    }
   }
 
   private async runReflexesOnFinal(
@@ -264,7 +304,8 @@ export class RelayEngine {
     caseId: string,
     caseVersion: number,
     sourceEventId: string,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const findings: string[] = [];
     const sourceEvent = {
       sourceEventId,
       segmentId: sourceEventId,
@@ -297,12 +338,19 @@ export class RelayEngine {
         });
 
         if (result.type === "finding") {
+          findings.push(result.summary);
           await this.deps.store.addFeedItem({
             itemId: this.deps.ids.next("feed"),
             kind: "finding",
             summary: result.summary,
             createdAt: this.deps.clock.now().toISOString(),
             caseId,
+          });
+          const [title, ...rest] = result.summary.split(":");
+          await this.deps.glasses?.show({
+            kind: "finding",
+            title: (title ?? "Finding").trim().slice(0, 40),
+            body: rest.join(":").trim().slice(0, 192) || result.summary.slice(0, 192),
           });
           await this.deps.store.appendDomainEvent(
             "reflex.finding",
@@ -330,6 +378,7 @@ export class RelayEngine {
         }
       }
     }
+    return findings;
   }
 
   private async onCaseResume(item: WorkItem): Promise<void> {

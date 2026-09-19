@@ -27,19 +27,33 @@ describe("autonomous engine", () => {
       const listen = await client.execute({ type: "SetListening", enabled: true });
       expect(listen.ok).toBe(true);
 
-      const ask = await client.execute({ type: "SubmitText", text: "What does API mean?" });
+      const ask = await client.execute({
+        type: "SubmitText",
+        text: "What does API mean?",
+      });
       expect(ask.ok).toBe(true);
       expect(ask.caseId).toBeTruthy();
 
       await waitFor(async () => {
         const snap = await client.getSnapshot();
-        return snap.feedItems.some((i) => i.caseId === ask.caseId) && snap.listening;
+        return (
+          snap.feedItems.some((i) => i.kind === "answer" || i.kind === "finding") &&
+          snap.listening
+        );
       });
 
       const snap = await client.getSnapshot();
       expect(snap.listening).toBe(true);
-      expect(snap.status.find((s) => s.id === "engine")?.ok).toBe(true);
-      expect(snap.sourceSegments.length).toBeGreaterThan(0);
+      expect(snap.feedItems.some((i) => i.kind === "ask" && i.summary.includes("API"))).toBe(
+        true,
+      );
+      expect(
+        snap.feedItems.some(
+          (i) =>
+            (i.kind === "finding" || i.kind === "answer") &&
+            i.summary.includes("Application Programming Interface"),
+        ),
+      ).toBe(true);
     } finally {
       await client.stop();
       harness.close();

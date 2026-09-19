@@ -43,3 +43,6 @@ fixtures/private/**
 .env
 .env.*
 !.env.example
+__pycache__/
+*.pyc
+tools/**/__pycache__/

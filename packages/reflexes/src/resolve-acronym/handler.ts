@@ -84,8 +84,9 @@ export function createResolveAcronymModule(
   return {
     definition: resolveAcronymDefinition,
     detect(event: SourceEvent, context: DetectionContext): TriggerCandidate[] {
+      const caseInsensitive = event.origin === "typed";
       void context;
-      return detectAcronymTokens(event.text).map((t) => ({
+      return detectAcronymTokens(event.text, { caseInsensitive }).map((t) => ({
         reflexId: resolveAcronymDefinition.id,
         reflexVersion: resolveAcronymDefinition.version,
         token: t.token,

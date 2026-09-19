@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import type { RelayClient, RelaySnapshot } from "@relay/contracts";
 import { RelayWorkbench } from "@relay/ui";
-import { createWebClient } from "./bootstrap/createWebClient";
+import { createWebClient, type WebClientHandle } from "./bootstrap/createWebClient";
 
 const EMPTY_SNAPSHOT: RelaySnapshot = {
   listening: false,
@@ -18,13 +18,60 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   queueDepth: 0,
 };
 
+const FIXTURE_SEGMENTS = [
+  {
+    type: "segment.final" as const,
+    atMs: 0,
+    segment: {
+      schemaVersion: 1 as const,
+      sourceId: "fixture",
+      sessionId: "session_web",
+      segmentId: "seg_1",
+      revision: 1,
+      sequence: 1,
+      startMs: 0,
+      endMs: 1200,
+      speakerKey: "SPEAKER_00",
+      speakerConfidence: 0.92,
+      text: "We should check the API before launch.",
+      textConfidence: 0.95,
+      final: true,
+      origin: "scripted_transcript" as const,
+      cursor: null,
+    },
+  },
+  {
+    type: "segment.final" as const,
+    atMs: 1800,
+    segment: {
+      schemaVersion: 1 as const,
+      sourceId: "fixture",
+      sessionId: "session_web",
+      segmentId: "seg_2",
+      revision: 1,
+      sequence: 2,
+      startMs: 1800,
+      endMs: 3200,
+      speakerKey: "SPEAKER_01",
+      speakerConfidence: 0.9,
+      text: "API means Application Programming Interface in our glossary.",
+      textConfidence: 0.96,
+      final: true,
+      origin: "scripted_transcript" as const,
+      cursor: null,
+    },
+  },
+];
+
 export function App() {
+  const handleRef = useRef<WebClientHandle | null>(null);
   const clientRef = useRef<RelayClient | null>(null);
   const [snapshot, setSnapshot] = useState<RelaySnapshot>(EMPTY_SNAPSHOT);
   const [traceLines, setTraceLines] = useState<string[]>([]);
 
   useEffect(() => {
     const handle = createWebClient();
+    handleRef.current = handle;
     clientRef.current = handle.client;
 
     const unsubscribe = handle.client.subscribe((change) => {
@@ -45,6 +92,7 @@ export function App() {
     return () => {
       unsubscribe();
       clientRef.current = null;
+      handleRef.current = null;
       void handle.stop();
     };
   }, []);
@@ -60,11 +108,22 @@ export function App() {
           void clientRef.current?.execute({ type: "SubmitText", text });
         }}
         traceLines={traceLines}
-        onReplayFixture={(fixture, speed) => {
+        onReplayFixture={async (fixture, speed) => {
+          const handle = handleRef.current;
+          if (!handle) return;
           setTraceLines((prev) => [
             ...prev.slice(-199),
-            `fixture:${fixture}@${speed}x (not wired)`,
+            `replay:${fixture}@${speed}x`,
           ]);
+          await clientRef.current?.execute({ type: "SetListening", enabled: true });
+          for (const event of FIXTURE_SEGMENTS) {
+            if (event.type !== "segment.final") continue;
+            await handle.engine.ingestFinalSegment(
+              { ...event.segment, sessionId: handle.client ? "session_web" : event.segment.sessionId },
+              false,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 80));
         }}
       />
       <StatusBar style="light" />

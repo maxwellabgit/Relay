@@ -17,6 +17,7 @@ export type WebClientOptions = {
 
 export type WebClientHandle = {
   readonly client: RelayClient;
+  readonly engine: RelayEngine;
   readonly store: MemoryEngineStore;
   readonly artifacts: MemoryArtifactStore;
   start(): Promise<void>;
@@ -76,6 +77,7 @@ export function createWebClient(options: WebClientOptions = {}): WebClientHandle
 
   return {
     client,
+    engine,
     store,
     artifacts,
     start: () => client.start(),

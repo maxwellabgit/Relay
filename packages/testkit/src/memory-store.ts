@@ -197,7 +197,7 @@ export class MemoryEngineStore implements EngineStore {
       .map((e) => ({
         segmentId: e.segment.segmentId,
         speakerKey: e.segment.speakerKey,
-        text: `[artifact:${e.textArtifactId}]`,
+        text: e.segment.text,
         final: true,
         origin: e.segment.origin,
         sequence: e.segment.sequence,

@@ -91,7 +91,7 @@ describe("MemoryEngineStore", () => {
       {
         segmentId: "seg_1",
         speakerKey: null,
-        text: "[artifact:art_1]",
+        text: "What does API mean?",
         final: true,
         origin: "typed",
         sequence: 1,
