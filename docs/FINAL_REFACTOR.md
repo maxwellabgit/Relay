@@ -222,12 +222,12 @@ public interface IConnector
     Task<ConnectionHealth> CheckAsync(Connection connection, CancellationToken ct);
     Task<ObservationPage> ObserveAsync(Connection connection, ConnectorCursor? cursor, CancellationToken ct);
     Task<ReadResult> ReadAsync(ReadRequest request, CancellationToken ct);
-    Task<OperationReceipt> ExecuteAsync(ApprovedOperation operation, CancellationToken ct);
-    Task<OperationReconciliation> ReconcileAsync(ExecutingOperation operation, CancellationToken ct);
+    Task<OperationReceipt> ExecuteAsync(ConnectorWriteRequest request, CancellationToken ct);
+    Task<OperationReconciliation> ReconcileAsync(ConnectorReconcileRequest request, CancellationToken ct);
 }
 ```
 
-Connectors return normalized source items and opaque provider cursors. Connector code does not decide which Reflex runs and does not call Jev directly.
+Connectors return normalized `ObservedItemDraft` items and opaque provider cursors. Write/reconcile requests include connection, arguments, scopes, hash, attempt ID, and source refs. Connector code does not decide which Reflex runs and does not call Jev directly.
 
 ### Reflex handler
 

@@ -6,7 +6,7 @@ namespace Relay.Core.Telemetry;
 /// <summary>
 /// Rejects or hashes sensitive property keys. Records character counts and SHA-256 hashes
 /// instead of content for keys named text, body, prompt, content, transcript, answer,
-/// apiKey, secret, and authorization.
+/// expected, actual, summary, detail, apiKey, secret, and authorization.
 /// </summary>
 public static class TelemetryRedactor
 {
@@ -18,6 +18,10 @@ public static class TelemetryRedactor
         "content",
         "transcript",
         "answer",
+        "expected",
+        "actual",
+        "summary",
+        "detail",
         "apiKey",
         "secret",
         "authorization",

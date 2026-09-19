@@ -32,6 +32,8 @@ Alpha write states are `disabled` and `approval_required`. Enabling a write acti
 
 ## Contract
 
+Connectors return normalized `ObservedItemDraft` values. The runtime persists objects, source events, cursors, and work items. Write and reconcile requests carry connection, arguments, scopes, canonical hash, attempt ID, and source references—implementations must not recover that context from global repositories.
+
 ```csharp
 public interface IConnector
 {
@@ -39,9 +41,11 @@ public interface IConnector
     Task<ConnectionHealth> CheckAsync(Connection connection, CancellationToken ct);
     Task<ObservationPage> ObserveAsync(Connection connection, ConnectorCursor? cursor, CancellationToken ct);
     Task<ReadResult> ReadAsync(ReadRequest request, CancellationToken ct);
-    Task<OperationReceipt> ExecuteAsync(ApprovedOperation operation, CancellationToken ct);
-    Task<OperationReconciliation> ReconcileAsync(ExecutingOperation operation, CancellationToken ct);
+    Task<OperationReceipt> ExecuteAsync(ConnectorWriteRequest request, CancellationToken ct);
+    Task<OperationReconciliation> ReconcileAsync(ConnectorReconcileRequest request, CancellationToken ct);
 }
 ```
+
+`ConnectorDefinition` lists versioned operations with observation/read/write kind, schemas, OAuth scopes, risk class, returned classification, idempotency, reconciliation, default enablement, resource scoping, and rate limits. Do not implement providers against a bare list of string IDs.
 
 Disconnecting a source revokes tokens and offers deletion of imported content and derived indexes. Removing one selected resource makes it immediately unavailable to search.

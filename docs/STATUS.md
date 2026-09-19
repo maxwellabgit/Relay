@@ -16,7 +16,15 @@ Superseded product documents live in `docs/archive/`.
 
 ## Phase
 
-**Final additive prototype frozen. Alpha refactor in progress. Alpha not complete.**
+**Contracts defined but not wired.** Alpha refactor in progress. Alpha not complete.
+
+`IRelayApplication`, `IConnector`, `IReflexHandler`, `ITranscriptSource`, `ConnectorCatalog`, and `ReflexCatalog` exist as inspectable contracts and catalogs. Production code still runs the frozen additive host. `Relay.Infrastructure` is a shell. No connector or built-in Reflex executes yet.
+
+## Characterization only (not alpha gates)
+
+- Graceful restart of the frozen prototype (`RestartCharacterizationTests`) — not process-death crash recovery.
+- Plaintext object-store sentinel absence from one event payload and known telemetry keys (`PlaintextBoundaryCharacterizationTests`) — not encryption or full-store sentinel scan.
+- Project-file and assembly reference edges (`ProductionDependencyTests`) — root `Relay.slnx` still temporarily includes legacy/Worker projects.
 
 ## Not yet proven
 
@@ -27,6 +35,7 @@ Superseded product documents live in `docs/archive/`.
 - Four built-in Reflexes against real fixtures
 - Legacy Session/Mind/Worker code removed from shipped binaries
 - Packaged Windows dogfood with an empty problem report
+- Production solution cutover (`Relay.Production.slnx` / `Relay.Legacy.slnx`)
 
 ## Alpha completion rule
 

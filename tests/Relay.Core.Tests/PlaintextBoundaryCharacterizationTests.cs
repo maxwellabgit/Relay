@@ -5,10 +5,11 @@ using Relay.Core.Tests.Support;
 namespace Relay.Core.Tests;
 
 /// <summary>
-/// Retained privacy invariant: a unique sentinel may exist in the object store
-/// and must not appear in case-event payloads or telemetry properties.
+/// Plaintext object-store boundary characterization of the frozen prototype.
+/// This is not an alpha encryption gate: it does not scan SQLite, raw files, or
+/// encrypted storage, and the object store remains plaintext.
 /// </summary>
-public sealed class PrivacySentinelTests : IDisposable
+public sealed class PlaintextBoundaryCharacterizationTests : IDisposable
 {
     private const string Sentinel = "PRIVACY_SENTINEL_94465cf_do_not_log";
     private readonly TempDataRoot _tmp = new();
@@ -17,7 +18,7 @@ public sealed class PrivacySentinelTests : IDisposable
     public void Dispose() => _tmp.Dispose();
 
     [Fact]
-    public void Direct_input_sentinel_stays_in_the_object_store()
+    public void Direct_input_sentinel_stays_in_the_plaintext_object_store()
     {
         _tmp.Root.EnsureLayout(_clock);
         using var diagnostics = new RuntimeDiagnostics(
@@ -38,11 +39,15 @@ public sealed class PrivacySentinelTests : IDisposable
     }
 
     [Fact]
-    public void Telemetry_redactor_does_not_keep_the_sentinel()
+    public void Telemetry_redactor_does_not_keep_the_sentinel_in_known_keys()
     {
         var redacted = TelemetryRedactor.Redact(new Dictionary<string, string>
         {
             ["transcript"] = Sentinel,
+            ["expected"] = Sentinel,
+            ["actual"] = Sentinel,
+            ["summary"] = Sentinel,
+            ["detail"] = Sentinel,
             ["phase"] = "needs_decision",
         });
 

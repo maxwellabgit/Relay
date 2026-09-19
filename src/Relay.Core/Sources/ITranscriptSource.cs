@@ -18,4 +18,18 @@ public interface ITranscriptSource : IAsyncDisposable
     IAsyncEnumerable<TranscriptSegment> ReadAsync(CancellationToken cancellationToken);
 }
 
-public sealed record SourceSliceRef(string ObjectId, string Sha256, int Start, int End, string Classification);
+/// <summary>
+/// Exact, validated reference into a persisted object. Offsets are inclusive-exclusive UTF-16 indices
+/// when <see cref="OffsetsValidated"/> is true.
+/// </summary>
+public sealed record SourceSliceRef(
+    string ObjectId,
+    string ObjectVersion,
+    string Sha256,
+    string? SourceEventId,
+    string? SegmentId,
+    string? ProviderItemId,
+    int Start,
+    int End,
+    bool OffsetsValidated,
+    Security.DataClassification Classification);

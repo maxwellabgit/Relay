@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Relay.Core\Relay.Core.csproj" />
+    <ProjectReference Include="..\..\src\Relay.Connectors\Relay.Connectors.csproj" />
   </ItemGroup>
 
 </Project>

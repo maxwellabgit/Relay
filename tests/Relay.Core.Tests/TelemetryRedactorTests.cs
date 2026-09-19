@@ -11,11 +11,16 @@ public sealed class TelemetryRedactorTests
     [InlineData("content")]
     [InlineData("transcript")]
     [InlineData("answer")]
+    [InlineData("expected")]
+    [InlineData("actual")]
+    [InlineData("summary")]
+    [InlineData("detail")]
     [InlineData("apiKey")]
     [InlineData("secret")]
     [InlineData("authorization")]
     [InlineData("TEXT")]
     [InlineData("ApiKey")]
+    [InlineData("Summary")]
     public void Reject_mode_throws_for_sensitive_keys(string key)
     {
         var ex = Assert.Throws<TelemetryRedactionException>(() =>

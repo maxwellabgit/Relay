@@ -1,8 +1,8 @@
 # Reflexes
 
-A Reflex is a versioned declarative automation: trigger, conditions, permitted sources, read plan, bounded judgments, action template, approval mode, fixtures, activation record, and outcome history. It is not generated code.
+A Reflex is a versioned declarative automation: trigger, negative triggers, conditions, permitted sources, read plan, bounded judgments, permitted write actions, approval mode, budgets, retry policy, fixtures, explanation template, activation state, outcome history, and rollback behavior. It is not generated code. Those fields are first-class on `ReflexDefinition`; handlers must not hide policy.
 
-`ReflexResult` may publish a finding, record evidence, request a bounded read, propose an operation, ask a clarification, or finish with no action. It cannot execute a write.
+`ReflexContext` carries trigger source references, case version, eligible connections, remaining budgets, and current time. `ReflexResult` may publish a finding, record evidence drafts, request bounded reads, propose complete operations, ask a clarification, or finish with no action. It cannot execute a write.
 
 Production registers only these four definitions in the alpha:
 
