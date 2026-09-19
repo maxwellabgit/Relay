@@ -1,5 +1,5 @@
 import type { JudgmentPort, JudgmentResponse, TextModelPort } from "@relay/contracts";
-import { createRelayClient, type EngineDeps } from "@relay/engine";
+import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
 
@@ -35,7 +35,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     },
   };
 
-  const client = createRelayClient({
+  const deps: EngineDeps = {
     store,
     artifacts,
     judgments,
@@ -43,9 +43,18 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     clock,
     ids,
     sessionId: options.sessionId ?? "session_test",
-  });
+  };
 
-  return { client, store, artifacts, close: () => store.close() };
+  const engine = new RelayEngine(deps);
+  const client = createRelayClientFromEngine(engine);
+
+  return {
+    client,
+    engine,
+    store,
+    artifacts,
+    close: () => store.close(),
+  };
 }
 
 export { MemoryArtifactStore, SqliteEngineStore };

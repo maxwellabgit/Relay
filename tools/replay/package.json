@@ -14,6 +14,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@relay/adapter-node": "0.1.0",
     "@relay/contracts": "0.1.0",
     "@relay/testkit": "0.1.0"
   },
