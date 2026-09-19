@@ -1,0 +1,2 @@
+-- Shared SQLite migrations (applied by Node, Tauri, and expo-sqlite adapters).
+-- Full schema lands in commit 3.

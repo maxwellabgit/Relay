@@ -1,0 +1,29 @@
+{
+  "name": "@relay/app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --web",
+    "web": "expo start --web",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "export:web": "expo export --platform web",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@relay/contracts": "0.1.0",
+    "@relay/engine": "0.1.0",
+    "@relay/ui": "0.1.0",
+    "expo": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.2"
+  }
+}

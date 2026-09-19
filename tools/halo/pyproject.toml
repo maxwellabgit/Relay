@@ -1,0 +1,17 @@
+[project]
+name = "relay-halo"
+version = "0.1.0"
+description = "Halo emulator bridge for RELAY glasses display port"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+relay-halo-bridge = "relay_halo.bridge:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["relay_halo*"]

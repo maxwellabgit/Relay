@@ -1,0 +1,19 @@
+{
+  "name": "@relay/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@relay/app": "0.1.0",
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "typescript": "~5.9.2"
+  }
+}

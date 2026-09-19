@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RELAY",
+  "version": "0.1.0",
+  "identifier": "app.relay.desktop",
+  "build": {
+    "beforeDevCommand": "npm run start --workspace @relay/app",
+    "devUrl": "http://localhost:8081",
+    "beforeBuildCommand": "npm run export:web --workspace @relay/app",
+    "frontendDist": "../../relay/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "RELAY",
+        "width": 1280,
+        "height": 860,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

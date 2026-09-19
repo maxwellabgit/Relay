@@ -27,3 +27,18 @@ Generated Files/
 # Isolated local data roots
 .dev-data/
 .dev-runs/
+
+# Node / TypeScript workspace
+node_modules/
+dist/
+dist-types/
+.expo/
+coverage/
+*.tsbuildinfo
+apps/desktop/src-tauri/target/
+runs/
+fixtures/private/**
+!fixtures/private/.gitignore
+.env
+.env.*
+!.env.example

@@ -1,0 +1,48 @@
+{
+  "name": "relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "adapters/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run start --workspace @relay/app",
+    "dev:desktop": "npm run tauri:dev --workspace @relay/desktop",
+    "build:web": "npm run export:web --workspace @relay/app",
+    "build:desktop": "npm run tauri:build --workspace @relay/desktop",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:unit && npm run test:architecture",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -b",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:replay": "vitest run --project replay",
+    "test:privacy": "vitest run --project privacy",
+    "test:architecture": "vitest run --project architecture",
+    "audio:prepare": "npm run prepare:audio --workspace @relay/audio-tools",
+    "halo:emulator": "npm run emulator --workspace @relay/halo-tools",
+    "replay": "npm run replay --workspace @relay/replay-tools",
+    "logs:tail": "npm run logs:tail --workspace @relay/replay-tools",
+    "replay:last": "npm run replay:last --workspace @relay/replay-tools",
+    "eval:thresholds": "npm run eval:thresholds --workspace @relay/replay-tools"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@types/node": "^22.18.1",
+    "eslint": "^9.35.0",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.43.0",
+    "vitest": "^3.2.4"
+  }
+}

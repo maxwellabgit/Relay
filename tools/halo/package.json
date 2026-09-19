@@ -1,0 +1,13 @@
+{
+  "name": "@relay/halo-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "emulator": "python -m relay_halo.bridge --help",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}

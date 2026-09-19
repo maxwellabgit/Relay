@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "outDir": "dist-types",
+    "rootDir": ".",
+    "composite": true,
+    "lib": ["ES2022", "DOM"],
+    "emitDeclarationOnly": true,
+    "allowJs": true
+  },
+  "include": ["app.config.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/ui" }
+  ]
+}

@@ -1,0 +1,2 @@
+-- Plain-text display script scaffold for Halo (Stage 2).
+-- Uses Brilliant TxPlainText message format.

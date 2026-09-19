@@ -1,0 +1,18 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/contracts" },
+    { "path": "packages/engine" },
+    { "path": "packages/reflexes" },
+    { "path": "packages/testkit" },
+    { "path": "packages/ui" },
+    { "path": "adapters/node" },
+    { "path": "adapters/tauri" },
+    { "path": "adapters/expo" },
+    { "path": "apps/relay" },
+    { "path": "apps/desktop" },
+    { "path": "tools/replay" },
+    { "path": "tools/audio" },
+    { "path": "tools/halo" }
+  ]
+}

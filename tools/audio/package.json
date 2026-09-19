@@ -1,0 +1,13 @@
+{
+  "name": "@relay/audio-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:audio": "python -m relay_audio.prepare --help",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}
