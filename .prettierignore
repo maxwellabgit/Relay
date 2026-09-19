@@ -13,8 +13,9 @@ tools/**/__pycache__/
 *.pyc
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
-Cargo.lock
-
+apps/relay/dist/
+src/
+tests/
 .dev-data/
 .dev-runs/
 artifacts/
