@@ -93,7 +93,8 @@ Memory/
   AcronymEntry.cs
   IMemorySearch.cs
 Security/
-  DataClassification.cs
+  DataClassification.cs   # DisclosureClass, DataSensitivity, DataPolicy
+  ArtifactRefs.cs         # ConnectorRef, ConnectorActionRef, JudgmentDefinitionRef, ReflexRef
   DisclosureGrant.cs
   ConnectorGrant.cs
 Telemetry/

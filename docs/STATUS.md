@@ -16,15 +16,16 @@ Superseded product documents live in `docs/archive/`.
 
 ## Phase
 
-**Contracts defined but not wired.** Alpha refactor in progress. Alpha not complete.
+**Contracts defined but not wired.** Authority, disclosure, and versioned references are hardened. Alpha not complete.
 
-`IRelayApplication`, `IConnector`, `IReflexHandler`, `ITranscriptSource`, `ConnectorCatalog`, and `ReflexCatalog` exist as inspectable contracts and catalogs. Production code still runs the frozen additive host. `Relay.Infrastructure` is a shell. No connector or built-in Reflex executes yet.
+`IRelayApplication`, `IConnector`, `IReflexHandler`, `ITranscriptSource`, `ConnectorCatalog`, and `ReflexCatalog` exist as inspectable contracts and catalogs. Approvals are hash- and case-version-bound. Observed content defaults to local-only disclosure. Production code still runs the frozen additive host. `Relay.Infrastructure` is a shell. No connector or built-in Reflex executes yet.
 
 ## Characterization only (not alpha gates)
 
 - Graceful restart of the frozen prototype (`RestartCharacterizationTests`) — not process-death crash recovery.
-- Plaintext object-store sentinel absence from one event payload and known telemetry keys (`PlaintextBoundaryCharacterizationTests`) — not encryption or full-store sentinel scan.
+- Plaintext object-store sentinel absence from one event payload (`PlaintextBoundaryCharacterizationTests`) — not encryption or full-store sentinel scan.
 - Project-file and assembly reference edges (`ProductionDependencyTests`) — root `Relay.slnx` still temporarily includes legacy/Worker projects.
+- Catalog cross-resolution and `OperationAuthority` binding tests — contract-level, not runtime broker coverage.
 
 ## Not yet proven
 

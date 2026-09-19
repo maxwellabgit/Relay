@@ -43,7 +43,7 @@ public sealed class NullRelayTelemetry : IRelayTelemetry
     {
         ArgumentNullException.ThrowIfNull(draft);
         var seq = Interlocked.Increment(ref _seq);
-        var props = TelemetryRedactor.Redact(draft.Properties);
+        var props = TelemetryRedactor.Allow(draft.EventName, draft.Properties);
         return new ProductEvent
         {
             Timestamp = DateTimeOffset.UtcNow,

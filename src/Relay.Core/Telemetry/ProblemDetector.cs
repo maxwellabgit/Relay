@@ -216,8 +216,8 @@ public sealed class ProblemDetector : IDisposable
                     "user_reported:" + (evt.PayloadRef ?? evt.Sequence.ToString(CultureInfo.InvariantCulture)),
                     evt.Properties.GetValueOrDefault("severity") ?? ProblemSeverities.Error,
                     "User reported a problem.",
-                    expected: evt.Properties.GetValueOrDefault("expected") ?? "expected behavior",
-                    actual: evt.Properties.GetValueOrDefault("actual") ?? "user report",
+                    expected: "see protected problem object",
+                    actual: "user report",
                     evt,
                     evt.CaseId,
                     evt.OperationId);

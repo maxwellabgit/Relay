@@ -1,5 +1,7 @@
+using Relay.Core.Artifacts;
 using Relay.Core.Connectors;
 using Relay.Core.Reflexes;
+using Relay.Core.Security;
 
 namespace Relay.Core.Application;
 
@@ -9,25 +11,92 @@ public sealed record SubmitText(string Text, string? CaseId = null) : RelayComma
 
 public sealed record SetListening(bool Enabled) : RelayCommand;
 
-public sealed record ApproveOperation(string OperationId) : RelayCommand;
+public sealed record ApproveOperation(
+    string OperationId,
+    string ExpectedCanonicalHash,
+    long ExpectedCaseVersion) : RelayCommand;
 
-public sealed record RejectOperation(string OperationId, string? Reason = null) : RelayCommand;
+public sealed record RejectOperation(
+    string OperationId,
+    string ExpectedCanonicalHash,
+    long ExpectedCaseVersion,
+    string? Reason = null) : RelayCommand;
 
-public sealed record SetConnectionObservation(string ConnectionId, bool ObservationEnabled) : RelayCommand;
+public sealed record StartConnectionAuthorization(ConnectorRef Connector) : RelayCommand;
 
-public sealed record SetWriteAction(string ConnectionId, string ActionId, bool Enabled) : RelayCommand;
+public sealed record CompleteConnectionAuthorization(
+    string AuthorizationAttemptId,
+    string ProviderCallbackRef) : RelayCommand;
 
-public sealed record ActivateReflex(string ReflexId, int ReflexVersion) : RelayCommand;
+public sealed record DiscoverConnectionResources(
+    string ConnectionId,
+    long ExpectedConnectionVersion) : RelayCommand;
 
-public sealed record PauseReflex(string ReflexId) : RelayCommand;
+public sealed record SelectConnectionResources(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    IReadOnlyList<string> SelectedResourceIds) : RelayCommand;
 
-public sealed record DisconnectConnection(string ConnectionId, bool DeleteImportedContent) : RelayCommand;
+public sealed record StartConnectionReauthorization(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    IReadOnlyList<string> AdditionalOAuthScopes) : RelayCommand;
+
+public sealed record CompleteConnectionReauthorization(
+    string AuthorizationAttemptId,
+    string ProviderCallbackRef) : RelayCommand;
+
+public sealed record SetConnectionObservation(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    bool ObservationEnabled) : RelayCommand;
+
+public sealed record SetWriteAction(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    ConnectorActionRef Action,
+    bool Enabled) : RelayCommand;
+
+public sealed record GrantHostedDisclosure(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    DisclosureClass Disclosure,
+    DataSensitivity Sensitivity,
+    string Purpose,
+    TimeSpan? Ttl = null) : RelayCommand;
+
+public sealed record RevokeHostedDisclosure(
+    string GrantId,
+    long ExpectedGrantVersion) : RelayCommand;
+
+public sealed record RevokeConnectionCredentials(
+    string ConnectionId,
+    long ExpectedConnectionVersion) : RelayCommand;
+
+public sealed record DisconnectConnection(
+    string ConnectionId,
+    long ExpectedConnectionVersion) : RelayCommand;
+
+public sealed record DeleteImportedConnectionContent(
+    string ConnectionId,
+    long ExpectedConnectionVersion,
+    string ConfirmationToken) : RelayCommand;
+
+public sealed record ActivateReflex(
+    ReflexRef Reflex,
+    long ExpectedStateVersion) : RelayCommand;
+
+public sealed record PauseReflex(
+    ReflexRef Reflex,
+    long ExpectedStateVersion) : RelayCommand;
 
 public sealed record RelayCommandResult(
     bool Ok,
     string Summary,
     string? CaseId,
     string? OperationId,
+    string? ConnectionId,
+    string? AuthorizationAttemptId,
     string? Error);
 
 public sealed record FeedItemSnapshot(
@@ -39,23 +108,30 @@ public sealed record FeedItemSnapshot(
 
 public sealed record ApprovalSnapshot(
     string OperationId,
-    string ActionId,
+    ConnectorActionRef Action,
     string Summary,
+    string CanonicalHash,
+    long CaseVersion,
+    string ConnectionId,
+    long ConnectionVersion,
     DateTimeOffset ProposedAt);
 
 public sealed record ConnectionStateSnapshot(
     string ConnectionId,
-    string ConnectorId,
+    long ConnectionVersion,
+    ConnectorRef Connector,
     bool Connected,
     bool ObservationEnabled,
     string HealthStatus,
-    IReadOnlyDictionary<string, bool> WriteActionEnabled);
+    IReadOnlyList<string> SelectedResources,
+    IReadOnlyDictionary<string, bool> WriteActionEnabled,
+    IReadOnlyList<string> GrantedOAuthScopes);
 
 public sealed record ReflexStateSnapshot(
-    string ReflexId,
-    int ReflexVersion,
+    ReflexRef Reflex,
+    long StateVersion,
     ReflexActivationState Activation,
-    int RunCount);
+    ReflexRunSummary Runs);
 
 public sealed record ProviderHealthSnapshot(
     string ProviderId,
@@ -93,6 +169,7 @@ public sealed record ReflexChanged(ReflexStateSnapshot Reflex) : RelayChange;
 
 /// <summary>
 /// Single UI-facing facade. Commands are typed; the UI observes an asynchronous change stream.
+/// OAuth tokens never pass through commands.
 /// </summary>
 public interface IRelayApplication
 {

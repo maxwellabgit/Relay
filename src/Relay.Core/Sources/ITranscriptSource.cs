@@ -32,4 +32,4 @@ public sealed record SourceSliceRef(
     int Start,
     int End,
     bool OffsetsValidated,
-    Security.DataClassification Classification);
+    Security.DataPolicy Policy);

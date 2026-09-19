@@ -87,17 +87,20 @@ An Operation is one typed external or canonical write. It contains an idempotenc
 
 A Reflex is a versioned automation containing:
 
-- Trigger
+- Trigger and negative triggers
 - Conditions
-- Permitted sources
-- Read plan
-- Bounded judgments
-- Action template
+- Permitted sources (`ConnectorRef`)
+- Read plan (`ConnectorActionRef`)
+- Bounded judgments (`JudgmentDefinitionRef`)
+- Permitted write actions (`ConnectorActionRef`)
 - Approval mode
+- Budgets and retry policy
 - Evaluation fixtures
-- Activation record
-- Outcome history
-- Pause and rollback behavior
+- Explanation template
+- Activation defaults
+- Explicit rollback policy
+
+Runtime outcome history is stored on `ReflexState`, not on the immutable definition.
 
 Alpha Reflexes are declarative compositions of registered triggers, reads, judgments, and operations. They are never unrestricted generated programs.
 
@@ -140,7 +143,7 @@ Enabling a write action in the alpha permits proposals only. Every write still r
 | Google Calendar | User-selected calendars | Create/update an event; no delete in alpha |
 | Gmail | User-selected labels | Create a draft; no send/delete/archive in alpha |
 | Google Sheets | User-selected spreadsheets and ranges | Append/upsert rows; no sheet deletion in alpha |
-| GitHub | User-selected repositories | Draft an issue or comment; publishing remains approval-bound |
+| GitHub | User-selected repositories | Local draft (no GitHub write); `github.issue-create@1` / `github.issue-comment-create@1` after write reauthorization |
 | Public web/Wikipedia | Search and fetch only | None |
 | Plaid financial data | User-selected accounts, read-only | None |
 

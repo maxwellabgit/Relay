@@ -65,7 +65,7 @@ public sealed class JsonlRelayTelemetry : IRelayTelemetry
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentException.ThrowIfNullOrWhiteSpace(draft.EventName);
 
-        var props = TelemetryRedactor.Redact(draft.Properties);
+        var props = TelemetryRedactor.Allow(draft.EventName, draft.Properties);
         ProductEvent evt;
         lock (_gate)
         {

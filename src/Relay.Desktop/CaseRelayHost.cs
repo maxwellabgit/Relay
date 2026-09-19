@@ -141,8 +141,6 @@ public sealed class CaseRelayHost : IDisposable
         }
 
         var stored = Runtime.Objects.PutJson(noteBody, classification: SourceClassification.LocalOnly);
-        var lastSeq = _composition.Telemetry.LastSequence;
-        var seqStart = Math.Max(1, lastSeq - 99);
         Telemetry.Emit(new ProductEventDraft
         {
             EventName = ProductEventNames.ProblemReported,
@@ -152,14 +150,7 @@ public sealed class CaseRelayHost : IDisposable
             PayloadRef = stored.ObjectId,
             Properties = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["userNoteRef"] = stored.ObjectId,
-                ["userNoteSha256"] = stored.Sha256,
                 ["severity"] = severity,
-                ["expected"] = whatExpected.Length > 200 ? whatExpected[..200] : whatExpected,
-                ["actual"] = whatHappened.Length > 200 ? whatHappened[..200] : whatHappened,
-                ["eventSequenceStart"] = seqStart.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["eventSequenceEnd"] = Math.Max(lastSeq, seqStart).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["runId"] = RunId,
             },
         });
 

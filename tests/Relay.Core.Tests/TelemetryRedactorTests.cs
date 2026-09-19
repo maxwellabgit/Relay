@@ -4,64 +4,64 @@ namespace Relay.Core.Tests;
 
 public sealed class TelemetryRedactorTests
 {
+    [Fact]
+    public void Allow_keeps_only_event_allowlisted_keys()
+    {
+        var allowed = TelemetryRedactor.Allow(
+            ProductEventNames.CaseCreated,
+            new Dictionary<string, string>
+            {
+                ["origin"] = "direct",
+                ["charCount"] = "12",
+            });
+
+        Assert.Equal("direct", allowed["origin"]);
+        Assert.Equal("12", allowed["charCount"]);
+    }
+
     [Theory]
-    [InlineData("text")]
-    [InlineData("body")]
-    [InlineData("prompt")]
-    [InlineData("content")]
-    [InlineData("transcript")]
-    [InlineData("answer")]
     [InlineData("expected")]
     [InlineData("actual")]
-    [InlineData("summary")]
-    [InlineData("detail")]
-    [InlineData("apiKey")]
-    [InlineData("secret")]
-    [InlineData("authorization")]
-    [InlineData("TEXT")]
-    [InlineData("ApiKey")]
-    [InlineData("Summary")]
-    public void Reject_mode_throws_for_sensitive_keys(string key)
+    [InlineData("query")]
+    [InlineData("subject")]
+    [InlineData("message")]
+    [InlineData("providerError")]
+    [InlineData("person")]
+    [InlineData("transcript")]
+    public void Allow_rejects_unknown_keys(string key)
     {
         var ex = Assert.Throws<TelemetryRedactionException>(() =>
-            TelemetryRedactor.Redact(new Dictionary<string, string> { [key] = "secret-value" }, rejectSensitive: true));
-        Assert.Equal(key, ex.Key, ignoreCase: true);
+            TelemetryRedactor.Allow(
+                ProductEventNames.ProblemReported,
+                new Dictionary<string, string> { [key] = "leak", ["severity"] = "error" }));
+        Assert.Equal(key, ex.Key, ignoreCase: false);
     }
 
     [Fact]
-    public void Hash_mode_replaces_sensitive_values_with_count_and_sha256()
+    public void Problem_reported_allows_only_severity()
     {
-        var input = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["text"] = "hello",
-            ["casePhase"] = "needs_decision",
-            ["prompt"] = "do not leak",
-        };
-
-        var redacted = TelemetryRedactor.Redact(input, rejectSensitive: false);
-
-        Assert.False(redacted.ContainsKey("text"));
-        Assert.False(redacted.ContainsKey("prompt"));
-        Assert.Equal("5", redacted["text.charCount"]);
-        Assert.Equal(TelemetryRedactor.Sha256Hex("hello"), redacted["text.sha256"]);
-        Assert.Equal("11", redacted["prompt.charCount"]);
-        Assert.Equal(TelemetryRedactor.Sha256Hex("do not leak"), redacted["prompt.sha256"]);
-        Assert.Equal("needs_decision", redacted["casePhase"]);
-        Assert.DoesNotContain(redacted.Values, v => v.Contains("hello", StringComparison.Ordinal));
-        Assert.DoesNotContain(redacted.Values, v => v.Contains("do not leak", StringComparison.Ordinal));
+        var allowed = TelemetryRedactor.Allow(
+            ProductEventNames.ProblemReported,
+            new Dictionary<string, string> { ["severity"] = "error" });
+        Assert.Equal(new[] { "severity" }, allowed.Keys.ToArray());
     }
 
     [Fact]
-    public void Non_sensitive_keys_pass_through()
+    public void Legacy_redact_without_event_name_drops_all_properties()
     {
         var redacted = TelemetryRedactor.Redact(new Dictionary<string, string>
         {
-            ["capabilityId"] = "glossary.acronym.resolve@1",
-            ["spanStart"] = "12",
-        }, rejectSensitive: true);
+            ["phase"] = "needs_decision",
+            ["transcript"] = "secret",
+        });
+        Assert.Empty(redacted);
+    }
 
-        Assert.Equal("glossary.acronym.resolve@1", redacted["capabilityId"]);
-        Assert.Equal("12", redacted["spanStart"]);
+    [Fact]
+    public void Reject_mode_throws_when_legacy_redact_sees_properties()
+    {
+        Assert.Throws<TelemetryRedactionException>(() =>
+            TelemetryRedactor.Redact(new Dictionary<string, string> { ["phase"] = "x" }, rejectSensitive: true));
     }
 }
 
@@ -86,8 +86,7 @@ public sealed class JsonlRelayTelemetryTests : IDisposable
             first = telemetry.Emit(new ProductEventDraft
             {
                 EventName = ProductEventNames.AppStarted,
-                Level = ProductEventLevels.Info,
-                Properties = new Dictionary<string, string> { ["text"] = "should-hash" },
+                Properties = new Dictionary<string, string> { ["appVersion"] = "0.1.0-test" },
             });
             telemetry.Emit(new ProductEventDraft
             {
@@ -98,14 +97,29 @@ public sealed class JsonlRelayTelemetryTests : IDisposable
         }
 
         Assert.Equal(1, first.Sequence);
-        Assert.False(first.Properties.ContainsKey("text"));
-        Assert.Equal("11", first.Properties["text.charCount"]);
+        Assert.Equal("0.1.0-test", first.Properties["appVersion"]);
 
         var lines = File.ReadAllLines(path);
         Assert.Equal(2, lines.Length);
         Assert.Contains("\"eventName\":\"app.started\"", lines[0], StringComparison.Ordinal);
         Assert.Contains("\"eventName\":\"operation.approved\"", lines[1], StringComparison.Ordinal);
         Assert.Contains("\"schemaVersion\":1", lines[0], StringComparison.Ordinal);
-        Assert.DoesNotContain("should-hash", lines[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Rejects_unknown_property_keys_for_event()
+    {
+        using var telemetry = new JsonlRelayTelemetry(_dir, "run-2");
+        Assert.Throws<TelemetryRedactionException>(() =>
+            telemetry.Emit(new ProductEventDraft
+            {
+                EventName = ProductEventNames.ProblemReported,
+                PayloadRef = "obj-1",
+                Properties = new Dictionary<string, string>
+                {
+                    ["severity"] = "error",
+                    ["expected"] = "should not leak",
+                },
+            }));
     }
 }

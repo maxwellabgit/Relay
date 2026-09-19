@@ -1,8 +1,16 @@
 # Reflexes
 
-A Reflex is a versioned declarative automation: trigger, negative triggers, conditions, permitted sources, read plan, bounded judgments, permitted write actions, approval mode, budgets, retry policy, fixtures, explanation template, activation state, outcome history, and rollback behavior. It is not generated code. Those fields are first-class on `ReflexDefinition`; handlers must not hide policy.
+A Reflex is a versioned declarative automation: trigger, negative triggers, conditions, permitted sources, read plan, bounded judgments, permitted write actions, approval mode, budgets, retry policy, fixtures, explanation template, activation defaults, and an explicit rollback policy. It is not generated code. Those fields are first-class on `ReflexDefinition`; handlers must not hide policy.
 
-`ReflexContext` carries trigger source references, case version, eligible connections, remaining budgets, and current time. `ReflexResult` may publish a finding, record evidence drafts, request bounded reads, propose complete operations, ask a clarification, or finish with no action. It cannot execute a write.
+Runtime outcome history lives on `ReflexState` / `ReflexRunSummary`, not on the immutable definition.
+
+`ReflexContext` carries trigger source references, case version (`long`), eligible connections, remaining budgets, and current time.
+
+`ReflexResult` is a closed hierarchy (`FindingResult`, `ReadRequestedResult`, `OperationProposedResult`, `ClarificationRequiredResult`, `NoActionResult`). Invalid Kind/field combinations are unrepresentable.
+
+An `OperationProposal` supplies action reference, arguments, input source refs, requested resource scope, and typed preconditions. The operation broker canonicalizes arguments, resolves granted scope from policy, and calculates hash / idempotency key.
+
+Identifier display uses exact versions, for example `reflex.remember-birthday@1` and `google-calendar@1/google-calendar.event-create@1`.
 
 Production registers only these four definitions in the alpha:
 
@@ -12,14 +20,14 @@ Detect a birthday statement, extract person and date locally, use Jev only for s
 
 ## `reflex.verify-technical-claim@1`
 
-Extract a checkable claim, enumerate permission-filtered sources, and let Jev choose among that finite list. Search, retrieve, then judge support. At most three sources and two post-retrieval judgment rounds. Terminal results are `supported`, `contradicted`, or `insufficient`, each with exact citations or an honest insufficient. No write.
+Extract a checkable claim, enumerate permission-filtered sources, and let Jev choose among that finite list. Search conversation, Gmail, Calendar, GitHub (issues/PRs/code/content/comments), and public sources, then judge support. At most three sources and two post-retrieval judgment rounds. Terminal results are `supported`, `contradicted`, or `insufficient`, each with exact citations or an honest insufficient. No write.
 
 ## `reflex.preserve-important-information@1`
 
-Extract a possible durable fact, decision, constraint, configuration, or correction. Jev judges importance and relevance. Code searches local memory, links equivalent notes, and shows conflicts instead of overwriting them. A new note is proposed unless the local-note Reflex toggle is explicitly enabled.
+Triggers may come from any enabled observed source. Extract a possible durable fact, decision, constraint, configuration, or correction. Jev judges importance and relevance. Code searches local memory, links equivalent notes, and shows conflicts instead of overwriting them. A new note is proposed unless the local-note Reflex toggle is explicitly enabled.
 
 ## `reflex.resolve-acronym@1`
 
-Search exact project glossary, then local notes, previous conversations, Gmail and GitHub, then public search. Jev selects among supplied candidates. It cannot invent an expansion that is not in the evidence. Remembering an accepted expansion is a separate local-memory operation.
+Search exact project glossary, then local notes, prior conversation, Gmail and GitHub search, then public search. Jev selects among supplied candidates. It cannot invent an expansion that is not in the evidence. Remembering an accepted expansion is a separate local-memory operation.
 
 Active Reflexes stay on their approved version until the user explicitly upgrades them.

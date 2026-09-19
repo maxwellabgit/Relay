@@ -39,19 +39,23 @@ public sealed class PlaintextBoundaryCharacterizationTests : IDisposable
     }
 
     [Fact]
-    public void Telemetry_redactor_does_not_keep_the_sentinel_in_known_keys()
+    public void Telemetry_allowlist_rejects_sentinel_bearing_unknown_keys()
     {
-        var redacted = TelemetryRedactor.Redact(new Dictionary<string, string>
-        {
-            ["transcript"] = Sentinel,
-            ["expected"] = Sentinel,
-            ["actual"] = Sentinel,
-            ["summary"] = Sentinel,
-            ["detail"] = Sentinel,
-            ["phase"] = "needs_decision",
-        });
+        Assert.Throws<TelemetryRedactionException>(() =>
+            TelemetryRedactor.Allow(
+                ProductEventNames.ProblemReported,
+                new Dictionary<string, string>
+                {
+                    ["severity"] = "error",
+                    ["expected"] = Sentinel,
+                    ["actual"] = Sentinel,
+                    ["summary"] = Sentinel,
+                    ["detail"] = Sentinel,
+                }));
 
-        Assert.DoesNotContain(redacted.Values, v => v.Contains(Sentinel, StringComparison.Ordinal));
-        Assert.Equal(Sentinel.Length.ToString(), redacted["transcript.charCount"]);
+        var allowed = TelemetryRedactor.Allow(
+            ProductEventNames.ProblemReported,
+            new Dictionary<string, string> { ["severity"] = "error" });
+        Assert.DoesNotContain(allowed.Values, v => v.Contains(Sentinel, StringComparison.Ordinal));
     }
 }
