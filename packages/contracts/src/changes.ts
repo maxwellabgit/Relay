@@ -88,6 +88,14 @@ export type RelaySnapshot = {
   readonly sourceSegments: readonly SourceSegmentView[];
   readonly cases: readonly CaseView[];
   readonly queueDepth: number;
+  readonly activity: readonly ActivityLine[];
+};
+
+export type ActivityLine = {
+  readonly sequence: number;
+  readonly at: string;
+  readonly eventType: string;
+  readonly message: string;
 };
 
 export type SourceSegmentView = {
@@ -143,6 +151,8 @@ export type TraceAppendedChange = {
   readonly type: "TraceAppended";
   readonly sequence: number;
   readonly eventType: string;
+  readonly message: string;
+  readonly at: string;
 };
 
 export type RelayChange =

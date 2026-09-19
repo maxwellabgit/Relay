@@ -16,6 +16,7 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   sourceSegments: [],
   cases: [],
   queueDepth: 0,
+  activity: [],
 };
 
 const FIXTURE_SEGMENTS = [
@@ -79,12 +80,9 @@ export function App() {
         setSnapshot(change.snapshot);
         return;
       }
-      if (change.type === "TraceAppended") {
-        setTraceLines((prev) => [
-          ...prev.slice(-199),
-          `#${change.sequence} ${change.eventType}`,
-        ]);
-      }
+        if (change.type === "TraceAppended") {
+          setTraceLines((prev) => [...prev.slice(-199), change.message]);
+        }
     });
 
     void handle.start();
@@ -107,23 +105,34 @@ export function App() {
         onSubmit={(text) => {
           void clientRef.current?.execute({ type: "SubmitText", text });
         }}
+        onRemember={(token) => {
+          void clientRef.current?.execute({ type: "RememberToken", token });
+        }}
         traceLines={traceLines}
         onReplayFixture={async (fixture, speed) => {
           const handle = handleRef.current;
           if (!handle) return;
-          setTraceLines((prev) => [
-            ...prev.slice(-199),
-            `replay:${fixture}@${speed}x`,
-          ]);
+          if (fixture !== "acronym-basic") {
+            setTraceLines((prev) => [
+              ...prev.slice(-199),
+              `replay rejected: ${fixture} is not loaded`,
+            ]);
+            return;
+          }
+          setTraceLines((prev) => [...prev.slice(-199), `replay:${fixture}@${speed}x`]);
           await clientRef.current?.execute({ type: "SetListening", enabled: true });
+          let previousAt = 0;
           for (const event of FIXTURE_SEGMENTS) {
-            if (event.type !== "segment.final") continue;
+            const gap = speed === 0 ? 0 : Math.max(0, event.atMs - previousAt) / speed;
+            previousAt = event.atMs;
+            if (gap > 0) {
+              await new Promise((resolve) => setTimeout(resolve, gap));
+            }
             await handle.engine.ingestFinalSegment(
-              { ...event.segment, sessionId: handle.client ? "session_web" : event.segment.sessionId },
+              { ...event.segment, sessionId: "session_web" },
               false,
             );
           }
-          await new Promise((r) => setTimeout(r, 80));
         }}
       />
       <StatusBar style="light" />

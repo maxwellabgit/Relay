@@ -2,6 +2,7 @@ import type {
   ArtifactStorePort,
   GlassesDisplayPort,
   JudgmentPort,
+  JudgmentRequest,
   ReflexModule,
   RelayChange,
   RelayCommand,
@@ -11,8 +12,14 @@ import type {
   TranscriptSegmentV1,
 } from "@relay/contracts";
 import { localOnlyPolicy } from "@relay/contracts";
+import { runJudgmentLifecycle } from "./judgment-lifecycle.js";
 import { projectSnapshot } from "./projections.js";
-import { shouldCreateCaseForFinal } from "./policies.js";
+import {
+  definitionSearchTask,
+  formatNoulInterval,
+  noulConfidenceInterval,
+  shouldCreateCaseForFinal,
+} from "./policies.js";
 import { PRIORITY_DIRECT, PRIORITY_OBSERVED, type WorkItem } from "./queue.js";
 import { Scheduler, type Clock, type IdFactory } from "./scheduler.js";
 import type { EngineStore } from "./store.js";
@@ -27,6 +34,10 @@ export type EngineDeps = {
   readonly sessionId: string;
   readonly reflexModules?: readonly ReflexModule[];
   readonly glasses?: GlassesDisplayPort;
+  /** Honest storage label for the developer panel. Defaults to memory. */
+  readonly storageDetail?: string;
+  /** Honest Jev label. Defaults to missing key until a TypeSafe key is configured. */
+  readonly jevDetail?: string;
 };
 
 function encodeText(text: string): Uint8Array {
@@ -80,6 +91,10 @@ export class RelayEngine {
       case "SetListening": {
         await this.deps.store.setListening(this.deps.sessionId, command.enabled);
         this.emit({ type: "ListeningChanged", listening: command.enabled });
+        await this.note(
+          "listening.changed",
+          command.enabled ? "Listening on" : "Listening off",
+        );
         await this.emitSnapshot();
         return { ok: true, summary: command.enabled ? "listening_on" : "listening_off" };
       }
@@ -88,6 +103,8 @@ export class RelayEngine {
         const caseId = await this.ingestFinalSegment(segment, true);
         return { ok: true, summary: "ask_accepted", caseId };
       }
+      case "RememberToken":
+        return this.rememberToken(command.token);
       default:
         return { ok: false, summary: "unsupported_command", error: command.type };
     }
@@ -115,7 +132,18 @@ export class RelayEngine {
       return "";
     }
 
-    await this.deps.store.appendDomainEvent("source.final", at, {
+    const listening = await this.deps.store.getListening(this.deps.sessionId);
+    if (!isAsk && !listening) {
+      await this.note("source.rejected", "Source rejected · listening off", {
+        sourceEventId,
+        segmentId: segment.segmentId,
+        reasonCode: "listening_off",
+      });
+      await this.emitSnapshot();
+      return "";
+    }
+
+    await this.note("source.accepted", `Source accepted · ${segment.origin}`, {
       sourceEventId,
       segmentId: segment.segmentId,
     });
@@ -185,6 +213,7 @@ export class RelayEngine {
           "work.failed",
           this.deps.clock.now().toISOString(),
           {
+            message: `Work failed · ${item.type}`,
             workId: item.workId,
             type: item.type,
             error: error instanceof Error ? error.message : "unknown",
@@ -273,29 +302,36 @@ export class RelayEngine {
           caseId,
         });
       } else {
-        const generated = await this.deps.model.generate(
-          { taskKind: "direct_answer", prompt: text, caseId },
-          this.abort?.signal ?? new AbortController().signal,
-        );
-        await this.deps.store.addFeedItem({
-          itemId: this.deps.ids.next("feed"),
-          kind: "answer",
-          summary: generated.ok
-            ? generated.text
-            : "No matching reflex fired for this Ask yet. Try an acronym like API, or enable listening for observed findings.",
-          createdAt: this.deps.clock.now().toISOString(),
-          caseId,
-        });
+        const task = definitionSearchTask(text);
+        if (task) {
+          await this.deps.store.addFeedItem({
+            itemId: this.deps.ids.next("feed"),
+            kind: "task",
+            summary: task,
+            createdAt: this.deps.clock.now().toISOString(),
+            caseId,
+          });
+        } else {
+          const generated = await this.deps.model.generate(
+            { taskKind: "direct_answer", prompt: text, caseId },
+            this.abort?.signal ?? new AbortController().signal,
+          );
+          await this.deps.store.addFeedItem({
+            itemId: this.deps.ids.next("feed"),
+            kind: "answer",
+            summary: generated.ok ? generated.text : "No local result for this Ask.",
+            createdAt: this.deps.clock.now().toISOString(),
+            caseId,
+          });
+        }
       }
-    } else {
-      await this.deps.store.addFeedItem({
-        itemId: this.deps.ids.next("feed"),
-        kind: "observation",
-        summary: text,
-        createdAt: completed.updatedAt,
-        caseId,
-      });
     }
+
+    const outcome = findingSummaries.length > 0 ? "answer" : definitionSearchTask(text) ? "task" : "no local result";
+    await this.note(
+      "feed.ready",
+      current.origin === "direct" ? `Ask finished · ${outcome}` : `Observed speech finished · ${outcome}`,
+    );
   }
 
   private async runReflexesOnFinal(
@@ -339,42 +375,36 @@ export class RelayEngine {
 
         if (result.type === "finding") {
           findings.push(result.summary);
-          await this.deps.store.addFeedItem({
-            itemId: this.deps.ids.next("feed"),
-            kind: "finding",
-            summary: result.summary,
-            createdAt: this.deps.clock.now().toISOString(),
-            caseId,
-          });
+          if (!isAsk) {
+            await this.deps.store.addFeedItem({
+              itemId: this.deps.ids.next("feed"),
+              kind: "finding",
+              summary: result.summary,
+              createdAt: this.deps.clock.now().toISOString(),
+              caseId,
+            });
+          }
           const [title, ...rest] = result.summary.split(":");
           await this.deps.glasses?.show({
             kind: "finding",
             title: (title ?? "Finding").trim().slice(0, 40),
             body: rest.join(":").trim().slice(0, 192) || result.summary.slice(0, 192),
           });
-          await this.deps.store.appendDomainEvent(
-            "reflex.finding",
-            this.deps.clock.now().toISOString(),
-            {
-              caseId,
-              caseVersion,
-              sourceEventId,
-              reflexId: reflex.definition.id,
-              reflexVersion: reflex.definition.version,
-              token: trigger.token,
-              reasonCode: "finding",
-            },
-          );
+          await this.note("reflex.finding", `Reflex finding · ${trigger.token}`, {
+            caseId,
+            caseVersion,
+            sourceEventId,
+            reflexId: reflex.definition.id,
+            reflexVersion: reflex.definition.version,
+            token: trigger.token,
+            reasonCode: "finding",
+          });
         } else {
-          await this.deps.store.appendDomainEvent(
-            "reflex.no_action",
-            this.deps.clock.now().toISOString(),
-            {
-              caseId,
-              reflexId: reflex.definition.id,
-              reasonCode: result.summary,
-            },
-          );
+          await this.note("reflex.no_action", `Reflex skipped · ${result.summary}`, {
+            caseId,
+            reflexId: reflex.definition.id,
+            reasonCode: result.summary,
+          });
         }
       }
     }
@@ -438,12 +468,128 @@ export class RelayEngine {
   private statusChips() {
     return [
       { id: "engine" as const, label: "Engine", ok: this.running, detail: this.running ? "running" : "stopped" },
-      { id: "jev" as const, label: "Jev", ok: true, detail: "recorded" },
-      { id: "model" as const, label: "Model", ok: true, detail: "ready" },
-      { id: "audio" as const, label: "Audio", ok: true, detail: "idle" },
-      { id: "halo" as const, label: "Halo", ok: true, detail: "offline" },
-      { id: "storage" as const, label: "Storage", ok: true, detail: "sqlite" },
+      { id: "jev" as const, label: "Jev", ok: false, detail: this.deps.jevDetail ?? "missing key" },
+      { id: "model" as const, label: "Model", ok: false, detail: "disabled" },
+      { id: "audio" as const, label: "Audio", ok: false, detail: "not connected" },
+      { id: "halo" as const, label: "Halo", ok: false, detail: "offline" },
+      {
+        id: "storage" as const,
+        label: "Storage",
+        ok: true,
+        detail: this.deps.storageDetail ?? "memory",
+      },
     ];
+  }
+
+  private async rememberToken(rawToken: string): Promise<RelayCommandResult> {
+    const token = rawToken.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,12}$/.test(token)) {
+      return { ok: false, summary: "invalid_token" };
+    }
+
+    await this.note("memory.requested", `Add to memory requested · ${token}`);
+    const request: JudgmentRequest = {
+      questionSetId: "judgment.remember",
+      questionSetVersion: "1",
+      model: "jev-1.13.0",
+      provider: "typesafe",
+      state: { token, proposal: "remember_acronym" },
+      questions: {
+        remember: {
+          type: "noul",
+          instructions:
+            "Should this acronym be stored in the user's local memory? Answer yes only if it is a stable term worth recalling later.",
+        },
+      },
+    };
+
+    const signal = this.abort?.signal ?? new AbortController().signal;
+    const outcome = await runJudgmentLifecycle(
+      {
+        store: this.deps.store,
+        artifacts: this.deps.artifacts,
+        judgments: this.deps.judgments,
+        clock: this.deps.clock,
+        ids: this.deps.ids,
+      },
+      request,
+      signal,
+    );
+
+    if (!outcome.response.ok) {
+      const category = outcome.response.failure.category;
+      const message = `Jev remember ${token} · ${category} · not accepted`;
+      await this.note("jev.failed", message, { token, category });
+      await this.deps.store.addFeedItem({
+        itemId: this.deps.ids.next("feed"),
+        kind: "memory",
+        summary: `Not stored · ${token} · Jev ${category}`,
+        createdAt: this.deps.clock.now().toISOString(),
+      });
+      await this.emitSnapshot();
+      return { ok: false, summary: category };
+    }
+
+    const answer = outcome.response.success.answers.remember;
+    if (!answer || answer.type !== "noul") {
+      await this.note("jev.failed", `Jev remember ${token} · invalid_response · not accepted`, {
+        token,
+      });
+      await this.emitSnapshot();
+      return { ok: false, summary: "invalid_response" };
+    }
+
+    const interval = noulConfidenceInterval(answer.probabilityYes);
+    if (!interval) {
+      await this.note("jev.failed", `Jev remember ${token} · invalid probability · not accepted`, {
+        token,
+      });
+      await this.emitSnapshot();
+      return { ok: false, summary: "invalid_response" };
+    }
+
+    const decision = `${formatNoulInterval(interval)} · ${interval.accept ? "accepted" : "not accepted"}`;
+    await this.note(interval.accept ? "jev.accepted" : "jev.refused", `Jev remember ${token} · ${decision}`, {
+      token,
+      probabilityYes: interval.probabilityYes,
+      confidence: interval.confidence,
+      low: interval.low,
+      high: interval.high,
+    });
+
+    if (!interval.accept) {
+      await this.deps.store.addFeedItem({
+        itemId: this.deps.ids.next("feed"),
+        kind: "memory",
+        summary: `Not stored · ${token} · ${formatNoulInterval(interval)}`,
+        createdAt: this.deps.clock.now().toISOString(),
+      });
+      await this.emitSnapshot();
+      return { ok: false, summary: "below_threshold" };
+    }
+
+    await this.note("memory.stored", `Memory stored · ${token}`, { token });
+    await this.deps.store.addFeedItem({
+      itemId: this.deps.ids.next("feed"),
+      kind: "memory",
+      summary: `Remembered ${token} · ${formatNoulInterval(interval)}`,
+      createdAt: this.deps.clock.now().toISOString(),
+    });
+    await this.emitSnapshot();
+    return { ok: true, summary: "remembered" };
+  }
+
+  private async note(
+    eventType: string,
+    message: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    const at = this.deps.clock.now().toISOString();
+    const sequence = await this.deps.store.appendDomainEvent(eventType, at, {
+      message,
+      ...extra,
+    });
+    this.emit({ type: "TraceAppended", sequence, eventType, message, at });
   }
 
   private emit(change: RelayChange): void {

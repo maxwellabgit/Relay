@@ -58,6 +58,8 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     ids,
     sessionId: options.sessionId ?? "session_test",
     reflexModules: productionReflexes,
+    storageDetail: "sqlite",
+    jevDetail: "recorded",
   };
 
   const engine = new RelayEngine(deps);

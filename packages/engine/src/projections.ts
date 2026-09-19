@@ -6,12 +6,13 @@ export async function projectSnapshot(
   sessionId: string,
   status: readonly StatusChipState[],
 ): Promise<RelaySnapshot> {
-  const [listening, cases, feedItems, sourceSegments, queueDepth] = await Promise.all([
+  const [listening, cases, feedItems, sourceSegments, queueDepth, events] = await Promise.all([
     store.getListening(sessionId),
     store.listActiveCases(),
     store.listFeedItems(),
     store.listSourceSegments(sessionId),
     store.countWorkItems(),
+    store.listDomainEvents(80),
   ]);
 
   return {
@@ -37,5 +38,17 @@ export async function projectSnapshot(
       version: c.version,
     })),
     queueDepth,
+    activity: events.flatMap((event) => {
+      const message = event.payload.message;
+      if (typeof message !== "string" || !message.trim()) return [];
+      return [
+        {
+          sequence: event.sequence,
+          at: event.at,
+          eventType: event.type,
+          message,
+        },
+      ];
+    }),
   };
 }

@@ -64,5 +64,13 @@ export type EngineStore = {
   upsertJudgment(record: JudgmentRecord): Promise<void>;
   findCompletedJudgmentByHash(requestHash: string): Promise<JudgmentRecord | null>;
   appendDomainEvent(type: string, at: string, payload: Record<string, unknown>): Promise<number>;
+  listDomainEvents(limit: number): Promise<
+    readonly {
+      sequence: number;
+      type: string;
+      at: string;
+      payload: Record<string, unknown>;
+    }[]
+  >;
   countWorkItems(): Promise<number>;
 };

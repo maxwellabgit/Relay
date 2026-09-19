@@ -1,12 +1,7 @@
 import type { JudgmentPort, RelayClient, TextModelPort } from "@relay/contracts";
-import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
+import { createRelayClientFromEngine, createTypeSafeJudgmentPort, RelayEngine, type EngineDeps } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
-import {
-  MemoryArtifactStore,
-  MemoryEngineStore,
-  RecordedJudgmentPort,
-  recordedSuccess,
-} from "@relay/testkit/browser";
+import { MemoryArtifactStore, MemoryEngineStore } from "@relay/testkit/browser";
 
 export type WebClientOptions = {
   readonly sessionId?: string;
@@ -37,23 +32,10 @@ export function createWebClient(options: WebClientOptions = {}): WebClientHandle
 
   const judgments: JudgmentPort =
     options.judgments ??
-    new RecordedJudgmentPort([
-      {
-        questionSetId: "judgment.acronym-choice",
-        response: recordedSuccess({
-          expansion: {
-            type: "choice",
-            choice: "Application Programming Interface",
-            probabilities: {
-              "Application Programming Interface": 0.82,
-              no_match: 0.18,
-            },
-            confidence: 0.82,
-          },
-          useful: { type: "noul", probabilityYes: 0.78 },
-        }),
-      },
-    ]);
+    createTypeSafeJudgmentPort({
+      getApiKey: () => null,
+      retryDelayMs: 0,
+    });
 
   const model: TextModelPort = {
     async generate() {
@@ -70,6 +52,8 @@ export function createWebClient(options: WebClientOptions = {}): WebClientHandle
     ids,
     sessionId: options.sessionId ?? "session_web",
     reflexModules: productionReflexes,
+    storageDetail: "memory",
+    jevDetail: "missing key",
   };
 
   const engine = new RelayEngine(deps);

@@ -299,6 +299,18 @@ export class MemoryEngineStore implements EngineStore {
     return sequence;
   }
 
+  async listDomainEvents(limit: number): Promise<
+    readonly {
+      sequence: number;
+      type: string;
+      at: string;
+      payload: Record<string, unknown>;
+    }[]
+  > {
+    const take = Math.max(0, limit);
+    return this.domainEvents.slice(-take);
+  }
+
   async countWorkItems(): Promise<number> {
     return this.workItems.size;
   }

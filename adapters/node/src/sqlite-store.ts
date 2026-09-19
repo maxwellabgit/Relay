@@ -339,6 +339,32 @@ export class SqliteEngineStore implements EngineStore {
     return Number(info.lastInsertRowid);
   }
 
+  async listDomainEvents(limit: number): Promise<
+    readonly {
+      sequence: number;
+      type: string;
+      at: string;
+      payload: Record<string, unknown>;
+    }[]
+  > {
+    const rows = this.db
+      .prepare(
+        `SELECT sequence, type, at, payload_json FROM domain_events ORDER BY sequence DESC LIMIT ?`,
+      )
+      .all(Math.max(0, limit)) as {
+      sequence: number;
+      type: string;
+      at: string;
+      payload_json: string;
+    }[];
+    return rows.reverse().map((row) => ({
+      sequence: row.sequence,
+      type: row.type,
+      at: row.at,
+      payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+    }));
+  }
+
   async countWorkItems(): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) AS c FROM work_items`).get() as { c: number };
     return row.c;

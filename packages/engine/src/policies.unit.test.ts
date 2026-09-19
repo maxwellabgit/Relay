@@ -1,17 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { shouldCreateCaseForFinal } from "./policies.js";
+import { definitionSearchTask, formatNoulInterval, noulConfidenceInterval } from "./policies.js";
 
-describe("case routing policy", () => {
-  it("gives direct Ask a higher priority lane without inventing a listen super-case", () => {
-    expect(shouldCreateCaseForFinal("typed", true)).toEqual({
-      origin: "direct",
-      kind: "answer",
-      priority: 100,
-    });
-    expect(shouldCreateCaseForFinal("scripted_transcript", false)).toEqual({
-      origin: "observed",
-      kind: "resolve",
-      priority: 50,
-    });
+describe("definitionSearchTask", () => {
+  it("recommends an online search for an unknown acronym ask", () => {
+    expect(definitionSearchTask("What does MSRP mean?")).toBe(
+      "Search online for the definition of MSRP",
+    );
+  });
+
+  it("does not invent a task for ordinary text", () => {
+    expect(definitionSearchTask("BESS glossary check")).toBeNull();
+  });
+
+  it("accepts memory only when the Jev yes probability clears 0.70", () => {
+    const high = noulConfidenceInterval(0.82);
+    const low = noulConfidenceInterval(0.41);
+    expect(high?.accept).toBe(true);
+    expect(high?.low).toBeCloseTo(0.18);
+    expect(high?.high).toBeCloseTo(0.82);
+    expect(formatNoulInterval(high!)).toContain("confidence interval 0.18–0.82");
+    expect(low?.accept).toBe(false);
+    expect(noulConfidenceInterval(1.2)).toBeNull();
   });
 });

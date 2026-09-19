@@ -27,10 +27,10 @@ describe("transcript replay", () => {
         engine: harness.engine,
         sessionId: "replay_session",
       });
-      await new Promise((r) => setTimeout(r, 150));
       const snap = await harness.client.getSnapshot();
       expect(result.finals).toBe(2);
       expect(snap.sourceSegments.length).toBe(2);
+      expect(snap.cases).toHaveLength(0);
       expect(snap.listening).toBe(false);
     } finally {
       await harness.client.stop();

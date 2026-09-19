@@ -11,6 +11,11 @@ export type SetListeningCommand = {
   readonly enabled: boolean;
 };
 
+export type RememberTokenCommand = {
+  readonly type: "RememberToken";
+  readonly token: string;
+};
+
 export type ApproveOperationCommand = {
   readonly type: "ApproveOperation";
   readonly operationId: string;
@@ -134,6 +139,7 @@ export type ReplayFixtureCommand = {
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
+  | RememberTokenCommand
   | ApproveOperationCommand
   | RejectOperationCommand
   | StartConnectionAuthorizationCommand
