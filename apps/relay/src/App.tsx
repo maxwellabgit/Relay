@@ -17,17 +17,34 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   cases: [],
   queueDepth: 0,
   activity: [],
-  gate: null,
-  expansion: {
-    completeSessions: 0,
-    sessionTarget: 12,
-    reflexesBuilt: 0,
-    reflexTarget: 4,
-    reviewDue: false,
+  runtime: {
+    runId: "",
+    commit: "unknown",
+    sessionId: null,
+    episodeId: null,
+    queueDepth: 0,
+    logPath: "",
+    logWritable: false,
+    logError: null,
+    mode: "live",
+    retention: "7d",
   },
-  recommendations: [],
-  decisions: [],
-  decisionLogPath: ".dev-data/dev-console/decisions.jsonl",
+  gate: null,
+  patterns: [],
+  review: {
+    completeSessions: 0,
+    sessionTrigger: 12,
+    approvedReflexes: 0,
+    reflexTrigger: 4,
+    completeEpisodes: 0,
+    episodeTrigger: 25,
+    qualifiedCandidates: 0,
+    candidateTrigger: 3,
+    reviewDue: false,
+    trigger: null,
+  },
+  trace: [],
+  memories: [],
 };
 
 const FIXTURE_SEGMENTS = [
@@ -118,6 +135,9 @@ export function App() {
         }}
         onRemember={(token) => {
           void clientRef.current?.execute({ type: "RememberToken", token });
+        }}
+        onCaptureBirthday={(personKey, date, confirmed) => {
+          void clientRef.current?.execute({ type: "CaptureBirthday", personKey, date, confirmed });
         }}
         onStartSession={() => {
           void clientRef.current?.execute({ type: "StartWorkSession" });

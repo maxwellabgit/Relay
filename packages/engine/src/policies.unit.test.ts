@@ -18,7 +18,7 @@ describe("definitionSearchTask", () => {
     expect(high?.accept).toBe(true);
     expect(high?.low).toBeCloseTo(0.18);
     expect(high?.high).toBeCloseTo(0.82);
-    expect(formatNoulInterval(high!)).toContain("confidence interval 0.18–0.82");
+    expect(formatNoulInterval(high!)).toBe("P(yes)=0.82 · P(no)=0.18");
     expect(low?.accept).toBe(false);
     expect(noulConfidenceInterval(1.2)).toBeNull();
   });

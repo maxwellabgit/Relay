@@ -9,6 +9,7 @@ export type RelayWorkbenchProps = {
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
   readonly onRemember?: (token: string) => void;
+  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
   readonly onStartSession?: () => void;
   readonly onEndSession?: () => void;
   readonly showDeveloperPanel?: boolean;
@@ -23,6 +24,7 @@ export function RelayWorkbench({
   onListenChange,
   onSubmit,
   onRemember,
+  onCaptureBirthday,
   onStartSession,
   onEndSession,
   showDeveloperPanel,
@@ -40,6 +42,7 @@ export function RelayWorkbench({
           onListenChange={onListenChange}
           onSubmit={onSubmit}
           {...(onRemember !== undefined ? { onRemember } : {})}
+          {...(onCaptureBirthday !== undefined ? { onCaptureBirthday } : {})}
         />
       </View>
       {showDev ? (
@@ -49,6 +52,12 @@ export function RelayWorkbench({
           {...(onReplayFixture !== undefined ? { onReplayFixture } : {})}
           {...(onStartSession !== undefined ? { onStartSession } : {})}
           {...(onEndSession !== undefined ? { onEndSession } : {})}
+          onOpenLog={() => {
+            const path = snapshot.runtime.logPath;
+            if (path && typeof navigator !== "undefined" && navigator.clipboard) {
+              void navigator.clipboard.writeText(path);
+            }
+          }}
         />
       ) : null}
     </View>

@@ -2,18 +2,24 @@ import type { JudgmentPort, TextModelPort } from "@relay/contracts";
 import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
 import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
+import { createFileTraceSink } from "./file-trace.js";
 
 export type NodeHarnessOptions = {
   readonly sessionId?: string;
+  readonly databasePath?: string;
+  readonly runsRoot?: string;
   readonly clock?: EngineDeps["clock"];
   readonly ids?: EngineDeps["ids"];
   readonly judgments?: JudgmentPort;
+  readonly reflexModules?: EngineDeps["reflexModules"];
 };
 
 export function createNodeHarness(options: NodeHarnessOptions = {}) {
-  const store = new SqliteEngineStore();
+  const store = new SqliteEngineStore(options.databasePath ?? ":memory:");
   const artifacts = new MemoryArtifactStore();
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
@@ -57,9 +63,13 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     clock,
     ids,
     sessionId: options.sessionId ?? "session_test",
-    reflexModules: productionReflexes,
+    reflexModules: options.reflexModules ?? productionReflexes,
     storageDetail: "sqlite",
-    jevDetail: "recorded",
+    jevStatus: { ok: true, detail: "recorded" },
+    modelStatus: { ok: false, detail: "disabled" },
+    mode: "recorded",
+    gitCommit: "test",
+    trace: createFileTraceSink(options.runsRoot ?? join(tmpdir(), "relay-runs")),
   };
 
   const engine = new RelayEngine(deps);

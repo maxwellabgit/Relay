@@ -89,11 +89,12 @@ export type RelaySnapshot = {
   readonly cases: readonly CaseView[];
   readonly queueDepth: number;
   readonly activity: readonly ActivityLine[];
-  readonly gate: DecisionGateView | null;
-  readonly expansion: ExpansionProgress;
-  readonly recommendations: readonly PatternRecommendation[];
-  readonly decisions: readonly KeptDecision[];
-  readonly decisionLogPath: string;
+  readonly runtime: RuntimeHeader;
+  readonly gate: DecisionReceiptView | null;
+  readonly patterns: readonly PatternView[];
+  readonly review: ReviewStatus;
+  readonly trace: readonly TraceRow[];
+  readonly memories: readonly MemoryView[];
 };
 
 export type ActivityLine = {
@@ -103,42 +104,78 @@ export type ActivityLine = {
   readonly message: string;
 };
 
-export type GateMark = "pass" | "fail" | "info" | "wait";
-
-export type GateRow = {
-  readonly label: string;
-  readonly value: string;
-  readonly mark: GateMark;
+export type RuntimeHeader = {
+  readonly runId: string;
+  readonly commit: string;
+  readonly sessionId: string | null;
+  readonly episodeId: string | null;
+  readonly queueDepth: number;
+  readonly logPath: string;
+  readonly logWritable: boolean;
+  readonly logError: string | null;
+  readonly mode: "live" | "recorded" | "replay";
+  readonly retention: string;
 };
 
-/** The decision currently in front of the developer. No model prose. */
-export type DecisionGateView = {
+export type DecisionReceiptView = {
   readonly at: string;
-  readonly title: string;
-  readonly rows: readonly GateRow[];
+  readonly gateId: string;
+  readonly policyVersion: string;
+  readonly reflexId: string | null;
+  readonly questionType: "deterministic" | "choice" | "noul" | "user" | "not_applicable";
+  readonly optionIds: readonly string[];
+  readonly probabilities: Readonly<Record<string, number>>;
+  readonly topProbability: number | null;
+  readonly margin: number | null;
+  readonly threshold: number | null;
+  readonly result: "pass" | "fail" | "wait" | "not_applicable";
+  readonly reasonCode: string;
+  readonly provider: string;
+  readonly latencyMs: number | null;
+  readonly retries: number;
+  readonly nextAction: string;
 };
 
-export type ExpansionProgress = {
-  readonly completeSessions: number;
-  readonly sessionTarget: number;
-  readonly reflexesBuilt: number;
-  readonly reflexTarget: number;
-  readonly reviewDue: boolean;
-};
-
-export type PatternRecommendation = {
-  readonly code: string;
-  readonly because: string;
+export type PatternView = {
+  readonly signature: string;
   readonly count: number;
-  readonly status: "candidate";
+  readonly sessions: number;
+  readonly outcomes: Readonly<Record<string, number>>;
+  readonly firstAt: string;
+  readonly lastAt: string;
+  readonly evidenceIds: readonly string[];
+  readonly candidateState: string | null;
+  readonly because: string;
+  readonly needed: string;
 };
 
-/** A kept log line. Detail is a short code, never a saved response. */
-export type KeptDecision = {
+export type ReviewStatus = {
+  readonly completeSessions: number;
+  readonly sessionTrigger: number;
+  readonly approvedReflexes: number;
+  readonly reflexTrigger: number;
+  readonly completeEpisodes: number;
+  readonly episodeTrigger: number;
+  readonly qualifiedCandidates: number;
+  readonly candidateTrigger: number;
+  readonly reviewDue: boolean;
+  readonly trigger: string | null;
+};
+
+export type TraceRow = {
   readonly sequence: number;
   readonly at: string;
-  readonly code: string;
-  readonly detail: string;
+  readonly type: string;
+  readonly reasonCode: string | null;
+  readonly latencyMs: number | null;
+  readonly caseId: string | null;
+  readonly result: string | null;
+};
+
+export type MemoryView = {
+  readonly kind: "glossary" | "birthday";
+  readonly key: string;
+  readonly fields: Readonly<Record<string, string>>;
 };
 
 export type SourceSegmentView = {

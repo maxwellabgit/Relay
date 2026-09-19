@@ -11,7 +11,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             secrets::secret_status,
-            diagnostics::run_dir_status,
+            diagnostics::trace_run_dir,
+            diagnostics::append_trace_event,
+            diagnostics::read_trace_events,
             hotkeys::hotkey_status,
             halo::halo_status
         ])

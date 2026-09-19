@@ -16,6 +16,28 @@ export type RememberTokenCommand = {
   readonly token: string;
 };
 
+export type CaptureBirthdayCommand = {
+  readonly type: "CaptureBirthday";
+  readonly personKey: string;
+  readonly date: string;
+  readonly confirmed: boolean;
+};
+
+export type RecordCompletedWorkCommand = {
+  readonly type: "RecordCompletedWork";
+  readonly kind: "calendar.block";
+  readonly fields: {
+    readonly start_bucket: string;
+    readonly duration: string;
+    readonly reminder_offset: string;
+  };
+};
+
+export type ApproveCandidateCommand = {
+  readonly type: "ApproveCandidate";
+  readonly candidateId: string;
+};
+
 export type StartWorkSessionCommand = {
   readonly type: "StartWorkSession";
 };
@@ -148,6 +170,9 @@ export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
   | RememberTokenCommand
+  | CaptureBirthdayCommand
+  | RecordCompletedWorkCommand
+  | ApproveCandidateCommand
   | StartWorkSessionCommand
   | EndWorkSessionCommand
   | ApproveOperationCommand

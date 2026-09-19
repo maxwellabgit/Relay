@@ -178,7 +178,13 @@ export function createResolveAcronymModule(
         summary: "judgment_required",
         sourceRefs: context.triggerSourceRefs,
         judgmentIds: [],
-        clarificationPrompt: JSON.stringify({ token, candidates: list }),
+        clarificationPrompt: JSON.stringify({
+        token,
+        optionIds: list,
+        policyVersion: "resolve-acronym@1",
+        choiceProbabilityMinimum: (policy as AcronymPolicyV1).choiceProbabilityMinimum,
+        choiceMarginMinimum: (policy as AcronymPolicyV1).choiceMarginMinimum,
+      }),
       };
     },
   };

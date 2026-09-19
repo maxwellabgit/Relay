@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { JudgmentPort } from "@relay/contracts";
 import { createNodeHarness } from "./create-client.js";
 
@@ -77,11 +79,10 @@ describe("autonomous engine", () => {
       expect(tasks).toHaveLength(1);
       expect(tasks[0]?.summary).toBe("Search online for the definition of MSRP");
       expect(answers).toHaveLength(0);
-      expect(snap.decisions.some((line) => line.code === "lookup.unknown" && line.detail.startsWith("MSRP"))).toBe(
-        true,
-      );
-      expect(snap.gate?.rows.find((row) => row.label === "Jev")?.value).toBe("not called");
-      expect(snap.decisions.some((line) => line.detail.includes("Search online"))).toBe(false);
+      expect(snap.gate?.reasonCode).toBe("no_candidates");
+      expect(snap.gate?.questionType).toBe("not_applicable");
+      expect(snap.trace.some((line) => line.type === "outcome.completed")).toBe(true);
+      expect(snap.trace.some((line) => (line.result ?? "").includes("Search online"))).toBe(false);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -103,7 +104,7 @@ describe("autonomous engine", () => {
     }
   });
 
-  it("does not store memory when Jev has no key", async () => {
+  it("stores an explicit glossary memory without asking Jev", async () => {
     const calls: string[] = [];
     const judgments: JudgmentPort = {
       async judge(request) {
@@ -115,50 +116,45 @@ describe("autonomous engine", () => {
     try {
       await harness.client.start();
       const result = await harness.client.execute({ type: "RememberToken", token: "MSRP" });
-      expect(result.ok).toBe(false);
-      expect(result.summary).toBe("missing_secret");
-      expect(calls).toEqual(["judgment.remember"]);
+      expect(result.ok).toBe(true);
+      expect(result.summary).toBe("remembered");
+      expect(calls).toEqual([]);
       const snap = await harness.client.getSnapshot();
-      expect(snap.feedItems.some((item) => item.summary.startsWith("Remembered"))).toBe(false);
-      expect(snap.activity.some((line) => line.message.includes("missing_secret"))).toBe(true);
-      expect(snap.activity.some((line) => line.message.includes("not accepted"))).toBe(true);
-      expect(snap.decisions.some((line) => line.code === "gate.remember" && line.detail.includes("missing_secret"))).toBe(
-        true,
-      );
+      expect(snap.memories).toEqual([
+        { kind: "glossary", key: "MSRP", fields: { expansion: "" } },
+      ]);
+      expect(snap.gate?.questionType).toBe("user");
+      expect(snap.gate?.reasonCode).toBe("explicit_user");
     } finally {
       await harness.client.stop();
       harness.close();
     }
   });
 
-  it("stores memory only after a Jev confidence interval clears the gate", async () => {
-    const judgments: JudgmentPort = {
-      async judge() {
-        return {
-          ok: true,
-          success: {
-            model: "jev-1.13.0",
-            answers: { remember: { type: "noul", probabilityYes: 0.82 } },
-            inputTokens: 1,
-            outputTokens: 1,
-            elapsedMs: 4,
-          },
-        };
-      },
-    };
-    const harness = createNodeHarness({ judgments });
+  it("retrieves an explicit memory after restart instead of searching again", async () => {
+    const databasePath = join(tmpdir(), `relay-memory-${Date.now()}.sqlite`);
+    const first = createNodeHarness({ databasePath });
     try {
-      await harness.client.start();
-      const result = await harness.client.execute({ type: "RememberToken", token: "msrp" });
-      expect(result.ok).toBe(true);
-      const snap = await harness.client.getSnapshot();
-      expect(snap.feedItems.some((item) => item.summary.startsWith("Remembered MSRP"))).toBe(true);
-      expect(
-        snap.activity.some((line) => line.eventType === "jev.accepted" && line.message.includes("0.18–0.82")),
-      ).toBe(true);
+      await first.client.start();
+      const stored = await first.client.execute({ type: "RememberToken", token: "MSRP" });
+      expect(stored.summary).toBe("remembered");
     } finally {
-      await harness.client.stop();
-      harness.close();
+      await first.client.stop();
+      first.close();
+    }
+    const second = createNodeHarness({ databasePath });
+    try {
+      await second.client.start();
+      await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
+      await waitFor(async () => (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"));
+      const snap = await second.client.getSnapshot();
+      expect(snap.feedItems.some((item) => item.kind === "task")).toBe(false);
+      expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toContain("saved locally");
+      const trace = await second.client.getSnapshot();
+      expect(JSON.stringify(trace.trace)).not.toContain("What does MSRP mean?");
+    } finally {
+      await second.client.stop();
+      second.close();
     }
   });
 });

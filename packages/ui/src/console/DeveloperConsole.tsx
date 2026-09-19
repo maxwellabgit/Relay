@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { GateMark, RelaySnapshot } from "@relay/contracts";
+import type { RelaySnapshot } from "@relay/contracts";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
 
@@ -9,375 +9,166 @@ type Props = {
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
   readonly onStartSession?: () => void;
   readonly onEndSession?: () => void;
+  readonly onOpenLog?: () => void;
 };
 
 const SPEEDS = [0, 1, 10] as const;
 
 export function DeveloperConsole({
   snapshot,
+  traceLines = [],
   onReplayFixture,
   onStartSession,
   onEndSession,
+  onOpenLog,
 }: Props) {
   const [speed, setSpeed] = useState<number>(0);
-  const engine = snapshot.status.find((chip) => chip.id === "engine");
-  const expansion = snapshot.expansion;
-  const decisions = [...snapshot.decisions].reverse();
+  const [paused, setPaused] = useState(false);
+  const [frozen, setFrozen] = useState(snapshot.trace);
+  const rows = paused ? frozen : snapshot.trace;
+  const runtime = snapshot.runtime;
+  const review = snapshot.review;
 
   return (
-    <View style={styles.panel}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Decision ledger</Text>
-          <Text style={styles.subtitle}>Gates, Nouls, and what RELAY is allowed to keep.</Text>
-        </View>
-        <View style={styles.connected}>
-          <View style={[styles.liveDot, engine?.ok ? styles.liveOn : styles.liveOff]} />
-          <Text style={styles.connectedLabel}>{engine?.ok ? "Running" : "Stopped"}</Text>
-        </View>
-      </View>
-
+    <ScrollView style={styles.panel} contentContainerStyle={styles.content}>
+      <Text style={styles.title}>Run inspector</Text>
+      <Text style={styles.meta}>{`${runtime.runId} · ${runtime.commit} · ${runtime.mode}`}</Text>
+      <Text style={styles.meta}>
+        {`session ${runtime.sessionId ?? "none"} · episode ${runtime.episodeId ?? "none"} · queue ${runtime.queueDepth}`}
+      </Text>
       <View style={styles.chips}>
         {snapshot.status.map((chip) => (
           <Text key={chip.id} style={styles.chip}>
-            <Text style={chip.ok ? styles.ok : styles.dim}>{chip.ok ? "●" : "○"}</Text>
-            {` ${chip.label} ${chip.detail}`}
+            {`${chip.ok ? "●" : "○"} ${chip.label} ${chip.detail}`}
           </Text>
         ))}
       </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Bounded expansion</Text>
-        <Meter
-          label="Complete work sessions"
-          value={expansion.completeSessions}
-          target={expansion.sessionTarget}
-        />
-        <Meter label="Reflexes built" value={expansion.reflexesBuilt} target={expansion.reflexTarget} />
-        <Text style={styles.review}>
-          {expansion.reviewDue
-            ? "Self-review is due."
-            : "Self-review waits until both thresholds are met. Nothing is rewritten yet."}
-        </Text>
-        <View style={styles.sessionRow}>
-          <Pressable onPress={onStartSession} style={styles.sessionBtn}>
-            <Text style={styles.sessionText}>Start session</Text>
-          </Pressable>
-          <Pressable onPress={onEndSession} style={styles.sessionBtn}>
-            <Text style={styles.sessionText}>End session</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{snapshot.gate ? snapshot.gate.title : "No decision yet"}</Text>
-        {snapshot.gate ? (
-          snapshot.gate.rows.map((row) => (
-            <View key={row.label} style={styles.gateRow}>
-              <Text style={[styles.mark, markStyle(row.mark)]}>{markGlyph(row.mark)}</Text>
-              <Text style={styles.gateLabel}>{row.label}</Text>
-              <Text style={styles.gateValue}>{row.value}</Text>
-            </View>
-          ))
-        ) : (
-          <Text style={styles.empty}>Ask for an acronym, or add one to memory. The gate lands here.</Text>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recommendations</Text>
-        {snapshot.recommendations.length === 0 ? (
-          <Text style={styles.empty}>None yet. A repeated lookup can become a candidate. It is not built.</Text>
-        ) : (
-          snapshot.recommendations.map((item) => (
-            <Text key={`${item.code}:${item.because}`} style={styles.recommend}>
-              {`${item.code} · ${item.because} · ${item.count} · ${item.status}`}
-            </Text>
-          ))
-        )}
-      </View>
-
-      <Text style={styles.path}>{snapshot.decisionLogPath}</Text>
-      <ScrollView contentContainerStyle={styles.log}>
-        {decisions.length === 0 ? (
-          <Text style={styles.empty}>Kept decisions stream here. Trash lines are dropped.</Text>
-        ) : (
-          decisions.map((line) => (
-            <View key={line.sequence} style={styles.row}>
-              <Text style={styles.time}>{formatTime(line.at)}</Text>
-              <Text style={styles.event}>{line.code}</Text>
-              <Text style={styles.message}>{line.detail}</Text>
-            </View>
-          ))
-        )}
-      </ScrollView>
-
-      <View style={styles.replay}>
-        <Text style={styles.replayLabel}>glossary fixture</Text>
-        {SPEEDS.map((value) => (
-          <Pressable
-            key={value}
-            onPress={() => setSpeed(value)}
-            style={[styles.speedBtn, speed === value ? styles.speedOn : null]}
-          >
-            <Text style={styles.speedText}>{value === 0 ? "0×" : `${value}×`}</Text>
-          </Pressable>
-        ))}
-        <Pressable onPress={() => onReplayFixture?.("acronym-basic", speed)} style={styles.playBtn}>
-          <Text style={styles.playText}>Replay</Text>
+      <Text style={styles.path}>{runtime.logPath || "No run folder"}</Text>
+      <Text style={styles.meta}>
+        {runtime.logWritable ? `retention ${runtime.retention}` : `log error ${runtime.logError ?? "unavailable"}`}
+      </Text>
+      <View style={styles.row}>
+        <Pressable onPress={onOpenLog} style={styles.button}>
+          <Text style={styles.buttonText}>Open run folder</Text>
+        </Pressable>
+        <Pressable onPress={onStartSession} style={styles.button}>
+          <Text style={styles.buttonText}>Start session</Text>
+        </Pressable>
+        <Pressable onPress={onEndSession} style={styles.button}>
+          <Text style={styles.buttonText}>End session</Text>
         </Pressable>
       </View>
-    </View>
-  );
-}
 
-function Meter({ label, value, target }: { readonly label: string; readonly value: number; readonly target: number }) {
-  const ratio = target === 0 ? 0 : Math.min(1, value / target);
-  return (
-    <View style={styles.meter}>
-      <Text style={styles.meterLabel}>{`${label} ${value}/${target}`}</Text>
-      <View style={styles.track}>
-        <View style={[styles.fill, { width: `${Math.round(ratio * 100)}%` }]} />
+      <Text style={styles.section}>Current decision</Text>
+      {snapshot.gate ? (
+        <View style={styles.card}>
+          <Line label="Gate" value={`${snapshot.gate.gateId} · ${snapshot.gate.policyVersion}`} />
+          <Line label="Question" value={snapshot.gate.questionType} />
+          <Line label="Options" value={snapshot.gate.optionIds.join(", ") || "none"} />
+          <Line label="Probabilities" value={formatMap(snapshot.gate.probabilities)} />
+          <Line label="Top / margin" value={`${formatNum(snapshot.gate.topProbability)} / ${formatNum(snapshot.gate.margin)}`} />
+          <Line label="Threshold" value={formatNum(snapshot.gate.threshold)} />
+          <Line label="Result" value={`${snapshot.gate.result} · ${snapshot.gate.reasonCode}`} />
+          <Line label="Provider" value={snapshot.gate.provider} />
+          <Line label="Latency / retries" value={`${snapshot.gate.latencyMs ?? "n/a"} ms · ${snapshot.gate.retries}`} />
+          <Line label="Next" value={snapshot.gate.nextAction} />
+        </View>
+      ) : (
+        <Text style={styles.empty}>No receipt yet.</Text>
+      )}
+
+      <Text style={styles.section}>Evidence</Text>
+      {snapshot.patterns.length === 0 ? (
+        <Text style={styles.empty}>No completed episodes yet.</Text>
+      ) : (
+        snapshot.patterns.map((pattern) => (
+          <View key={pattern.signature} style={styles.card}>
+            <Text style={styles.signature}>{pattern.signature}</Text>
+            <Line label="Count / sessions" value={`${pattern.count} / ${pattern.sessions}`} />
+            <Line label="State" value={pattern.candidateState ?? "observing"} />
+            <Line label="Needed" value={pattern.needed || "none"} />
+            <Line label="Because" value={pattern.because || "not proposed"} />
+            <Line label="Evidence" value={pattern.evidenceIds.join(", ")} />
+          </View>
+        ))
+      )}
+
+      <Text style={styles.section}>Self-review</Text>
+      <Text style={styles.meta}>
+        {`sessions ${review.completeSessions}/${review.sessionTrigger} · reflexes ${review.approvedReflexes}/${review.reflexTrigger} · episodes ${review.completeEpisodes}/${review.episodeTrigger} · candidates ${review.qualifiedCandidates}/${review.candidateTrigger}`}
+      </Text>
+      <Text style={styles.meta}>
+        {review.reviewDue ? `Review due · ${review.trigger}. Recommendations only.` : "No review trigger yet."}
+      </Text>
+
+      <View style={styles.row}>
+        <Text style={styles.section}>Trace</Text>
+        <Pressable
+          onPress={() => {
+            setFrozen(snapshot.trace);
+            setPaused((value) => !value);
+          }}
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>{paused ? "Resume" : "Pause"}</Text>
+        </Pressable>
       </View>
-    </View>
+      {rows.length === 0 ? <Text style={styles.empty}>No canonical events yet.</Text> : null}
+      {[...rows].reverse().map((line) => (
+        <Text key={line.sequence} style={styles.trace}>
+          {`${line.type} · ${line.reasonCode ?? "none"} · ${line.result ?? ""}`}
+        </Text>
+      ))}
+      {traceLines.map((line, index) => (
+        <Text key={`live-${index}`} style={styles.trace}>
+          {line}
+        </Text>
+      ))}
+
+      <View style={styles.row}>
+        <Text style={styles.meta}>glossary fixture</Text>
+        {SPEEDS.map((value) => (
+          <Pressable key={value} onPress={() => setSpeed(value)} style={styles.button}>
+            <Text style={styles.buttonText}>{value === 0 ? "0×" : `${value}×`}</Text>
+          </Pressable>
+        ))}
+        <Pressable onPress={() => onReplayFixture?.("acronym-basic", speed)} style={styles.button}>
+          <Text style={styles.buttonText}>Replay</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 
-function markGlyph(mark: GateMark): string {
-  if (mark === "pass") return "●";
-  if (mark === "fail") return "○";
-  if (mark === "wait") return "…";
-  return "·";
+function Line({ label, value }: { readonly label: string; readonly value: string }) {
+  return <Text style={styles.line}>{`${label}: ${value}`}</Text>;
 }
 
-function markStyle(mark: GateMark) {
-  if (mark === "pass") return styles.ok;
-  if (mark === "fail") return styles.bad;
-  if (mark === "wait") return styles.warn;
-  return styles.dim;
+function formatMap(values: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(values);
+  if (entries.length === 0) return "none";
+  return entries.map(([key, value]) => `${key} ${value.toFixed(2)}`).join(" · ");
 }
 
-function formatTime(iso: string): string {
-  const parsed = Date.parse(iso);
-  if (Number.isNaN(parsed)) return iso;
-  return new Date(parsed).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+function formatNum(value: number | null): string {
+  return value == null ? "n/a" : value.toFixed(2);
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    backgroundColor: colors.console,
-    minWidth: 420,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 8,
-    gap: 12,
-  },
-  headerText: { flex: 1, gap: 4 },
-  title: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-  connected: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingTop: 6,
-  },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  liveOn: { backgroundColor: colors.ok },
-  liveOff: { backgroundColor: colors.textDim },
-  connectedLabel: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  chips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 22,
-    paddingBottom: 8,
-  },
-  chip: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  section: {
-    marginHorizontal: 18,
-    marginBottom: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.bgPanel,
-    gap: 6,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  review: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  sessionRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  sessionBtn: {
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  sessionText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  meter: { gap: 4 },
-  meterLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  track: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.bg,
-    overflow: "hidden",
-  },
-  fill: {
-    height: 6,
-    backgroundColor: colors.cyan,
-  },
-  gateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  mark: {
-    width: 16,
-    fontSize: 12,
-  },
-  gateLabel: {
-    width: 130,
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  gateValue: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 12,
-  },
-  recommend: {
-    color: colors.cyan,
-    fontSize: 12,
-    fontFamily: "monospace",
-  },
-  path: {
-    color: colors.textDim,
-    fontSize: 11,
-    fontFamily: "monospace",
-    paddingHorizontal: 22,
-    paddingBottom: 4,
-  },
-  log: {
-    paddingHorizontal: 18,
-    paddingBottom: 12,
-    gap: 2,
-  },
-  empty: {
-    color: colors.textDim,
-    fontSize: 12,
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-    paddingVertical: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  time: {
-    width: 78,
-    color: colors.textDim,
-    fontSize: 11,
-    fontFamily: "monospace",
-  },
-  event: {
-    width: 168,
-    color: colors.cyan,
-    fontSize: 11,
-    fontFamily: "monospace",
-  },
-  message: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  ok: { color: colors.ok },
-  dim: { color: colors.textDim },
-  bad: { color: colors.danger },
-  warn: { color: colors.warn },
-  replay: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  replayLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  speedBtn: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  speedOn: {
-    borderColor: colors.cyan,
-    backgroundColor: colors.accentSoft,
-  },
-  speedText: {
-    color: colors.text,
-    fontSize: 12,
-  },
-  playBtn: {
-    backgroundColor: colors.blue,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  playText: {
-    color: "#f7fbff",
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  panel: { flex: 1, backgroundColor: colors.console, minWidth: 420 },
+  content: { padding: 18, gap: 8 },
+  title: { color: colors.text, fontSize: 22, fontWeight: "700" },
+  section: { color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 8 },
+  meta: { color: colors.textMuted, fontSize: 12 },
+  path: { color: colors.cyan, fontSize: 12, fontFamily: "monospace" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { color: colors.textMuted, fontSize: 12 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" },
+  button: { borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  buttonText: { color: colors.text, fontSize: 12 },
+  card: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, gap: 2 },
+  signature: { color: colors.cyan, fontSize: 12, fontFamily: "monospace" },
+  line: { color: colors.text, fontSize: 12 },
+  empty: { color: colors.textDim, fontSize: 12 },
+  trace: { color: colors.text, fontSize: 12, fontFamily: "monospace" },
 });

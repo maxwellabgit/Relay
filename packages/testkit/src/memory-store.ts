@@ -9,6 +9,7 @@ import type {
   RelaySnapshot,
 } from "@relay/contracts";
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
+import { InMemoryLearning } from "@relay/engine";
 
 type SessionRow = {
   createdAt: string;
@@ -39,6 +40,7 @@ type WorkRow = WorkItem & {
 };
 
 export class MemoryEngineStore implements EngineStore {
+  readonly learning = new InMemoryLearning();
   private readonly sessions = new Map<string, SessionRow>();
   private readonly sourceEvents = new Map<string, SourceRow>();
   private readonly cases = new Map<string, CaseRecord>();
@@ -46,6 +48,7 @@ export class MemoryEngineStore implements EngineStore {
   private readonly domainEvents: DomainEventRow[] = [];
   private readonly workItems = new Map<string, WorkRow>();
   private readonly judgments = new Map<string, JudgmentRecord>();
+  private readonly deadLetters: { workId: string; reasonCode: string; at: string }[] = [];
   private domainSeq = 0;
 
   close(): void {
@@ -313,5 +316,14 @@ export class MemoryEngineStore implements EngineStore {
 
   async countWorkItems(): Promise<number> {
     return this.workItems.size;
+  }
+
+  async deadLetter(workId: string, reasonCode: string, at: string): Promise<void> {
+    this.workItems.delete(workId);
+    this.deadLetters.push({ workId, reasonCode, at });
+  }
+
+  async listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]> {
+    return this.deadLetters;
   }
 }

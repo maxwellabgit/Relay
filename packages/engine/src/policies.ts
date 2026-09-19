@@ -81,9 +81,48 @@ export function noulConfidenceInterval(probabilityYes: number): NoulInterval | n
   };
 }
 
+/** The yes/no split of a Noul. This is not a statistical confidence interval. */
 export function formatNoulInterval(interval: NoulInterval): string {
   const yes = interval.probabilityYes.toFixed(2);
-  const low = interval.low.toFixed(2);
-  const high = interval.high.toFixed(2);
-  return `P(yes)=${yes} · confidence interval ${low}–${high}`;
+  const no = interval.probabilityNo.toFixed(2);
+  return `P(yes)=${yes} · P(no)=${no}`;
+}
+
+export function askedToken(text: string): string | null {
+  const task = definitionSearchTask(text);
+  if (!task) return null;
+  return /([A-Z0-9]{2,12})$/.exec(task)?.[1] ?? null;
+}
+
+export function validateBirthday(personKey: string, date: string): string | null {
+  if (!/^[A-Za-z][A-Za-z0-9]{0,24}$/.test(personKey)) return "invalid_person";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return "invalid_date";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
+    return "invalid_date";
+  }
+  return null;
+}
+
+export function evaluateChoiceGate(input: {
+  readonly probabilities: Readonly<Record<string, number>>;
+  readonly minimum: number;
+  readonly marginMinimum: number;
+}): { readonly pass: boolean; readonly top: number; readonly margin: number; readonly selected: string; readonly reasonCode: string } {
+  const ranked = Object.entries(input.probabilities).sort((a, b) => b[1] - a[1]);
+  const top = ranked[0];
+  const second = ranked[1];
+  if (!top) return { pass: false, top: 0, margin: 0, selected: "", reasonCode: "missing_choice" };
+  const margin = second ? top[1] - second[1] : top[1];
+  if (top[1] < input.minimum) {
+    return { pass: false, top: top[1], margin, selected: top[0], reasonCode: "below_choice_minimum" };
+  }
+  if (second && margin < input.marginMinimum) {
+    return { pass: false, top: top[1], margin, selected: top[0], reasonCode: "below_choice_margin" };
+  }
+  return { pass: true, top: top[1], margin, selected: top[0], reasonCode: "policy_pass" };
 }

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Composer } from "../assistant/Composer.js";
 import { colors } from "../theme/colors.js";
 
@@ -8,9 +9,10 @@ type Props = {
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
   readonly onRemember?: (token: string) => void;
+  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
 };
 
-export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember }: Props) {
+export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember, onCaptureBirthday }: Props) {
   const task = [...snapshot.feedItems].reverse().find((item) => item.kind === "task");
   const token = task ? acronymFromTask(task.summary) : null;
   const memory = [...snapshot.feedItems].reverse().find((item) => item.kind === "memory");
@@ -91,6 +93,10 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember }: P
           </View>
         ) : null}
 
+        <BirthdayCapture
+          memories={snapshot.memories.filter((memory) => memory.kind === "birthday")}
+          {...(onCaptureBirthday !== undefined ? { onCaptureBirthday } : {})}
+        />
         <Composer onSubmit={onSubmit} />
 
         <View style={styles.tabs}>
@@ -101,6 +107,49 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember }: P
         </View>
         <Text style={styles.footer}>Private. Local. In your control.</Text>
       </View>
+    </View>
+  );
+}
+
+function BirthdayCapture({
+  memories,
+  onCaptureBirthday,
+}: {
+  readonly memories: RelaySnapshot["memories"];
+  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
+}) {
+  const [personKey, setPersonKey] = useState("");
+  const [date, setDate] = useState("");
+  return (
+    <View style={styles.birthday}>
+      <Text style={styles.actionEyebrow}>Birthday</Text>
+      <TextInput
+        value={personKey}
+        onChangeText={setPersonKey}
+        placeholder="Name"
+        placeholderTextColor={colors.textDim}
+        style={styles.birthdayInput}
+      />
+      <TextInput
+        value={date}
+        onChangeText={setDate}
+        placeholder="YYYY-MM-DD"
+        placeholderTextColor={colors.textDim}
+        style={styles.birthdayInput}
+      />
+      <View style={styles.birthdayActions}>
+        <Pressable onPress={() => onCaptureBirthday?.(personKey, date, false)} style={styles.memory}>
+          <Text style={styles.memoryLabel}>Check date</Text>
+        </Pressable>
+        <Pressable onPress={() => onCaptureBirthday?.(personKey, date, true)} style={styles.memory}>
+          <Text style={styles.memoryLabel}>Save</Text>
+        </Pressable>
+      </View>
+      {memories.map((memory) => (
+        <Text key={memory.key} style={styles.memoryValue}>
+          {`${memory.key} · ${memory.fields.date ?? ""}`}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -357,6 +406,24 @@ const styles = StyleSheet.create({
   },
   memoryStored: {
     borderColor: colors.ok,
+  },
+  birthday: {
+    gap: 6,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  birthdayInput: {
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+  },
+  birthdayActions: {
+    flexDirection: "row",
+    gap: 8,
   },
   memoryValue: {
     color: colors.text,

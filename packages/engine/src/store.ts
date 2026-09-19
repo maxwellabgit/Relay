@@ -11,6 +11,7 @@ import type {
   TranscriptSegmentV1,
 } from "@relay/contracts";
 import type { WorkItem } from "./queue.js";
+import type { LearningStore } from "./learning-store.js";
 
 export type PersistedSourceEvent = {
   readonly sourceEventId: string;
@@ -73,4 +74,7 @@ export type EngineStore = {
     }[]
   >;
   countWorkItems(): Promise<number>;
+  deadLetter(workId: string, reasonCode: string, at: string): Promise<void>;
+  listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]>;
+  readonly learning: LearningStore;
 };

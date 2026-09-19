@@ -13,6 +13,7 @@ import type {
   RelaySnapshot,
 } from "@relay/contracts";
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
+import { SqliteLearning } from "./sqlite-learning.js";
 
 const migrationPath = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -21,6 +22,7 @@ const migrationPath = resolve(
 
 export class SqliteEngineStore implements EngineStore {
   private readonly db: DatabaseSync;
+  readonly learning: SqliteLearning;
 
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
@@ -28,6 +30,7 @@ export class SqliteEngineStore implements EngineStore {
     this.db
       .prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)")
       .run(new Date().toISOString());
+    this.learning = new SqliteLearning(this.db);
   }
 
   close(): void {
@@ -368,6 +371,23 @@ export class SqliteEngineStore implements EngineStore {
   async countWorkItems(): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) AS c FROM work_items`).get() as { c: number };
     return row.c;
+  }
+
+  async deadLetter(workId: string, reasonCode: string, at: string): Promise<void> {
+    this.db.prepare(`DELETE FROM work_items WHERE work_id = ?`).run(workId);
+    this.db
+      .prepare(`INSERT OR REPLACE INTO dead_letters(work_id, reason_code, at) VALUES (?, ?, ?)`)
+      .run(workId, reasonCode, at);
+  }
+
+  async listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]> {
+    return (
+      this.db.prepare(`SELECT work_id, reason_code, at FROM dead_letters`).all() as {
+        work_id: string;
+        reason_code: string;
+        at: string;
+      }[]
+    ).map((row) => ({ workId: row.work_id, reasonCode: row.reason_code, at: row.at }));
   }
 }
 
