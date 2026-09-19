@@ -9,6 +9,8 @@ export type RelayWorkbenchProps = {
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
   readonly onRemember?: (token: string) => void;
+  readonly onStartSession?: () => void;
+  readonly onEndSession?: () => void;
   readonly showDeveloperPanel?: boolean;
   readonly traceLines?: string[];
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
@@ -21,6 +23,8 @@ export function RelayWorkbench({
   onListenChange,
   onSubmit,
   onRemember,
+  onStartSession,
+  onEndSession,
   showDeveloperPanel,
   traceLines,
   onReplayFixture,
@@ -43,6 +47,8 @@ export function RelayWorkbench({
           snapshot={snapshot}
           {...(traceLines !== undefined ? { traceLines } : {})}
           {...(onReplayFixture !== undefined ? { onReplayFixture } : {})}
+          {...(onStartSession !== undefined ? { onStartSession } : {})}
+          {...(onEndSession !== undefined ? { onEndSession } : {})}
         />
       ) : null}
     </View>

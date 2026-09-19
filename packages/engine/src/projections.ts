@@ -50,5 +50,16 @@ export async function projectSnapshot(
         },
       ];
     }),
+    gate: null,
+    expansion: {
+      completeSessions: 0,
+      sessionTarget: 12,
+      reflexesBuilt: 0,
+      reflexTarget: 4,
+      reviewDue: false,
+    },
+    recommendations: [],
+    decisions: [],
+    decisionLogPath: ".dev-data/dev-console/decisions.jsonl",
   };
 }

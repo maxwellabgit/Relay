@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ActivityLine, RelaySnapshot } from "@relay/contracts";
+import type { GateMark, RelaySnapshot } from "@relay/contracts";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
 
@@ -7,21 +7,29 @@ type Props = {
   readonly snapshot: RelaySnapshot;
   readonly traceLines?: string[];
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
+  readonly onStartSession?: () => void;
+  readonly onEndSession?: () => void;
 };
 
 const SPEEDS = [0, 1, 10] as const;
 
-export function DeveloperConsole({ snapshot, onReplayFixture }: Props) {
+export function DeveloperConsole({
+  snapshot,
+  onReplayFixture,
+  onStartSession,
+  onEndSession,
+}: Props) {
   const [speed, setSpeed] = useState<number>(0);
   const engine = snapshot.status.find((chip) => chip.id === "engine");
-  const lines = [...snapshot.activity].reverse();
+  const expansion = snapshot.expansion;
+  const decisions = [...snapshot.decisions].reverse();
 
   return (
     <View style={styles.panel}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Developer Console</Text>
-          <Text style={styles.subtitle}>What RELAY is doing right now.</Text>
+          <Text style={styles.title}>Decision ledger</Text>
+          <Text style={styles.subtitle}>Gates, Nouls, and what RELAY is allowed to keep.</Text>
         </View>
         <View style={styles.connected}>
           <View style={[styles.liveDot, engine?.ok ? styles.liveOn : styles.liveOff]} />
@@ -38,8 +46,74 @@ export function DeveloperConsole({ snapshot, onReplayFixture }: Props) {
         ))}
       </View>
 
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Bounded expansion</Text>
+        <Meter
+          label="Complete work sessions"
+          value={expansion.completeSessions}
+          target={expansion.sessionTarget}
+        />
+        <Meter label="Reflexes built" value={expansion.reflexesBuilt} target={expansion.reflexTarget} />
+        <Text style={styles.review}>
+          {expansion.reviewDue
+            ? "Self-review is due."
+            : "Self-review waits until both thresholds are met. Nothing is rewritten yet."}
+        </Text>
+        <View style={styles.sessionRow}>
+          <Pressable onPress={onStartSession} style={styles.sessionBtn}>
+            <Text style={styles.sessionText}>Start session</Text>
+          </Pressable>
+          <Pressable onPress={onEndSession} style={styles.sessionBtn}>
+            <Text style={styles.sessionText}>End session</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{snapshot.gate ? snapshot.gate.title : "No decision yet"}</Text>
+        {snapshot.gate ? (
+          snapshot.gate.rows.map((row) => (
+            <View key={row.label} style={styles.gateRow}>
+              <Text style={[styles.mark, markStyle(row.mark)]}>{markGlyph(row.mark)}</Text>
+              <Text style={styles.gateLabel}>{row.label}</Text>
+              <Text style={styles.gateValue}>{row.value}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.empty}>Ask for an acronym, or add one to memory. The gate lands here.</Text>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Recommendations</Text>
+        {snapshot.recommendations.length === 0 ? (
+          <Text style={styles.empty}>None yet. A repeated lookup can become a candidate. It is not built.</Text>
+        ) : (
+          snapshot.recommendations.map((item) => (
+            <Text key={`${item.code}:${item.because}`} style={styles.recommend}>
+              {`${item.code} · ${item.because} · ${item.count} · ${item.status}`}
+            </Text>
+          ))
+        )}
+      </View>
+
+      <Text style={styles.path}>{snapshot.decisionLogPath}</Text>
+      <ScrollView contentContainerStyle={styles.log}>
+        {decisions.length === 0 ? (
+          <Text style={styles.empty}>Kept decisions stream here. Trash lines are dropped.</Text>
+        ) : (
+          decisions.map((line) => (
+            <View key={line.sequence} style={styles.row}>
+              <Text style={styles.time}>{formatTime(line.at)}</Text>
+              <Text style={styles.event}>{line.code}</Text>
+              <Text style={styles.message}>{line.detail}</Text>
+            </View>
+          ))
+        )}
+      </ScrollView>
+
       <View style={styles.replay}>
-        <Text style={styles.replayLabel}>acronym-basic</Text>
+        <Text style={styles.replayLabel}>glossary fixture</Text>
         {SPEEDS.map((value) => (
           <Pressable
             key={value}
@@ -53,37 +127,34 @@ export function DeveloperConsole({ snapshot, onReplayFixture }: Props) {
           <Text style={styles.playText}>Replay</Text>
         </Pressable>
       </View>
-
-      <ScrollView contentContainerStyle={styles.log}>
-        {lines.length === 0 ? (
-          <Text style={styles.empty}>Waiting for the engine. Decisions will stream here.</Text>
-        ) : (
-          lines.map((line) => <LogLine key={line.sequence} line={line} />)
-        )}
-      </ScrollView>
     </View>
   );
 }
 
-function LogLine({ line }: { readonly line: ActivityLine }) {
-  const tone = toneFor(line.eventType);
+function Meter({ label, value, target }: { readonly label: string; readonly value: number; readonly target: number }) {
+  const ratio = target === 0 ? 0 : Math.min(1, value / target);
   return (
-    <View style={styles.row}>
-      <Text style={styles.time}>{formatTime(line.at)}</Text>
-      <Text style={[styles.event, tone === "jev" ? styles.jev : null, tone === "bad" ? styles.bad : null]}>
-        {line.eventType}
-      </Text>
-      <Text style={styles.message}>{line.message}</Text>
+    <View style={styles.meter}>
+      <Text style={styles.meterLabel}>{`${label} ${value}/${target}`}</Text>
+      <View style={styles.track}>
+        <View style={[styles.fill, { width: `${Math.round(ratio * 100)}%` }]} />
+      </View>
     </View>
   );
 }
 
-function toneFor(eventType: string): "jev" | "bad" | "plain" {
-  if (eventType.startsWith("jev.") || eventType.startsWith("memory.")) return "jev";
-  if (eventType.endsWith("failed") || eventType.endsWith("rejected") || eventType.endsWith("refused")) {
-    return "bad";
-  }
-  return "plain";
+function markGlyph(mark: GateMark): string {
+  if (mark === "pass") return "●";
+  if (mark === "fail") return "○";
+  if (mark === "wait") return "…";
+  return "·";
+}
+
+function markStyle(mark: GateMark) {
+  if (mark === "pass") return styles.ok;
+  if (mark === "fail") return styles.bad;
+  if (mark === "wait") return styles.warn;
+  return styles.dim;
 }
 
 function formatTime(iso: string): string {
@@ -150,14 +221,134 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
   },
+  section: {
+    marginHorizontal: 18,
+    marginBottom: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.bgPanel,
+    gap: 6,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  review: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  sessionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  sessionBtn: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  sessionText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  meter: { gap: 4 },
+  meterLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  track: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.bg,
+    overflow: "hidden",
+  },
+  fill: {
+    height: 6,
+    backgroundColor: colors.cyan,
+  },
+  gateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  mark: {
+    width: 16,
+    fontSize: 12,
+  },
+  gateLabel: {
+    width: 130,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  gateValue: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 12,
+  },
+  recommend: {
+    color: colors.cyan,
+    fontSize: 12,
+    fontFamily: "monospace",
+  },
+  path: {
+    color: colors.textDim,
+    fontSize: 11,
+    fontFamily: "monospace",
+    paddingHorizontal: 22,
+    paddingBottom: 4,
+  },
+  log: {
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+    gap: 2,
+  },
+  empty: {
+    color: colors.textDim,
+    fontSize: 12,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 10,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  time: {
+    width: 78,
+    color: colors.textDim,
+    fontSize: 11,
+    fontFamily: "monospace",
+  },
+  event: {
+    width: 168,
+    color: colors.cyan,
+    fontSize: 11,
+    fontFamily: "monospace",
+  },
+  message: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 16,
+  },
   ok: { color: colors.ok },
   dim: { color: colors.textDim },
+  bad: { color: colors.danger },
+  warn: { color: colors.warn },
   replay: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 22,
-    paddingBottom: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   replayLabel: {
     color: colors.textMuted,
@@ -188,42 +379,5 @@ const styles = StyleSheet.create({
     color: "#f7fbff",
     fontSize: 12,
     fontWeight: "700",
-  },
-  log: {
-    paddingHorizontal: 18,
-    paddingBottom: 24,
-    gap: 2,
-  },
-  empty: {
-    color: colors.textDim,
-    fontSize: 13,
-    paddingTop: 8,
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  time: {
-    width: 78,
-    color: colors.textDim,
-    fontSize: 12,
-    fontFamily: "monospace",
-  },
-  event: {
-    width: 148,
-    color: colors.textMuted,
-    fontSize: 12,
-    fontFamily: "monospace",
-  },
-  jev: { color: colors.cyan },
-  bad: { color: colors.warn },
-  message: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 13,
-    lineHeight: 18,
   },
 });

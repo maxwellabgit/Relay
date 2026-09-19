@@ -6,6 +6,7 @@ export * from "./ports.js";
 export * from "./projections.js";
 export * from "./queue.js";
 export * from "./scheduler.js";
+export * from "./decision-ledger.js";
 export * from "./store.js";
 export * from "./typesafe-judgment.js";
 

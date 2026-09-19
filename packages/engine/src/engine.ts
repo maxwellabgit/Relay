@@ -22,6 +22,7 @@ import {
 } from "./policies.js";
 import { PRIORITY_DIRECT, PRIORITY_OBSERVED, type WorkItem } from "./queue.js";
 import { Scheduler, type Clock, type IdFactory } from "./scheduler.js";
+import { DecisionLedger, type DecisionLogPort } from "./decision-ledger.js";
 import type { EngineStore } from "./store.js";
 
 export type EngineDeps = {
@@ -38,6 +39,7 @@ export type EngineDeps = {
   readonly storageDetail?: string;
   /** Honest Jev label. Defaults to missing key until a TypeSafe key is configured. */
   readonly jevDetail?: string;
+  readonly decisionLog?: DecisionLogPort;
 };
 
 function encodeText(text: string): Uint8Array {
@@ -55,9 +57,15 @@ export class RelayEngine {
   private running = false;
   private loopPromise: Promise<void> | null = null;
   private abort: AbortController | null = null;
+  private readonly ledger: DecisionLedger;
 
   constructor(private readonly deps: EngineDeps) {
     this.scheduler = new Scheduler(deps.store, deps.clock, "engine");
+    this.ledger = new DecisionLedger(
+      deps.reflexModules?.length ?? 0,
+      () => deps.clock.now().toISOString(),
+      deps.decisionLog,
+    );
   }
 
   async start(): Promise<void> {
@@ -66,6 +74,9 @@ export class RelayEngine {
     this.abort = new AbortController();
     const at = this.deps.clock.now().toISOString();
     await this.deps.store.ensureSession(this.deps.sessionId, at);
+    if (this.deps.decisionLog) {
+      await this.ledger.hydrate(await this.deps.decisionLog.read());
+    }
     this.loopPromise = this.runLoop(this.abort.signal);
     await this.emitSnapshot();
   }
@@ -83,7 +94,8 @@ export class RelayEngine {
   }
 
   async getSnapshot(): Promise<RelaySnapshot> {
-    return projectSnapshot(this.deps.store, this.deps.sessionId, this.statusChips());
+    const snapshot = await projectSnapshot(this.deps.store, this.deps.sessionId, this.statusChips());
+    return { ...snapshot, ...this.ledger.view() };
   }
 
   async execute(command: RelayCommand): Promise<RelayCommandResult> {
@@ -105,6 +117,16 @@ export class RelayEngine {
       }
       case "RememberToken":
         return this.rememberToken(command.token);
+      case "StartWorkSession": {
+        const started = await this.ledger.startSession();
+        await this.emitSnapshot();
+        return { ok: started === "started", summary: started };
+      }
+      case "EndWorkSession": {
+        const ended = await this.ledger.endSession();
+        await this.emitSnapshot();
+        return { ok: ended === "completed", summary: ended };
+      }
       default:
         return { ok: false, summary: "unsupported_command", error: command.type };
     }
@@ -399,7 +421,18 @@ export class RelayEngine {
             token: trigger.token,
             reasonCode: "finding",
           });
+          await this.ledger.recordExactLookup(trigger.token);
+        } else if (result.type === "clarification_required") {
+          await this.ledger.recordJudgmentRequired(trigger.token);
+          await this.note("reflex.no_action", `Reflex skipped · ${result.summary}`, {
+            caseId,
+            reflexId: reflex.definition.id,
+            reasonCode: result.summary,
+          });
         } else {
+          if (result.summary === "no_candidates") {
+            await this.ledger.recordUnknownLookup(trigger.token);
+          }
           await this.note("reflex.no_action", `Reflex skipped · ${result.summary}`, {
             caseId,
             reflexId: reflex.definition.id,
@@ -520,6 +553,7 @@ export class RelayEngine {
       const category = outcome.response.failure.category;
       const message = `Jev remember ${token} · ${category} · not accepted`;
       await this.note("jev.failed", message, { token, category });
+      await this.ledger.recordRemember(token, { kind: "missing", category });
       await this.deps.store.addFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "memory",
@@ -535,6 +569,7 @@ export class RelayEngine {
       await this.note("jev.failed", `Jev remember ${token} · invalid_response · not accepted`, {
         token,
       });
+      await this.ledger.recordRemember(token, { kind: "missing", category: "invalid_response" });
       await this.emitSnapshot();
       return { ok: false, summary: "invalid_response" };
     }
@@ -544,6 +579,7 @@ export class RelayEngine {
       await this.note("jev.failed", `Jev remember ${token} · invalid probability · not accepted`, {
         token,
       });
+      await this.ledger.recordRemember(token, { kind: "missing", category: "invalid_response" });
       await this.emitSnapshot();
       return { ok: false, summary: "invalid_response" };
     }
@@ -555,6 +591,11 @@ export class RelayEngine {
       confidence: interval.confidence,
       low: interval.low,
       high: interval.high,
+    });
+    await this.ledger.recordRemember(token, {
+      kind: "noul",
+      probabilityYes: interval.probabilityYes,
+      accept: interval.accept,
     });
 
     if (!interval.accept) {

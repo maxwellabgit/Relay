@@ -2,6 +2,7 @@ import type { JudgmentPort, RelayClient, TextModelPort } from "@relay/contracts"
 import { createRelayClientFromEngine, createTypeSafeJudgmentPort, RelayEngine, type EngineDeps } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
 import { MemoryArtifactStore, MemoryEngineStore } from "@relay/testkit/browser";
+import { createBrowserDecisionLog } from "./decision-log";
 
 export type WebClientOptions = {
   readonly sessionId?: string;
@@ -54,6 +55,7 @@ export function createWebClient(options: WebClientOptions = {}): WebClientHandle
     reflexModules: productionReflexes,
     storageDetail: "memory",
     jevDetail: "missing key",
+    decisionLog: createBrowserDecisionLog(),
   };
 
   const engine = new RelayEngine(deps);

@@ -89,6 +89,11 @@ export type RelaySnapshot = {
   readonly cases: readonly CaseView[];
   readonly queueDepth: number;
   readonly activity: readonly ActivityLine[];
+  readonly gate: DecisionGateView | null;
+  readonly expansion: ExpansionProgress;
+  readonly recommendations: readonly PatternRecommendation[];
+  readonly decisions: readonly KeptDecision[];
+  readonly decisionLogPath: string;
 };
 
 export type ActivityLine = {
@@ -96,6 +101,44 @@ export type ActivityLine = {
   readonly at: string;
   readonly eventType: string;
   readonly message: string;
+};
+
+export type GateMark = "pass" | "fail" | "info" | "wait";
+
+export type GateRow = {
+  readonly label: string;
+  readonly value: string;
+  readonly mark: GateMark;
+};
+
+/** The decision currently in front of the developer. No model prose. */
+export type DecisionGateView = {
+  readonly at: string;
+  readonly title: string;
+  readonly rows: readonly GateRow[];
+};
+
+export type ExpansionProgress = {
+  readonly completeSessions: number;
+  readonly sessionTarget: number;
+  readonly reflexesBuilt: number;
+  readonly reflexTarget: number;
+  readonly reviewDue: boolean;
+};
+
+export type PatternRecommendation = {
+  readonly code: string;
+  readonly because: string;
+  readonly count: number;
+  readonly status: "candidate";
+};
+
+/** A kept log line. Detail is a short code, never a saved response. */
+export type KeptDecision = {
+  readonly sequence: number;
+  readonly at: string;
+  readonly code: string;
+  readonly detail: string;
 };
 
 export type SourceSegmentView = {

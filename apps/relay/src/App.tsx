@@ -17,6 +17,17 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   cases: [],
   queueDepth: 0,
   activity: [],
+  gate: null,
+  expansion: {
+    completeSessions: 0,
+    sessionTarget: 12,
+    reflexesBuilt: 0,
+    reflexTarget: 4,
+    reviewDue: false,
+  },
+  recommendations: [],
+  decisions: [],
+  decisionLogPath: ".dev-data/dev-console/decisions.jsonl",
 };
 
 const FIXTURE_SEGMENTS = [
@@ -107,6 +118,12 @@ export function App() {
         }}
         onRemember={(token) => {
           void clientRef.current?.execute({ type: "RememberToken", token });
+        }}
+        onStartSession={() => {
+          void clientRef.current?.execute({ type: "StartWorkSession" });
+        }}
+        onEndSession={() => {
+          void clientRef.current?.execute({ type: "EndWorkSession" });
         }}
         traceLines={traceLines}
         onReplayFixture={async (fixture, speed) => {

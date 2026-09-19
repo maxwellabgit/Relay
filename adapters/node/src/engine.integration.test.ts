@@ -77,6 +77,11 @@ describe("autonomous engine", () => {
       expect(tasks).toHaveLength(1);
       expect(tasks[0]?.summary).toBe("Search online for the definition of MSRP");
       expect(answers).toHaveLength(0);
+      expect(snap.decisions.some((line) => line.code === "lookup.unknown" && line.detail.startsWith("MSRP"))).toBe(
+        true,
+      );
+      expect(snap.gate?.rows.find((row) => row.label === "Jev")?.value).toBe("not called");
+      expect(snap.decisions.some((line) => line.detail.includes("Search online"))).toBe(false);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -117,6 +122,9 @@ describe("autonomous engine", () => {
       expect(snap.feedItems.some((item) => item.summary.startsWith("Remembered"))).toBe(false);
       expect(snap.activity.some((line) => line.message.includes("missing_secret"))).toBe(true);
       expect(snap.activity.some((line) => line.message.includes("not accepted"))).toBe(true);
+      expect(snap.decisions.some((line) => line.code === "gate.remember" && line.detail.includes("missing_secret"))).toBe(
+        true,
+      );
     } finally {
       await harness.client.stop();
       harness.close();

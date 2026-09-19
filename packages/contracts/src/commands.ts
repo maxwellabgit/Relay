@@ -16,6 +16,14 @@ export type RememberTokenCommand = {
   readonly token: string;
 };
 
+export type StartWorkSessionCommand = {
+  readonly type: "StartWorkSession";
+};
+
+export type EndWorkSessionCommand = {
+  readonly type: "EndWorkSession";
+};
+
 export type ApproveOperationCommand = {
   readonly type: "ApproveOperation";
   readonly operationId: string;
@@ -140,6 +148,8 @@ export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
   | RememberTokenCommand
+  | StartWorkSessionCommand
+  | EndWorkSessionCommand
   | ApproveOperationCommand
   | RejectOperationCommand
   | StartConnectionAuthorizationCommand
