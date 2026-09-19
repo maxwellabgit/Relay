@@ -1,6 +1,7 @@
 import type {
   ArtifactStorePort,
   JudgmentPort,
+  ReflexModule,
   RelayChange,
   RelayCommand,
   RelayCommandResult,
@@ -23,14 +24,7 @@ export type EngineDeps = {
   readonly clock: Clock;
   readonly ids: IdFactory;
   readonly sessionId: string;
-  readonly reflexes?: {
-    onSourceFinal(input: {
-      sourceEventId: string;
-      segment: TranscriptSegmentV1;
-      caseId: string;
-      caseVersion: number;
-    }): Promise<void>;
-  };
+  readonly reflexModules?: readonly ReflexModule[];
 };
 
 function encodeText(text: string): Uint8Array {
@@ -141,6 +135,7 @@ export class RelayEngine {
         caseId: record.caseId,
         caseVersion: record.version,
         segmentId: segment.segmentId,
+        text: segment.text,
         isAsk,
       },
       routing.priority,
@@ -221,6 +216,8 @@ export class RelayEngine {
     const caseId = String(item.payload.caseId);
     const caseVersion = Number(item.payload.caseVersion);
     const sourceEventId = String(item.payload.sourceEventId);
+    const text = String(item.payload.text ?? "");
+    const isAsk = item.payload.isAsk === true;
     const current = await this.deps.store.getCase(caseId);
     if (!current || current.version !== caseVersion) return;
 
@@ -236,18 +233,13 @@ export class RelayEngine {
       sourceEventId,
     });
 
-    if (this.deps.reflexes) {
-      // Reflex wiring lands in commit 5; hook is present so the loop stays autonomous.
-      await this.deps.store.appendCaseEvent(
-        caseId,
-        updated.version,
-        "case.phase_changed",
-        this.deps.clock.now().toISOString(),
-        { phase: "publish", note: "reflex_hook_pending" },
-      );
+    if (this.deps.reflexModules?.length) {
+      await this.runReflexesOnFinal(text, isAsk, caseId, updated.version, sourceEventId);
     }
 
-    const completed = await this.deps.store.updateCase(caseId, updated.version, {
+    const latest = await this.deps.store.getCase(caseId);
+    if (!latest) return;
+    const completed = await this.deps.store.updateCase(caseId, latest.version, {
       phase: "done",
       status: "completed",
       at: this.deps.clock.now().toISOString(),
@@ -264,6 +256,80 @@ export class RelayEngine {
       createdAt: completed.updatedAt,
       caseId,
     });
+  }
+
+  private async runReflexesOnFinal(
+    text: string,
+    isAsk: boolean,
+    caseId: string,
+    caseVersion: number,
+    sourceEventId: string,
+  ): Promise<void> {
+    const sourceEvent = {
+      sourceEventId,
+      segmentId: sourceEventId,
+      text,
+      origin: isAsk ? "typed" : "scripted_transcript",
+      speakerKey: null,
+      startMs: 0,
+      endMs: 0,
+    };
+    const detection = {
+      sessionId: this.deps.sessionId,
+      now: this.deps.clock.now().toISOString(),
+      listening: await this.deps.store.getListening(this.deps.sessionId),
+    };
+
+    for (const reflex of this.deps.reflexModules ?? []) {
+      const triggers = reflex.detect(sourceEvent, detection);
+      for (const trigger of triggers) {
+        const result = await reflex.evaluate({
+          caseId,
+          caseVersion,
+          reflex: { id: reflex.definition.id, version: reflex.definition.version },
+          triggerSourceRefs: [],
+          eligibleConnections: [],
+          remainingBudgets: reflex.definition.budgets,
+          now: detection.now,
+          observationText: text,
+          triggerToken: trigger.token,
+          isExplicitAsk: isAsk,
+        });
+
+        if (result.type === "finding") {
+          await this.deps.store.addFeedItem({
+            itemId: this.deps.ids.next("feed"),
+            kind: "finding",
+            summary: result.summary,
+            createdAt: this.deps.clock.now().toISOString(),
+            caseId,
+          });
+          await this.deps.store.appendDomainEvent(
+            "reflex.finding",
+            this.deps.clock.now().toISOString(),
+            {
+              caseId,
+              caseVersion,
+              sourceEventId,
+              reflexId: reflex.definition.id,
+              reflexVersion: reflex.definition.version,
+              token: trigger.token,
+              reasonCode: "finding",
+            },
+          );
+        } else {
+          await this.deps.store.appendDomainEvent(
+            "reflex.no_action",
+            this.deps.clock.now().toISOString(),
+            {
+              caseId,
+              reflexId: reflex.definition.id,
+              reasonCode: result.summary,
+            },
+          );
+        }
+      }
+    }
   }
 
   private async onCaseResume(item: WorkItem): Promise<void> {

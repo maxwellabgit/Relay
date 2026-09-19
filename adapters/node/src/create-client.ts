@@ -1,5 +1,7 @@
-import type { JudgmentPort, JudgmentResponse, TextModelPort } from "@relay/contracts";
+import type { JudgmentPort, TextModelPort } from "@relay/contracts";
 import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
+import { productionReflexes } from "@relay/reflexes";
+import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
 
@@ -7,6 +9,7 @@ export type NodeHarnessOptions = {
   readonly sessionId?: string;
   readonly clock?: EngineDeps["clock"];
   readonly ids?: EngineDeps["ids"];
+  readonly judgments?: JudgmentPort;
 };
 
 export function createNodeHarness(options: NodeHarnessOptions = {}) {
@@ -20,14 +23,25 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
       next: (prefix: string) => `${prefix}_${++n}`,
     } satisfies EngineDeps["ids"]);
 
-  const judgments: JudgmentPort = {
-    async judge(): Promise<JudgmentResponse> {
-      return {
-        ok: false,
-        failure: { category: "disabled", message: "recorded_judgments_default" },
-      };
-    },
-  };
+  const judgments: JudgmentPort =
+    options.judgments ??
+    new RecordedJudgmentPort([
+      {
+        questionSetId: "judgment.acronym-choice",
+        response: recordedSuccess({
+          expansion: {
+            type: "choice",
+            choice: "Application Programming Interface",
+            probabilities: {
+              "Application Programming Interface": 0.82,
+              no_match: 0.18,
+            },
+            confidence: 0.82,
+          },
+          useful: { type: "noul", probabilityYes: 0.78 },
+        }),
+      },
+    ]);
 
   const model: TextModelPort = {
     async generate() {
@@ -43,6 +57,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     clock,
     ids,
     sessionId: options.sessionId ?? "session_test",
+    reflexModules: productionReflexes,
   };
 
   const engine = new RelayEngine(deps);

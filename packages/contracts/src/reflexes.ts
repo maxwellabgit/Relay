@@ -68,6 +68,10 @@ export type ReflexContext = {
   readonly eligibleConnections: readonly ConnectionView[];
   readonly remainingBudgets: ReflexBudgets;
   readonly now: string;
+  /** Observation text for detectors that need the current window. */
+  readonly observationText?: string;
+  readonly triggerToken?: string;
+  readonly isExplicitAsk?: boolean;
 };
 
 export type DetectionContext = {

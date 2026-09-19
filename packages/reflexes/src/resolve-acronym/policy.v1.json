@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "choiceProbabilityMinimum": 0.65,
+  "choiceMarginMinimum": 0.15,
+  "displayUsefulnessMinimum": 0.70,
+  "repeatCooldownMs": 300000
+}
