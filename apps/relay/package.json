@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@expo/metro-runtime": "^57.0.16",
     "@relay/contracts": "0.1.0",
     "@relay/engine": "0.1.0",
     "@relay/reflexes": "0.1.0",

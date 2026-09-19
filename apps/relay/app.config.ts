@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: "automatic",
   web: {
     bundler: "metro",
-    output: "static",
+    output: "single",
   },
   ios: {
     supportsTablet: false,

@@ -12,7 +12,8 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@relay/contracts": "0.1.0"
+    "@relay/contracts": "0.1.0",
+    "@tauri-apps/api": "^2.8.0"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

@@ -36,6 +36,7 @@ dist-types/
 coverage/
 *.tsbuildinfo
 apps/desktop/src-tauri/target/
+apps/relay/dist/
 runs/
 fixtures/private/**
 !fixtures/private/.gitignore

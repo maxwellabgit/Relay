@@ -1,12 +1,12 @@
 import type { RelaySnapshot } from "@relay/contracts";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
-import { Composer } from "./assistant/Composer.js";
-import { Feed } from "./assistant/Feed.js";
-import { ListenToggle } from "./assistant/ListenToggle.js";
-import { PendingCard } from "./assistant/PendingCard.js";
-import { StatusChips } from "./assistant/StatusChips.js";
-import { DeveloperPanel } from "./developer/DeveloperPanel.js";
-import { colors } from "./theme/colors.js";
+import { Composer } from "./assistant/Composer";
+import { Feed } from "./assistant/Feed";
+import { ListenToggle } from "./assistant/ListenToggle";
+import { PendingCard } from "./assistant/PendingCard";
+import { StatusChips } from "./assistant/StatusChips";
+import { DeveloperPanel } from "./developer/DeveloperPanel";
+import { colors } from "./theme/colors";
 
 export type RelayWorkbenchProps = {
   readonly snapshot: RelaySnapshot;

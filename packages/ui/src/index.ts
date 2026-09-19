@@ -1,8 +1,8 @@
-export { Composer } from "./assistant/Composer.js";
-export { Feed } from "./assistant/Feed.js";
-export { ListenToggle } from "./assistant/ListenToggle.js";
-export { PendingCard } from "./assistant/PendingCard.js";
-export { StatusChips } from "./assistant/StatusChips.js";
-export { DeveloperPanel } from "./developer/DeveloperPanel.js";
-export { RelayWorkbench, type RelayWorkbenchProps } from "./RelayWorkbench.js";
-export { colors } from "./theme/colors.js";
+export { Composer } from "./assistant/Composer";
+export { Feed } from "./assistant/Feed";
+export { ListenToggle } from "./assistant/ListenToggle";
+export { PendingCard } from "./assistant/PendingCard";
+export { StatusChips } from "./assistant/StatusChips";
+export { DeveloperPanel } from "./developer/DeveloperPanel";
+export { RelayWorkbench, type RelayWorkbenchProps } from "./RelayWorkbench";
+export { colors } from "./theme/colors";

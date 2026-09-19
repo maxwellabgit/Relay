@@ -13,4 +13,19 @@ config.resolver.nodeModulesPaths = [
 ];
 config.resolver.disableHierarchicalLookup = true;
 
+// TypeScript ESM uses `.js` specifiers that map to `.ts` sources.
+const upstreamResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const resolver = upstreamResolveRequest ?? context.resolveRequest;
+  if (moduleName.startsWith(".") && moduleName.endsWith(".js")) {
+    const withoutJs = moduleName.slice(0, -3);
+    try {
+      return resolver(context, withoutJs, platform);
+    } catch {
+      // fall through
+    }
+  }
+  return resolver(context, moduleName, platform);
+};
+
 module.exports = config;

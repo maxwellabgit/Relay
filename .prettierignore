@@ -12,8 +12,9 @@ tools/**/.venv/
 tools/**/__pycache__/
 *.pyc
 apps/desktop/src-tauri/target/
-src/
-tests/
+apps/desktop/src-tauri/gen/
+Cargo.lock
+
 .dev-data/
 .dev-runs/
 artifacts/
