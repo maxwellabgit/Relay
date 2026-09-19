@@ -1,2 +1,8 @@
-/** Workspace bootstrap — autonomous engine lands in commit 3. */
-export const ENGINE_BOOTSTRAP = "0.1.0" as const;
+export * from "./engine.js";
+export * from "./host.js";
+export * from "./policies.js";
+export * from "./ports.js";
+export * from "./projections.js";
+export * from "./queue.js";
+export * from "./scheduler.js";
+export * from "./store.js";
