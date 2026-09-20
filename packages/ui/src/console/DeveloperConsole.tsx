@@ -44,9 +44,7 @@ export function DeveloperConsole({
   const [reasonFilter, setReasonFilter] = useState<string | null>(null);
 
   const rows = paused ? frozen : snapshot.trace;
-  const runtime = snapshot.runtime;
-  const review = snapshot.review;
-  const tree = useMemo(() => projectJevTree(snapshot.gate, snapshot.trace), [snapshot.gate, snapshot.trace]);
+  const tree = useMemo(() => projectJevTree(snapshot.decision), [snapshot.decision]);
 
   const filtered = rows.filter((row) => {
     if (stageFilter && row.stage !== stageFilter) return false;
@@ -91,9 +89,14 @@ export function DeveloperConsole({
           <View style={styles.jevSide}>
             <SideCard title="Current input">
               <Text style={styles.sideBody}>
-                {latestUserLine(snapshot) ?? "No user message in this run yet."}
+                {snapshot.currentInputPreview ?? "No live input preview."}
               </Text>
-              <Text style={styles.sideMeta}>{runtime.episodeId ? `episode ${runtime.episodeId}` : "no episode"}</Text>
+              <Text style={styles.sideMeta}>
+                {snapshot.currentInputPreview ? "not saved" : "preview cleared"}
+                {tree.caseId ? ` · case ${tree.caseId}` : ""}
+                {tree.decisionId ? ` · decision ${tree.decisionId}` : ""}
+                {tree.historical ? " · historical" : ""}
+              </Text>
             </SideCard>
             <SideCard title="Jev output">
               <Text style={styles.code}>{formatJson(tree.output)}</Text>
@@ -417,15 +420,6 @@ function FilterRow({
 
 function Line({ label, value }: { readonly label: string; readonly value: string }) {
   return <Text style={styles.line}>{`${label}: ${value}`}</Text>;
-}
-
-function latestUserLine(snapshot: RelaySnapshot): string | null {
-  for (let i = snapshot.feedItems.length - 1; i >= 0; i -= 1) {
-    const item = snapshot.feedItems[i];
-    if (item && /user|typed|source|utterance/i.test(item.kind)) return item.summary;
-  }
-  const last = snapshot.feedItems[snapshot.feedItems.length - 1];
-  return last?.summary ?? null;
 }
 
 function formatJson(value: Readonly<Record<string, string | number | boolean | null>>): string {

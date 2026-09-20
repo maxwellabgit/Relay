@@ -114,6 +114,9 @@ const ID_FIELDS = [
   "judgmentId",
   "receiptId",
   "reflexId",
+  "decisionId",
+  "captureSessionId",
+  "workSessionId",
 ] as const;
 
 export type RuntimeEventV2 = {
@@ -131,6 +134,9 @@ export type RuntimeEventV2 = {
   readonly judgmentId?: string;
   readonly receiptId?: string;
   readonly reflexId?: string;
+  readonly decisionId?: string;
+  readonly captureSessionId?: string;
+  readonly workSessionId?: string;
   readonly reasonCode?: string;
   readonly durationMs?: number;
   readonly attempt?: number;
@@ -152,6 +158,9 @@ const ALLOWED = new Set([
   "judgmentId",
   "receiptId",
   "reflexId",
+  "decisionId",
+  "captureSessionId",
+  "workSessionId",
   "reasonCode",
   "durationMs",
   "attempt",

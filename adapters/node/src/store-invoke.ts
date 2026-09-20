@@ -12,7 +12,7 @@ import type {
   WorkSessionRecord,
 } from "@relay/engine";
 import type { StoreInvoke } from "@relay/adapter-tauri/engine-store";
-import { SqliteEngineStore } from "./sqlite-store.js";
+import type { SqliteEngineStore } from "./sqlite-store.js";
 
 export function sqliteStoreInvoke(store: SqliteEngineStore): StoreInvoke {
   return async (command, args) => {

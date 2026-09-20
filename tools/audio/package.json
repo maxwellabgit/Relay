@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare:audio": "python -m relay_audio.prepare --help",
+    "prepare:audio": "python -m relay_audio.prepare",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {

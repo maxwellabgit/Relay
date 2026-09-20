@@ -5,6 +5,11 @@ description = "Halo emulator bridge for RELAY glasses display port"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+test = [
+  "pytest==8.3.5",
+]
+
 [project.scripts]
 relay-halo-bridge = "relay_halo.bridge:main"
 

@@ -46,3 +46,5 @@ fixtures/private/**
 __pycache__/
 *.pyc
 tools/**/__pycache__/
+*.egg-info/
+tools/**/*.egg-info/

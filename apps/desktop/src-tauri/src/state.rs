@@ -9,6 +9,8 @@ const MIGRATION_2: &str =
     include_str!("../../../../packages/storage-schema/migrations/002_learning.sql");
 const MIGRATION_3: &str =
     include_str!("../../../../packages/storage-schema/migrations/003_runtime.sql");
+const MIGRATION_4: &str =
+    include_str!("../../../../packages/storage-schema/migrations/004_decisions.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -71,6 +73,7 @@ impl StateDb {
         .map_err(|error| error.to_string())?;
         apply_version(&tx, 2, MIGRATION_2)?;
         apply_version(&tx, 3, MIGRATION_3)?;
+        apply_version(&tx, 4, MIGRATION_4)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -744,14 +747,18 @@ fn list_episodes(conn: &Connection) -> Result<Value, String> {
 
 fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
+    let receipt_id = req_str(record, "receiptId")?;
+    let decision_id = opt_str(record, "decisionId").unwrap_or_else(|| receipt_id.clone());
     conn.execute(
         "INSERT INTO decision_receipts(
           receipt_id, case_id, gate_id, policy_version, question_type, provider,
           probabilities_json, thresholds_json, selected_option, result, reason_code,
-          latency_ms, retries, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          latency_ms, retries, created_at,
+          decision_id, judgment_id, reflex_id, selected_option_id, option_labels_json,
+          requested_at, completed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
-            req_str(record, "receiptId")?,
+            receipt_id,
             opt_str(record, "caseId"),
             req_str(record, "gateId")?,
             req_str(record, "policyVersion")?,
@@ -765,6 +772,13 @@ fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
             opt_i64(record, "latencyMs"),
             req_i64(record, "retries")?,
             req_str(record, "createdAt")?,
+            decision_id,
+            opt_str(record, "judgmentId"),
+            opt_str(record, "reflexId"),
+            opt_str(record, "selectedOptionId"),
+            json_text(record.get("optionLabels").unwrap_or(&json!({})))?,
+            opt_str(record, "requestedAt"),
+            opt_str(record, "completedAt"),
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -965,20 +979,31 @@ fn map_episode(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 fn map_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let probabilities: String = row.get("probabilities_json")?;
     let thresholds: String = row.get("thresholds_json")?;
+    let option_labels: String = row
+        .get::<_, Option<String>>("option_labels_json")?
+        .unwrap_or_else(|| "{}".into());
+    let receipt_id: String = row.get("receipt_id")?;
     Ok(json!({
-        "receiptId": row.get::<_, String>("receipt_id")?,
+        "receiptId": receipt_id.clone(),
+        "decisionId": row.get::<_, Option<String>>("decision_id")?.unwrap_or(receipt_id),
         "caseId": row.get::<_, Option<String>>("case_id")?,
+        "judgmentId": row.get::<_, Option<String>>("judgment_id")?,
+        "reflexId": row.get::<_, Option<String>>("reflex_id")?,
         "gateId": row.get::<_, String>("gate_id")?,
         "policyVersion": row.get::<_, String>("policy_version")?,
         "questionType": row.get::<_, String>("question_type")?,
         "provider": row.get::<_, String>("provider")?,
         "probabilities": parse_json(&probabilities).unwrap_or(json!({})),
         "thresholds": parse_json(&thresholds).unwrap_or(json!({})),
+        "optionLabels": parse_json(&option_labels).unwrap_or(json!({})),
         "selectedOption": row.get::<_, Option<String>>("selected_option")?,
+        "selectedOptionId": row.get::<_, Option<String>>("selected_option_id")?,
         "result": row.get::<_, String>("result")?,
         "reasonCode": row.get::<_, String>("reason_code")?,
         "latencyMs": row.get::<_, Option<i64>>("latency_ms")?,
         "retries": row.get::<_, i64>("retries")?,
+        "requestedAt": row.get::<_, Option<String>>("requested_at")?,
+        "completedAt": row.get::<_, Option<String>>("completed_at")?,
         "createdAt": row.get::<_, String>("created_at")?,
     }))
 }

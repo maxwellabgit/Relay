@@ -23,7 +23,6 @@ import {
   RETENTION_LABEL,
   workSignature,
   type EpisodeOutcome,
-  type MemoryRecord,
   type ReceiptRecord,
 } from "./learning-store.js";
 import {
@@ -87,7 +86,9 @@ export class RelayEngine {
   private logError: string | null = null;
   private activeEpisodeId: string | null = null;
   private activeCaseId: string | null = null;
+  private currentInputPreview: string | null = null;
   private readonly optionLabels = new Map<string, Record<string, string>>();
+  private readonly pendingCards = new Map<string, ActionCard>();
 
   constructor(private readonly deps: EngineDeps) {
     this.scheduler = new Scheduler(deps.store, deps.clock, "engine");
@@ -139,11 +140,17 @@ export class RelayEngine {
       activeCaseId: this.activeCaseId,
       episodeId: this.activeEpisodeId,
     });
-    const memories = await this.deps.store.learning.listMemories();
     const gate = inspected.gate
-      ? { ...inspected.gate, optionLabels: this.optionLabels.get(inspected.gate.gateId) ?? {} }
+      ? { ...inspected.gate, optionLabels: { ...inspected.gate.optionLabels, ...(this.optionLabels.get(inspected.gate.gateId) ?? {}) } }
       : null;
-    return { ...snapshot, ...inspected, gate, actions: pendingActions(memories) };
+    return {
+      ...snapshot,
+      ...inspected,
+      gate,
+      decision: inspected.decision,
+      currentInputPreview: this.currentInputPreview,
+      actions: [...this.pendingCards.values()],
+    };
   }
 
   async execute(command: RelayCommand): Promise<RelayCommandResult> {
@@ -155,6 +162,7 @@ export class RelayEngine {
         return { ok: true, summary: command.enabled ? "listening_on" : "listening_off" };
       }
       case "SubmitText": {
+        this.currentInputPreview = command.text;
         const segment = this.makeTypedSegment(command.text);
         const caseId = await this.ingestFinalSegment(segment, true);
         return { ok: true, summary: "ask_accepted", caseId };
@@ -426,7 +434,7 @@ export class RelayEngine {
       await this.deps.store.addFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "ask",
-        summary: text,
+        summary: structuredAskSummary(text),
         createdAt: completed.updatedAt,
         caseId,
       });
@@ -518,7 +526,7 @@ export class RelayEngine {
   }> {
     const findings: string[] = [];
     let signature: string | null = null;
-    let suppressSearch = false;
+    const suppressSearch = false;
     const sourceEvent = {
       sourceEventId,
       segmentId: sourceEventId,
@@ -649,7 +657,9 @@ export class RelayEngine {
     const minimum = parsed.choiceProbabilityMinimum ?? 0.65;
     const marginMinimum = parsed.choiceMarginMinimum ?? 0.15;
     const criteria: Record<string, string> = {};
-    for (const id of [...optionIds, "no_match"]) criteria[id] = id;
+    for (const id of optionIds) criteria[id] = labelById[id] ?? id;
+    criteria.no_match = "None of the permitted choices";
+    labelById.no_match = "None of the permitted choices";
     const request: JudgmentRequest = {
       questionSetId: "judgment.acronym-choice",
       questionSetVersion: "1",
@@ -682,9 +692,13 @@ export class RelayEngine {
       this.abort?.signal ?? new AbortController().signal,
     );
     const durationMs = Date.now() - started;
+    const requestedAt = new Date(started).toISOString();
+    const completedAt = this.deps.clock.now().toISOString();
     if (!outcome.response.ok) {
       const category = outcome.response.failure.category;
       const reasonCode = knownReason(category);
+      const retrying = isRetryableJudgmentFailure(category) && attempt < JUDGMENT_MAX_ATTEMPTS;
+      const blocked = category === "missing_secret" || category === "authentication";
       await this.putReceipt({
         caseId,
         gateId: reflexId,
@@ -694,12 +708,18 @@ export class RelayEngine {
         probabilities: {},
         thresholds: { choiceProbabilityMinimum: minimum, choiceMarginMinimum: marginMinimum },
         selectedOption: null,
-        result: "fail",
+        selectedOptionId: null,
+        optionLabels: labelById,
+        reflexId,
+        judgmentId: outcome.record.judgmentId,
+        result: retrying ? "wait" : blocked ? "blocked" : "fail",
         reasonCode,
         latencyMs: durationMs,
         retries: attempt - 1,
+        requestedAt,
+        completedAt: retrying ? null : completedAt,
       });
-      if (isRetryableJudgmentFailure(category) && attempt < JUDGMENT_MAX_ATTEMPTS) {
+      if (retrying) {
         const nextAttemptAt = new Date(this.deps.clock.now().getTime() + backoffMs(attempt)).toISOString();
         await this.deps.store.upsertJudgmentAttempt({
           attemptId: `${caseId}:${attempt}`,
@@ -712,6 +732,17 @@ export class RelayEngine {
           providerRequestId: outcome.record.judgmentId,
           createdAt: this.deps.clock.now().toISOString(),
         });
+        await this.emitTrace({
+          type: "judgment.failed",
+          stage: "judgment.response",
+          status: "waiting",
+          caseId,
+          reflexId,
+          judgmentId: outcome.record.judgmentId,
+          reasonCode,
+          attempt,
+          durationMs,
+        });
         return {
           kind: "retry",
           reasonCode,
@@ -719,7 +750,7 @@ export class RelayEngine {
           payload: { ...item.payload, attempt: attempt + 1, caseVersion: current.version },
         };
       }
-      const status = category === "missing_secret" || category === "authentication" ? "blocked" : "failed";
+      const status = blocked ? "blocked" : "failed";
       await this.finishCase(caseId, current.version, status);
       await this.deps.store.addFeedItem({
         itemId: this.deps.ids.next("feed"),
@@ -733,6 +764,8 @@ export class RelayEngine {
         stage: "judgment.response",
         status: "failed",
         caseId,
+        reflexId,
+        judgmentId: outcome.record.judgmentId,
         reasonCode,
         attempt,
         durationMs,
@@ -771,10 +804,16 @@ export class RelayEngine {
       probabilities,
       thresholds: { choiceProbabilityMinimum: minimum, choiceMarginMinimum: marginMinimum },
       selectedOption: gate.selected,
+      selectedOptionId: gate.selected,
+      optionLabels: labelById,
+      reflexId,
+      judgmentId: outcome.record.judgmentId,
       result: pass ? "pass" : "fail",
       reasonCode,
       latencyMs: durationMs,
       retries: attempt - 1,
+      requestedAt,
+      completedAt,
     });
     await this.emitTrace({
       type: "judgment.completed",
@@ -902,6 +941,9 @@ export class RelayEngine {
       source: "explicit_user",
       createdAt: existing?.createdAt ?? this.deps.clock.now().toISOString(),
     });
+    for (const [id, card] of this.pendingCards) {
+      if (card.kind === "save_definition" && card.token === token) this.pendingCards.delete(id);
+    }
     await this.putReceipt({
       caseId: null,
       gateId: "memory.explicit",
@@ -962,6 +1004,9 @@ export class RelayEngine {
       source: "explicit_user",
       createdAt: existing?.createdAt ?? this.deps.clock.now().toISOString(),
     });
+    for (const [id, card] of this.pendingCards) {
+      if (card.kind === "confirm_birthday" && card.personId === key) this.pendingCards.delete(id);
+    }
     await this.emitTrace({
       type: "memory.stored",
       stage: "memory.write",
@@ -1245,13 +1290,53 @@ export class RelayEngine {
   }
 
   private async putReceipt(
-    input: Omit<ReceiptRecord, "receiptId" | "retries" | "createdAt"> & { retries?: number },
+    input: Omit<
+      ReceiptRecord,
+      | "receiptId"
+      | "retries"
+      | "createdAt"
+      | "decisionId"
+      | "optionLabels"
+      | "selectedOptionId"
+      | "judgmentId"
+      | "reflexId"
+      | "requestedAt"
+      | "completedAt"
+    > & {
+      retries?: number;
+      decisionId?: string;
+      optionLabels?: Readonly<Record<string, string>>;
+      selectedOptionId?: string | null;
+      judgmentId?: string | null;
+      reflexId?: string | null;
+      requestedAt?: string | null;
+      completedAt?: string | null;
+    },
   ): Promise<void> {
+    const now = this.deps.clock.now().toISOString();
+    const receiptId = this.deps.ids.next("receipt");
     await this.deps.store.learning.putReceipt({
-      ...input,
-      receiptId: this.deps.ids.next("receipt"),
+      caseId: input.caseId,
+      gateId: input.gateId,
+      policyVersion: input.policyVersion,
+      questionType: input.questionType,
+      provider: input.provider,
+      probabilities: input.probabilities,
+      thresholds: input.thresholds,
+      selectedOption: input.selectedOption,
+      result: input.result,
+      reasonCode: input.reasonCode,
+      latencyMs: input.latencyMs,
+      receiptId,
+      decisionId: input.decisionId ?? receiptId,
+      judgmentId: input.judgmentId ?? null,
+      reflexId: input.reflexId ?? null,
+      optionLabels: input.optionLabels ?? {},
+      selectedOptionId: input.selectedOptionId ?? input.selectedOption,
+      requestedAt: input.requestedAt ?? now,
+      completedAt: input.completedAt ?? (input.result === "wait" ? null : now),
       retries: input.retries ?? 0,
-      createdAt: this.deps.clock.now().toISOString(),
+      createdAt: now,
     });
   }
 
@@ -1342,6 +1427,7 @@ export class RelayEngine {
       waitKind: null,
       at: this.deps.clock.now().toISOString(),
     });
+    if (this.activeCaseId === caseId) this.currentInputPreview = null;
     void version;
   }
 
@@ -1352,19 +1438,17 @@ export class RelayEngine {
     year?: number;
   }): Promise<void> {
     const key = await this.personId(input.displayName);
-    await this.deps.store.learning.putMemory({
-      memoryId: this.deps.ids.next("mem"),
-      kind: "birthday",
-      key,
-      value: {
-        displayName: input.displayName,
-        month: String(input.month),
-        day: String(input.day),
-        year: input.year ? String(input.year) : "",
-        status: "pending",
-      },
-      source: "pending",
-      createdAt: this.deps.clock.now().toISOString(),
+    const month = String(input.month).padStart(2, "0");
+    const day = String(input.day).padStart(2, "0");
+    const date = input.year ? `${input.year}-${month}-${day}` : `${month}-${day}`;
+    const actionId = this.deps.ids.next("action");
+    this.pendingCards.set(actionId, {
+      actionId,
+      kind: "confirm_birthday",
+      label: "Confirm birthday",
+      personId: key,
+      displayName: input.displayName,
+      date,
     });
     await this.deps.store.addFeedItem({
       itemId: this.deps.ids.next("feed"),
@@ -1378,13 +1462,13 @@ export class RelayEngine {
     if (!token || !expansion) return;
     const existing = await this.deps.store.learning.getMemory("glossary", token);
     if (existing?.source === "explicit_user") return;
-    await this.deps.store.learning.putMemory({
-      memoryId: existing?.memoryId ?? this.deps.ids.next("mem"),
-      kind: "glossary",
-      key: token,
-      value: { expansion, status: "pending" },
-      source: "pending",
-      createdAt: existing?.createdAt ?? this.deps.clock.now().toISOString(),
+    const actionId = this.deps.ids.next("action");
+    this.pendingCards.set(actionId, {
+      actionId,
+      kind: "save_definition",
+      label: `Save definition for ${token}`,
+      token,
+      expansion,
     });
   }
 
@@ -1424,33 +1508,11 @@ const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "work.failed": "work",
 };
 
-function pendingActions(memories: readonly MemoryRecord[]): ActionCard[] {
-  const actions: ActionCard[] = [];
-  for (const memory of memories) {
-    if (memory.source !== "pending") continue;
-    if (memory.kind === "glossary") {
-      const expansion = memory.value.expansion ?? "";
-      if (!expansion) continue;
-      actions.push({
-        actionId: memory.memoryId,
-        kind: "save_definition",
-        label: `Save definition for ${memory.key}`,
-        token: memory.key,
-        expansion,
-      });
-      continue;
-    }
-    const year = memory.value.year ? `-${memory.value.year}` : "";
-    actions.push({
-      actionId: memory.memoryId,
-      kind: "confirm_birthday",
-      label: "Confirm birthday",
-      personId: memory.key,
-      displayName: memory.value.displayName ?? "",
-      date: `${memory.value.month}-${memory.value.day}${year}`,
-    });
-  }
-  return actions;
+function structuredAskSummary(text: string): string {
+  if (parseGlossaryMeans(text)) return "typed ask · glossary definition";
+  if (parseBirthdayUtterance(text)) return "typed ask · birthday capture";
+  if (askedToken(text)) return "typed ask · acronym lookup";
+  return "typed ask · general";
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

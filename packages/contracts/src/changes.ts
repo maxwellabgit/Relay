@@ -91,6 +91,8 @@ export type RelaySnapshot = {
   readonly activity: readonly ActivityLine[];
   readonly runtime: RuntimeHeader;
   readonly gate: DecisionReceiptView | null;
+  readonly decision: DecisionRunView | null;
+  readonly currentInputPreview: string | null;
   readonly patterns: readonly PatternView[];
   readonly review: ReviewStatus;
   readonly trace: readonly TraceRow[];
@@ -134,12 +136,69 @@ export type DecisionReceiptView = {
   readonly thresholds: Readonly<Record<string, number>>;
   readonly threshold: number | null;
   readonly optionLabels: Readonly<Record<string, string>>;
-  readonly result: "pass" | "fail" | "wait" | "not_applicable";
+  readonly result: "pass" | "fail" | "wait" | "not_applicable" | "blocked";
   readonly reasonCode: string;
   readonly provider: string;
   readonly latencyMs: number | null;
   readonly retries: number;
   readonly nextAction: string;
+  readonly receiptId: string | null;
+  readonly decisionId: string | null;
+  readonly caseId: string | null;
+  readonly judgmentId: string | null;
+  readonly selectedOptionId: string | null;
+};
+
+export type DecisionStageState = "not_started" | "running" | "passed" | "failed" | "waiting" | "skipped";
+
+export type DecisionStageView = {
+  readonly stage: string;
+  readonly title: string;
+  readonly state: DecisionStageState;
+  readonly durationMs: number | null;
+  readonly reasonCode: string | null;
+  readonly branch?: {
+    readonly continueLabel: string;
+    readonly exitLabel: string;
+    readonly taken: "continue" | "exit";
+  };
+};
+
+export type DecisionAttemptView = {
+  readonly attempt: number;
+  readonly status: string;
+  readonly reasonCode: string | null;
+  readonly durationMs: number | null;
+  readonly at: string;
+};
+
+export type DecisionRunView = {
+  readonly decisionId: string;
+  readonly receiptId: string | null;
+  readonly caseId: string;
+  readonly judgmentId: string | null;
+  readonly reflexId: string | null;
+  readonly gateId: string;
+  readonly policyVersion: string;
+  readonly historical: boolean;
+  readonly questionType: DecisionReceiptView["questionType"];
+  readonly status: DecisionStageState | "completed" | "blocked";
+  readonly stages: readonly DecisionStageView[];
+  readonly optionIds: readonly string[];
+  readonly optionLabels: Readonly<Record<string, string>>;
+  readonly probabilities: Readonly<Record<string, number>>;
+  readonly thresholds: Readonly<Record<string, number>>;
+  readonly topProbability: number | null;
+  readonly margin: number | null;
+  readonly selectedOptionId: string | null;
+  readonly reasonCode: string;
+  readonly nextAction: string;
+  readonly provider: string;
+  readonly attempts: readonly DecisionAttemptView[];
+  readonly requestedAt: string | null;
+  readonly completedAt: string | null;
+  readonly elapsedMs: number | null;
+  readonly result: DecisionReceiptView["result"];
 };
 
 export type PatternView = {
@@ -183,6 +242,13 @@ export type TraceRow = {
   readonly attempt: number | null;
   readonly caseId: string | null;
   readonly episodeId: string | null;
+  readonly runId: string | null;
+  readonly captureSessionId: string | null;
+  readonly workSessionId: string | null;
+  readonly decisionId: string | null;
+  readonly judgmentId: string | null;
+  readonly receiptId: string | null;
+  readonly reflexId: string | null;
   readonly result: string | null;
 };
 

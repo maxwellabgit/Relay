@@ -1,5 +1,6 @@
 import type {
   ArtifactStorePort,
+  JudgmentAnswer,
   JudgmentPort,
   JudgmentRecord,
   JudgmentRequest,
@@ -127,7 +128,7 @@ export async function runJudgmentLifecycle(
       const stored = JSON.parse(new TextDecoder().decode(raw)) as {
         ok?: boolean;
         model?: string;
-        answers?: Record<string, import("@relay/contracts").JudgmentAnswer>;
+        answers?: Record<string, JudgmentAnswer>;
         inputTokens?: number;
         outputTokens?: number;
         elapsedMs?: number;

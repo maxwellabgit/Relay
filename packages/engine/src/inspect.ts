@@ -1,5 +1,6 @@
 import type {
   DecisionReceiptView,
+  DecisionRunView,
   MemoryView,
   PatternView,
   ReviewStatus,
@@ -16,6 +17,7 @@ import {
   type LearningStore,
   type ReceiptRecord,
 } from "./learning-store.js";
+import { projectDecisionRun, selectReceiptForDecision } from "./project-decision-run.js";
 import type { RuntimeEventV2 } from "./runtime-events.js";
 
 export async function inspectRuntime(
@@ -25,6 +27,7 @@ export async function inspectRuntime(
 ): Promise<{
   runtime: RuntimeHeader;
   gate: DecisionReceiptView | null;
+  decision: DecisionRunView | null;
   patterns: readonly PatternView[];
   review: ReviewStatus;
   trace: readonly TraceRow[];
@@ -57,13 +60,22 @@ export async function inspectRuntime(
     completeEpisodes: completeEpisodes - (lastReview?.episodesAtReview ?? 0),
     qualifiedCandidates: qualifiedCandidates - (lastReview?.candidatesAtReview ?? 0),
   });
-  const latest = receipts.at(-1) ?? null;
+  const selected = selectReceiptForDecision(receipts, header.activeCaseId);
+  const decision = projectDecisionRun({
+    receipt: selected.receipt,
+    events: traces,
+    activeCaseId: header.activeCaseId,
+    historical: selected.historical,
+  });
+  // Gate remains for migration: prefer correlated selection, else latest receipt (may lack caseId).
+  const gateReceipt = selected.receipt ?? receipts.at(-1) ?? null;
   return {
     runtime: {
       ...header,
       sessionId: open?.sessionId ?? null,
     },
-    gate: latest ? toGate(latest) : null,
+    gate: gateReceipt ? toGate(gateReceipt) : null,
+    decision,
     patterns: patterns.map((pattern) => {
       const candidate = candidates.find((item) => item.signature === pattern.signature) ?? null;
       return {
@@ -112,6 +124,13 @@ export async function inspectRuntime(
       attempt: event.attempt ?? null,
       caseId: event.caseId ?? null,
       episodeId: event.episodeId ?? null,
+      runId: event.runId,
+      captureSessionId: event.captureSessionId ?? null,
+      workSessionId: event.workSessionId ?? event.sessionId ?? null,
+      decisionId: event.decisionId ?? null,
+      judgmentId: event.judgmentId ?? null,
+      receiptId: event.receiptId ?? null,
+      reflexId: event.reflexId ?? null,
       result: event.status,
     })),
     memories: memories.map((memory) => ({
@@ -128,11 +147,15 @@ function toGate(receipt: ReceiptRecord): DecisionReceiptView {
   const ranked = Object.values(receipt.probabilities).sort((a, b) => b - a);
   const margin = ranked.length === 0 ? null : ranked.length === 1 ? ranked[0]! : ranked[0]! - ranked[1]!;
   const threshold = Object.values(receipt.thresholds)[0] ?? null;
+  const elapsed =
+    receipt.requestedAt && receipt.completedAt
+      ? Math.max(0, Date.parse(receipt.completedAt) - Date.parse(receipt.requestedAt))
+      : receipt.latencyMs;
   return {
     at: receipt.createdAt,
     gateId: receipt.gateId,
     policyVersion: receipt.policyVersion,
-    reflexId: receipt.gateId.startsWith("reflex.") ? receipt.gateId : null,
+    reflexId: receipt.reflexId ?? (receipt.gateId.startsWith("reflex.") ? receipt.gateId : null),
     questionType: receipt.questionType,
     optionIds: Object.keys(receipt.probabilities),
     probabilities: receipt.probabilities,
@@ -140,18 +163,24 @@ function toGate(receipt: ReceiptRecord): DecisionReceiptView {
     margin,
     threshold,
     thresholds: receipt.thresholds,
-    optionLabels: {},
+    optionLabels: receipt.optionLabels,
     result: receipt.result,
     reasonCode: receipt.reasonCode,
     provider: receipt.provider,
-    latencyMs: receipt.latencyMs,
+    latencyMs: Number.isFinite(elapsed) ? elapsed : receipt.latencyMs,
     retries: receipt.retries,
     nextAction: nextAction(receipt),
+    receiptId: receipt.receiptId,
+    decisionId: receipt.decisionId,
+    caseId: receipt.caseId,
+    judgmentId: receipt.judgmentId,
+    selectedOptionId: receipt.selectedOptionId ?? receipt.selectedOption,
   };
 }
 
 function nextAction(receipt: ReceiptRecord): string {
   if (receipt.result === "wait") return "bounded_wait";
+  if (receipt.result === "blocked") return "blocked";
   if (receipt.result === "fail") return "no_definition";
   if (receipt.result === "not_applicable") return "local_result";
   if (receipt.questionType === "user") return "stored";

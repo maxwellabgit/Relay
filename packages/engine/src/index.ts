@@ -8,6 +8,7 @@ export * from "./queue.js";
 export * from "./scheduler.js";
 export * from "./inspect.js";
 export * from "./learning-store.js";
+export * from "./project-decision-run.js";
 export * from "./store.js";
 export * from "./trace-sink.js";
 export * from "./episodes.js";

@@ -99,8 +99,10 @@ export class SqliteLearning implements LearningStore {
         `INSERT INTO decision_receipts(
           receipt_id, case_id, gate_id, policy_version, question_type, provider,
           probabilities_json, thresholds_json, selected_option, result, reason_code,
-          latency_ms, retries, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          latency_ms, retries, created_at,
+          decision_id, judgment_id, reflex_id, selected_option_id, option_labels_json,
+          requested_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.receiptId,
@@ -117,6 +119,13 @@ export class SqliteLearning implements LearningStore {
         record.latencyMs,
         record.retries,
         record.createdAt,
+        record.decisionId,
+        record.judgmentId,
+        record.reflexId,
+        record.selectedOptionId,
+        JSON.stringify(record.optionLabels),
+        record.requestedAt,
+        record.completedAt,
       );
   }
 
@@ -266,6 +275,13 @@ type ReceiptRow = {
   latency_ms: number | null;
   retries: number;
   created_at: string;
+  decision_id: string | null;
+  judgment_id: string | null;
+  reflex_id: string | null;
+  selected_option_id: string | null;
+  option_labels_json: string | null;
+  requested_at: string | null;
+  completed_at: string | null;
 };
 type PatternRow = {
   signature: string;
@@ -328,18 +344,25 @@ function mapEpisode(row: EpisodeRow): EpisodeRecord {
 function mapReceipt(row: ReceiptRow): ReceiptRecord {
   return {
     receiptId: row.receipt_id,
+    decisionId: row.decision_id ?? row.receipt_id,
     caseId: row.case_id,
+    judgmentId: row.judgment_id,
+    reflexId: row.reflex_id,
     gateId: row.gate_id,
     policyVersion: row.policy_version,
     questionType: row.question_type,
     provider: row.provider,
     probabilities: JSON.parse(row.probabilities_json) as Record<string, number>,
     thresholds: JSON.parse(row.thresholds_json) as Record<string, number>,
+    optionLabels: JSON.parse(row.option_labels_json ?? "{}") as Record<string, string>,
     selectedOption: row.selected_option,
+    selectedOptionId: row.selected_option_id ?? row.selected_option,
     result: row.result,
     reasonCode: row.reason_code,
     latencyMs: row.latency_ms,
     retries: row.retries,
+    requestedAt: row.requested_at,
+    completedAt: row.completed_at,
     createdAt: row.created_at,
   };
 }

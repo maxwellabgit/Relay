@@ -514,14 +514,22 @@ function mapJudgment(row: DbJudgment): JudgmentRecord {
 
 function applyMigrations(db: DatabaseSync): void {
   const now = new Date().toISOString();
+  const files: Readonly<Record<number, string>> = {
+    1: "001_core.sql",
+    2: "002_learning.sql",
+    3: "003_runtime.sql",
+    4: "004_decisions.sql",
+  };
   db.exec("BEGIN");
   try {
-    db.exec(readFileSync(resolve(migrationDir, "001_core.sql"), "utf8"));
+    db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3]) {
+    for (const version of [2, 3, 4]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
-      db.exec(readFileSync(resolve(migrationDir, `00${version}_${version === 2 ? "learning" : "runtime"}.sql`), "utf8"));
+      const file = files[version];
+      if (!file) continue;
+      db.exec(readFileSync(resolve(migrationDir, file), "utf8"));
       db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(version, now);
     }
     db.exec("COMMIT");

@@ -28,6 +28,7 @@ export default tseslint.config(
       ".dev-runs/**",
       "Projects/**",
       "dev/**",
+      "tools/verify-v1.mjs",
       "apps/relay/babel.config.js",
       "apps/relay/metro.config.js",
       "apps/relay/index.js",

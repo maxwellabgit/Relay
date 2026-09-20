@@ -43,18 +43,25 @@ export type EpisodeRecord = {
 
 export type ReceiptRecord = {
   readonly receiptId: string;
+  readonly decisionId: string;
   readonly caseId: string | null;
+  readonly judgmentId: string | null;
+  readonly reflexId: string | null;
   readonly gateId: string;
   readonly policyVersion: string;
   readonly questionType: "deterministic" | "choice" | "noul" | "user" | "not_applicable";
   readonly provider: string;
   readonly probabilities: Readonly<Record<string, number>>;
   readonly thresholds: Readonly<Record<string, number>>;
+  readonly optionLabels: Readonly<Record<string, string>>;
   readonly selectedOption: string | null;
-  readonly result: "pass" | "fail" | "wait" | "not_applicable";
+  readonly selectedOptionId: string | null;
+  readonly result: "pass" | "fail" | "wait" | "not_applicable" | "blocked";
   readonly reasonCode: string;
   readonly latencyMs: number | null;
   readonly retries: number;
+  readonly requestedAt: string | null;
+  readonly completedAt: string | null;
   readonly createdAt: string;
 };
 

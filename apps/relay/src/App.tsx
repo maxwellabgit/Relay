@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import type { ActionCard, RelayClient, RelaySnapshot } from "@relay/contracts";
+import { ACRONYM_BASIC_EVENTS } from "@relay/testkit/browser";
 import { RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
-import { ACRONYM_BASIC_EVENTS } from "./fixtures/acronym-basic";
 
 const EMPTY_SNAPSHOT: RelaySnapshot = {
   listening: false,
@@ -34,6 +34,8 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
     activeCaseId: null,
   },
   gate: null,
+  decision: null,
+  currentInputPreview: null,
   patterns: [],
   review: {
     completeSessions: 0,
@@ -122,13 +124,23 @@ export function App() {
           const handle = handleRef.current;
           if (!handle || fixture !== "acronym-basic") return;
           await clientRef.current?.execute({ type: "SetListening", enabled: true });
+          const captureId = `capture_${Date.now()}`;
           let previousAt = 0;
+          let index = 0;
           for (const event of ACRONYM_BASIC_EVENTS) {
             if (event.type !== "segment.final") continue;
+            index += 1;
             const gap = speed === 0 ? 0 : Math.max(0, event.atMs - previousAt) / speed;
             previousAt = event.atMs;
             if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
-            await handle.engine.ingestFinalSegment({ ...event.segment, sessionId: snapshot.runtime.sessionId ?? "session_web" }, false);
+            await handle.engine.ingestFinalSegment(
+              {
+                ...event.segment,
+                segmentId: `${captureId}_${event.segment.segmentId}_${index}`,
+                sessionId: snapshot.runtime.sessionId ?? "session_web",
+              },
+              false,
+            );
           }
         }}
       />

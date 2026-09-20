@@ -70,7 +70,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         : { ok: false, detail: "missing key" },
     modelStatus: { ok: false, detail: "disabled" },
     mode: "live",
-    gitCommit: "unknown",
+    gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
   };
 
@@ -124,6 +124,13 @@ function createNativeJudgmentPort(invoke: TauriInvoke): JudgmentPort {
       return parseTypeSafeBody(JSON.stringify(result.body ?? {}), Number(result.latency_ms ?? 0));
     },
   };
+}
+
+function resolveBuildSha(): string {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const sha = env?.EXPO_PUBLIC_GIT_SHA ?? env?.GIT_COMMIT ?? env?.GITHUB_SHA;
+  if (sha && /^[0-9a-f]{7,40}$/i.test(sha)) return sha.toLowerCase();
+  return "unknown";
 }
 
 function requireTauriInvoke(): TauriInvoke {

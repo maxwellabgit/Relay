@@ -13,10 +13,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - run: npm ci
+      - name: Export build SHA
+        shell: bash
+        run: echo "EXPO_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test:unit
@@ -25,6 +32,13 @@ jobs:
       - run: npm run test:privacy
       - run: npm run test:architecture
       - run: npm run build:web
+      - name: Export iOS
+        run: npm run export:ios --workspace @relay/app
+      - name: Install Halo test extra
+        working-directory: tools/halo
+        run: python -m pip install -e ".[test]"
+      - name: Halo protocol tests
+        run: npm run halo:test
       - name: Cargo fmt
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check

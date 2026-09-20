@@ -48,7 +48,7 @@ function TreeStep({ node, isLast }: { readonly node: JevTreeNode; readonly isLas
         <View style={[styles.badge, terminal ? styles.badgeTerminal : null]}>
           <Text style={[styles.badgeText, terminal ? styles.badgeTextTerminal : null]}>{node.step}</Text>
         </View>
-        <View style={[styles.node, terminal ? styles.nodeTerminal : styles.nodeTaken]}>
+        <View style={[styles.node, terminal ? styles.nodeTerminal : nodeStyle(node.status)]}>
           <View style={styles.nodeMain}>
             <Text style={[styles.nodeTitle, terminal ? styles.nodeTitleTerminal : null]}>
               {terminal ? `★ ${node.title}` : node.title}
@@ -102,6 +102,13 @@ function formatMs(value: number | null): string {
   return `${Math.round(value)} ms`;
 }
 
+function nodeStyle(status: JevTreeNode["status"]) {
+  if (status === "skipped" || status === "idle") return styles.nodeIdle;
+  if (status === "failed") return styles.nodeFailed;
+  if (status === "waiting") return styles.nodeWaiting;
+  return styles.nodeTaken;
+}
+
 const styles = StyleSheet.create({
   root: {
     borderWidth: 1,
@@ -150,6 +157,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgElevated,
   },
   nodeTaken: { borderColor: colors.cyan },
+  nodeIdle: { borderColor: colors.borderStrong, opacity: 0.7 },
+  nodeFailed: { borderColor: colors.danger },
+  nodeWaiting: { borderColor: colors.warn },
   nodeTerminal: {
     borderColor: colors.warn,
     backgroundColor: "#241c0c",

@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createNodeHarness } from "@relay/adapter-node";
 import { readFixture, runReplay } from "@relay/testkit";
 
-const fixture = resolve(
-  process.cwd(),
-  "fixtures/public/transcripts/acronym-basic.jsonl",
-);
+const fixture = resolve(process.cwd(), "fixtures/public/transcripts/acronym-basic.jsonl");
 
 describe("transcript replay", () => {
   it("emits identical event contents at speed 0 and speed 10", async () => {
@@ -17,7 +14,7 @@ describe("transcript replay", () => {
     expect(events0.some((e) => e.type === "segment.speaker_revised")).toBe(true);
   });
 
-  it("streams finals into the engine at virtual speed", async () => {
+  it("streams finals into the engine and produces acronym outcomes", async () => {
     const harness = createNodeHarness({ sessionId: "replay_session" });
     try {
       await harness.client.start();
@@ -26,12 +23,13 @@ describe("transcript replay", () => {
         speed: 0,
         engine: harness.engine,
         sessionId: "replay_session",
+        captureSessionId: "capture_replay_1",
       });
       const snap = await harness.client.getSnapshot();
       expect(result.finals).toBe(2);
-      expect(snap.sourceSegments.length).toBe(2);
-      expect(snap.cases).toHaveLength(0);
-      expect(snap.listening).toBe(false);
+      expect(snap.listening).toBe(true);
+      expect(snap.sourceSegments.length).toBeGreaterThan(0);
+      expect(snap.cases.length + snap.feedItems.length).toBeGreaterThan(0);
     } finally {
       await harness.client.stop();
       harness.close();
