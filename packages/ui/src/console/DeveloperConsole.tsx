@@ -1,7 +1,9 @@
-import { useState } from "react";
-import type { PatternView, RelaySnapshot, TraceRow } from "@relay/contracts";
+import type { DecisionReceiptView, PatternView, RelaySnapshot, TraceRow } from "@relay/contracts";
+import { useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
+import { JevDecisionTree } from "./JevDecisionTree.js";
+import { projectJevTree } from "./projectJevTree.js";
 
 type Props = {
   readonly snapshot: RelaySnapshot;
@@ -14,7 +16,14 @@ type Props = {
   readonly onSnoozeCandidate?: (candidateId: string) => void;
 };
 
+type Tab = "overview" | "jev" | "logs";
+
 const SPEEDS = [0, 1, 10] as const;
+const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "jev", label: "Jev Decision Tree" },
+  { id: "logs", label: "Logs" },
+];
 
 export function DeveloperConsole({
   snapshot,
@@ -26,6 +35,7 @@ export function DeveloperConsole({
   onRejectCandidate,
   onSnoozeCandidate,
 }: Props) {
+  const [tab, setTab] = useState<Tab>("jev");
   const [speed, setSpeed] = useState<number>(0);
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState(snapshot.trace);
@@ -36,6 +46,7 @@ export function DeveloperConsole({
   const rows = paused ? frozen : snapshot.trace;
   const runtime = snapshot.runtime;
   const review = snapshot.review;
+  const tree = useMemo(() => projectJevTree(snapshot.gate, snapshot.trace), [snapshot.gate, snapshot.trace]);
 
   const filtered = rows.filter((row) => {
     if (stageFilter && row.stage !== stageFilter) return false;
@@ -47,15 +58,121 @@ export function DeveloperConsole({
   const stageChips = uniqueValues(rows.map((r) => r.stage));
   const statusChips = uniqueValues(rows.map((r) => r.status));
   const reasonChips = uniqueValues(rows.map((r) => r.reasonCode));
-
   const chronological = [...filtered].sort((a, b) => a.sequence - b.sequence);
 
   return (
     <ScrollView style={styles.panel} contentContainerStyle={styles.content}>
+      <View style={styles.tabs}>
+        {TABS.map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => setTab(item.id)}
+            style={[styles.tab, tab === item.id ? styles.tabActive : null]}
+          >
+            <Text style={[styles.tabText, tab === item.id ? styles.tabTextActive : null]}>{item.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {tab === "overview" ? (
+        <OverviewPane
+          snapshot={snapshot}
+          {...(onOpenLog !== undefined ? { onOpenLog } : {})}
+          {...(onStartSession !== undefined ? { onStartSession } : {})}
+          {...(onEndSession !== undefined ? { onEndSession } : {})}
+        />
+      ) : null}
+
+      {tab === "jev" ? (
+        <View style={styles.jevLayout}>
+          <View style={styles.jevMain}>
+            <JevDecisionTree tree={tree} />
+          </View>
+          <View style={styles.jevSide}>
+            <SideCard title="Current input">
+              <Text style={styles.sideBody}>
+                {latestUserLine(snapshot) ?? "No user message in this run yet."}
+              </Text>
+              <Text style={styles.sideMeta}>{runtime.episodeId ? `episode ${runtime.episodeId}` : "no episode"}</Text>
+            </SideCard>
+            <SideCard title="Jev output">
+              <Text style={styles.code}>{formatJson(tree.output)}</Text>
+            </SideCard>
+            <SideCard title="Evidence">
+              {snapshot.patterns.length === 0 ? (
+                <Text style={styles.empty}>No completed-episode patterns yet.</Text>
+              ) : (
+                snapshot.patterns.slice(0, 4).map((pattern) => (
+                  <Text key={pattern.signature} style={styles.sideBody}>
+                    {`${pattern.signature} · ${pattern.count}× · ${pattern.candidateState ?? "observing"}`}
+                  </Text>
+                ))
+              )}
+            </SideCard>
+            <SideCard title="Trace">
+              {[...chronological].slice(-6).reverse().map((row) => (
+                <Text key={row.sequence} style={styles.traceMini}>
+                  {`${formatTime(row.at)} · ${row.stage ?? row.type} · ${row.status ?? "-"}`}
+                </Text>
+              ))}
+              <Text style={tree.completed ? styles.footerOk : styles.footerWait}>
+                {tree.completed
+                  ? `Completed${tree.totalMs != null ? ` in ${Math.round(tree.totalMs)} ms` : ""}`
+                  : "In progress"}
+              </Text>
+            </SideCard>
+            <GateDetails gate={snapshot.gate} />
+          </View>
+        </View>
+      ) : null}
+
+      {tab === "logs" ? (
+        <LogsPane
+          snapshot={snapshot}
+          chronological={chronological}
+          stageChips={stageChips}
+          statusChips={statusChips}
+          reasonChips={reasonChips}
+          stageFilter={stageFilter}
+          statusFilter={statusFilter}
+          reasonFilter={reasonFilter}
+          paused={paused}
+          speed={speed}
+          onSetStageFilter={setStageFilter}
+          onSetStatusFilter={setStatusFilter}
+          onSetReasonFilter={setReasonFilter}
+          onTogglePause={() => {
+            setFrozen(snapshot.trace);
+            setPaused((value) => !value);
+          }}
+          onSetSpeed={setSpeed}
+          {...(onReplayFixture !== undefined ? { onReplayFixture } : {})}
+          {...(onApproveCandidate !== undefined ? { onApproveCandidate } : {})}
+          {...(onRejectCandidate !== undefined ? { onRejectCandidate } : {})}
+          {...(onSnoozeCandidate !== undefined ? { onSnoozeCandidate } : {})}
+        />
+      ) : null}
+    </ScrollView>
+  );
+}
+
+function OverviewPane({
+  snapshot,
+  onOpenLog,
+  onStartSession,
+  onEndSession,
+}: {
+  readonly snapshot: RelaySnapshot;
+  readonly onOpenLog?: () => void;
+  readonly onStartSession?: () => void;
+  readonly onEndSession?: () => void;
+}) {
+  const runtime = snapshot.runtime;
+  const review = snapshot.review;
+  return (
+    <View style={styles.stack}>
       <Text style={styles.title}>Run inspector</Text>
-      <Text style={styles.meta}>
-        {`${runtime.runId} · ${runtime.commit} · ${runtime.storageAdapter}`}
-      </Text>
+      <Text style={styles.meta}>{`${runtime.runId} · ${runtime.commit} · ${runtime.storageAdapter}`}</Text>
       <Text style={styles.path}>{runtime.logPath || "No run folder"}</Text>
       <View style={styles.chips}>
         {snapshot.status.map((chip) => (
@@ -86,33 +203,62 @@ export function DeveloperConsole({
           <Text style={styles.buttonText}>End session</Text>
         </Pressable>
       </View>
+      <Text style={styles.section}>Self-review</Text>
+      <Text style={styles.meta}>
+        {`sessions ${review.completeSessions}/${review.sessionTrigger} · approved ${review.approvedCandidates} · built ${review.builtReflexes}/${review.reflexTrigger} · active ${review.activeReflexes} · episodes ${review.completeEpisodes}/${review.episodeTrigger} · candidates ${review.qualifiedCandidates}/${review.candidateTrigger}`}
+      </Text>
+      <Text style={styles.meta}>
+        {review.reviewDue
+          ? `Review due · ${review.trigger}. Recommendations only.`
+          : "No review trigger yet."}
+      </Text>
+    </View>
+  );
+}
 
-      <Text style={styles.section}>Current decision</Text>
-      {snapshot.gate ? (
-        <View style={styles.card}>
-          <Line label="Gate" value={`${snapshot.gate.gateId} · ${snapshot.gate.policyVersion}`} />
-          <Line label="Question" value={snapshot.gate.questionType} />
-          <Line label="Thresholds" value={formatMap(snapshot.gate.thresholds)} />
-          {Object.keys(snapshot.gate.optionLabels).length > 0 ? (
-            <Line label="Option labels" value={formatStringMap(snapshot.gate.optionLabels)} />
-          ) : null}
-          <Line label="Options" value={snapshot.gate.optionIds.join(", ") || "none"} />
-          <Line label="Probabilities" value={formatMap(snapshot.gate.probabilities)} />
-          <Line
-            label="Top / margin"
-            value={`${formatNum(snapshot.gate.topProbability)} / ${formatNum(snapshot.gate.margin)}`}
-          />
-          <Line label="Selected" value={selectedOption(snapshot.gate.probabilities) ?? "n/a"} />
-          <Line label="Result" value={`${snapshot.gate.result} · ${snapshot.gate.reasonCode}`} />
-          <Line label="Provider" value={snapshot.gate.provider} />
-          <Line label="Attempt" value={String(snapshot.gate.retries)} />
-          <Line label="Latency" value={snapshot.gate.latencyMs != null ? `${snapshot.gate.latencyMs} ms` : "n/a"} />
-          <Line label="Next" value={snapshot.gate.nextAction} />
-        </View>
-      ) : (
-        <Text style={styles.empty}>No receipt yet.</Text>
-      )}
-
+function LogsPane({
+  snapshot,
+  chronological,
+  stageChips,
+  statusChips,
+  reasonChips,
+  stageFilter,
+  statusFilter,
+  reasonFilter,
+  paused,
+  speed,
+  onSetStageFilter,
+  onSetStatusFilter,
+  onSetReasonFilter,
+  onTogglePause,
+  onSetSpeed,
+  onReplayFixture,
+  onApproveCandidate,
+  onRejectCandidate,
+  onSnoozeCandidate,
+}: {
+  readonly snapshot: RelaySnapshot;
+  readonly chronological: TraceRow[];
+  readonly stageChips: string[];
+  readonly statusChips: string[];
+  readonly reasonChips: string[];
+  readonly stageFilter: string | null;
+  readonly statusFilter: string | null;
+  readonly reasonFilter: string | null;
+  readonly paused: boolean;
+  readonly speed: number;
+  readonly onSetStageFilter: (value: string | null) => void;
+  readonly onSetStatusFilter: (value: string | null) => void;
+  readonly onSetReasonFilter: (value: string | null) => void;
+  readonly onTogglePause: () => void;
+  readonly onSetSpeed: (value: number) => void;
+  readonly onReplayFixture?: (fixture: string, speed: number) => void;
+  readonly onApproveCandidate?: (candidateId: string) => void;
+  readonly onRejectCandidate?: (candidateId: string) => void;
+  readonly onSnoozeCandidate?: (candidateId: string) => void;
+}) {
+  return (
+    <View style={styles.stack}>
       <Text style={styles.section}>Evidence</Text>
       {snapshot.patterns.length === 0 ? (
         <Text style={styles.empty}>No completed episodes yet.</Text>
@@ -128,51 +274,18 @@ export function DeveloperConsole({
         ))
       )}
 
-      <Text style={styles.section}>Self-review</Text>
-      <Text style={styles.meta}>
-        {`sessions ${review.completeSessions}/${review.sessionTrigger} · approved ${review.approvedCandidates} · built ${review.builtReflexes}/${review.reflexTrigger} · active ${review.activeReflexes} · episodes ${review.completeEpisodes}/${review.episodeTrigger} · candidates ${review.qualifiedCandidates}/${review.candidateTrigger}`}
-      </Text>
-      <Text style={styles.meta}>
-        {review.reviewDue
-          ? `Review due · ${review.trigger}. Recommendations only.`
-          : "No review trigger yet."}
-      </Text>
-
       <View style={styles.row}>
         <Text style={styles.section}>Timeline</Text>
-        <Pressable
-          onPress={() => {
-            setFrozen(snapshot.trace);
-            setPaused((value) => !value);
-          }}
-          style={styles.button}
-        >
+        <Pressable onPress={onTogglePause} style={styles.button}>
           <Text style={styles.buttonText}>{paused ? "Resume" : "Pause"}</Text>
         </Pressable>
       </View>
 
-      <FilterRow
-        label="stage"
-        values={stageChips}
-        active={stageFilter}
-        onSelect={setStageFilter}
-      />
-      <FilterRow
-        label="status"
-        values={statusChips}
-        active={statusFilter}
-        onSelect={setStatusFilter}
-      />
-      <FilterRow
-        label="reason"
-        values={reasonChips}
-        active={reasonFilter}
-        onSelect={setReasonFilter}
-      />
+      <FilterRow label="stage" values={stageChips} active={stageFilter} onSelect={onSetStageFilter} />
+      <FilterRow label="status" values={statusChips} active={statusFilter} onSelect={onSetStatusFilter} />
+      <FilterRow label="reason" values={reasonChips} active={reasonFilter} onSelect={onSetReasonFilter} />
 
-      <Text style={styles.traceHeader}>
-        {"time | +delta | duration | stage | status | case | episode | reason"}
-      </Text>
+      <Text style={styles.traceHeader}>{"time | +delta | duration | stage | status | case | episode | reason"}</Text>
       {chronological.length === 0 ? <Text style={styles.empty}>No canonical events yet.</Text> : null}
       {[...chronological].reverse().map((row, index, arr) => {
         const older = arr[index + 1];
@@ -186,7 +299,7 @@ export function DeveloperConsole({
       <View style={styles.row}>
         <Text style={styles.meta}>glossary fixture</Text>
         {SPEEDS.map((value) => (
-          <Pressable key={value} onPress={() => setSpeed(value)} style={styles.button}>
+          <Pressable key={value} onPress={() => onSetSpeed(value)} style={styles.button}>
             <Text style={styles.buttonText}>{value === 0 ? "0×" : `${value}×`}</Text>
           </Pressable>
         ))}
@@ -194,7 +307,37 @@ export function DeveloperConsole({
           <Text style={styles.buttonText}>Replay</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
+  );
+}
+
+function GateDetails({ gate }: { readonly gate: DecisionReceiptView | null }) {
+  if (!gate) {
+    return (
+      <SideCard title="Gate receipt">
+        <Text style={styles.empty}>No receipt yet.</Text>
+      </SideCard>
+    );
+  }
+  return (
+    <SideCard title="Gate receipt">
+      <Text style={styles.sideBody}>{`${gate.gateId} · ${gate.policyVersion}`}</Text>
+      <Text style={styles.sideMeta}>{`${gate.result} · ${gate.reasonCode} · ${gate.nextAction}`}</Text>
+      <Text style={styles.sideMeta}>{`provider ${gate.provider} · retries ${gate.retries}`}</Text>
+      {Object.keys(gate.optionLabels).length > 0 ? (
+        <Text style={styles.sideMeta}>{formatStringMap(gate.optionLabels)}</Text>
+      ) : null}
+      <Text style={styles.sideMeta}>{formatMap(gate.probabilities)}</Text>
+    </SideCard>
+  );
+}
+
+function SideCard({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+  return (
+    <View style={styles.sideCard}>
+      <Text style={styles.sideTitle}>{title}</Text>
+      {children}
+    </View>
   );
 }
 
@@ -276,6 +419,19 @@ function Line({ label, value }: { readonly label: string; readonly value: string
   return <Text style={styles.line}>{`${label}: ${value}`}</Text>;
 }
 
+function latestUserLine(snapshot: RelaySnapshot): string | null {
+  for (let i = snapshot.feedItems.length - 1; i >= 0; i -= 1) {
+    const item = snapshot.feedItems[i];
+    if (item && /user|typed|source|utterance/i.test(item.kind)) return item.summary;
+  }
+  const last = snapshot.feedItems[snapshot.feedItems.length - 1];
+  return last?.summary ?? null;
+}
+
+function formatJson(value: Readonly<Record<string, string | number | boolean | null>>): string {
+  return JSON.stringify(value, null, 2);
+}
+
 function formatTraceLine(row: TraceRow, previous: TraceRow | undefined): string {
   const time = formatTime(row.at);
   const delta =
@@ -307,16 +463,6 @@ function formatStringMap(values: Readonly<Record<string, string>>): string {
   return entries.map(([key, value]) => `${key}=${value}`).join(" · ");
 }
 
-function formatNum(value: number | null): string {
-  return value == null ? "n/a" : value.toFixed(2);
-}
-
-function selectedOption(probabilities: Readonly<Record<string, number>>): string | null {
-  const entries = Object.entries(probabilities);
-  if (entries.length === 0) return null;
-  return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
-}
-
 function rejectedOutcomes(outcomes: Readonly<Record<string, number>>): string | null {
   const rejected = Object.entries(outcomes).filter(
     ([key, count]) => count > 0 && /reject|fail|deny/i.test(key),
@@ -331,7 +477,43 @@ function uniqueValues(values: readonly (string | null)[]): string[] {
 
 const styles = StyleSheet.create({
   panel: { flex: 1, backgroundColor: colors.console, minWidth: 420 },
-  content: { padding: 18, gap: 8 },
+  content: { padding: 18, gap: 12 },
+  tabs: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingBottom: 0,
+  },
+  tab: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabActive: { borderBottomColor: colors.cyan },
+  tabText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  tabTextActive: { color: colors.cyan },
+  stack: { gap: 8 },
+  jevLayout: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignItems: "flex-start" },
+  jevMain: { flexGrow: 1, flexBasis: 420, minWidth: 320 },
+  jevSide: { flexGrow: 1, flexBasis: 260, minWidth: 240, gap: 10 },
+  sideCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.bgPanel,
+    padding: 10,
+    gap: 4,
+  },
+  sideTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  sideBody: { color: colors.text, fontSize: 12 },
+  sideMeta: { color: colors.textDim, fontSize: 11 },
+  code: { color: colors.cyan, fontSize: 11, fontFamily: "monospace" },
+  traceMini: { color: colors.textMuted, fontSize: 11, fontFamily: "monospace" },
+  footerOk: { color: colors.ok, fontSize: 12, fontWeight: "600", marginTop: 4 },
+  footerWait: { color: colors.warn, fontSize: 12, fontWeight: "600", marginTop: 4 },
   title: { color: colors.text, fontSize: 22, fontWeight: "700" },
   section: { color: colors.text, fontSize: 14, fontWeight: "700", marginTop: 8 },
   meta: { color: colors.textMuted, fontSize: 12 },
