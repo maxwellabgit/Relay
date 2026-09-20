@@ -28,6 +28,7 @@ const EVENT_TYPES = new Set([
   "source.accepted",
   "source.rejected",
   "case.created",
+  "answer.committed",
   "reflex.detected",
   "judgment.requested",
   "judgment.completed",

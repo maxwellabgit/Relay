@@ -118,6 +118,27 @@ fn prune_old_runs() {
 pub fn trace_run_dir(run_id: String) -> Result<String, String> {
     let dir = run_dir(&run_id)?;
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let manifest = dir.join("manifest.json");
+    if !manifest.exists() {
+        let started_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .to_string();
+        let body = serde_json::json!({
+            "schemaVersion": 1,
+            "runId": run_id,
+            "applicationVersion": env!("CARGO_PKG_VERSION"),
+            "gitCommit": option_env!("GIT_COMMIT").unwrap_or("unknown"),
+            "protocolVersion": "2",
+            "reflexVersions": { "resolve-acronym": 1 },
+            "policyVersions": { "resolve-acronym@1": "v1" },
+            "providerModes": ["typesafe", "local_model"],
+            "startedAt": started_at,
+            "status": "running"
+        });
+        fs::write(&manifest, format!("{}\n", body)).map_err(|error| error.to_string())?;
+    }
     Ok(dir.to_string_lossy().to_string())
 }
 

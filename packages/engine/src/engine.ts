@@ -242,6 +242,13 @@ export class RelayEngine {
       priority: routing.priority,
       at,
     });
+    await this.emitTrace({
+      type: "case.created",
+      stage: "case.create",
+      status: "completed",
+      caseId: record.caseId,
+      reasonCode: isAsk ? "direct_answer" : "detected",
+    });
 
     await this.scheduler.enqueue(
       "source.final",
@@ -439,6 +446,13 @@ export class RelayEngine {
           createdAt: this.deps.clock.now().toISOString(),
           caseId,
         });
+        await this.emitTrace({
+          type: "answer.committed",
+          stage: "episode.complete",
+          status: "completed",
+          caseId,
+          reasonCode: "completed",
+        });
       } else if (current.origin === "direct") {
         const task = definitionSearchTask(text);
         if (task && token && !reflex.suppressSearch) {
@@ -479,6 +493,13 @@ export class RelayEngine {
             summary: generated.ok ? generated.text : "No local result for this Ask.",
             createdAt: this.deps.clock.now().toISOString(),
             caseId,
+          });
+          await this.emitTrace({
+            type: "answer.committed",
+            stage: "episode.complete",
+            status: "completed",
+            caseId,
+            reasonCode: generated.ok ? "completed" : "model_unavailable",
           });
         }
       }
@@ -845,6 +866,13 @@ export class RelayEngine {
         summary: label,
         createdAt: this.deps.clock.now().toISOString(),
         caseId,
+      });
+      await this.emitTrace({
+        type: "answer.committed",
+        stage: "episode.complete",
+        status: "completed",
+        caseId,
+        reasonCode: "policy_pass",
       });
       const signature = workSignature("acronym.lookup", { outcome: "choice", token });
       if (signature) await this.recordEpisode(signature, caseId, "completed");
@@ -1583,6 +1611,8 @@ const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "session.ended": "session",
   "source.accepted": "source.accept",
   "source.rejected": "source.accept",
+  "case.created": "case.create",
+  "answer.committed": "episode.complete",
   "reflex.detected": "reflex.detect",
   "policy.evaluated": "policy.evaluate",
   "judgment.requested": "judgment.request",
