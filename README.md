@@ -23,29 +23,38 @@ The activated automation is called a **Reflex**. Reflexes—not chats, prompts, 
 
 ## Alpha goal
 
-The alpha must prove one complete product loop on Windows:
+The Windows V1 goal is one complete product loop on the TypeScript/Tauri Windows path:
 
 ```text
-voice or text input
-  -> protected source record
-  -> immediate useful assistance
-  -> repeated-pattern evidence
-  -> inspectable Reflex proposal
-  -> explicit activation
-  -> safe execution and audit receipt
+real text or live local speech
+    → protected source artifact
+    → durable Case
+    → deterministic routing / Reflex detection
+    → local model when generation is needed
+    → bounded Jev judgment when semantic judgment is needed
+    → code-owned policy gate
+    → useful RELAY result
+    → durable outcome / memory / evidence
+    → truthful developer trace
+    → restart without losing or duplicating work
 ```
 
-The alpha includes:
+### What Windows V1 currently includes
 
-- A working text assistant.
-- A working voice-input assistant using an `ITranscriptSource`; Wispr Flow is the first supported source.
-- Continuous conversation observation while Listening is enabled.
-- Local notes and memory with exact source references.
-- Read-only connections for Google Workspace, GitHub, public web/Wikipedia search, and financial transactions through Plaid.
-- Individually disabled-by-default write actions for each connector.
-- Four built-in Reflexes.
-- Evidence collection for later user-specific Reflex proposals.
-- One feed, one composer, a Connections page, and a Reflexes page.
+- Working typed Ask with local model generation when a loopback model server is available.
+- Listen intake via allowlisted local audio process (finals only) into the same engine path as replay.
+- Protected DPAPI artifacts and secrets on Windows; feed/source prose is not stored as raw SQLite prose.
+- One complete Reflex: `resolve-acronym@1` (memory → bundled dictionary → context candidates → optional Jev Choice).
+- Developer console as a projection of real Case / Jev / model / policy events.
+
+### What Windows V1 does not claim yet
+
+- Google Workspace, GitHub, or Plaid connectors wired for production use.
+- Physical Halo hardware or iPhone/TestFlight adapters.
+- Four production Reflexes (only acronym resolution is complete).
+- Automatic Reflex generation or self-modifying code.
+
+See `docs/STATUS.md` and `docs/WINDOWS_V1_ACCEPTANCE.md` for the living implementation record.
 
 The alpha does not generate or execute arbitrary code, send email automatically, move money, push Git commits, or grant itself additional access.
 
