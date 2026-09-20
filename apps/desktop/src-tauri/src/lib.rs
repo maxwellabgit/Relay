@@ -9,6 +9,9 @@ mod secrets;
 mod state;
 mod typesafe;
 
+#[cfg(test)]
+mod test_env;
+
 use std::sync::Mutex;
 use tauri::RunEvent;
 

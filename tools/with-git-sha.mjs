@@ -3,6 +3,7 @@
  * Ensure EXPO_PUBLIC_GIT_SHA and GIT_COMMIT agree for frontend + native builds.
  * Usage: node tools/with-git-sha.mjs <command> [...args]
  */
+/* eslint-env node */
 import { spawn, execSync } from "node:child_process";
 
 function resolveSha() {

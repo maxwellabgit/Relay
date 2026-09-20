@@ -478,16 +478,15 @@ mod tests {
     #[test]
     fn control_signal_parses_ready_and_error() {
         assert_eq!(
-            control_signal(&json!({"v":1,"type":"source.ready","backend":"faster-whisper","sampleRate":16000})),
+            control_signal(
+                &json!({"v":1,"type":"source.ready","backend":"faster-whisper","sampleRate":16000})
+            ),
             Some(StartupSignal::Ready)
         );
         assert_eq!(
             control_signal(&json!({"v":1,"type":"source.error","code":"asr_unavailable"})),
             Some(StartupSignal::Error("asr_unavailable".into()))
         );
-        assert_eq!(
-            control_signal(&json!({"v":1,"type":"segment.final"})),
-            None
-        );
+        assert_eq!(control_signal(&json!({"v":1,"type":"segment.final"})), None);
     }
 }

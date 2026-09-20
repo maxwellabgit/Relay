@@ -8,6 +8,7 @@ function memoryArtifacts(): ArtifactStorePort {
   let n = 0;
   return {
     async put(bytes: Uint8Array, _policy: DataPolicy) {
+      void _policy;
       const artifactId = `art_${++n}`;
       const digest = await crypto.subtle.digest("SHA-256", bytes);
       const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");

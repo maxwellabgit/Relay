@@ -176,9 +176,7 @@ pub fn artifact_get(request: ArtifactGetRequest) -> Result<ArtifactGetResult, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::test_env::with_temp_localappdata;
 
     #[test]
     fn protect_roundtrip_and_hash() {
@@ -192,53 +190,46 @@ mod tests {
 
     #[test]
     fn put_get_restart_content_addressing_and_failures() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("relay-artifact-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("LOCALAPPDATA", &dir);
+        with_temp_localappdata("artifact-test", |_| {
+            let payload = b"relay-restart-sentinel-v1";
+            let put = artifact_put(ArtifactPutRequest {
+                bytes_b64: encode_b64(payload),
+                policy: serde_json::json!({ "disclosure": "local_only", "sensitivity": 0 }),
+            })
+            .expect("put");
+            let put2 = artifact_put(ArtifactPutRequest {
+                bytes_b64: encode_b64(payload),
+                policy: serde_json::json!({ "disclosure": "local_only", "sensitivity": 0 }),
+            })
+            .expect("put2");
+            assert_eq!(put.artifact_id, put2.artifact_id);
+            assert_eq!(put.sha256, put2.sha256);
 
-        let payload = b"relay-restart-sentinel-v1";
-        let put = artifact_put(ArtifactPutRequest {
-            bytes_b64: encode_b64(payload),
-            policy: serde_json::json!({ "disclosure": "local_only", "sensitivity": 0 }),
-        })
-        .expect("put");
-        let put2 = artifact_put(ArtifactPutRequest {
-            bytes_b64: encode_b64(payload),
-            policy: serde_json::json!({ "disclosure": "local_only", "sensitivity": 0 }),
-        })
-        .expect("put2");
-        assert_eq!(put.artifact_id, put2.artifact_id);
-        assert_eq!(put.sha256, put2.sha256);
+            let got = artifact_get(ArtifactGetRequest {
+                artifact_id: put.artifact_id.clone(),
+                sha256: put.sha256.clone(),
+            })
+            .expect("get");
+            assert_eq!(decode_b64(&got.bytes_b64).unwrap(), payload);
 
-        let got = artifact_get(ArtifactGetRequest {
-            artifact_id: put.artifact_id.clone(),
-            sha256: put.sha256.clone(),
-        })
-        .expect("get");
-        assert_eq!(decode_b64(&got.bytes_b64).unwrap(), payload);
+            let missing = artifact_get(ArtifactGetRequest {
+                artifact_id: "artifact_missing_id".into(),
+                sha256: put.sha256.clone(),
+            });
+            assert!(match missing {
+                Err(msg) => msg.contains("artifact_missing"),
+                Ok(_) => false,
+            });
 
-        let missing = artifact_get(ArtifactGetRequest {
-            artifact_id: "artifact_missing_id".into(),
-            sha256: put.sha256.clone(),
+            let path = objects_dir()
+                .unwrap()
+                .join(format!("{}.bin", put.artifact_id));
+            fs::write(&path, b"corrupted-bytes").unwrap();
+            let bad = artifact_get(ArtifactGetRequest {
+                artifact_id: put.artifact_id,
+                sha256: put.sha256,
+            });
+            assert!(bad.is_err());
         });
-        assert!(match missing {
-            Err(msg) => msg.contains("artifact_missing"),
-            Ok(_) => false,
-        });
-
-        let path = objects_dir()
-            .unwrap()
-            .join(format!("{}.bin", put.artifact_id));
-        fs::write(&path, b"corrupted-bytes").unwrap();
-        let bad = artifact_get(ArtifactGetRequest {
-            artifact_id: put.artifact_id,
-            sha256: put.sha256,
-        });
-        assert!(bad.is_err());
-
-        let _ = fs::remove_dir_all(&dir);
-        std::env::remove_var("LOCALAPPDATA");
     }
 }

@@ -874,39 +874,29 @@ fn record_completed_episode(conn: &Connection, op: &Value) -> Result<Value, Stri
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let (
-        prior_count,
-        mut session_ids,
-        mut outcomes,
-        first_at_existing,
-        mut evidence_ids,
-        existing_json,
-    ): (
-        i64,
-        Vec<String>,
-        serde_json::Map<String, Value>,
-        Option<String>,
-        Vec<String>,
-        Option<Value>,
-    ) = match existing {
-        Some(row) => (
-            row.1,
-            serde_json::from_str(&row.2).unwrap_or_default(),
-            serde_json::from_str(&row.3).unwrap_or_default(),
-            Some(row.4.clone()),
-            serde_json::from_str(&row.6).unwrap_or_default(),
-            Some(json!({
-                "signature": row.0,
-                "count": row.1,
-                "sessionIds": serde_json::from_str::<Value>(&row.2).unwrap_or(json!([])),
-                "outcomes": serde_json::from_str::<Value>(&row.3).unwrap_or(json!({})),
-                "firstAt": row.4,
-                "lastAt": row.5,
-                "evidenceIds": serde_json::from_str::<Value>(&row.6).unwrap_or(json!([])),
-            })),
-        ),
-        None => (0, Vec::new(), serde_json::Map::new(), None, Vec::new(), None),
-    };
+
+    let mut prior_count: i64 = 0;
+    let mut session_ids: Vec<String> = Vec::new();
+    let mut outcomes: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut first_at_existing: Option<String> = None;
+    let mut evidence_ids: Vec<String> = Vec::new();
+    let mut existing_json: Option<Value> = None;
+    if let Some(row) = existing {
+        prior_count = row.1;
+        session_ids = serde_json::from_str(&row.2).unwrap_or_default();
+        outcomes = serde_json::from_str(&row.3).unwrap_or_default();
+        first_at_existing = Some(row.4.clone());
+        evidence_ids = serde_json::from_str(&row.6).unwrap_or_default();
+        existing_json = Some(json!({
+            "signature": row.0,
+            "count": row.1,
+            "sessionIds": serde_json::from_str::<Value>(&row.2).unwrap_or(json!([])),
+            "outcomes": serde_json::from_str::<Value>(&row.3).unwrap_or(json!({})),
+            "firstAt": row.4,
+            "lastAt": row.5,
+            "evidenceIds": serde_json::from_str::<Value>(&row.6).unwrap_or(json!([])),
+        }));
+    }
     if evidence_ids.iter().any(|id| id == &episode_id) {
         return Ok(existing_json.unwrap_or(Value::Null));
     }
@@ -952,8 +942,8 @@ fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
     let receipt_id = req_str(record, "receiptId")?;
     let decision_id = opt_str(record, "decisionId").unwrap_or_else(|| receipt_id.clone());
-    let selected_option_id = opt_str(record, "selectedOptionId")
-        .or_else(|| opt_str(record, "selectedOption"));
+    let selected_option_id =
+        opt_str(record, "selectedOptionId").or_else(|| opt_str(record, "selectedOption"));
     conn.execute(
         "INSERT INTO decision_receipts(
           receipt_id, case_id, gate_id, policy_version, question_type, provider,

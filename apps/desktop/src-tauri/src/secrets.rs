@@ -165,37 +165,28 @@ pub fn maybe_seed_from_env() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::test_env::with_temp_localappdata;
 
     #[test]
     fn secret_lifecycle_present_and_deleted() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("relay-secret-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("LOCALAPPDATA", &dir);
+        with_temp_localappdata("secret-test", |_| {
+            assert_eq!(secret_status(), "disabled");
+            assert!(read_typesafe_api_key().is_err());
 
-        assert_eq!(secret_status(), "disabled");
-        assert!(read_typesafe_api_key().is_err());
+            secret_set(SecretSetRequest {
+                name: SECRET_NAME.into(),
+                value: "test-key-value".into(),
+            })
+            .expect("set");
+            assert_eq!(secret_status(), "present");
+            assert_eq!(read_typesafe_api_key().unwrap(), "test-key-value");
 
-        secret_set(SecretSetRequest {
-            name: SECRET_NAME.into(),
-            value: "test-key-value".into(),
-        })
-        .expect("set");
-        assert_eq!(secret_status(), "present");
-        assert_eq!(read_typesafe_api_key().unwrap(), "test-key-value");
-
-        secret_delete(SecretNameRequest {
-            name: SECRET_NAME.into(),
-        })
-        .expect("delete");
-        assert_eq!(secret_status(), "disabled");
-        assert!(read_typesafe_api_key().is_err());
-
-        let _ = fs::remove_dir_all(&dir);
-        std::env::remove_var("LOCALAPPDATA");
+            secret_delete(SecretNameRequest {
+                name: SECRET_NAME.into(),
+            })
+            .expect("delete");
+            assert_eq!(secret_status(), "disabled");
+            assert!(read_typesafe_api_key().is_err());
+        });
     }
 }
