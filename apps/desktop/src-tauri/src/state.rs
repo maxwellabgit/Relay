@@ -671,7 +671,8 @@ fn put_memory(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
     let content_artifact_id = opt_str(record, "contentArtifactId");
     let content_sha256 = opt_str(record, "contentSha256");
-    let metadata = record.get("metadata").unwrap_or(&json!({}));
+    let empty_metadata = json!({});
+    let metadata = record.get("metadata").unwrap_or(&empty_metadata);
     // Free prose must not land in value_json; TS adapter packs into artifacts first.
     conn.execute(
         "INSERT INTO memories(

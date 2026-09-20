@@ -89,4 +89,31 @@ describe("live transcript pump", () => {
     expect(ingested[0]?.sessionId).toBe("engine_session");
     expect(ingested[0]?.text).toBe("observed phrase");
   });
+
+  it("notifies when native audio status changes after startup", async () => {
+    const statuses: Array<{ ok: boolean; detail: string; capturing: boolean }> = [];
+    let tick = 0;
+    const audio = new TauriAudioPort(async (command) => {
+      if (command === "audio_status") {
+        tick += 1;
+        if (tick === 1) return { ok: true, detail: "capturing", capturing: true };
+        return { ok: false, detail: "source_exited", capturing: false };
+      }
+      if (command === "audio_drain") return { events: [] };
+      return { ok: true, detail: "idle", capturing: false };
+    });
+    const stop = startLiveTranscriptPump({
+      audio,
+      sessionId: "engine_session",
+      intervalMs: 15,
+      ingest: async () => undefined,
+      onStatus: (status) => {
+        statuses.push(status);
+      },
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    stop();
+    expect(statuses.some((s) => s.capturing)).toBe(true);
+    expect(statuses.some((s) => s.detail === "source_exited")).toBe(true);
+  });
 });

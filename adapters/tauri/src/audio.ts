@@ -44,11 +44,14 @@ export type LiveTranscriptPumpOptions = {
   readonly sessionId: string;
   readonly ingest: (segment: TranscriptSegmentV1) => Promise<void>;
   readonly intervalMs?: number;
+  /** Invoked when native audio health/capture status changes after startup. */
+  readonly onStatus?: (status: AudioStatus) => void | Promise<void>;
 };
 
 /** Polls drain and forwards finals into RelayEngine.ingestFinalSegment. */
 export function startLiveTranscriptPump(options: LiveTranscriptPumpOptions): () => void {
   let stopped = false;
+  let lastKey = "";
   const intervalMs = options.intervalMs ?? 200;
   const timer = setInterval(() => {
     void tick();
@@ -57,6 +60,15 @@ export function startLiveTranscriptPump(options: LiveTranscriptPumpOptions): () 
   async function tick(): Promise<void> {
     if (stopped) return;
     try {
+      if (options.onStatus) {
+        const status = await options.audio.status();
+        const key = `${status.ok}:${status.capturing}:${status.detail}`;
+        if (key !== lastKey) {
+          lastKey = key;
+          await options.onStatus(status);
+        }
+      }
+      if (stopped) return;
       const events = await options.audio.drain();
       for (const event of events) {
         if (stopped) return;

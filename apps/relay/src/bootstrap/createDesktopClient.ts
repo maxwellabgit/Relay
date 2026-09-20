@@ -9,7 +9,7 @@ import type {
   TextModelPort,
 } from "@relay/contracts";
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
-import { startLiveTranscriptPump, TauriAudioPort } from "@relay/adapter-tauri/audio";
+import { startLiveTranscriptPump, TauriAudioPort, type AudioStatus } from "@relay/adapter-tauri/audio";
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
 import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
@@ -104,20 +104,53 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const engine = new RelayEngine(deps);
   const inner = createRelayClientFromEngine(engine);
   let stopPump: (() => void) | null = null;
+  let acceptIntake = true;
+  let handlingSourceFailure = false;
+
+  const applyAudioHealth = (status: AudioStatus): void => {
+    audioHealth.ok = status.ok;
+    audioHealth.detail = status.capturing ? "capturing" : status.detail;
+  };
 
   const client: RelayClient = {
     start: async () => {
       await inner.start();
       stopPump?.();
+      acceptIntake = true;
       stopPump = startLiveTranscriptPump({
         audio,
         sessionId,
         ingest: async (segment) => {
+          if (!acceptIntake) return;
           await engine.ingestFinalSegment(segment, false);
+        },
+        onStatus: async (status) => {
+          const wasCapturing = audioHealth.detail === "capturing";
+          applyAudioHealth(status);
+          const sourceDied =
+            wasCapturing && !status.capturing && (!status.ok || status.detail === "source_exited");
+          if (sourceDied && !handlingSourceFailure) {
+            handlingSourceFailure = true;
+            try {
+              acceptIntake = false;
+              const listening = await store.getListening(sessionId).catch(() => false);
+              if (listening) {
+                await inner.execute({ type: "SetListening", enabled: false });
+              }
+              await engine.refreshSnapshot();
+            } catch {
+              await engine.refreshSnapshot().catch(() => undefined);
+            } finally {
+              handlingSourceFailure = false;
+            }
+            return;
+          }
+          await engine.refreshSnapshot().catch(() => undefined);
         },
       });
     },
     stop: async () => {
+      acceptIntake = false;
       stopPump?.();
       stopPump = null;
       try {
@@ -130,32 +163,53 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     getSnapshot: () => inner.getSnapshot(),
     subscribe: (listener) => inner.subscribe(listener),
     execute: async (command: RelayCommand): Promise<RelayCommandResult> => {
-      const result = await inner.execute(command);
       if (command.type === "SetListening") {
-        try {
-          if (command.enabled) {
+        if (command.enabled) {
+          try {
             const status = await audio.start(sessionId);
-            audioHealth.ok = status.ok;
-            audioHealth.detail = status.capturing ? "capturing" : status.detail;
-          } else {
-            const drained = await audio.drain();
-            for (const event of drained) {
-              if (event.type === "segment.final") {
-                await engine.ingestFinalSegment({ ...event.segment, sessionId }, false);
-              }
+            applyAudioHealth(status);
+            if (!status.ok || !status.capturing) {
+              await engine.refreshSnapshot();
+              return {
+                ok: false,
+                summary: "audio_unavailable",
+                error: status.detail || "asr_unavailable",
+              };
             }
-            const status = await audio.stop();
-            audioHealth.ok = status.ok;
-            audioHealth.detail = "idle";
+            acceptIntake = true;
+            const result = await inner.execute(command);
+            await engine.refreshSnapshot();
+            return result;
+          } catch {
+            audioHealth.ok = false;
+            audioHealth.detail = "unavailable";
+            await engine.refreshSnapshot().catch(() => undefined);
+            return { ok: false, summary: "audio_unavailable", error: "unavailable" };
           }
+        }
+
+        try {
+          // Disable: stop accepting → stop source → drain → commit → Listening=false
+          acceptIntake = false;
+          const status = await audio.stop();
+          const drained = await audio.drain();
+          for (const event of drained) {
+            if (event.type === "segment.final") {
+              await engine.ingestFinalSegment({ ...event.segment, sessionId }, false);
+            }
+          }
+          applyAudioHealth({ ...status, detail: "idle", capturing: false, ok: true });
+          const result = await inner.execute(command);
           await engine.refreshSnapshot();
+          return result;
         } catch {
           audioHealth.ok = false;
           audioHealth.detail = "unavailable";
           await engine.refreshSnapshot().catch(() => undefined);
+          return { ok: false, summary: "audio_stop_failed", error: "unavailable" };
         }
       }
-      return result;
+      return inner.execute(command);
     },
   };
 

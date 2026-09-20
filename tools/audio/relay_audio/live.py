@@ -4,11 +4,16 @@
 Emits finalized TranscriptSegmentV1 events as NDJSON on stdout.
 Partial/interim transcripts are never written.
 
+Control messages (no transcript prose):
+  source.ready  — capture/ASR ready
+  source.error  — fatal startup failure; process exits
+
 Modes:
   --fixture PATH   replay prepared JSONL/WAV-derived finals (CI / offline)
-  (default)        attempt local mic capture with energy VAD; ASR optional
+  (default)        local mic capture with energy VAD + local ASR
 
 Never logs transcript text to stderr diagnostics.
+Never auto-downloads Whisper models during Listen.
 """
 
 from __future__ import annotations
@@ -19,6 +24,22 @@ import os
 import sys
 import time
 from pathlib import Path
+
+SAMPLE_RATE = 16000
+DEFAULT_MODEL = "tiny.en"
+
+
+def emit_control(payload: dict) -> None:
+    sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def emit_ready(*, backend: str, sample_rate: int = SAMPLE_RATE) -> None:
+    emit_control({"v": 1, "type": "source.ready", "backend": backend, "sampleRate": sample_rate})
+
+
+def emit_error(code: str) -> None:
+    emit_control({"v": 1, "type": "source.error", "code": code})
 
 
 def emit_final(
@@ -58,7 +79,26 @@ def emit_final(
     sys.stdout.flush()
 
 
+def load_asr(model_name: str):
+    """Load local Whisper without downloading. Returns (model, error_code)."""
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except Exception:
+        return None, "asr_unavailable"
+    try:
+        model = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            local_files_only=True,
+        )
+        return model, None
+    except Exception:
+        return None, "asr_model_unavailable"
+
+
 def run_fixture(path: Path, session_id: str) -> int:
+    emit_ready(backend="fixture", sample_rate=SAMPLE_RATE)
     sequence = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -87,22 +127,25 @@ def run_fixture(path: Path, session_id: str) -> int:
 
 
 def run_mic(session_id: str) -> int:
-    """Capture 16 kHz mono with energy VAD; optional local ASR.
+    """Capture 16 kHz mono with energy VAD and local ASR.
 
-    Without ASR packages installed, silence detection still runs and the
-    process stays healthy so RELAY can report audio status truthfully.
-    Phrases are only emitted when an ASR backend is available.
+    Requires numpy, sounddevice, and a locally cached Whisper model.
+    Failures emit source.error on stdout and exit (no silent sleep).
     """
     try:
         import numpy as np  # type: ignore
         import sounddevice as sd  # type: ignore
     except Exception:
-        sys.stderr.write("audio_backend_unavailable\n")
-        sys.stderr.flush()
-        while True:
-            time.sleep(1.0)
+        emit_error("audio_backend_unavailable")
+        return 1
 
-    sample_rate = 16000
+    model_name = os.environ.get("RELAY_WHISPER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    asr, asr_error = load_asr(model_name)
+    if asr is None:
+        emit_error(asr_error or "asr_unavailable")
+        return 1
+
+    sample_rate = SAMPLE_RATE
     frame_ms = 30
     frame = int(sample_rate * frame_ms / 1000)
     silence_frames = 18  # ~540ms
@@ -114,17 +157,18 @@ def run_mic(session_id: str) -> int:
     started_ms = 0
     t0 = time.time()
 
-    asr = None
     try:
-        from faster_whisper import WhisperModel  # type: ignore
-
-        asr = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+        stream = sd.InputStream(
+            samplerate=sample_rate, channels=1, dtype="float32", blocksize=frame
+        )
+        stream.start()
     except Exception:
-        asr = None
+        emit_error("mic_unavailable")
+        return 1
 
-    with sd.InputStream(
-        samplerate=sample_rate, channels=1, dtype="float32", blocksize=frame
-    ) as stream:
+    emit_ready(backend="faster-whisper", sample_rate=sample_rate)
+
+    try:
         while True:
             data, _overflowed = stream.read(frame)
             mono = data[:, 0]
@@ -145,9 +189,8 @@ def run_mic(session_id: str) -> int:
                     voiced = 0
                     silent = 0
                     text = ""
-                    if asr is not None:
-                        segments, _info = asr.transcribe(audio, language="en")
-                        text = " ".join(s.text.strip() for s in segments).strip()
+                    segments, _info = asr.transcribe(audio, language="en")
+                    text = " ".join(s.text.strip() for s in segments).strip()
                     if text:
                         sequence += 1
                         emit_final(
@@ -160,6 +203,12 @@ def run_mic(session_id: str) -> int:
                             text=text,
                             origin="microphone",
                         )
+    finally:
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
     return 0
 
 

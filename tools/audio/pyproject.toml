@@ -5,8 +5,16 @@ description = "WhisperX preprocessing for RELAY recorded-audio fixtures"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+live = [
+  "numpy==2.2.2",
+  "sounddevice==0.5.5",
+  "faster-whisper==1.2.1",
+]
+
 [project.scripts]
 relay-audio-prepare = "relay_audio.prepare:main"
+relay-audio-doctor = "relay_audio.doctor:main"
 
 [build-system]
 requires = ["setuptools>=68"]
