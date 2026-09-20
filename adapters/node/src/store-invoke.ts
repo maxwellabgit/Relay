@@ -144,6 +144,8 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
     case "put_episode":
       await store.learning.putEpisode(op.record as EpisodeRecord);
       return null;
+    case "record_completed_episode":
+      return store.learning.recordCompletedEpisode(op.record as EpisodeRecord);
     case "list_episodes":
       return store.learning.listEpisodes();
     case "put_receipt":

@@ -209,7 +209,7 @@ export class SqliteEngineStore implements EngineStore {
   async addFeedItem(item: FeedItemRecord): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
+        `INSERT OR IGNORE INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -249,7 +249,7 @@ export class SqliteEngineStore implements EngineStore {
   async enqueue(item: WorkItem): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO work_items(work_id, type, priority, available_at, payload_json, created_at)
+        `INSERT OR IGNORE INTO work_items(work_id, type, priority, available_at, payload_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(

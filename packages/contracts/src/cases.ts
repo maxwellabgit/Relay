@@ -15,6 +15,7 @@ export type CasePhase =
   | "intake"
   | "detect"
   | "read"
+  | "model"
   | "judge"
   | "decide"
   | "propose"

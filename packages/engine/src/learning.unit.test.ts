@@ -29,6 +29,13 @@ describe("bounded expansion rules", () => {
     expect(patternReady(threeSessions)).toBe(true);
   });
 
+  it("does not double-count the same episode id when folding", () => {
+    const one = foldPattern(null, episode("e1", "s1"));
+    const again = foldPattern(one, episode("e1", "s1"));
+    expect(again).toEqual(one);
+    expect(again.count).toBe(1);
+  });
+
   it("fires each review rule on its own threshold", () => {
     expect(reviewTrigger({ completeSessions: 11, builtReflexes: 0, completeEpisodes: 0, qualifiedCandidates: 0 })).toBeNull();
     expect(reviewTrigger({ completeSessions: 12, builtReflexes: 0, completeEpisodes: 0, qualifiedCandidates: 0 })).toBe("sessions");

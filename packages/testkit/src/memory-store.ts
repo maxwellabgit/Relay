@@ -185,6 +185,7 @@ export class MemoryEngineStore implements EngineStore {
   }
 
   async addFeedItem(item: FeedItemRecord): Promise<void> {
+    if (this.feedItems.some((existing) => existing.itemId === item.itemId)) return;
     this.feedItems.push(item);
   }
 
@@ -203,6 +204,7 @@ export class MemoryEngineStore implements EngineStore {
   }
 
   async enqueue(item: WorkItem): Promise<void> {
+    if (this.workItems.has(item.workId)) return;
     this.workItems.set(item.workId, {
       ...item,
       leaseOwner: null,

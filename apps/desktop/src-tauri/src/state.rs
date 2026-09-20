@@ -161,6 +161,7 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "current_session" => current_session(conn),
         "list_sessions" => list_sessions(conn),
         "put_episode" => put_episode(conn, op),
+        "record_completed_episode" => record_completed_episode(conn, op),
         "list_episodes" => list_episodes(conn),
         "put_receipt" => put_receipt(conn, op),
         "list_receipts" => list_receipts(conn),
@@ -378,7 +379,7 @@ fn list_feed_items(conn: &Connection) -> Result<Value, String> {
 fn add_feed_item(conn: &Connection, op: &Value) -> Result<Value, String> {
     let item = req_obj(op, "item")?;
     conn.execute(
-        "INSERT INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
+        "INSERT OR IGNORE INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             req_str(item, "itemId")?,
@@ -423,7 +424,7 @@ fn list_source_segments(conn: &Connection, op: &Value) -> Result<Value, String> 
 fn enqueue(conn: &Connection, op: &Value) -> Result<Value, String> {
     let item = req_obj(op, "item")?;
     conn.execute(
-        "INSERT INTO work_items(work_id, type, priority, available_at, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT OR IGNORE INTO work_items(work_id, type, priority, available_at, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             req_str(item, "workId")?,
             req_str(item, "type")?,
@@ -756,7 +757,7 @@ fn list_sessions(conn: &Connection) -> Result<Value, String> {
 fn put_episode(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
     conn.execute(
-        "INSERT INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
+        "INSERT OR IGNORE INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             req_str(record, "episodeId")?,
@@ -770,6 +771,120 @@ fn put_episode(conn: &Connection, op: &Value) -> Result<Value, String> {
     )
     .map_err(|error| error.to_string())?;
     Ok(Value::Null)
+}
+
+fn record_completed_episode(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let record = req_obj(op, "record")?;
+    conn.execute(
+        "INSERT OR IGNORE INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            req_str(record, "episodeId")?,
+            req_str(record, "sessionId")?,
+            opt_str(record, "caseId"),
+            req_str(record, "signature")?,
+            req_str(record, "outcome")?,
+            req_str(record, "startedAt")?,
+            opt_str(record, "completedAt"),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    let outcome = req_str(record, "outcome")?;
+    if outcome != "completed" {
+        return Ok(Value::Null);
+    }
+    let signature = req_str(record, "signature")?;
+    let episode_id = req_str(record, "episodeId")?;
+    let session_id = req_str(record, "sessionId")?;
+    let started_at = req_str(record, "startedAt")?;
+    let completed_at = opt_str(record, "completedAt").unwrap_or_else(|| started_at.clone());
+    let existing = conn
+        .query_row(
+            "SELECT signature, count, session_ids_json, outcomes_json, first_at, last_at, evidence_ids_json
+             FROM pattern_evidence WHERE signature = ?1",
+            params![signature],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let (
+        prior_count,
+        mut session_ids,
+        mut outcomes,
+        first_at_existing,
+        mut evidence_ids,
+        existing_json,
+    ): (
+        i64,
+        Vec<String>,
+        serde_json::Map<String, Value>,
+        Option<String>,
+        Vec<String>,
+        Option<Value>,
+    ) = match existing {
+        Some(row) => (
+            row.1,
+            serde_json::from_str(&row.2).unwrap_or_default(),
+            serde_json::from_str(&row.3).unwrap_or_default(),
+            Some(row.4.clone()),
+            serde_json::from_str(&row.6).unwrap_or_default(),
+            Some(json!({
+                "signature": row.0,
+                "count": row.1,
+                "sessionIds": serde_json::from_str::<Value>(&row.2).unwrap_or(json!([])),
+                "outcomes": serde_json::from_str::<Value>(&row.3).unwrap_or(json!({})),
+                "firstAt": row.4,
+                "lastAt": row.5,
+                "evidenceIds": serde_json::from_str::<Value>(&row.6).unwrap_or(json!([])),
+            })),
+        ),
+        None => (0, Vec::new(), serde_json::Map::new(), None, Vec::new(), None),
+    };
+    if evidence_ids.iter().any(|id| id == &episode_id) {
+        return Ok(existing_json.unwrap_or(Value::Null));
+    }
+    if !session_ids.iter().any(|id| id == &session_id) {
+        session_ids.push(session_id);
+    }
+    let prior = outcomes.get(&outcome).and_then(|v| v.as_i64()).unwrap_or(0);
+    outcomes.insert(outcome, json!(prior + 1));
+    evidence_ids.push(episode_id);
+    let count = prior_count + 1;
+    let first_at = first_at_existing.unwrap_or_else(|| completed_at.clone());
+    conn.execute(
+        "INSERT OR REPLACE INTO pattern_evidence(
+          signature, count, session_ids_json, outcomes_json, first_at, last_at, evidence_ids_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            signature,
+            count,
+            serde_json::to_string(&session_ids).unwrap_or_else(|_| "[]".into()),
+            Value::Object(outcomes.clone()).to_string(),
+            first_at,
+            completed_at,
+            serde_json::to_string(&evidence_ids).unwrap_or_else(|_| "[]".into()),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(json!({
+        "signature": signature,
+        "count": count,
+        "sessionIds": session_ids,
+        "outcomes": Value::Object(outcomes),
+        "firstAt": first_at,
+        "lastAt": completed_at,
+        "evidenceIds": evidence_ids,
+    }))
 }
 
 fn list_episodes(conn: &Connection) -> Result<Value, String> {

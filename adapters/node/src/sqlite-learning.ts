@@ -10,7 +10,7 @@ import type {
   ReviewRecord,
   WorkSessionRecord,
 } from "@relay/engine";
-import { RETENTION_MS } from "@relay/engine";
+import { foldPattern, RETENTION_MS } from "@relay/engine";
 
 export class SqliteLearning implements LearningStore {
   constructor(private readonly db: DatabaseSync) {}
@@ -75,7 +75,7 @@ export class SqliteLearning implements LearningStore {
   async putEpisode(record: EpisodeRecord): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
+        `INSERT OR IGNORE INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -91,6 +91,55 @@ export class SqliteLearning implements LearningStore {
 
   async listEpisodes(): Promise<readonly EpisodeRecord[]> {
     return (this.db.prepare(`SELECT * FROM work_episodes`).all() as EpisodeRow[]).map(mapEpisode);
+  }
+
+  async recordCompletedEpisode(record: EpisodeRecord): Promise<PatternRecord | null> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO work_episodes(episode_id, session_id, case_id, signature, outcome, started_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.episodeId,
+          record.sessionId,
+          record.caseId,
+          record.signature,
+          record.outcome,
+          record.startedAt,
+          record.completedAt,
+        );
+      if (record.outcome !== "completed") {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const existingRow = this.db
+        .prepare(`SELECT * FROM pattern_evidence WHERE signature = ?`)
+        .get(record.signature) as PatternRow | undefined;
+      const existing = existingRow ? mapPattern(existingRow) : null;
+      const pattern = foldPattern(existing, record);
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO pattern_evidence(
+            signature, count, session_ids_json, outcomes_json, first_at, last_at, evidence_ids_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          pattern.signature,
+          pattern.count,
+          JSON.stringify(pattern.sessionIds),
+          JSON.stringify(pattern.outcomes),
+          pattern.firstAt,
+          pattern.lastAt,
+          JSON.stringify(pattern.evidenceIds),
+        );
+      this.db.exec("COMMIT");
+      return pattern;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   async putReceipt(record: ReceiptRecord): Promise<void> {

@@ -31,13 +31,26 @@ describe("local model generation path", () => {
       type: "SubmitText",
       text: "What is the difference between connection-oriented and connectionless transport?",
     });
-    await waitFor(async () =>
-      (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-    );
+    await waitFor(async () => {
+      const snap = await harness.client.getSnapshot();
+      return (
+        snap.feedItems.some((item) => item.kind === "answer") &&
+        snap.waits.length === 0 &&
+        snap.trace.some((line) => line.type === "answer.committed")
+      );
+    });
     const snap = await harness.client.getSnapshot();
-    expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toContain("TCP is connection-oriented");
+    const ask = snap.feedItems.find((item) => item.kind === "ask");
+    const answer = snap.feedItems.find((item) => item.kind === "answer");
+    expect(answer?.summary).toContain("TCP is connection-oriented");
+    expect(ask?.itemId).toMatch(/^feed_.+_ask$/);
+    expect(answer?.itemId).toMatch(/^feed_.+_answer$/);
+    expect(snap.waits).toHaveLength(0);
     expect(snap.status.find((s) => s.id === "model")?.detail).toBe("ready");
     expect(snap.feedItems.some((i) => i.summary.includes("No local result"))).toBe(false);
+    expect(snap.feedItems.filter((i) => i.kind === "answer")).toHaveLength(1);
+    expect(snap.trace.some((line) => line.type === "model.requested")).toBe(true);
+    expect(snap.trace.some((line) => line.type === "answer.committed")).toBe(true);
     await harness.client.stop();
     harness.close();
   });

@@ -224,6 +224,10 @@ class TauriLearning implements LearningStore {
     return this.voidOp({ op: "put_episode", record });
   }
 
+  async recordCompletedEpisode(record: EpisodeRecord): Promise<PatternRecord | null> {
+    return (await this.call({ op: "record_completed_episode", record })) as PatternRecord | null;
+  }
+
   async listEpisodes(): Promise<readonly EpisodeRecord[]> {
     return (await this.call({ op: "list_episodes" })) as EpisodeRecord[];
   }

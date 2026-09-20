@@ -18,7 +18,6 @@ import { inspectRuntime } from "./inspect.js";
 import { runJudgmentLifecycle } from "./judgment-lifecycle.js";
 import {
   BENEFIT_YES_MINIMUM,
-  foldPattern,
   patternReady,
   RETENTION_LABEL,
   workSignature,
@@ -325,6 +324,8 @@ export class RelayEngine {
         return this.onSourceFinal(item);
       case "judgment.requested":
         return this.onJudgmentRequested(item);
+      case "model.requested":
+        return this.onModelRequested(item);
       case "case.resume":
         await this.onCaseResume(item);
         return { kind: "complete" };
@@ -359,7 +360,7 @@ export class RelayEngine {
     if (glossaryMeans) {
       await this.offerGlossary(glossaryMeans.token, glossaryMeans.expansion);
       await this.publishFeedItem({
-        itemId: this.deps.ids.next("feed"),
+        itemId: feedItemId(caseId, "task"),
         kind: "task",
         summary: `Confirm ${glossaryMeans.token} means ${glossaryMeans.expansion}`,
         createdAt: this.deps.clock.now().toISOString(),
@@ -418,108 +419,210 @@ export class RelayEngine {
     const findingSummaries = [...reflex.findings];
     const token = askedToken(text);
     let signature = reflex.signature;
-
     const latest = await this.deps.store.getCase(caseId);
     if (!latest) return { kind: "complete" };
-    const completed = await this.deps.store.updateCase(caseId, latest.version, {
-      phase: "done",
-      status: "completed",
-      at: this.deps.clock.now().toISOString(),
-    });
-    if (!completed) return { kind: "complete" };
+    const at = this.deps.clock.now().toISOString();
 
-    if (findingSummaries.length > 0 || current.origin === "direct") {
-      if (current.origin === "direct") {
-        await this.publishFeedItem({
-          itemId: this.deps.ids.next("feed"),
-          kind: "ask",
-          summary: structuredAskSummary(text),
-          createdAt: completed.updatedAt,
-          caseId,
-        });
+    if (current.origin === "direct") {
+      await this.publishFeedItem({
+        itemId: feedItemId(caseId, "ask"),
+        kind: "ask",
+        summary: structuredAskSummary(text),
+        createdAt: at,
+        caseId,
+      });
+    }
+
+    if (findingSummaries.length > 0) {
+      await this.publishFeedItem({
+        itemId: feedItemId(caseId, "answer"),
+        kind: "answer",
+        summary: findingSummaries.join(" · "),
+        createdAt: at,
+        caseId,
+      });
+      await this.emitTrace({
+        type: "answer.committed",
+        stage: "episode.complete",
+        status: "completed",
+        caseId,
+        reasonCode: "completed",
+      });
+      if (signature) {
+        try {
+          const unresolved = signature.includes("outcome=no_candidates");
+          await this.recordEpisode(signature, caseId, unresolved ? "unresolved" : "completed");
+        } catch {
+          // Episode persistence must not block the Ask outcome.
+        }
       }
-      if (findingSummaries.length > 0) {
+      await this.emitTrace({
+        type: "outcome.recorded",
+        stage: "episode.complete",
+        status: "completed",
+        caseId,
+        reasonCode: signature ? "episode_recorded" : "no_episode",
+      });
+      await this.finishCase(caseId, latest.version, "completed");
+      return { kind: "complete" };
+    }
+
+    if (current.origin === "direct") {
+      const task = definitionSearchTask(text);
+      if (task && token && !reflex.suppressSearch) {
+        signature = workSignature("acronym.lookup", { outcome: "no_candidates", token });
+        await this.putReceipt({
+          caseId,
+          gateId: "reflex.resolve-acronym",
+          policyVersion: "resolve-acronym@1",
+          questionType: "not_applicable",
+          provider: "not_applicable",
+          probabilities: {},
+          thresholds: {},
+          selectedOption: null,
+          result: "not_applicable",
+          reasonCode: "no_candidates",
+          latencyMs: null,
+        });
         await this.publishFeedItem({
-          itemId: this.deps.ids.next("feed"),
-          kind: "answer",
-          summary: findingSummaries.join(" · "),
-          createdAt: this.deps.clock.now().toISOString(),
+          itemId: feedItemId(caseId, "task"),
+          kind: "task",
+          summary: task,
+          createdAt: at,
           caseId,
         });
+        if (signature) {
+          try {
+            await this.recordEpisode(signature, caseId, "unresolved");
+          } catch {
+            // ignore
+          }
+        }
         await this.emitTrace({
-          type: "answer.committed",
+          type: "outcome.recorded",
           stage: "episode.complete",
           status: "completed",
           caseId,
-          reasonCode: "completed",
+          reasonCode: "episode_recorded",
         });
-      } else if (current.origin === "direct") {
-        const task = definitionSearchTask(text);
-        if (task && token && !reflex.suppressSearch) {
-          signature = workSignature("acronym.lookup", { outcome: "no_candidates", token });
-          await this.putReceipt({
-            caseId,
-            gateId: "reflex.resolve-acronym",
-            policyVersion: "resolve-acronym@1",
-            questionType: "not_applicable",
-            provider: "not_applicable",
-            probabilities: {},
-            thresholds: {},
-            selectedOption: null,
-            result: "not_applicable",
-            reasonCode: "no_candidates",
-            latencyMs: null,
-          });
-          await this.publishFeedItem({
-            itemId: this.deps.ids.next("feed"),
-            kind: "task",
-            summary: task,
-            createdAt: this.deps.clock.now().toISOString(),
-            caseId,
-          });
-        } else if (task) {
-          await this.publishFeedItem({
-            itemId: this.deps.ids.next("feed"),
-            kind: "task",
-            summary: task,
-            createdAt: this.deps.clock.now().toISOString(),
-            caseId,
-          });
-        } else {
-          const generated = await this.generateDirectAnswer(text, caseId);
-          await this.publishFeedItem({
-            itemId: this.deps.ids.next("feed"),
-            kind: "answer",
-            summary: generated.ok ? generated.text : "No local result for this Ask.",
-            createdAt: this.deps.clock.now().toISOString(),
-            caseId,
-          });
-          await this.emitTrace({
-            type: "answer.committed",
-            stage: "episode.complete",
-            status: "completed",
-            caseId,
-            reasonCode: generated.ok ? "completed" : "model_unavailable",
-          });
-        }
+        await this.finishCase(caseId, latest.version, "completed");
+        return { kind: "complete" };
       }
+      if (task) {
+        await this.publishFeedItem({
+          itemId: feedItemId(caseId, "task"),
+          kind: "task",
+          summary: task,
+          createdAt: at,
+          caseId,
+        });
+        await this.emitTrace({
+          type: "outcome.recorded",
+          stage: "episode.complete",
+          status: "completed",
+          caseId,
+          reasonCode: "no_episode",
+        });
+        await this.finishCase(caseId, latest.version, "completed");
+        return { kind: "complete" };
+      }
+
+      const waiting = await this.deps.store.updateCase(caseId, latest.version, {
+        phase: "model",
+        status: "waiting",
+        waitKind: "model",
+        at,
+      });
+      if (!waiting) return { kind: "complete" };
+      await this.deps.store.enqueue({
+        workId: modelWorkId(caseId),
+        type: "model.requested",
+        priority: PRIORITY_DIRECT,
+        availableAt: at,
+        createdAt: at,
+        payload: {
+          caseId,
+          caseVersion: waiting.version,
+          sourceEventId,
+          textArtifactId: String(item.payload.textArtifactId ?? ""),
+          textSha256: String(item.payload.textSha256 ?? ""),
+        },
+      });
+      await this.emitTrace({
+        type: "model.requested",
+        stage: "model.request",
+        status: "waiting",
+        caseId,
+        reasonCode: "direct_answer",
+      });
+      return { kind: "complete" };
     }
 
-    if (signature) {
-      try {
-        const unresolved = signature.includes("outcome=no_candidates");
-        await this.recordEpisode(signature, caseId, unresolved ? "unresolved" : "completed");
-      } catch {
-        // Episode persistence must not block the outcome receipt for the Ask.
-      }
+    await this.emitTrace({
+      type: "outcome.recorded",
+      stage: "episode.complete",
+      status: "completed",
+      caseId,
+      reasonCode: "no_episode",
+    });
+    await this.finishCase(caseId, latest.version, "completed");
+    return { kind: "complete" };
+  }
+
+  private async onModelRequested(item: WorkItem): Promise<WorkDisposition> {
+    const caseId = String(item.payload.caseId ?? "");
+    const current = await this.deps.store.getCase(caseId);
+    if (!current || current.status === "completed" || current.status === "blocked" || current.status === "failed") {
+      return { kind: "complete" };
+    }
+    const text = await this.loadText(item);
+    if (text == null) {
+      await this.publishFeedItem({
+        itemId: feedItemId(caseId, "answer"),
+        kind: "answer",
+        summary: "No local result for this Ask.",
+        createdAt: this.deps.clock.now().toISOString(),
+        caseId,
+      });
+      await this.emitTrace({
+        type: "answer.committed",
+        stage: "episode.complete",
+        status: "completed",
+        caseId,
+        reasonCode: "model_unavailable",
+      });
+      await this.finishCase(caseId, current.version, "failed");
+      return { kind: "complete" };
+    }
+
+    const existing = (await this.deps.store.listFeedItemRecords()).find(
+      (feed) => feed.itemId === feedItemId(caseId, "answer"),
+    );
+    if (!existing) {
+      const generated = await this.generateDirectAnswer(text, caseId);
+      await this.publishFeedItem({
+        itemId: feedItemId(caseId, "answer"),
+        kind: "answer",
+        summary: generated.ok ? generated.text : "No local result for this Ask.",
+        createdAt: this.deps.clock.now().toISOString(),
+        caseId,
+      });
+      await this.emitTrace({
+        type: "answer.committed",
+        stage: "episode.complete",
+        status: "completed",
+        caseId,
+        reasonCode: generated.ok ? "completed" : "model_unavailable",
+      });
     }
     await this.emitTrace({
       type: "outcome.recorded",
       stage: "episode.complete",
       status: "completed",
       caseId,
-      reasonCode: signature ? "episode_recorded" : "no_episode",
+      reasonCode: "no_episode",
     });
+    await this.finishCase(caseId, current.version, "completed");
     return { kind: "complete" };
   }
 
@@ -766,14 +869,14 @@ export class RelayEngine {
         };
       }
       const status = blocked ? "blocked" : "failed";
-      await this.finishCase(caseId, current.version, status);
       await this.publishFeedItem({
-        itemId: this.deps.ids.next("feed"),
+        itemId: feedItemId(caseId, "wait"),
         kind: "wait",
         summary: `Jev choice unavailable · ${reasonCode}`,
         createdAt: this.deps.clock.now().toISOString(),
         caseId,
       });
+      await this.finishCase(caseId, current.version, status);
       await this.emitTrace({
         type: "judgment.failed",
         stage: "judgment.response",
@@ -858,10 +961,9 @@ export class RelayEngine {
       attempt,
     });
     if (pass && label) {
-      await this.finishCase(caseId, current.version, "completed");
       const token = String(item.payload.token ?? "");
       await this.publishFeedItem({
-        itemId: this.deps.ids.next("feed"),
+        itemId: feedItemId(caseId, "answer"),
         kind: "answer",
         summary: label,
         createdAt: this.deps.clock.now().toISOString(),
@@ -877,6 +979,7 @@ export class RelayEngine {
       const signature = workSignature("acronym.lookup", { outcome: "choice", token });
       if (signature) await this.recordEpisode(signature, caseId, "completed");
       await this.offerGlossary(token, label);
+      await this.finishCase(caseId, current.version, "completed");
     } else {
       await this.finishCase(caseId, current.version, "completed");
     }
@@ -1176,9 +1279,9 @@ export class RelayEngine {
     const open = (await this.deps.store.learning.currentSession()) ?? {
       sessionId: await this.openWorkSession(),
     };
-    const episodeId = this.deps.ids.next("episode");
+    const episodeId = caseId ? `episode_${caseId}` : this.deps.ids.next("episode");
     const at = this.deps.clock.now().toISOString();
-    await this.deps.store.learning.putEpisode({
+    const record = {
       episodeId,
       sessionId: open.sessionId,
       caseId,
@@ -1186,20 +1289,15 @@ export class RelayEngine {
       outcome,
       startedAt: at,
       completedAt: at,
-    });
+    };
+    let pattern = null;
     if (outcome === "completed") {
-      const existing = await this.deps.store.learning.getPattern(signature);
-      const pattern = foldPattern(existing, {
-        episodeId,
-        sessionId: open.sessionId,
-        caseId,
-        signature,
-        outcome,
-        startedAt: at,
-        completedAt: at,
-      });
-      await this.deps.store.learning.putPattern(pattern);
-      if (patternReady(pattern)) await this.considerCandidate(pattern.signature, pattern.count, pattern.sessionIds.length);
+      pattern = await this.deps.store.learning.recordCompletedEpisode(record);
+      if (pattern && patternReady(pattern)) {
+        await this.considerCandidate(pattern.signature, pattern.count, pattern.sessionIds.length);
+      }
+    } else {
+      await this.deps.store.learning.putEpisode(record);
     }
     this.activeEpisodeId = outcome === "completed" ? null : episodeId;
     await this.emitTrace({
@@ -1603,6 +1701,14 @@ export class RelayEngine {
     const snapshot = await this.getSnapshot();
     this.emit({ type: "SnapshotReplaced", snapshot });
   }
+}
+
+function feedItemId(caseId: string, role: string): string {
+  return `feed_${caseId}_${role}`;
+}
+
+function modelWorkId(caseId: string): string {
+  return `work_${caseId}_model`;
 }
 
 const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {

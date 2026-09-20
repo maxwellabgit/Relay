@@ -124,6 +124,8 @@ export type LearningStore = {
   listSessions(): Promise<readonly WorkSessionRecord[]>;
   putEpisode(record: EpisodeRecord): Promise<void>;
   listEpisodes(): Promise<readonly EpisodeRecord[]>;
+  /** Atomically insert episode and fold pattern when outcome is completed. */
+  recordCompletedEpisode(record: EpisodeRecord): Promise<PatternRecord | null>;
   putReceipt(record: ReceiptRecord): Promise<void>;
   listReceipts(): Promise<readonly ReceiptRecord[]>;
   putPattern(record: PatternRecord): Promise<void>;
@@ -148,6 +150,9 @@ export function workSignature(kind: string, fields: Readonly<Record<string, stri
 }
 
 export function foldPattern(existing: PatternRecord | null, episode: EpisodeRecord): PatternRecord {
+  if (existing?.evidenceIds.includes(episode.episodeId)) {
+    return existing;
+  }
   const successful = episode.outcome === "completed";
   const sessions = new Set(existing?.sessionIds ?? []);
   if (successful) sessions.add(episode.sessionId);
@@ -233,11 +238,20 @@ export class InMemoryLearning implements LearningStore {
   }
 
   async putEpisode(record: EpisodeRecord): Promise<void> {
+    if (this.episodes.some((episode) => episode.episodeId === record.episodeId)) return;
     this.episodes.push(record);
   }
 
   async listEpisodes(): Promise<readonly EpisodeRecord[]> {
     return this.episodes;
+  }
+
+  async recordCompletedEpisode(record: EpisodeRecord): Promise<PatternRecord | null> {
+    await this.putEpisode(record);
+    if (record.outcome !== "completed") return null;
+    const pattern = foldPattern(await this.getPattern(record.signature), record);
+    await this.putPattern(pattern);
+    return pattern;
   }
 
   async putReceipt(record: ReceiptRecord): Promise<void> {

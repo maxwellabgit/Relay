@@ -3,6 +3,7 @@ export type WorkItemType =
   | "case.resume"
   | "judgment.requested"
   | "judgment.completed"
+  | "model.requested"
   | "model.completed"
   | "operation.completed"
   | "timer.due";
