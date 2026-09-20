@@ -8,7 +8,7 @@ import type {
   CasePhase,
   CaseRecord,
   CaseStatus,
-  FeedItemSnapshot,
+  FeedItemRecord,
   JudgmentRecord,
   RelaySnapshot,
 } from "@relay/contracts";
@@ -182,19 +182,44 @@ export class SqliteEngineStore implements EngineStore {
     return rows.map(mapCase);
   }
 
-  async listFeedItems(): Promise<readonly FeedItemSnapshot[]> {
+  async listFeedItemRecords(): Promise<readonly FeedItemRecord[]> {
     const rows = this.db
-      .prepare(`SELECT payload_json FROM domain_events WHERE type = 'feed.item' ORDER BY sequence`)
-      .all() as { payload_json: string }[];
-    return rows.map((r) => JSON.parse(r.payload_json) as FeedItemSnapshot);
+      .prepare(
+        `SELECT item_id, kind, content_artifact_id, content_sha256, created_at, case_id
+         FROM feed_items ORDER BY created_at`,
+      )
+      .all() as {
+      item_id: string;
+      kind: string;
+      content_artifact_id: string;
+      content_sha256: string;
+      created_at: string;
+      case_id: string | null;
+    }[];
+    return rows.map((r) => ({
+      itemId: r.item_id,
+      kind: r.kind,
+      contentArtifactId: r.content_artifact_id,
+      contentSha256: r.content_sha256,
+      createdAt: r.created_at,
+      ...(r.case_id ? { caseId: r.case_id } : {}),
+    }));
   }
 
-  async addFeedItem(item: FeedItemSnapshot): Promise<void> {
-    await this.appendDomainEvent(
-      "feed.item",
-      item.createdAt,
-      item as unknown as Record<string, unknown>,
-    );
+  async addFeedItem(item: FeedItemRecord): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        item.itemId,
+        item.kind,
+        item.contentArtifactId,
+        item.contentSha256,
+        item.createdAt,
+        item.caseId ?? null,
+      );
   }
 
   async listSourceSegments(sessionId: string): Promise<RelaySnapshot["sourceSegments"]> {
@@ -519,12 +544,13 @@ function applyMigrations(db: DatabaseSync): void {
     2: "002_learning.sql",
     3: "003_runtime.sql",
     4: "004_decisions.sql",
+    5: "005_content_artifacts.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4]) {
+    for (const version of [2, 3, 4, 5]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

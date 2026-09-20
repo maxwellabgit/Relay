@@ -8,6 +8,16 @@ export type FeedItemSnapshot = {
   readonly caseId?: string;
 };
 
+/** Durable feed row — prose lives in the artifact store, not SQLite. */
+export type FeedItemRecord = {
+  readonly itemId: string;
+  readonly kind: string;
+  readonly contentArtifactId: string;
+  readonly contentSha256: string;
+  readonly createdAt: string;
+  readonly caseId?: string;
+};
+
 export type ApprovalSnapshot = {
   readonly operationId: string;
   readonly action: ConnectorActionRef;

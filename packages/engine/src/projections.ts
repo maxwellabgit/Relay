@@ -1,20 +1,61 @@
-import type { RelaySnapshot, StatusChipState } from "@relay/contracts";
+import type {
+  ArtifactStorePort,
+  FeedItemRecord,
+  FeedItemSnapshot,
+  RelaySnapshot,
+  StatusChipState,
+} from "@relay/contracts";
 import type { EngineStore } from "./store.js";
 import { RETENTION_LABEL } from "./learning-store.js";
+
+export async function hydrateFeedItems(
+  records: readonly FeedItemRecord[],
+  artifacts: ArtifactStorePort,
+): Promise<readonly FeedItemSnapshot[]> {
+  const items: FeedItemSnapshot[] = [];
+  for (const record of records) {
+    try {
+      const bytes = await artifacts.get({
+        artifactId: record.contentArtifactId,
+        sha256: record.contentSha256,
+        policy: { disclosure: "local_only", sensitivity: 0 },
+      });
+      const summary = new TextDecoder().decode(bytes);
+      items.push({
+        itemId: record.itemId,
+        kind: record.kind,
+        summary,
+        createdAt: record.createdAt,
+        ...(record.caseId ? { caseId: record.caseId } : {}),
+      });
+    } catch {
+      items.push({
+        itemId: record.itemId,
+        kind: record.kind,
+        summary: "[unavailable]",
+        createdAt: record.createdAt,
+        ...(record.caseId ? { caseId: record.caseId } : {}),
+      });
+    }
+  }
+  return items;
+}
 
 export async function projectSnapshot(
   store: EngineStore,
   sessionId: string,
   status: readonly StatusChipState[],
+  artifacts: ArtifactStorePort,
 ): Promise<RelaySnapshot> {
-  const [listening, cases, feedItems, sourceSegments, queueDepth, events] = await Promise.all([
+  const [listening, cases, records, sourceSegments, queueDepth, events] = await Promise.all([
     store.getListening(sessionId),
     store.listActiveCases(),
-    store.listFeedItems(),
+    store.listFeedItemRecords(),
     store.listSourceSegments(sessionId),
     store.countWorkItems(),
     store.listDomainEvents(80),
   ]);
+  const feedItems = await hydrateFeedItems(records, artifacts);
 
   return {
     listening,

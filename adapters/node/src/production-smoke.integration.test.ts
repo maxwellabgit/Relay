@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { createProductionIds, createRelayClientFromEngine, RelayEngine } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
-import { MemoryArtifactStore } from "@relay/testkit/browser";
 import { createFileTraceSink } from "./file-trace.js";
+import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
 
@@ -78,7 +78,7 @@ describe("windows production composition smoke", () => {
 function openComposition(databasePath: string, runsRoot: string) {
   const sqlite = new SqliteEngineStore(databasePath);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
-  const artifacts = new MemoryArtifactStore();
+  const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(databasePath));
   const ids = createProductionIds();
   const engine = new RelayEngine({
     store,

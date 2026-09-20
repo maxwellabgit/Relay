@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use crate::secrets::read_typesafe_api_key;
+
 #[derive(Deserialize)]
 pub struct TypesafeJudgeRequest {
     pub model: String,
@@ -43,8 +45,6 @@ fn post_once(
     api_key: &str,
     body: &serde_json::Value,
 ) -> Result<(u16, Option<serde_json::Value>), (u16, bool)> {
-    // Returns Ok((status, parsed_body)) on 2xx.
-    // Err((status, retryable)) on HTTP error; status 0 + retryable false on transport error.
     match agent
         .post("https://api.typesafe.ai/v1/systemone")
         .set("Authorization", &format!("Bearer {api_key}"))
@@ -73,9 +73,9 @@ pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
     let _ = &request.model;
     let started = Instant::now();
 
-    let api_key = match std::env::var("RELAY_TYPESAFE_API_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
+    let api_key = match read_typesafe_api_key() {
+        Ok(value) => value,
+        Err(_) => {
             return fail("missing_secret", 0, started.elapsed().as_millis() as u64, 0);
         }
     };

@@ -1,4 +1,5 @@
-import type { JudgmentPort, JudgmentRequest, JudgmentResponse, RelayClient, TextModelPort } from "@relay/contracts";
+import type { ArtifactStorePort, JudgmentPort, JudgmentRequest, JudgmentResponse, RelayClient, TextModelPort } from "@relay/contracts";
+import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
 import {
   createProductionIds,
@@ -9,7 +10,6 @@ import {
   type EngineDeps,
 } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
-import { MemoryArtifactStore } from "@relay/testkit/browser";
 import { createBrowserTraceSink } from "./trace-log";
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -29,7 +29,7 @@ export type DesktopClientHandle = {
   readonly client: RelayClient;
   readonly engine: RelayEngine;
   readonly store: TauriEngineStore;
-  readonly artifacts: MemoryArtifactStore;
+  readonly artifacts: ArtifactStorePort;
   start(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -46,7 +46,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const ids = options.ids ?? createProductionIds();
   const storeInvoke: StoreInvoke = (command, args) => invoke(command, args);
   const store = new TauriEngineStore(storeInvoke);
-  const artifacts = new MemoryArtifactStore();
+  const artifacts = new TauriArtifactStore(invoke);
   const judgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
   const model: TextModelPort = {
     async generate() {

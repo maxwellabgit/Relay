@@ -11,6 +11,8 @@ const MIGRATION_3: &str =
     include_str!("../../../../packages/storage-schema/migrations/003_runtime.sql");
 const MIGRATION_4: &str =
     include_str!("../../../../packages/storage-schema/migrations/004_decisions.sql");
+const MIGRATION_5: &str =
+    include_str!("../../../../packages/storage-schema/migrations/005_content_artifacts.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -74,6 +76,7 @@ impl StateDb {
         apply_version(&tx, 2, MIGRATION_2)?;
         apply_version(&tx, 3, MIGRATION_3)?;
         apply_version(&tx, 4, MIGRATION_4)?;
+        apply_version(&tx, 5, MIGRATION_5)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -343,22 +346,50 @@ fn list_active_cases(conn: &Connection) -> Result<Value, String> {
 fn list_feed_items(conn: &Connection) -> Result<Value, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT payload_json FROM domain_events WHERE type = 'feed.item' ORDER BY sequence",
+            "SELECT item_id, kind, content_artifact_id, content_sha256, created_at, case_id
+             FROM feed_items ORDER BY created_at",
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok(json!({
+                "itemId": row.get::<_, String>(0)?,
+                "kind": row.get::<_, String>(1)?,
+                "contentArtifactId": row.get::<_, String>(2)?,
+                "contentSha256": row.get::<_, String>(3)?,
+                "createdAt": row.get::<_, String>(4)?,
+                "caseId": row.get::<_, Option<String>>(5)?,
+            }))
+        })
         .map_err(|error| error.to_string())?;
     let mut items = Vec::new();
     for row in rows {
-        items.push(parse_json(&row.map_err(|error| error.to_string())?)?);
+        let mut value = row.map_err(|error| error.to_string())?;
+        if value.get("caseId").and_then(|v| v.as_str()).is_none() {
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove("caseId");
+            }
+        }
+        items.push(value);
     }
     Ok(Value::Array(items))
 }
 
 fn add_feed_item(conn: &Connection, op: &Value) -> Result<Value, String> {
     let item = req_obj(op, "item")?;
-    append_domain_event_raw(conn, "feed.item", &req_str(item, "createdAt")?, item)?;
+    conn.execute(
+        "INSERT INTO feed_items(item_id, kind, content_artifact_id, content_sha256, created_at, case_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            req_str(item, "itemId")?,
+            req_str(item, "kind")?,
+            req_str(item, "contentArtifactId")?,
+            req_str(item, "contentSha256")?,
+            req_str(item, "createdAt")?,
+            item.get("caseId").and_then(|v| v.as_str()),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 

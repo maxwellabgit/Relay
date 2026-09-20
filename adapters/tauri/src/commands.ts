@@ -19,6 +19,16 @@ export async function secretStatus(): Promise<string> {
   return invoke<string>("secret_status");
 }
 
+export async function secretSet(name: string, value: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("secret_set", { request: { name, value } });
+}
+
+export async function secretDelete(name: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("secret_delete", { request: { name } });
+}
+
 export async function systemOne(
   request: HostedSystemOneRequest,
 ): Promise<HostedSystemOneResponse> {

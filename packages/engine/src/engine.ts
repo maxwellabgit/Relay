@@ -124,7 +124,12 @@ export class RelayEngine {
   }
 
   async getSnapshot(): Promise<RelaySnapshot> {
-    const snapshot = await projectSnapshot(this.deps.store, this.deps.sessionId, this.statusChips());
+    const snapshot = await projectSnapshot(
+      this.deps.store,
+      this.deps.sessionId,
+      this.statusChips(),
+      this.deps.artifacts,
+    );
     const deadLetters = (await this.deps.store.listDeadLetters()).length;
     const inspected = await inspectRuntime(this.deps.store.learning, this.traces, {
       runId: this.runId(),
@@ -339,7 +344,7 @@ export class RelayEngine {
     const glossaryMeans = parseGlossaryMeans(text);
     if (glossaryMeans) {
       await this.offerGlossary(glossaryMeans.token, glossaryMeans.expansion);
-      await this.deps.store.addFeedItem({
+      await this.publishFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "task",
         summary: `Confirm ${glossaryMeans.token} means ${glossaryMeans.expansion}`,
@@ -431,7 +436,7 @@ export class RelayEngine {
     if (!completed) return { kind: "complete" };
 
     if (current.origin === "direct") {
-      await this.deps.store.addFeedItem({
+      await this.publishFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "ask",
         summary: structuredAskSummary(text),
@@ -439,7 +444,7 @@ export class RelayEngine {
         caseId,
       });
       if (findingSummaries.length > 0) {
-        await this.deps.store.addFeedItem({
+        await this.publishFeedItem({
           itemId: this.deps.ids.next("feed"),
           kind: "answer",
           summary: findingSummaries.join(" · "),
@@ -463,7 +468,7 @@ export class RelayEngine {
             reasonCode: "no_candidates",
             latencyMs: null,
           });
-          await this.deps.store.addFeedItem({
+          await this.publishFeedItem({
             itemId: this.deps.ids.next("feed"),
             kind: "task",
             summary: task,
@@ -471,7 +476,7 @@ export class RelayEngine {
             caseId,
           });
         } else if (task) {
-          await this.deps.store.addFeedItem({
+          await this.publishFeedItem({
             itemId: this.deps.ids.next("feed"),
             kind: "task",
             summary: task,
@@ -483,7 +488,7 @@ export class RelayEngine {
             { taskKind: "direct_answer", prompt: text, caseId },
             this.abort?.signal ?? new AbortController().signal,
           );
-          await this.deps.store.addFeedItem({
+          await this.publishFeedItem({
             itemId: this.deps.ids.next("feed"),
             kind: "answer",
             summary: generated.ok ? generated.text : "No local result for this Ask.",
@@ -752,7 +757,7 @@ export class RelayEngine {
       }
       const status = blocked ? "blocked" : "failed";
       await this.finishCase(caseId, current.version, status);
-      await this.deps.store.addFeedItem({
+      await this.publishFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "wait",
         summary: `Jev choice unavailable · ${reasonCode}`,
@@ -829,7 +834,7 @@ export class RelayEngine {
     const label = labelById[gate.selected] ?? "";
     if (pass && gate.selected !== "no_match" && label) {
       await this.finishCase(caseId, current.version, "completed");
-      await this.deps.store.addFeedItem({
+      await this.publishFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "answer",
         summary: label,
@@ -963,7 +968,7 @@ export class RelayEngine {
       status: "completed",
       reasonCode: "explicit_user",
     });
-    await this.deps.store.addFeedItem({
+    await this.publishFeedItem({
       itemId: this.deps.ids.next("feed"),
       kind: "memory",
       summary: `Saved ${token}`,
@@ -1026,7 +1031,7 @@ export class RelayEngine {
       reasonCode: "birthday_confirmed",
       latencyMs: null,
     });
-    await this.deps.store.addFeedItem({
+    await this.publishFeedItem({
       itemId: this.deps.ids.next("feed"),
       kind: "memory",
       summary: "Birthday saved",
@@ -1450,7 +1455,7 @@ export class RelayEngine {
       displayName: input.displayName,
       date,
     });
-    await this.deps.store.addFeedItem({
+    await this.publishFeedItem({
       itemId: this.deps.ids.next("feed"),
       kind: "task",
       summary: "Confirm birthday",
@@ -1480,6 +1485,26 @@ export class RelayEngine {
 
   private emit(change: RelayChange): void {
     for (const listener of this.listeners) listener(change);
+  }
+
+
+  private async publishFeedItem(item: {
+    readonly itemId: string;
+    readonly kind: string;
+    readonly summary: string;
+    readonly createdAt: string;
+    readonly caseId?: string;
+  }): Promise<void> {
+    const bytes = encodeText(item.summary);
+    const ref = await this.deps.artifacts.put(bytes, localOnlyPolicy());
+    await this.deps.store.addFeedItem({
+      itemId: item.itemId,
+      kind: item.kind,
+      contentArtifactId: ref.artifactId,
+      contentSha256: ref.sha256,
+      createdAt: item.createdAt,
+      ...(item.caseId ? { caseId: item.caseId } : {}),
+    });
   }
 
   private async emitSnapshot(): Promise<void> {

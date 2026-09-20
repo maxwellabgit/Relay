@@ -1,4 +1,4 @@
-import type { CaseKind, CaseOrigin, CasePhase, CaseStatus, FeedItemSnapshot, JudgmentRecord } from "@relay/contracts";
+import type { CaseKind, CaseOrigin, CasePhase, CaseStatus, FeedItemRecord, JudgmentRecord } from "@relay/contracts";
 import type {
   CandidateRecord,
   EpisodeRecord,
@@ -66,9 +66,9 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
     case "list_active_cases":
       return store.listActiveCases();
     case "list_feed_items":
-      return store.listFeedItems();
+      return store.listFeedItemRecords();
     case "add_feed_item":
-      await store.addFeedItem(op.item as FeedItemSnapshot);
+      await store.addFeedItem(op.item as FeedItemRecord);
       return null;
     case "list_source_segments":
       return store.listSourceSegments(str(op, "sessionId"));

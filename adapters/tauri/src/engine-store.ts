@@ -4,7 +4,7 @@ import type {
   CasePhase,
   CaseRecord,
   CaseStatus,
-  FeedItemSnapshot,
+  FeedItemRecord,
   JudgmentRecord,
   RelaySnapshot,
 } from "@relay/contracts";
@@ -93,11 +93,11 @@ export class TauriEngineStore implements EngineStore {
     return (await this.call({ op: "list_active_cases" })) as CaseRecord[];
   }
 
-  async listFeedItems(): Promise<readonly FeedItemSnapshot[]> {
-    return (await this.call({ op: "list_feed_items" })) as FeedItemSnapshot[];
+  async listFeedItemRecords(): Promise<readonly FeedItemRecord[]> {
+    return (await this.call({ op: "list_feed_items" })) as FeedItemRecord[];
   }
 
-  addFeedItem(item: FeedItemSnapshot): Promise<void> {
+  addFeedItem(item: FeedItemRecord): Promise<void> {
     return this.voidOp({ op: "add_feed_item", item });
   }
 

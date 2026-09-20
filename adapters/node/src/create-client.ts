@@ -6,6 +6,7 @@ import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DecisionArtifactStore, decisionArtifactRoot } from "./decision-artifacts.js";
+import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
@@ -24,13 +25,17 @@ export type NodeHarnessOptions = {
 };
 
 export function createNodeHarness(options: NodeHarnessOptions = {}) {
-  const sqlite = new SqliteEngineStore(options.databasePath ?? ":memory:");
+  const databasePath = options.databasePath ?? ":memory:";
+  const sqlite = new SqliteEngineStore(databasePath);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
   const runsRoot = options.runsRoot ?? join(tmpdir(), "relay-runs");
   const runId = `run_${Date.now().toString(36)}`;
-  const artifacts = options.durableDecisionArtifacts
-    ? new DecisionArtifactStore(decisionArtifactRoot(runsRoot, runId))
-    : new MemoryArtifactStore();
+  const artifacts =
+    options.durableDecisionArtifacts
+      ? new DecisionArtifactStore(decisionArtifactRoot(runsRoot, runId))
+      : databasePath !== ":memory:"
+        ? new FileArtifactStore(fileArtifactRootForDatabase(databasePath))
+        : new MemoryArtifactStore();
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
   const ids =

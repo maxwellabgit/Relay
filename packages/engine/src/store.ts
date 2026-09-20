@@ -5,7 +5,7 @@ import type {
   CaseRecord,
   CaseStatus,
   DataPolicy,
-  FeedItemSnapshot,
+  FeedItemRecord,
   JudgmentRecord,
   RelaySnapshot,
   TranscriptSegmentV1,
@@ -55,8 +55,8 @@ export type EngineStore = {
     payload: Record<string, unknown>,
   ): Promise<void>;
   listActiveCases(): Promise<readonly CaseRecord[]>;
-  listFeedItems(): Promise<readonly FeedItemSnapshot[]>;
-  addFeedItem(item: FeedItemSnapshot): Promise<void>;
+  listFeedItemRecords(): Promise<readonly FeedItemRecord[]>;
+  addFeedItem(item: FeedItemRecord): Promise<void>;
   listSourceSegments(sessionId: string): Promise<RelaySnapshot["sourceSegments"]>;
   enqueue(item: WorkItem): Promise<void>;
   claimNext(now: string, owner: string, leaseMs: number): Promise<WorkItem | null>;

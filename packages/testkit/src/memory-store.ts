@@ -4,7 +4,7 @@ import type {
   CasePhase,
   CaseRecord,
   CaseStatus,
-  FeedItemSnapshot,
+  FeedItemRecord,
   JudgmentRecord,
   RelaySnapshot,
 } from "@relay/contracts";
@@ -46,6 +46,7 @@ export class MemoryEngineStore implements EngineStore {
   private readonly cases = new Map<string, CaseRecord>();
   private readonly caseEvents: CaseEventRow[] = [];
   private readonly domainEvents: DomainEventRow[] = [];
+  private readonly feedItems: FeedItemRecord[] = [];
   private readonly workItems = new Map<string, WorkRow>();
   private readonly judgments = new Map<string, JudgmentRecord>();
   private readonly deadLetters: { workId: string; reasonCode: string; at: string }[] = [];
@@ -179,19 +180,12 @@ export class MemoryEngineStore implements EngineStore {
       .sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt));
   }
 
-  async listFeedItems(): Promise<readonly FeedItemSnapshot[]> {
-    return this.domainEvents
-      .filter((e) => e.type === "feed.item")
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((e) => e.payload as unknown as FeedItemSnapshot);
+  async listFeedItemRecords(): Promise<readonly FeedItemRecord[]> {
+    return [...this.feedItems].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  async addFeedItem(item: FeedItemSnapshot): Promise<void> {
-    await this.appendDomainEvent(
-      "feed.item",
-      item.createdAt,
-      item as unknown as Record<string, unknown>,
-    );
+  async addFeedItem(item: FeedItemRecord): Promise<void> {
+    this.feedItems.push(item);
   }
 
   async listSourceSegments(sessionId: string): Promise<RelaySnapshot["sourceSegments"]> {
