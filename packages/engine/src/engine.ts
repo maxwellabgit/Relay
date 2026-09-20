@@ -39,6 +39,7 @@ import {
 import { projectSnapshot } from "./projections.js";
 import { PRIORITY_DIRECT, PRIORITY_OBSERVED, type WorkItem } from "./queue.js";
 import { JUDGMENT_MAX_ATTEMPTS, backoffMs, knownReason, type RuntimeEventV2 } from "./runtime-events.js";
+import { DIRECT_ANSWER_PROMPT_V1 } from "./prompts/direct-answer.v1.js";
 import { Scheduler, type Clock, type IdFactory } from "./scheduler.js";
 import type { EngineStore } from "./store.js";
 import type { TraceSink } from "./trace-sink.js";
@@ -484,10 +485,7 @@ export class RelayEngine {
             caseId,
           });
         } else {
-          const generated = await this.deps.model.generate(
-            { taskKind: "direct_answer", prompt: text, caseId },
-            this.abort?.signal ?? new AbortController().signal,
-          );
+          const generated = await this.generateDirectAnswer(text, caseId);
           await this.publishFeedItem({
             itemId: this.deps.ids.next("feed"),
             kind: "answer",
@@ -1507,6 +1505,65 @@ export class RelayEngine {
     });
   }
 
+  private async generateDirectAnswer(
+    text: string,
+    caseId: string,
+  ): Promise<{ ok: true; text: string } | { ok: false; failureReason: string }> {
+    const signal = this.abort?.signal ?? new AbortController().signal;
+    const prompt = DIRECT_ANSWER_PROMPT_V1.build(text);
+    await this.emitTrace({
+      type: "model.requested",
+      stage: "model.request",
+      status: "started",
+      caseId,
+      reasonCode: "direct_answer",
+    });
+    const started = this.deps.clock.now().getTime();
+    try {
+      const generated = await this.deps.model.generate(
+        {
+          taskKind: DIRECT_ANSWER_PROMPT_V1.taskKind,
+          promptVersion: DIRECT_ANSWER_PROMPT_V1.promptVersion,
+          prompt,
+          caseId,
+        },
+        signal,
+      );
+      const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
+      if (generated.ok) {
+        await this.emitTrace({
+          type: "model.completed",
+          stage: "model.response",
+          status: "completed",
+          caseId,
+          reasonCode: "completed",
+          durationMs,
+        });
+        return { ok: true, text: generated.text };
+      }
+      await this.emitTrace({
+        type: "model.failed",
+        stage: "model.response",
+        status: "failed",
+        caseId,
+        reasonCode: knownReason(generated.failureReason),
+        durationMs,
+      });
+      return generated;
+    } catch {
+      const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
+      await this.emitTrace({
+        type: "model.failed",
+        stage: "model.response",
+        status: "failed",
+        caseId,
+        reasonCode: signal.aborted ? "cancelled" : "model_unavailable",
+        durationMs,
+      });
+      return { ok: false, failureReason: signal.aborted ? "cancelled" : "model_unavailable" };
+    }
+  }
+
   private async emitSnapshot(): Promise<void> {
     const snapshot = await this.getSnapshot();
     this.emit({ type: "SnapshotReplaced", snapshot });
@@ -1524,6 +1581,9 @@ const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "judgment.requested": "judgment.request",
   "judgment.completed": "judgment.response",
   "judgment.failed": "judgment.response",
+  "model.requested": "model.request",
+  "model.completed": "model.response",
+  "model.failed": "model.response",
   "memory.stored": "memory.write",
   "episode.recorded": "episode.complete",
   "outcome.recorded": "episode.complete",

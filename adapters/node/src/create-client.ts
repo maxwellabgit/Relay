@@ -19,6 +19,7 @@ export type NodeHarnessOptions = {
   readonly clock?: EngineDeps["clock"];
   readonly ids?: EngineDeps["ids"];
   readonly judgments?: JudgmentPort;
+  readonly model?: TextModelPort;
   readonly reflexModules?: EngineDeps["reflexModules"];
   readonly episodeDefinitions?: EngineDeps["episodeDefinitions"];
   readonly durableDecisionArtifacts?: boolean;
@@ -64,11 +65,13 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
       },
     ]);
 
-  const model: TextModelPort = {
-    async generate() {
-      return { ok: false, failureReason: "model_disabled" };
-    },
-  };
+  const model: TextModelPort =
+    options.model ??
+    ({
+      async generate() {
+        return { ok: false, failureReason: "model_disabled" };
+      },
+    } satisfies TextModelPort);
 
   const deps: EngineDeps = {
     store,
@@ -82,7 +85,9 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     ...(options.episodeDefinitions ? { episodeDefinitions: options.episodeDefinitions } : {}),
     storageDetail: "sqlite",
     jevStatus: { ok: true, detail: "recorded" },
-    modelStatus: { ok: false, detail: "disabled" },
+    modelStatus: options.model
+      ? { ok: true, detail: "ready" }
+      : { ok: false, detail: "disabled" },
     mode: "recorded",
     gitCommit: "test",
     trace: createFileTraceSink(runsRoot, runId),

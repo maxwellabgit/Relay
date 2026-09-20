@@ -28,14 +28,25 @@ export type JudgmentPort = {
 
 export type GenerationRequest = {
   readonly taskKind: string;
+  readonly promptVersion?: string;
   readonly prompt: string;
   readonly evidenceExcerpts?: readonly string[];
   readonly caseId?: string;
+  readonly maxTokens?: number;
+  readonly temperature?: number;
 };
 
+export type GenerationFailureReason =
+  | "model_unavailable"
+  | "timeout"
+  | "invalid_response"
+  | "cancelled"
+  | "model_disabled"
+  | string;
+
 export type GenerationResponse =
-  | { readonly ok: true; readonly text: string }
-  | { readonly ok: false; readonly failureReason: string };
+  | { readonly ok: true; readonly text: string; readonly model: string; readonly elapsedMs: number }
+  | { readonly ok: false; readonly failureReason: GenerationFailureReason };
 
 export type TextModelPort = {
   generate(request: GenerationRequest, signal: AbortSignal): Promise<GenerationResponse>;

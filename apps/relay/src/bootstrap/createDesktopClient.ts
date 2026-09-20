@@ -1,6 +1,7 @@
 import type { ArtifactStorePort, JudgmentPort, JudgmentRequest, JudgmentResponse, RelayClient, TextModelPort } from "@relay/contracts";
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
+import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
   createProductionIds,
   createRelayClientFromEngine,
@@ -22,6 +23,7 @@ export type DesktopClientOptions = {
   readonly clock?: EngineDeps["clock"];
   readonly ids?: EngineDeps["ids"];
   readonly judgments?: JudgmentPort;
+  readonly model?: TextModelPort;
   readonly invoke?: TauriInvoke;
 };
 
@@ -37,6 +39,11 @@ export type DesktopClientHandle = {
 export async function createDesktopClient(options: DesktopClientOptions = {}): Promise<DesktopClientHandle> {
   const invoke = options.invoke ?? requireTauriInvoke();
   const secret = String((await invoke("secret_status")) ?? "disabled");
+  const localModel = options.model ?? new TauriLocalModelPort(invoke);
+  const modelHealth =
+    "status" in localModel && typeof (localModel as TauriLocalModelPort).status === "function"
+      ? await (localModel as TauriLocalModelPort).status()
+      : { ok: false, detail: "unavailable" };
   const runId = `run_${Date.now().toString(36)}`;
   const directory = await invoke("trace_run_dir", { runId }).catch(() => null);
   const directoryLabel =
@@ -48,17 +55,12 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const store = new TauriEngineStore(storeInvoke);
   const artifacts = new TauriArtifactStore(invoke);
   const judgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
-  const model: TextModelPort = {
-    async generate() {
-      return { ok: false, failureReason: "model_disabled" };
-    },
-  };
 
   const deps: EngineDeps = {
     store,
     artifacts,
     judgments,
-    model,
+    model: localModel,
     clock: options.clock ?? { now: () => new Date() },
     ids,
     sessionId: ids.next("session"),
@@ -68,7 +70,9 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       secret === "present"
         ? { ok: true, detail: "native typesafe" }
         : { ok: false, detail: "missing key" },
-    modelStatus: { ok: false, detail: "disabled" },
+    modelStatus: modelHealth.ok
+      ? { ok: true, detail: "ready" }
+      : { ok: false, detail: "unavailable" },
     mode: "live",
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),

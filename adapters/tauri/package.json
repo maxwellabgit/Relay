@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./engine-store": "./src/engine-store.ts",
-    "./artifact-store": "./src/artifact-store.ts"
+    "./artifact-store": "./src/artifact-store.ts",
+    "./local-model": "./src/local-model.ts"
   },
   "scripts": {
     "typecheck": "tsc -b --pretty false"

@@ -3,6 +3,7 @@ mod commands;
 mod diagnostics;
 mod halo;
 mod hotkeys;
+mod local_model;
 mod secrets;
 mod state;
 mod typesafe;
@@ -23,6 +24,8 @@ pub fn run() {
             secrets::secret_delete,
             artifacts::artifact_put,
             artifacts::artifact_get,
+            local_model::local_model_status,
+            local_model::local_model_generate,
             diagnostics::trace_run_dir,
             diagnostics::append_trace_event,
             diagnostics::read_trace_events,

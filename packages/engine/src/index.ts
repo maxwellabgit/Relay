@@ -16,4 +16,5 @@ export * from "./ids.js";
 export * from "./runtime-events.js";
 export * from "./runtime-recorder.js";
 export * from "./typesafe-judgment.js";
+export * from "./prompts/index.js";
 
