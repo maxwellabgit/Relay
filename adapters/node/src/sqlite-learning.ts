@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { ArtifactStorePort } from "@relay/contracts";
+import { localOnlyPolicy } from "@relay/contracts";
 import type {
   CandidateRecord,
   EpisodeRecord,
@@ -10,20 +12,64 @@ import type {
   ReviewRecord,
   WorkSessionRecord,
 } from "@relay/engine";
-import { foldPattern, RETENTION_MS } from "@relay/engine";
+import {
+  foldPattern,
+  getJsonArtifact,
+  labelsOrUnavailable,
+  packMemoryValue,
+  putJsonArtifact,
+  RETENTION_MS,
+  unpackMemoryValue,
+} from "@relay/engine";
 
 export class SqliteLearning implements LearningStore {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly artifacts?: ArtifactStorePort,
+  ) {}
 
-  async putMemory(record: MemoryRecord): Promise<void> {
+  async putMemory(record: MemoryRecord & {
+    contentArtifactId?: string | null;
+    contentSha256?: string | null;
+    metadata?: Readonly<Record<string, string>>;
+  }): Promise<void> {
+    let artifactId = record.contentArtifactId ?? null;
+    let sha256 = record.contentSha256 ?? null;
+    let metadata = record.metadata ?? {};
+    if (!artifactId || !sha256) {
+      const packed = packMemoryValue(record.kind, record.value);
+      const ref = await this.requireArtifacts().put(
+        new TextEncoder().encode(JSON.stringify(packed.prose)),
+        localOnlyPolicy(),
+      );
+      artifactId = ref.artifactId;
+      sha256 = ref.sha256;
+      metadata = packed.metadata;
+    }
     this.db
       .prepare(
-        `INSERT INTO memories(memory_id, kind, key, value_json, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO memories(
+           memory_id, kind, key, value_json, source, created_at,
+           content_artifact_id, content_sha256, metadata_json
+         ) VALUES (?, ?, ?, '{}', ?, ?, ?, ?, ?)
          ON CONFLICT(kind, key) DO UPDATE SET
-           value_json=excluded.value_json, source=excluded.source`,
+           memory_id=excluded.memory_id,
+           value_json='{}',
+           source=excluded.source,
+           content_artifact_id=excluded.content_artifact_id,
+           content_sha256=excluded.content_sha256,
+           metadata_json=excluded.metadata_json`,
       )
-      .run(record.memoryId, record.kind, record.key, JSON.stringify(record.value), record.source, record.createdAt);
+      .run(
+        record.memoryId,
+        record.kind,
+        record.key,
+        record.source,
+        record.createdAt,
+        artifactId,
+        sha256,
+        JSON.stringify(metadata),
+      );
   }
 
   async deleteMemory(kind: MemoryKind, key: string): Promise<void> {
@@ -34,11 +80,12 @@ export class SqliteLearning implements LearningStore {
     const row = this.db
       .prepare(`SELECT * FROM memories WHERE kind = ? AND key = ?`)
       .get(kind, key) as MemoryRow | undefined;
-    return row ? mapMemory(row) : null;
+    return row ? this.mapMemory(row) : null;
   }
 
   async listMemories(): Promise<readonly MemoryRecord[]> {
-    return (this.db.prepare(`SELECT * FROM memories`).all() as MemoryRow[]).map(mapMemory);
+    const rows = this.db.prepare(`SELECT * FROM memories`).all() as MemoryRow[];
+    return Promise.all(rows.map((row) => this.mapMemory(row)));
   }
 
   async openSession(record: WorkSessionRecord): Promise<void> {
@@ -142,7 +189,19 @@ export class SqliteLearning implements LearningStore {
     }
   }
 
-  async putReceipt(record: ReceiptRecord): Promise<void> {
+  async putReceipt(record: ReceiptRecord & {
+    labelsArtifactId?: string | null;
+    labelsSha256?: string | null;
+  }): Promise<void> {
+    let labelsArtifactId = record.labelsArtifactId ?? null;
+    let labelsSha256 = record.labelsSha256 ?? null;
+    const labels = record.optionLabels ?? {};
+    if ((!labelsArtifactId || !labelsSha256) && Object.keys(labels).length > 0) {
+      const ref = await putJsonArtifact(this.requireArtifacts(), labels);
+      labelsArtifactId = ref.artifactId;
+      labelsSha256 = ref.sha256;
+    }
+    const selectedOptionId = record.selectedOptionId ?? record.selectedOption;
     this.db
       .prepare(
         `INSERT INTO decision_receipts(
@@ -150,8 +209,8 @@ export class SqliteLearning implements LearningStore {
           probabilities_json, thresholds_json, selected_option, result, reason_code,
           latency_ms, retries, created_at,
           decision_id, judgment_id, reflex_id, selected_option_id, option_labels_json,
-          requested_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          requested_at, completed_at, labels_artifact_id, labels_sha256
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?)`,
       )
       .run(
         record.receiptId,
@@ -162,7 +221,7 @@ export class SqliteLearning implements LearningStore {
         record.provider,
         JSON.stringify(record.probabilities),
         JSON.stringify(record.thresholds),
-        record.selectedOption,
+        selectedOptionId,
         record.result,
         record.reasonCode,
         record.latencyMs,
@@ -171,17 +230,17 @@ export class SqliteLearning implements LearningStore {
         record.decisionId,
         record.judgmentId,
         record.reflexId,
-        record.selectedOptionId,
-        JSON.stringify(record.optionLabels),
+        selectedOptionId,
         record.requestedAt,
         record.completedAt,
+        labelsArtifactId,
+        labelsSha256,
       );
   }
 
   async listReceipts(): Promise<readonly ReceiptRecord[]> {
-    return (this.db.prepare(`SELECT * FROM decision_receipts ORDER BY created_at`).all() as ReceiptRow[]).map(
-      mapReceipt,
-    );
+    const rows = this.db.prepare(`SELECT * FROM decision_receipts ORDER BY created_at`).all() as ReceiptRow[];
+    return Promise.all(rows.map((row) => this.mapReceipt(row)));
   }
 
   async putPattern(record: PatternRecord): Promise<void> {
@@ -213,36 +272,72 @@ export class SqliteLearning implements LearningStore {
     return (this.db.prepare(`SELECT * FROM pattern_evidence`).all() as PatternRow[]).map(mapPattern);
   }
 
-  async putCandidate(record: CandidateRecord): Promise<void> {
+  async putCandidate(record: CandidateRecord & {
+    becauseArtifactId?: string | null;
+    becauseSha256?: string | null;
+  }): Promise<void> {
+    let becauseArtifactId = record.becauseArtifactId ?? null;
+    let becauseSha256 = record.becauseSha256 ?? null;
+    if ((!becauseArtifactId || !becauseSha256) && record.because) {
+      const ref = await this.requireArtifacts().put(
+        new TextEncoder().encode(record.because),
+        localOnlyPolicy(),
+      );
+      becauseArtifactId = ref.artifactId;
+      becauseSha256 = ref.sha256;
+    }
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO expansion_candidates(candidate_id, signature, state, because, needed, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO expansion_candidates(
+           candidate_id, signature, state, because, needed, updated_at,
+           because_artifact_id, because_sha256
+         ) VALUES (?, ?, ?, '', ?, ?, ?, ?)`,
       )
-      .run(record.candidateId, record.signature, record.state, record.because, record.needed, record.updatedAt);
+      .run(
+        record.candidateId,
+        record.signature,
+        record.state,
+        record.needed,
+        record.updatedAt,
+        becauseArtifactId,
+        becauseSha256,
+      );
   }
 
   async listCandidates(): Promise<readonly CandidateRecord[]> {
-    return (this.db.prepare(`SELECT * FROM expansion_candidates`).all() as CandidateRow[]).map(mapCandidate);
+    const rows = this.db.prepare(`SELECT * FROM expansion_candidates`).all() as CandidateRow[];
+    return Promise.all(rows.map((row) => this.mapCandidate(row)));
   }
 
-  async putReview(record: ReviewRecord): Promise<void> {
+  async putReview(record: ReviewRecord & {
+    findingsArtifactId?: string | null;
+    findingsSha256?: string | null;
+  }): Promise<void> {
+    let findingsArtifactId = record.findingsArtifactId ?? null;
+    let findingsSha256 = record.findingsSha256 ?? null;
+    if ((!findingsArtifactId || !findingsSha256) && record.findings.length > 0) {
+      const ref = await putJsonArtifact(this.requireArtifacts(), record.findings);
+      findingsArtifactId = ref.artifactId;
+      findingsSha256 = ref.sha256;
+    }
     this.db
       .prepare(
         `INSERT OR IGNORE INTO review_runs(
           review_id, trigger_code, at, findings_json,
-          sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review,
+          findings_artifact_id, findings_sha256
+        ) VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.reviewId,
         record.triggerCode,
         record.at,
-        JSON.stringify(record.findings),
         record.sessionsAtReview,
         record.episodesAtReview,
         record.candidatesAtReview,
         record.builtReflexesAtReview,
+        findingsArtifactId,
+        findingsSha256,
       );
     this.db
       .prepare(
@@ -267,7 +362,8 @@ export class SqliteLearning implements LearningStore {
   }
 
   async listReviews(): Promise<readonly ReviewRecord[]> {
-    return (this.db.prepare(`SELECT * FROM review_runs`).all() as ReviewRow[]).map(mapReview);
+    const rows = this.db.prepare(`SELECT * FROM review_runs`).all() as ReviewRow[];
+    return Promise.all(rows.map((row) => this.mapReview(row)));
   }
 
   async compact(nowIso: string): Promise<number> {
@@ -283,6 +379,150 @@ export class SqliteLearning implements LearningStore {
     this.db.prepare(`DELETE FROM dead_letters WHERE at < ?`).run(cutoff);
     return Number(result.changes);
   }
+
+  private requireArtifacts(): ArtifactStorePort {
+    if (!this.artifacts) throw new Error("artifact_store_required");
+    return this.artifacts;
+  }
+
+  private async mapMemory(row: MemoryRow): Promise<MemoryRecord> {
+    const metadata = JSON.parse(row.metadata_json ?? "{}") as Record<string, string>;
+    let prose: Record<string, string> = {};
+    if (row.content_artifact_id && row.content_sha256 && this.artifacts) {
+      try {
+        const bytes = await this.artifacts.get({
+          artifactId: row.content_artifact_id,
+          sha256: row.content_sha256,
+          policy: localOnlyPolicy(),
+        });
+        prose = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
+      } catch {
+        prose = {};
+      }
+    } else if (row.value_json && row.value_json !== "{}") {
+      // Legacy rows written before protected-content migration.
+      const legacy = JSON.parse(row.value_json) as Record<string, string>;
+      return {
+        memoryId: row.memory_id,
+        kind: row.kind,
+        key: row.key,
+        value: legacy,
+        source: row.source,
+        createdAt: row.created_at,
+      };
+    }
+    return {
+      memoryId: row.memory_id,
+      kind: row.kind,
+      key: row.key,
+      value: unpackMemoryValue(row.kind, prose, metadata),
+      source: row.source,
+      createdAt: row.created_at,
+    };
+  }
+
+  private async mapReceipt(row: ReceiptRow): Promise<ReceiptRecord> {
+    const probabilities = JSON.parse(row.probabilities_json) as Record<string, number>;
+    const optionIds = Object.keys(probabilities);
+    let optionLabels: Record<string, string> = {};
+    if (row.labels_artifact_id && row.labels_sha256 && this.artifacts) {
+      try {
+        optionLabels = await getJsonArtifact(this.artifacts, {
+          artifactId: row.labels_artifact_id,
+          sha256: row.labels_sha256,
+          policy: localOnlyPolicy(),
+        });
+      } catch {
+        optionLabels = labelsOrUnavailable(optionIds.length > 0 ? optionIds : ["unavailable"], null);
+      }
+    } else {
+      const legacy = JSON.parse(row.option_labels_json ?? "{}") as Record<string, string>;
+      optionLabels =
+        Object.keys(legacy).length > 0
+          ? legacy
+          : labelsOrUnavailable(optionIds, null);
+      if (Object.keys(legacy).length === 0 && optionIds.length === 0) {
+        optionLabels = {};
+      }
+    }
+    const selectedOptionId = row.selected_option_id ?? row.selected_option;
+    return {
+      receiptId: row.receipt_id,
+      decisionId: row.decision_id ?? row.receipt_id,
+      caseId: row.case_id,
+      judgmentId: row.judgment_id,
+      reflexId: row.reflex_id,
+      gateId: row.gate_id,
+      policyVersion: row.policy_version,
+      questionType: row.question_type,
+      provider: row.provider,
+      probabilities,
+      thresholds: JSON.parse(row.thresholds_json) as Record<string, number>,
+      optionLabels,
+      selectedOption: selectedOptionId,
+      selectedOptionId,
+      result: row.result,
+      reasonCode: row.reason_code,
+      latencyMs: row.latency_ms,
+      retries: row.retries,
+      requestedAt: row.requested_at,
+      completedAt: row.completed_at,
+      createdAt: row.created_at,
+    };
+  }
+
+  private async mapCandidate(row: CandidateRow): Promise<CandidateRecord> {
+    let because = "";
+    if (row.because_artifact_id && row.because_sha256 && this.artifacts) {
+      try {
+        const bytes = await this.artifacts.get({
+          artifactId: row.because_artifact_id,
+          sha256: row.because_sha256,
+          policy: localOnlyPolicy(),
+        });
+        because = new TextDecoder().decode(bytes);
+      } catch {
+        because = "unavailable";
+      }
+    } else if (row.because) {
+      because = row.because;
+    }
+    return {
+      candidateId: row.candidate_id,
+      signature: row.signature,
+      state: row.state,
+      because,
+      needed: row.needed,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private async mapReview(row: ReviewRow): Promise<ReviewRecord> {
+    let findings: string[] = [];
+    if (row.findings_artifact_id && row.findings_sha256 && this.artifacts) {
+      try {
+        findings = await getJsonArtifact(this.artifacts, {
+          artifactId: row.findings_artifact_id,
+          sha256: row.findings_sha256,
+          policy: localOnlyPolicy(),
+        });
+      } catch {
+        findings = ["unavailable"];
+      }
+    } else if (row.findings_json && row.findings_json !== "[]") {
+      findings = JSON.parse(row.findings_json) as string[];
+    }
+    return {
+      reviewId: row.review_id,
+      triggerCode: row.trigger_code,
+      at: row.at,
+      findings,
+      sessionsAtReview: row.sessions_at_review,
+      episodesAtReview: row.episodes_at_review,
+      candidatesAtReview: row.candidates_at_review,
+      builtReflexesAtReview: row.built_reflexes_at_review,
+    };
+  }
 }
 
 type MemoryRow = {
@@ -292,6 +532,9 @@ type MemoryRow = {
   value_json: string;
   source: MemoryRecord["source"];
   created_at: string;
+  content_artifact_id: string | null;
+  content_sha256: string | null;
+  metadata_json: string | null;
 };
 type SessionRow = {
   session_id: string;
@@ -331,6 +574,8 @@ type ReceiptRow = {
   option_labels_json: string | null;
   requested_at: string | null;
   completed_at: string | null;
+  labels_artifact_id: string | null;
+  labels_sha256: string | null;
 };
 type PatternRow = {
   signature: string;
@@ -348,6 +593,8 @@ type CandidateRow = {
   because: string;
   needed: string;
   updated_at: string;
+  because_artifact_id: string | null;
+  because_sha256: string | null;
 };
 type ReviewRow = {
   review_id: string;
@@ -358,18 +605,10 @@ type ReviewRow = {
   episodes_at_review: number;
   candidates_at_review: number;
   built_reflexes_at_review: number;
+  findings_artifact_id: string | null;
+  findings_sha256: string | null;
 };
 
-function mapMemory(row: MemoryRow): MemoryRecord {
-  return {
-    memoryId: row.memory_id,
-    kind: row.kind,
-    key: row.key,
-    value: JSON.parse(row.value_json) as Record<string, string>,
-    source: row.source,
-    createdAt: row.created_at,
-  };
-}
 function mapSession(row: SessionRow): WorkSessionRecord {
   return {
     sessionId: row.session_id,
@@ -390,31 +629,6 @@ function mapEpisode(row: EpisodeRow): EpisodeRecord {
     completedAt: row.completed_at,
   };
 }
-function mapReceipt(row: ReceiptRow): ReceiptRecord {
-  return {
-    receiptId: row.receipt_id,
-    decisionId: row.decision_id ?? row.receipt_id,
-    caseId: row.case_id,
-    judgmentId: row.judgment_id,
-    reflexId: row.reflex_id,
-    gateId: row.gate_id,
-    policyVersion: row.policy_version,
-    questionType: row.question_type,
-    provider: row.provider,
-    probabilities: JSON.parse(row.probabilities_json) as Record<string, number>,
-    thresholds: JSON.parse(row.thresholds_json) as Record<string, number>,
-    optionLabels: JSON.parse(row.option_labels_json ?? "{}") as Record<string, string>,
-    selectedOption: row.selected_option,
-    selectedOptionId: row.selected_option_id ?? row.selected_option,
-    result: row.result,
-    reasonCode: row.reason_code,
-    latencyMs: row.latency_ms,
-    retries: row.retries,
-    requestedAt: row.requested_at,
-    completedAt: row.completed_at,
-    createdAt: row.created_at,
-  };
-}
 function mapPattern(row: PatternRow): PatternRecord {
   return {
     signature: row.signature,
@@ -424,27 +638,5 @@ function mapPattern(row: PatternRow): PatternRecord {
     firstAt: row.first_at,
     lastAt: row.last_at,
     evidenceIds: JSON.parse(row.evidence_ids_json) as string[],
-  };
-}
-function mapCandidate(row: CandidateRow): CandidateRecord {
-  return {
-    candidateId: row.candidate_id,
-    signature: row.signature,
-    state: row.state,
-    because: row.because,
-    needed: row.needed,
-    updatedAt: row.updated_at,
-  };
-}
-function mapReview(row: ReviewRow): ReviewRecord {
-  return {
-    reviewId: row.review_id,
-    triggerCode: row.trigger_code,
-    at: row.at,
-    findings: JSON.parse(row.findings_json) as string[],
-    sessionsAtReview: row.sessions_at_review,
-    episodesAtReview: row.episodes_at_review,
-    candidatesAtReview: row.candidates_at_review,
-    builtReflexesAtReview: row.built_reflexes_at_review,
   };
 }

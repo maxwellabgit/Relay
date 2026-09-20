@@ -74,8 +74,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const ids = options.ids ?? createProductionIds();
   const sessionId = ids.next("session");
   const storeInvoke: StoreInvoke = (command, args) => invoke(command, args);
-  const store = new TauriEngineStore(storeInvoke);
   const artifacts = new TauriArtifactStore(invoke);
+  const store = new TauriEngineStore(storeInvoke, artifacts);
   const judgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
 
   const deps: EngineDeps = {

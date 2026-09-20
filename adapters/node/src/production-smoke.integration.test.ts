@@ -76,9 +76,9 @@ describe("windows production composition smoke", () => {
 });
 
 function openComposition(databasePath: string, runsRoot: string) {
-  const sqlite = new SqliteEngineStore(databasePath);
-  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
   const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(databasePath));
+  const sqlite = new SqliteEngineStore(databasePath, artifacts);
+  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
   const ids = createProductionIds();
   const engine = new RelayEngine({
     store,

@@ -13,6 +13,8 @@ const MIGRATION_4: &str =
     include_str!("../../../../packages/storage-schema/migrations/004_decisions.sql");
 const MIGRATION_5: &str =
     include_str!("../../../../packages/storage-schema/migrations/005_content_artifacts.sql");
+const MIGRATION_6: &str =
+    include_str!("../../../../packages/storage-schema/migrations/006_protected_learning.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -77,6 +79,7 @@ impl StateDb {
         apply_version(&tx, 3, MIGRATION_3)?;
         apply_version(&tx, 4, MIGRATION_4)?;
         apply_version(&tx, 5, MIGRATION_5)?;
+        apply_version(&tx, 6, MIGRATION_6)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -666,17 +669,31 @@ fn upsert_judgment_attempt(conn: &Connection, op: &Value) -> Result<Value, Strin
 
 fn put_memory(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
+    let content_artifact_id = opt_str(record, "contentArtifactId");
+    let content_sha256 = opt_str(record, "contentSha256");
+    let metadata = record.get("metadata").unwrap_or(&json!({}));
+    // Free prose must not land in value_json; TS adapter packs into artifacts first.
     conn.execute(
-        "INSERT INTO memories(memory_id, kind, key, value_json, source, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(kind, key) DO UPDATE SET value_json=excluded.value_json, source=excluded.source",
+        "INSERT INTO memories(
+           memory_id, kind, key, value_json, source, created_at,
+           content_artifact_id, content_sha256, metadata_json
+         ) VALUES (?1, ?2, ?3, '{}', ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(kind, key) DO UPDATE SET
+           memory_id=excluded.memory_id,
+           value_json='{}',
+           source=excluded.source,
+           content_artifact_id=excluded.content_artifact_id,
+           content_sha256=excluded.content_sha256,
+           metadata_json=excluded.metadata_json",
         params![
             req_str(record, "memoryId")?,
             req_str(record, "kind")?,
             req_str(record, "key")?,
-            json_text(record.get("value").unwrap_or(&json!({})))?,
             req_str(record, "source")?,
             req_str(record, "createdAt")?,
+            content_artifact_id,
+            content_sha256,
+            json_text(metadata)?,
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -895,14 +912,16 @@ fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
     let receipt_id = req_str(record, "receiptId")?;
     let decision_id = opt_str(record, "decisionId").unwrap_or_else(|| receipt_id.clone());
+    let selected_option_id = opt_str(record, "selectedOptionId")
+        .or_else(|| opt_str(record, "selectedOption"));
     conn.execute(
         "INSERT INTO decision_receipts(
           receipt_id, case_id, gate_id, policy_version, question_type, provider,
           probabilities_json, thresholds_json, selected_option, result, reason_code,
           latency_ms, retries, created_at,
           decision_id, judgment_id, reflex_id, selected_option_id, option_labels_json,
-          requested_at, completed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+          requested_at, completed_at, labels_artifact_id, labels_sha256
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, '{}', ?19, ?20, ?21, ?22)",
         params![
             receipt_id,
             opt_str(record, "caseId"),
@@ -912,7 +931,7 @@ fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
             req_str(record, "provider")?,
             json_text(record.get("probabilities").unwrap_or(&json!({})))?,
             json_text(record.get("thresholds").unwrap_or(&json!({})))?,
-            opt_str(record, "selectedOption"),
+            selected_option_id.clone(),
             req_str(record, "result")?,
             req_str(record, "reasonCode")?,
             opt_i64(record, "latencyMs"),
@@ -921,10 +940,11 @@ fn put_receipt(conn: &Connection, op: &Value) -> Result<Value, String> {
             decision_id,
             opt_str(record, "judgmentId"),
             opt_str(record, "reflexId"),
-            opt_str(record, "selectedOptionId"),
-            json_text(record.get("optionLabels").unwrap_or(&json!({})))?,
+            selected_option_id,
             opt_str(record, "requestedAt"),
             opt_str(record, "completedAt"),
+            opt_str(record, "labelsArtifactId"),
+            opt_str(record, "labelsSha256"),
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -984,15 +1004,18 @@ fn list_patterns(conn: &Connection) -> Result<Value, String> {
 fn put_candidate(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
     conn.execute(
-        "INSERT OR REPLACE INTO expansion_candidates(candidate_id, signature, state, because, needed, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT OR REPLACE INTO expansion_candidates(
+           candidate_id, signature, state, because, needed, updated_at,
+           because_artifact_id, because_sha256
+         ) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7)",
         params![
             req_str(record, "candidateId")?,
             req_str(record, "signature")?,
             req_str(record, "state")?,
-            req_str(record, "because")?,
             req_str(record, "needed")?,
             req_str(record, "updatedAt")?,
+            opt_str(record, "becauseArtifactId"),
+            opt_str(record, "becauseSha256"),
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -1013,17 +1036,19 @@ fn put_review(conn: &Connection, op: &Value) -> Result<Value, String> {
     conn.execute(
         "INSERT OR IGNORE INTO review_runs(
           review_id, trigger_code, at, findings_json,
-          sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+          sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review,
+          findings_artifact_id, findings_sha256
+        ) VALUES (?1, ?2, ?3, '[]', ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             req_str(record, "reviewId")?,
             req_str(record, "triggerCode")?,
             req_str(record, "at")?,
-            json_text(record.get("findings").unwrap_or(&json!([])))?,
             req_i64(record, "sessionsAtReview")?,
             req_i64(record, "episodesAtReview")?,
             req_i64(record, "candidatesAtReview")?,
             req_i64(record, "builtReflexesAtReview")?,
+            opt_str(record, "findingsArtifactId"),
+            opt_str(record, "findingsSha256"),
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -1089,15 +1114,25 @@ fn map_case(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 fn map_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let value_json: String = row.get("value_json")?;
-    Ok(json!({
+    let metadata: String = row
+        .get::<_, Option<String>>("metadata_json")?
+        .unwrap_or_else(|| "{}".into());
+    let mut value = json!({
         "memoryId": row.get::<_, String>("memory_id")?,
         "kind": row.get::<_, String>("kind")?,
         "key": row.get::<_, String>("key")?,
-        "value": parse_json(&value_json).unwrap_or(json!({})),
+        "value": json!({}),
         "source": row.get::<_, String>("source")?,
         "createdAt": row.get::<_, String>("created_at")?,
-    }))
+        "metadata": parse_json(&metadata).unwrap_or(json!({})),
+    });
+    if let Some(artifact_id) = row.get::<_, Option<String>>("content_artifact_id")? {
+        value["contentArtifactId"] = json!(artifact_id);
+    }
+    if let Some(sha) = row.get::<_, Option<String>>("content_sha256")? {
+        value["contentSha256"] = json!(sha);
+    }
+    Ok(value)
 }
 
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
@@ -1125,11 +1160,11 @@ fn map_episode(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 fn map_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let probabilities: String = row.get("probabilities_json")?;
     let thresholds: String = row.get("thresholds_json")?;
-    let option_labels: String = row
-        .get::<_, Option<String>>("option_labels_json")?
-        .unwrap_or_else(|| "{}".into());
     let receipt_id: String = row.get("receipt_id")?;
-    Ok(json!({
+    let selected_option_id: Option<String> = row
+        .get::<_, Option<String>>("selected_option_id")?
+        .or(row.get::<_, Option<String>>("selected_option")?);
+    let mut value = json!({
         "receiptId": receipt_id.clone(),
         "decisionId": row.get::<_, Option<String>>("decision_id")?.unwrap_or(receipt_id),
         "caseId": row.get::<_, Option<String>>("case_id")?,
@@ -1141,9 +1176,9 @@ fn map_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "provider": row.get::<_, String>("provider")?,
         "probabilities": parse_json(&probabilities).unwrap_or(json!({})),
         "thresholds": parse_json(&thresholds).unwrap_or(json!({})),
-        "optionLabels": parse_json(&option_labels).unwrap_or(json!({})),
-        "selectedOption": row.get::<_, Option<String>>("selected_option")?,
-        "selectedOptionId": row.get::<_, Option<String>>("selected_option_id")?,
+        "optionLabels": json!({}),
+        "selectedOption": selected_option_id.clone(),
+        "selectedOptionId": selected_option_id,
         "result": row.get::<_, String>("result")?,
         "reasonCode": row.get::<_, String>("reason_code")?,
         "latencyMs": row.get::<_, Option<i64>>("latency_ms")?,
@@ -1151,7 +1186,14 @@ fn map_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "requestedAt": row.get::<_, Option<String>>("requested_at")?,
         "completedAt": row.get::<_, Option<String>>("completed_at")?,
         "createdAt": row.get::<_, String>("created_at")?,
-    }))
+    });
+    if let Some(artifact_id) = row.get::<_, Option<String>>("labels_artifact_id")? {
+        value["labelsArtifactId"] = json!(artifact_id);
+    }
+    if let Some(sha) = row.get::<_, Option<String>>("labels_sha256")? {
+        value["labelsSha256"] = json!(sha);
+    }
+    Ok(value)
 }
 
 fn map_pattern(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
@@ -1170,28 +1212,41 @@ fn map_pattern(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 fn map_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
+    let mut value = json!({
         "candidateId": row.get::<_, String>("candidate_id")?,
         "signature": row.get::<_, String>("signature")?,
         "state": row.get::<_, String>("state")?,
-        "because": row.get::<_, String>("because")?,
+        "because": "",
         "needed": row.get::<_, String>("needed")?,
         "updatedAt": row.get::<_, String>("updated_at")?,
-    }))
+    });
+    if let Some(artifact_id) = row.get::<_, Option<String>>("because_artifact_id")? {
+        value["becauseArtifactId"] = json!(artifact_id);
+    }
+    if let Some(sha) = row.get::<_, Option<String>>("because_sha256")? {
+        value["becauseSha256"] = json!(sha);
+    }
+    Ok(value)
 }
 
 fn map_review(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let findings: String = row.get("findings_json")?;
-    Ok(json!({
+    let mut value = json!({
         "reviewId": row.get::<_, String>("review_id")?,
         "triggerCode": row.get::<_, String>("trigger_code")?,
         "at": row.get::<_, String>("at")?,
-        "findings": parse_json(&findings).unwrap_or(json!([])),
+        "findings": json!([]),
         "sessionsAtReview": row.get::<_, i64>("sessions_at_review")?,
         "episodesAtReview": row.get::<_, i64>("episodes_at_review")?,
         "candidatesAtReview": row.get::<_, i64>("candidates_at_review")?,
         "builtReflexesAtReview": row.get::<_, i64>("built_reflexes_at_review")?,
-    }))
+    });
+    if let Some(artifact_id) = row.get::<_, Option<String>>("findings_artifact_id")? {
+        value["findingsArtifactId"] = json!(artifact_id);
+    }
+    if let Some(sha) = row.get::<_, Option<String>>("findings_sha256")? {
+        value["findingsSha256"] = json!(sha);
+    }
+    Ok(value)
 }
 
 fn map_judgment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
@@ -1437,7 +1492,10 @@ mod tests {
                 "memoryId": "mem_1",
                 "kind": "glossary",
                 "key": "MSRP",
-                "value": { "expansion": "First" },
+                "value": {},
+                "contentArtifactId": "artifact_first",
+                "contentSha256": "aaa",
+                "metadata": { "status": "confirmed" },
                 "source": "explicit_user",
                 "createdAt": "2020-01-01T00:00:00.000Z"
             }
@@ -1449,7 +1507,10 @@ mod tests {
                 "memoryId": "mem_2",
                 "kind": "glossary",
                 "key": "MSRP",
-                "value": { "expansion": "Manufacturer Suggested Retail Price" },
+                "value": {},
+                "contentArtifactId": "artifact_msrp",
+                "contentSha256": "bbb",
+                "metadata": { "status": "confirmed" },
                 "source": "explicit_user",
                 "createdAt": "2020-01-01T00:00:00.000Z"
             }
@@ -1462,10 +1523,9 @@ mod tests {
         let row = reopened
             .execute(&json!({ "op": "get_memory", "kind": "glossary", "key": "MSRP" }))
             .unwrap();
-        assert_eq!(
-            row["value"]["expansion"],
-            "Manufacturer Suggested Retail Price"
-        );
+        assert_eq!(row["contentArtifactId"], "artifact_msrp");
+        assert_eq!(row["contentSha256"], "bbb");
+        assert_eq!(row["value"], json!({}));
         let _ = std::fs::remove_file(path);
     }
 

@@ -424,10 +424,21 @@ export class RelayEngine {
     const at = this.deps.clock.now().toISOString();
 
     if (current.origin === "direct") {
+      const classification = classifyAskText(text);
+      await this.deps.store.appendCaseEvent(caseId, current.version, "ask.classified", at, {
+        classification,
+      });
+      await this.emitTrace({
+        type: "source.accepted",
+        stage: "source.accept",
+        status: "completed",
+        caseId,
+        reasonCode: classification,
+      });
       await this.publishFeedItem({
         itemId: feedItemId(caseId, "ask"),
         kind: "ask",
-        summary: structuredAskSummary(text),
+        summary: text,
         createdAt: at,
         caseId,
       });
@@ -937,7 +948,7 @@ export class RelayEngine {
         choiceMarginMinimum: marginMinimum,
         displayUsefulnessMinimum: usefulnessMinimum,
       },
-      selectedOption: pass ? label : gate.selected,
+      selectedOption: gate.selected,
       selectedOptionId: gate.selected,
       optionLabels: labelById,
       reflexId,
@@ -1736,11 +1747,11 @@ const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "work.failed": "work",
 };
 
-function structuredAskSummary(text: string): string {
-  if (parseGlossaryMeans(text)) return "typed ask · glossary definition";
-  if (parseBirthdayUtterance(text)) return "typed ask · birthday capture";
-  if (askedToken(text)) return "typed ask · acronym lookup";
-  return "typed ask · general";
+function classifyAskText(text: string): "typed_glossary" | "typed_birthday" | "typed_acronym" | "typed_general" {
+  if (parseGlossaryMeans(text)) return "typed_glossary";
+  if (parseBirthdayUtterance(text)) return "typed_birthday";
+  if (askedToken(text)) return "typed_acronym";
+  return "typed_general";
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

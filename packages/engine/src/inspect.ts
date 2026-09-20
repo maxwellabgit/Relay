@@ -17,6 +17,7 @@ import {
   type LearningStore,
   type ReceiptRecord,
 } from "./learning-store.js";
+import { labelsOrUnavailable } from "./protected-content.js";
 import { projectDecisionRun, selectReceiptForDecision } from "./project-decision-run.js";
 import type { RuntimeEventV2 } from "./runtime-events.js";
 
@@ -151,19 +152,20 @@ function toGate(receipt: ReceiptRecord): DecisionReceiptView {
     receipt.requestedAt && receipt.completedAt
       ? Math.max(0, Date.parse(receipt.completedAt) - Date.parse(receipt.requestedAt))
       : receipt.latencyMs;
+  const optionIds = Object.keys(receipt.probabilities);
   return {
     at: receipt.createdAt,
     gateId: receipt.gateId,
     policyVersion: receipt.policyVersion,
     reflexId: receipt.reflexId ?? (receipt.gateId.startsWith("reflex.") ? receipt.gateId : null),
     questionType: receipt.questionType,
-    optionIds: Object.keys(receipt.probabilities),
+    optionIds,
     probabilities: receipt.probabilities,
     topProbability: top,
     margin,
     threshold,
     thresholds: receipt.thresholds,
-    optionLabels: receipt.optionLabels,
+    optionLabels: labelsOrUnavailable(optionIds, receipt.optionLabels),
     result: receipt.result,
     reasonCode: receipt.reasonCode,
     provider: receipt.provider,

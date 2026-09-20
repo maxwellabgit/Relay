@@ -11,8 +11,6 @@ type Props = {
 };
 
 export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Props) {
-  const task = [...snapshot.feedItems].reverse().find((item) => item.kind === "task");
-
   return (
     <View style={styles.bezel}>
       <View style={styles.screen}>
@@ -66,14 +64,8 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Pro
           )}
         </ScrollView>
 
-        {task || snapshot.actions.length > 0 ? (
+        {snapshot.actions.length > 0 ? (
           <View style={styles.actions}>
-            {task ? (
-              <View style={styles.actionCard}>
-                <Text style={styles.actionEyebrow}>Recommended task</Text>
-                <Text style={styles.actionTitle}>{task.summary}</Text>
-              </View>
-            ) : null}
             {snapshot.actions.map((action) => (
               <Pressable
                 key={action.actionId}

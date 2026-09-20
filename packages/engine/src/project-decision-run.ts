@@ -1,5 +1,6 @@
 import type { DecisionAttemptView, DecisionRunView, DecisionStageState, DecisionStageView } from "@relay/contracts";
 import type { ReceiptRecord } from "./learning-store.js";
+import { labelsOrUnavailable } from "./protected-content.js";
 import type { RuntimeEventV2 } from "./runtime-events.js";
 
 const STAGE_ORDER = [
@@ -61,6 +62,8 @@ export function projectDecisionRun(input: ProjectDecisionRunInput): DecisionRunV
   const ranked = [...values].sort((a, b) => b - a);
   const margin = ranked.length === 0 ? null : ranked.length === 1 ? ranked[0]! : ranked[0]! - ranked[1]!;
 
+  const optionIds =
+    Object.keys(probabilities).length > 0 ? Object.keys(probabilities) : Object.keys(receipt.optionLabels);
   return {
     decisionId,
     receiptId: receipt.receiptId,
@@ -73,8 +76,8 @@ export function projectDecisionRun(input: ProjectDecisionRunInput): DecisionRunV
     questionType: receipt.questionType,
     status: mapStatus(receipt),
     stages,
-    optionIds: Object.keys(probabilities).length > 0 ? Object.keys(probabilities) : Object.keys(receipt.optionLabels),
-    optionLabels: receipt.optionLabels,
+    optionIds,
+    optionLabels: labelsOrUnavailable(optionIds, receipt.optionLabels),
     probabilities,
     thresholds: receipt.thresholds,
     topProbability: top,

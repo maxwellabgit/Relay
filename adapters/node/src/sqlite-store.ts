@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type {
+  ArtifactStorePort,
   CaseKind,
   CaseOrigin,
   CasePhase,
@@ -21,11 +22,11 @@ export class SqliteEngineStore implements EngineStore {
   private readonly db: DatabaseSync;
   readonly learning: SqliteLearning;
 
-  constructor(filename = ":memory:") {
+  constructor(filename = ":memory:", artifacts?: ArtifactStorePort) {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA foreign_keys = ON");
     applyMigrations(this.db);
-    this.learning = new SqliteLearning(this.db);
+    this.learning = new SqliteLearning(this.db, artifacts);
   }
 
   close(): void {
@@ -545,12 +546,13 @@ function applyMigrations(db: DatabaseSync): void {
     3: "003_runtime.sql",
     4: "004_decisions.sql",
     5: "005_content_artifacts.sql",
+    6: "006_protected_learning.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5]) {
+    for (const version of [2, 3, 4, 5, 6]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

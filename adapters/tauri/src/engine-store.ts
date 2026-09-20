@@ -1,13 +1,5 @@
-import type {
-  CaseKind,
-  CaseOrigin,
-  CasePhase,
-  CaseRecord,
-  CaseStatus,
-  FeedItemRecord,
-  JudgmentRecord,
-  RelaySnapshot,
-} from "@relay/contracts";
+import type { ArtifactStorePort, CaseKind, CaseOrigin, CasePhase, CaseRecord, CaseStatus, FeedItemRecord, JudgmentRecord, RelaySnapshot } from "@relay/contracts";
+import { localOnlyPolicy } from "@relay/contracts";
 import type {
   CandidateRecord,
   EngineStore,
@@ -22,6 +14,13 @@ import type {
   WorkItem,
   WorkSessionRecord,
 } from "@relay/engine";
+import {
+  getJsonArtifact,
+  labelsOrUnavailable,
+  packMemoryValue,
+  putJsonArtifact,
+  unpackMemoryValue,
+} from "@relay/engine";
 
 export type StoreInvoke = (command: string, args: { readonly op: Record<string, unknown> }) => Promise<unknown>;
 
@@ -30,9 +29,12 @@ type Call = (op: Record<string, unknown>) => Promise<unknown>;
 export class TauriEngineStore implements EngineStore {
   readonly learning: LearningStore;
 
-  constructor(private readonly invoke: StoreInvoke) {
+  constructor(
+    private readonly invoke: StoreInvoke,
+    artifacts?: ArtifactStorePort,
+  ) {
     const call: Call = (op) => this.invoke("store_execute", { op });
-    this.learning = new TauriLearning(call);
+    this.learning = new TauriLearning(call, artifacts);
     this.call = call;
   }
 
@@ -180,11 +182,61 @@ export class TauriEngineStore implements EngineStore {
   }
 }
 
-class TauriLearning implements LearningStore {
-  constructor(private readonly call: Call) {}
+type PersistedMemory = {
+  readonly memoryId: string;
+  readonly kind: MemoryKind;
+  readonly key: string;
+  readonly value: Readonly<Record<string, string>>;
+  readonly source: MemoryRecord["source"];
+  readonly createdAt: string;
+  readonly contentArtifactId?: string | null;
+  readonly contentSha256?: string | null;
+  readonly metadata?: Readonly<Record<string, string>>;
+};
 
-  putMemory(record: MemoryRecord): Promise<void> {
-    return this.voidOp({ op: "put_memory", record });
+type PersistedReceipt = ReceiptRecord & {
+  readonly labelsArtifactId?: string | null;
+  readonly labelsSha256?: string | null;
+};
+
+type PersistedCandidate = CandidateRecord & {
+  readonly becauseArtifactId?: string | null;
+  readonly becauseSha256?: string | null;
+};
+
+type PersistedReview = ReviewRecord & {
+  readonly findingsArtifactId?: string | null;
+  readonly findingsSha256?: string | null;
+};
+
+class TauriLearning implements LearningStore {
+  constructor(
+    private readonly call: Call,
+    private readonly artifacts?: ArtifactStorePort,
+  ) {}
+
+  async putMemory(record: MemoryRecord): Promise<void> {
+    if (!this.artifacts) {
+      await this.voidOp({ op: "put_memory", record });
+      return;
+    }
+    const packed = packMemoryValue(record.kind, record.value);
+    const ref = await this.artifacts.put(
+      new TextEncoder().encode(JSON.stringify(packed.prose)),
+      localOnlyPolicy(),
+    );
+    const persisted: PersistedMemory = {
+      memoryId: record.memoryId,
+      kind: record.kind,
+      key: record.key,
+      value: {},
+      source: record.source,
+      createdAt: record.createdAt,
+      contentArtifactId: ref.artifactId,
+      contentSha256: ref.sha256,
+      metadata: packed.metadata,
+    };
+    await this.voidOp({ op: "put_memory", record: persisted });
   }
 
   deleteMemory(kind: MemoryKind, key: string): Promise<void> {
@@ -192,11 +244,13 @@ class TauriLearning implements LearningStore {
   }
 
   async getMemory(kind: MemoryKind, key: string): Promise<MemoryRecord | null> {
-    return (await this.call({ op: "get_memory", kind, key })) as MemoryRecord | null;
+    const row = (await this.call({ op: "get_memory", kind, key })) as PersistedMemory | null;
+    return row ? this.hydrateMemory(row) : null;
   }
 
   async listMemories(): Promise<readonly MemoryRecord[]> {
-    return (await this.call({ op: "list_memories" })) as MemoryRecord[];
+    const rows = (await this.call({ op: "list_memories" })) as PersistedMemory[];
+    return Promise.all(rows.map((row) => this.hydrateMemory(row)));
   }
 
   openSession(record: WorkSessionRecord): Promise<void> {
@@ -232,12 +286,34 @@ class TauriLearning implements LearningStore {
     return (await this.call({ op: "list_episodes" })) as EpisodeRecord[];
   }
 
-  putReceipt(record: ReceiptRecord): Promise<void> {
-    return this.voidOp({ op: "put_receipt", record });
+  async putReceipt(record: ReceiptRecord): Promise<void> {
+    if (!this.artifacts) {
+      await this.voidOp({ op: "put_receipt", record });
+      return;
+    }
+    const labels = record.optionLabels ?? {};
+    let labelsArtifactId: string | null = null;
+    let labelsSha256: string | null = null;
+    if (Object.keys(labels).length > 0) {
+      const ref = await putJsonArtifact(this.artifacts, labels);
+      labelsArtifactId = ref.artifactId;
+      labelsSha256 = ref.sha256;
+    }
+    const selectedOptionId = record.selectedOptionId ?? record.selectedOption;
+    const persisted: PersistedReceipt = {
+      ...record,
+      optionLabels: {},
+      selectedOption: selectedOptionId,
+      selectedOptionId,
+      labelsArtifactId,
+      labelsSha256,
+    };
+    await this.voidOp({ op: "put_receipt", record: persisted });
   }
 
   async listReceipts(): Promise<readonly ReceiptRecord[]> {
-    return (await this.call({ op: "list_receipts" })) as ReceiptRecord[];
+    const rows = (await this.call({ op: "list_receipts" })) as PersistedReceipt[];
+    return Promise.all(rows.map((row) => this.hydrateReceipt(row)));
   }
 
   putPattern(record: PatternRecord): Promise<void> {
@@ -252,24 +328,167 @@ class TauriLearning implements LearningStore {
     return (await this.call({ op: "list_patterns" })) as PatternRecord[];
   }
 
-  putCandidate(record: CandidateRecord): Promise<void> {
-    return this.voidOp({ op: "put_candidate", record });
+  async putCandidate(record: CandidateRecord): Promise<void> {
+    if (!this.artifacts) {
+      await this.voidOp({ op: "put_candidate", record });
+      return;
+    }
+    let becauseArtifactId: string | null = null;
+    let becauseSha256: string | null = null;
+    if (record.because) {
+      const ref = await this.artifacts.put(new TextEncoder().encode(record.because), localOnlyPolicy());
+      becauseArtifactId = ref.artifactId;
+      becauseSha256 = ref.sha256;
+    }
+    const persisted: PersistedCandidate = {
+      ...record,
+      because: "",
+      becauseArtifactId,
+      becauseSha256,
+    };
+    await this.voidOp({ op: "put_candidate", record: persisted });
   }
 
   async listCandidates(): Promise<readonly CandidateRecord[]> {
-    return (await this.call({ op: "list_candidates" })) as CandidateRecord[];
+    const rows = (await this.call({ op: "list_candidates" })) as PersistedCandidate[];
+    return Promise.all(rows.map((row) => this.hydrateCandidate(row)));
   }
 
-  putReview(record: ReviewRecord): Promise<void> {
-    return this.voidOp({ op: "put_review", record });
+  async putReview(record: ReviewRecord): Promise<void> {
+    if (!this.artifacts) {
+      await this.voidOp({ op: "put_review", record });
+      return;
+    }
+    let findingsArtifactId: string | null = null;
+    let findingsSha256: string | null = null;
+    if (record.findings.length > 0) {
+      const ref = await putJsonArtifact(this.artifacts, record.findings);
+      findingsArtifactId = ref.artifactId;
+      findingsSha256 = ref.sha256;
+    }
+    const persisted: PersistedReview = {
+      ...record,
+      findings: [],
+      findingsArtifactId,
+      findingsSha256,
+    };
+    await this.voidOp({ op: "put_review", record: persisted });
   }
 
   async listReviews(): Promise<readonly ReviewRecord[]> {
-    return (await this.call({ op: "list_reviews" })) as ReviewRecord[];
+    const rows = (await this.call({ op: "list_reviews" })) as PersistedReview[];
+    return Promise.all(rows.map((row) => this.hydrateReview(row)));
   }
 
   async compact(nowIso: string): Promise<number> {
     return Number(await this.call({ op: "compact", nowIso }));
+  }
+
+  private async hydrateMemory(row: PersistedMemory): Promise<MemoryRecord> {
+    if (!this.artifacts || !row.contentArtifactId || !row.contentSha256) {
+      return {
+        memoryId: row.memoryId,
+        kind: row.kind,
+        key: row.key,
+        value: row.value ?? {},
+        source: row.source,
+        createdAt: row.createdAt,
+      };
+    }
+    let prose: Record<string, string> = {};
+    try {
+      const bytes = await this.artifacts.get({
+        artifactId: row.contentArtifactId,
+        sha256: row.contentSha256,
+        policy: localOnlyPolicy(),
+      });
+      prose = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, string>;
+    } catch {
+      prose = {};
+    }
+    return {
+      memoryId: row.memoryId,
+      kind: row.kind,
+      key: row.key,
+      value: unpackMemoryValue(row.kind, prose, row.metadata ?? {}),
+      source: row.source,
+      createdAt: row.createdAt,
+    };
+  }
+
+  private async hydrateReceipt(row: PersistedReceipt): Promise<ReceiptRecord> {
+    const optionIds = Object.keys(row.probabilities ?? {});
+    let optionLabels = row.optionLabels ?? {};
+    if (this.artifacts && row.labelsArtifactId && row.labelsSha256) {
+      try {
+        optionLabels = await getJsonArtifact(this.artifacts, {
+          artifactId: row.labelsArtifactId,
+          sha256: row.labelsSha256,
+          policy: localOnlyPolicy(),
+        });
+      } catch {
+        optionLabels = labelsOrUnavailable(optionIds, null);
+      }
+    } else if (Object.keys(optionLabels).length === 0 && optionIds.length > 0) {
+      optionLabels = labelsOrUnavailable(optionIds, null);
+    }
+    const selectedOptionId = row.selectedOptionId ?? row.selectedOption;
+    return {
+      ...row,
+      optionLabels,
+      selectedOption: selectedOptionId,
+      selectedOptionId,
+    };
+  }
+
+  private async hydrateCandidate(row: PersistedCandidate): Promise<CandidateRecord> {
+    let because = row.because ?? "";
+    if (this.artifacts && row.becauseArtifactId && row.becauseSha256) {
+      try {
+        because = new TextDecoder().decode(
+          await this.artifacts.get({
+            artifactId: row.becauseArtifactId,
+            sha256: row.becauseSha256,
+            policy: localOnlyPolicy(),
+          }),
+        );
+      } catch {
+        because = "unavailable";
+      }
+    }
+    return {
+      candidateId: row.candidateId,
+      signature: row.signature,
+      state: row.state,
+      because,
+      needed: row.needed,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private async hydrateReview(row: PersistedReview): Promise<ReviewRecord> {
+    let findings = row.findings ?? [];
+    if (this.artifacts && row.findingsArtifactId && row.findingsSha256) {
+      try {
+        findings = await getJsonArtifact(this.artifacts, {
+          artifactId: row.findingsArtifactId,
+          sha256: row.findingsSha256,
+          policy: localOnlyPolicy(),
+        });
+      } catch {
+        findings = ["unavailable"];
+      }
+    }
+    return {
+      reviewId: row.reviewId,
+      triggerCode: row.triggerCode,
+      at: row.at,
+      findings,
+      sessionsAtReview: row.sessionsAtReview,
+      episodesAtReview: row.episodesAtReview,
+      candidatesAtReview: row.candidatesAtReview,
+      builtReflexesAtReview: row.builtReflexesAtReview,
+    };
   }
 
   private async voidOp(op: Record<string, unknown>): Promise<void> {
