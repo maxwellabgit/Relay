@@ -1,5 +1,15 @@
-import type { ArtifactStorePort, JudgmentPort, JudgmentRequest, JudgmentResponse, RelayClient, TextModelPort } from "@relay/contracts";
+import type {
+  ArtifactStorePort,
+  JudgmentPort,
+  JudgmentRequest,
+  JudgmentResponse,
+  RelayClient,
+  RelayCommand,
+  RelayCommandResult,
+  TextModelPort,
+} from "@relay/contracts";
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
+import { startLiveTranscriptPump, TauriAudioPort } from "@relay/adapter-tauri/audio";
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
 import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
@@ -44,6 +54,17 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     "status" in localModel && typeof (localModel as TauriLocalModelPort).status === "function"
       ? await (localModel as TauriLocalModelPort).status()
       : { ok: false, detail: "unavailable" };
+  const audio = new TauriAudioPort(invoke);
+  const audioHealth = { ok: false, detail: "not connected" };
+  try {
+    const status = await audio.status();
+    audioHealth.ok = status.ok;
+    audioHealth.detail = status.capturing ? "capturing" : status.detail;
+  } catch {
+    audioHealth.ok = false;
+    audioHealth.detail = "unavailable";
+  }
+
   const runId = `run_${Date.now().toString(36)}`;
   const directory = await invoke("trace_run_dir", { runId }).catch(() => null);
   const directoryLabel =
@@ -51,6 +72,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       ? directory
       : `%LOCALAPPDATA%\\RELAY\\runs\\${runId}`;
   const ids = options.ids ?? createProductionIds();
+  const sessionId = ids.next("session");
   const storeInvoke: StoreInvoke = (command, args) => invoke(command, args);
   const store = new TauriEngineStore(storeInvoke);
   const artifacts = new TauriArtifactStore(invoke);
@@ -63,7 +85,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     model: localModel,
     clock: options.clock ?? { now: () => new Date() },
     ids,
-    sessionId: ids.next("session"),
+    sessionId,
     reflexModules: productionReflexes,
     storageDetail: "sqlite",
     jevStatus:
@@ -73,13 +95,70 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     modelStatus: modelHealth.ok
       ? { ok: true, detail: "ready" }
       : { ok: false, detail: "unavailable" },
+    audioStatus: audioHealth,
     mode: "live",
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
   };
 
   const engine = new RelayEngine(deps);
-  const client = createRelayClientFromEngine(engine);
+  const inner = createRelayClientFromEngine(engine);
+  let stopPump: (() => void) | null = null;
+
+  const client: RelayClient = {
+    start: async () => {
+      await inner.start();
+      stopPump?.();
+      stopPump = startLiveTranscriptPump({
+        audio,
+        sessionId,
+        ingest: async (segment) => {
+          await engine.ingestFinalSegment(segment, false);
+        },
+      });
+    },
+    stop: async () => {
+      stopPump?.();
+      stopPump = null;
+      try {
+        await audio.stop();
+      } catch {
+        /* ignore */
+      }
+      await inner.stop();
+    },
+    getSnapshot: () => inner.getSnapshot(),
+    subscribe: (listener) => inner.subscribe(listener),
+    execute: async (command: RelayCommand): Promise<RelayCommandResult> => {
+      const result = await inner.execute(command);
+      if (command.type === "SetListening") {
+        try {
+          if (command.enabled) {
+            const status = await audio.start(sessionId);
+            audioHealth.ok = status.ok;
+            audioHealth.detail = status.capturing ? "capturing" : status.detail;
+          } else {
+            const drained = await audio.drain();
+            for (const event of drained) {
+              if (event.type === "segment.final") {
+                await engine.ingestFinalSegment({ ...event.segment, sessionId }, false);
+              }
+            }
+            const status = await audio.stop();
+            audioHealth.ok = status.ok;
+            audioHealth.detail = "idle";
+          }
+          await engine.refreshSnapshot();
+        } catch {
+          audioHealth.ok = false;
+          audioHealth.detail = "unavailable";
+          await engine.refreshSnapshot().catch(() => undefined);
+        }
+      }
+      return result;
+    },
+  };
+
   return {
     client,
     engine,

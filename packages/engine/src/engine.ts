@@ -58,6 +58,7 @@ export type EngineDeps = {
   readonly storageDetail?: string;
   readonly jevStatus?: { readonly ok: boolean; readonly detail: string };
   readonly modelStatus?: { readonly ok: boolean; readonly detail: string };
+  readonly audioStatus?: { readonly ok: boolean; readonly detail: string };
   readonly mode?: "live" | "recorded" | "replay";
   readonly gitCommit?: string;
   readonly trace?: TraceSink;
@@ -117,6 +118,11 @@ export class RelayEngine {
     this.abort?.abort();
     await this.loopPromise;
     this.loopPromise = null;
+  }
+
+  /** Force a SnapshotReplaced projection after host-side status changes (e.g. audio). */
+  async refreshSnapshot(): Promise<void> {
+    await this.emitSnapshot();
   }
 
   subscribe(listener: (change: RelayChange) => void): () => void {
@@ -906,11 +912,12 @@ export class RelayEngine {
   private statusChips() {
     const jev = this.deps.jevStatus ?? { ok: false, detail: "missing key" };
     const model = this.deps.modelStatus ?? { ok: false, detail: "disabled" };
+    const audio = this.deps.audioStatus ?? { ok: false, detail: "not connected" };
     return [
       { id: "engine" as const, label: "Engine", ok: this.running, detail: this.running ? "running" : "stopped" },
       { id: "jev" as const, label: "Jev", ok: jev.ok, detail: jev.detail },
       { id: "model" as const, label: "Model", ok: model.ok, detail: model.detail },
-      { id: "audio" as const, label: "Audio", ok: false, detail: "not connected" },
+      { id: "audio" as const, label: "Audio", ok: audio.ok, detail: audio.detail },
       { id: "halo" as const, label: "Halo", ok: false, detail: "offline" },
       {
         id: "storage" as const,

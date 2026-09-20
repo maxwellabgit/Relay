@@ -1,4 +1,5 @@
 mod artifacts;
+mod audio;
 mod commands;
 mod diagnostics;
 mod halo;
@@ -26,6 +27,10 @@ pub fn run() {
             artifacts::artifact_get,
             local_model::local_model_status,
             local_model::local_model_generate,
+            audio::audio_start,
+            audio::audio_stop,
+            audio::audio_status,
+            audio::audio_drain,
             diagnostics::trace_run_dir,
             diagnostics::append_trace_event,
             diagnostics::read_trace_events,

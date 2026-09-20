@@ -1,10 +1,14 @@
 import type { TranscriptEvent, TranscriptSourcePort } from "@relay/contracts";
 
-/** Interface-only Stage 1 stub — live mic lands with native adapters. */
+/**
+ * Live microphone source contract for adapters that own capture.
+ * Engine never opens the microphone; it only receives TranscriptSegmentV1 finals.
+ */
 export type LiveMicrophoneSource = TranscriptSourcePort & {
   readonly kind: "microphone";
 };
 
+/** Empty stub kept for import stability in browser demos. Prefer TauriAudioPort on Windows. */
 export function createLiveMicrophoneSourceStub(): LiveMicrophoneSource {
   return {
     kind: "microphone",
@@ -12,7 +16,7 @@ export function createLiveMicrophoneSourceStub(): LiveMicrophoneSource {
       void signal;
       return {
         async *[Symbol.asyncIterator]() {
-          // Intentionally empty until native audio adapters land.
+          // Intentionally empty — Windows production uses Tauri audio_start/drain.
         },
       };
     },

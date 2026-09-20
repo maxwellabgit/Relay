@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./engine-store": "./src/engine-store.ts",
     "./artifact-store": "./src/artifact-store.ts",
-    "./local-model": "./src/local-model.ts"
+    "./local-model": "./src/local-model.ts",
+    "./audio": "./src/audio.ts"
   },
   "scripts": {
     "typecheck": "tsc -b --pretty false"
