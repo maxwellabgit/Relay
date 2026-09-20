@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { JudgmentPort } from "@relay/contracts";
-import { createResolveAcronymModule } from "@relay/reflexes";
+import { calendarBlockEpisode, createResolveAcronymModule } from "@relay/reflexes";
 import { recordedSuccess } from "@relay/testkit";
 import { createNodeHarness } from "./create-client.js";
 
@@ -22,9 +22,10 @@ describe("bounded expansion through RelayClient", () => {
         await harness.client.execute({ type: "EndWorkSession" });
       }
       const snap = await harness.client.getSnapshot();
-      expect(snap.patterns).toHaveLength(3);
+      expect(snap.patterns).toHaveLength(0);
       expect(snap.patterns.every((pattern) => pattern.candidateState !== "proposed")).toBe(true);
-      expect(snap.review.approvedReflexes).toBe(0);
+      expect(snap.review.approvedCandidates).toBe(0);
+      expect(snap.review.builtReflexes).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -40,12 +41,12 @@ describe("bounded expansion through RelayClient", () => {
         return recordedSuccess({ benefit: { type: "noul", probabilityYes: 0.8 } });
       },
     };
-    const harness = createNodeHarness({ judgments });
+    const harness = createNodeHarness({ judgments, episodeDefinitions: [calendarBlockEpisode] });
     try {
       await harness.client.start();
-      const fields = { start_bucket: "noon", duration: "60m", reminder_offset: "-1d" } as const;
+      const fields = { start_bucket: "noon", duration: "60m", reminder_offset: "-1d" };
       for (let index = 0; index < 3; index += 1) {
-        await harness.client.execute({ type: "RecordCompletedWork", kind: "calendar.block", fields });
+        await harness.engine.completeVerifiedWork("calendar.block", fields);
         await harness.client.execute({ type: "EndWorkSession" });
       }
       const snap = await harness.client.getSnapshot();
@@ -61,7 +62,8 @@ describe("bounded expansion through RelayClient", () => {
         candidateId: `cand_${pattern?.signature}`,
       });
       expect(approved.summary).toBe("approved");
-      expect((await harness.client.getSnapshot()).review.approvedReflexes).toBe(1);
+      expect((await harness.client.getSnapshot()).review.approvedCandidates).toBe(1);
+      expect((await harness.client.getSnapshot()).review.builtReflexes).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -80,12 +82,14 @@ describe("bounded expansion through RelayClient", () => {
     try {
       await harness.client.start();
       await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
-      await waitFor(async () => (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "wait"));
+      await waitFor(async () => (await harness.store.listDeadLetters()).length === 1);
       const snap = await harness.client.getSnapshot();
+      const blocked = await harness.store.getCase(snap.cases[0]?.caseId ?? "");
       expect(snap.feedItems.some((item) => item.kind === "task")).toBe(false);
-      expect(snap.feedItems.find((item) => item.kind === "wait")?.summary).toContain("missing_secret");
-      expect(snap.gate?.result).toBe("wait");
+      expect(blocked?.status).toBe("blocked");
+      expect(snap.gate?.reasonCode).toBe("missing_secret");
       expect(await harness.store.listDeadLetters()).toHaveLength(1);
+      expect(await harness.store.countWorkItems()).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -115,7 +119,7 @@ describe("bounded expansion through RelayClient", () => {
       const snap = await harness.client.getSnapshot();
       expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toBe("Battery Energy Storage");
       expect(snap.gate?.result).toBe("pass");
-      expect(snap.gate?.probabilities["Battery Energy Storage"]).toBe(0.82);
+      expect(Object.values(snap.gate?.probabilities ?? {})).toContain(0.82);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -129,15 +133,15 @@ describe("bounded expansion through RelayClient", () => {
     try {
       await first.client.start();
       expect(
-        (await first.client.execute({ type: "CaptureBirthday", personKey: "Ada", date: "1990-02-31", confirmed: true }))
+        (await first.client.execute({ type: "CaptureBirthday", displayName: "Ada", date: "1990-02-31", confirmed: true }))
           .summary,
       ).toBe("invalid_date");
       expect(
-        (await first.client.execute({ type: "CaptureBirthday", personKey: "Ada", date: "1990-02-02", confirmed: false }))
+        (await first.client.execute({ type: "CaptureBirthday", displayName: "Ada", date: "1990-02-02", confirmed: false }))
           .summary,
       ).toBe("confirmation_required");
       expect(
-        (await first.client.execute({ type: "CaptureBirthday", personKey: "Ada", date: "1990-02-02", confirmed: true }))
+        (await first.client.execute({ type: "CaptureBirthday", displayName: "Ada", date: "1990-02-02", confirmed: true }))
           .summary,
       ).toBe("birthday_stored");
       await first.client.execute({ type: "SubmitText", text: `note ${SENTINEL}` });
@@ -154,7 +158,12 @@ describe("bounded expansion through RelayClient", () => {
     try {
       await second.client.start();
       const snap = await second.client.getSnapshot();
-      expect(snap.memories).toContainEqual({ kind: "birthday", key: "Ada", fields: { date: "1990-02-02" } });
+      const birthday = snap.memories.find((memory) => memory.kind === "birthday");
+      expect(birthday?.fields.displayName).toBe("Ada");
+      expect(birthday?.fields.month).toBe("2");
+      expect(birthday?.fields.day).toBe("2");
+      expect(birthday?.fields.year).toBe("1990");
+      expect(birthday?.key).not.toBe("Ada");
     } finally {
       await second.client.stop();
       second.close();

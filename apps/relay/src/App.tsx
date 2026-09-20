@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import type { RelayClient, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, RelayClient, RelaySnapshot } from "@relay/contracts";
 import { RelayWorkbench } from "@relay/ui";
-import { createWebClient, type WebClientHandle } from "./bootstrap/createWebClient";
+import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
+import { ACRONYM_BASIC_EVENTS } from "./fixtures/acronym-basic";
 
 const EMPTY_SNAPSHOT: RelaySnapshot = {
   listening: false,
@@ -27,14 +28,19 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
     logWritable: false,
     logError: null,
     mode: "live",
-    retention: "7d",
+    retention: "trace 30d/100MB · failed 7d · memories until delete",
+    deadLetters: 0,
+    storageAdapter: "ephemeral demo",
+    activeCaseId: null,
   },
   gate: null,
   patterns: [],
   review: {
     completeSessions: 0,
     sessionTrigger: 12,
-    approvedReflexes: 0,
+    approvedCandidates: 0,
+    builtReflexes: 0,
+    activeReflexes: 0,
     reflexTrigger: 4,
     completeEpisodes: 0,
     episodeTrigger: 25,
@@ -45,81 +51,39 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   },
   trace: [],
   memories: [],
+  actions: [],
 };
 
-const FIXTURE_SEGMENTS = [
-  {
-    type: "segment.final" as const,
-    atMs: 0,
-    segment: {
-      schemaVersion: 1 as const,
-      sourceId: "fixture",
-      sessionId: "session_web",
-      segmentId: "seg_1",
-      revision: 1,
-      sequence: 1,
-      startMs: 0,
-      endMs: 1200,
-      speakerKey: "SPEAKER_00",
-      speakerConfidence: 0.92,
-      text: "We should check the API before launch.",
-      textConfidence: 0.95,
-      final: true,
-      origin: "scripted_transcript" as const,
-      cursor: null,
-    },
-  },
-  {
-    type: "segment.final" as const,
-    atMs: 1800,
-    segment: {
-      schemaVersion: 1 as const,
-      sourceId: "fixture",
-      sessionId: "session_web",
-      segmentId: "seg_2",
-      revision: 1,
-      sequence: 2,
-      startMs: 1800,
-      endMs: 3200,
-      speakerKey: "SPEAKER_01",
-      speakerConfidence: 0.9,
-      text: "API means Application Programming Interface in our glossary.",
-      textConfidence: 0.96,
-      final: true,
-      origin: "scripted_transcript" as const,
-      cursor: null,
-    },
-  },
-];
-
 export function App() {
-  const handleRef = useRef<WebClientHandle | null>(null);
+  const handleRef = useRef<AppClientHandle | null>(null);
   const clientRef = useRef<RelayClient | null>(null);
   const [snapshot, setSnapshot] = useState<RelaySnapshot>(EMPTY_SNAPSHOT);
-  const [traceLines, setTraceLines] = useState<string[]>([]);
 
   useEffect(() => {
-    const handle = createWebClient();
-    handleRef.current = handle;
-    clientRef.current = handle.client;
+    let cancelled = false;
+    let handle: AppClientHandle | null = null;
+    let unsubscribe = () => {};
 
-    const unsubscribe = handle.client.subscribe((change) => {
-      if (change.type === "SnapshotReplaced") {
-        setSnapshot(change.snapshot);
+    void createAppClient().then((created) => {
+      if (cancelled) {
+        void created.stop();
         return;
       }
-        if (change.type === "TraceAppended") {
-          setTraceLines((prev) => [...prev.slice(-199), change.message]);
-        }
+      handle = created;
+      handleRef.current = created;
+      clientRef.current = created.client;
+      unsubscribe = created.client.subscribe((change) => {
+        if (change.type === "SnapshotReplaced") setSnapshot(change.snapshot);
+      });
+      void created.start();
     });
 
-    void handle.start();
-
     return () => {
+      cancelled = true;
       unsubscribe();
       clientRef.current = null;
       handleRef.current = null;
-      void handle.stop();
+      if (handle) void handle.stop();
     };
   }, []);
 
@@ -133,11 +97,8 @@ export function App() {
         onSubmit={(text) => {
           void clientRef.current?.execute({ type: "SubmitText", text });
         }}
-        onRemember={(token) => {
-          void clientRef.current?.execute({ type: "RememberToken", token });
-        }}
-        onCaptureBirthday={(personKey, date, confirmed) => {
-          void clientRef.current?.execute({ type: "CaptureBirthday", personKey, date, confirmed });
+        onAction={(action) => {
+          void handleAction(clientRef.current, action);
         }}
         onStartSession={() => {
           void clientRef.current?.execute({ type: "StartWorkSession" });
@@ -145,34 +106,64 @@ export function App() {
         onEndSession={() => {
           void clientRef.current?.execute({ type: "EndWorkSession" });
         }}
-        traceLines={traceLines}
+        onApproveCandidate={(candidateId) => {
+          void clientRef.current?.execute({ type: "ApproveCandidate", candidateId });
+        }}
+        onRejectCandidate={(candidateId) => {
+          void clientRef.current?.execute({ type: "RejectCandidate", candidateId });
+        }}
+        onSnoozeCandidate={(candidateId) => {
+          void clientRef.current?.execute({ type: "SnoozeCandidate", candidateId });
+        }}
+        onOpenLog={() => {
+          void openRunFolder();
+        }}
         onReplayFixture={async (fixture, speed) => {
           const handle = handleRef.current;
-          if (!handle) return;
-          if (fixture !== "acronym-basic") {
-            setTraceLines((prev) => [
-              ...prev.slice(-199),
-              `replay rejected: ${fixture} is not loaded`,
-            ]);
-            return;
-          }
-          setTraceLines((prev) => [...prev.slice(-199), `replay:${fixture}@${speed}x`]);
+          if (!handle || fixture !== "acronym-basic") return;
           await clientRef.current?.execute({ type: "SetListening", enabled: true });
           let previousAt = 0;
-          for (const event of FIXTURE_SEGMENTS) {
+          for (const event of ACRONYM_BASIC_EVENTS) {
+            if (event.type !== "segment.final") continue;
             const gap = speed === 0 ? 0 : Math.max(0, event.atMs - previousAt) / speed;
             previousAt = event.atMs;
-            if (gap > 0) {
-              await new Promise((resolve) => setTimeout(resolve, gap));
-            }
-            await handle.engine.ingestFinalSegment(
-              { ...event.segment, sessionId: "session_web" },
-              false,
-            );
+            if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
+            await handle.engine.ingestFinalSegment({ ...event.segment, sessionId: snapshot.runtime.sessionId ?? "session_web" }, false);
           }
         }}
       />
       <StatusBar style="light" />
     </>
   );
+}
+
+async function handleAction(client: RelayClient | null, action: ActionCard): Promise<void> {
+  if (!client) return;
+  if (action.kind === "save_definition" || action.kind === "replace_memory") {
+    if (!action.token || !action.expansion) return;
+    await client.execute({
+      type: "UpsertGlossaryEntry",
+      token: action.token,
+      expansion: action.expansion,
+      confirmed: true,
+      ...(action.kind === "replace_memory" ? { replace: true } : {}),
+    });
+    return;
+  }
+  if (action.kind === "confirm_birthday") {
+    if (!action.displayName || !action.date) return;
+    await client.execute({
+      type: "CaptureBirthday",
+      displayName: action.displayName,
+      date: action.date,
+      confirmed: true,
+    });
+  }
+}
+
+async function openRunFolder(): Promise<void> {
+  const host = globalThis as { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } };
+  if (host.__TAURI_INTERNALS__?.invoke) {
+    await host.__TAURI_INTERNALS__.invoke("open_run_folder");
+  }
 }

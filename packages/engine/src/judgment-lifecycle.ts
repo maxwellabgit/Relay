@@ -32,17 +32,83 @@ export async function canonicalizeRequestHash(request: JudgmentRequest): Promise
     model: request.model,
     questionSetId: request.questionSetId,
     questionSetVersion: request.questionSetVersion,
-    questions: request.questions,
-    state: request.state,
+    questions: Object.fromEntries(
+      Object.entries(request.questions).map(([key, question]) => [
+        key,
+        { type: question.type, ...(question.type === "choice" ? { optionIds: Object.keys(question.criteria) } : {}) },
+      ]),
+    ),
+    state: sanitizeState(
+      request.state && typeof request.state === "object" ? (request.state as Record<string, unknown>) : {},
+    ),
     sources: (request.sourceObjectRefs ?? []).map((s) => s.sha256).sort(),
   };
   return sha256Hex(encode(canonical));
 }
 
+function sanitizeState(state: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(state)) {
+    if (typeof value === "number" || typeof value === "boolean") out[key] = value;
+    else if (typeof value === "string" && /^[a-zA-Z0-9._:-]{1,64}$/.test(value)) out[key] = value;
+    else if (Array.isArray(value) && value.every((item) => typeof item === "string" && item.length <= 32)) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function safeRequestArtifact(request: JudgmentRequest, requestHash: string): Uint8Array {
+  return encode({
+    questionSetId: request.questionSetId,
+    questionSetVersion: request.questionSetVersion,
+    model: request.model,
+    provider: request.provider ?? null,
+    requestHash,
+    state: sanitizeState(
+      request.state && typeof request.state === "object" ? (request.state as Record<string, unknown>) : {},
+    ),
+    questionTypes: Object.fromEntries(
+      Object.entries(request.questions).map(([key, question]) => [key, question.type]),
+    ),
+  });
+}
+
+function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
+  if (!response.ok) {
+    return encode({
+      ok: false,
+      category: response.failure.category,
+      httpStatus: response.failure.httpStatus ?? null,
+    });
+  }
+  const answers: Record<string, unknown> = {};
+  for (const [key, answer] of Object.entries(response.success.answers)) {
+    if (answer.type === "choice") {
+      answers[key] = {
+        type: "choice",
+        choice: answer.choice,
+        probabilities: answer.probabilities,
+      };
+    } else if (answer.type === "noul") {
+      answers[key] = { type: "noul", probabilityYes: answer.probabilityYes };
+    } else {
+      answers[key] = { type: answer.type };
+    }
+  }
+  return encode({
+    ok: true,
+    model: response.success.model,
+    answers,
+    inputTokens: response.success.inputTokens,
+    outputTokens: response.success.outputTokens,
+    elapsedMs: response.success.elapsedMs,
+  });
+}
+
 /**
  * Persist request → dispatch → persist response → return.
- * Reuses matching completed results during replay/restart.
- * Provider calls happen outside storage transactions.
+ * Artifacts store only allowlisted fields (no instruction prose).
  */
 export async function runJudgmentLifecycle(
   deps: JudgmentLifecycleDeps,
@@ -52,18 +118,40 @@ export async function runJudgmentLifecycle(
   const requestHash = request.requestHash ?? (await canonicalizeRequestHash(request));
   const cached = await deps.store.findCompletedJudgmentByHash(requestHash);
   if (cached?.responseArtifactId) {
-    const raw = await deps.artifacts.get({
-      artifactId: cached.responseArtifactId,
-      sha256: cached.responseHash ?? "",
-      policy: localOnlyPolicy(),
-    });
-    const response = JSON.parse(new TextDecoder().decode(raw)) as JudgmentResponse;
-    if (response.ok) {
-      return { record: cached, response, providerCalled: false };
+    try {
+      const raw = await deps.artifacts.get({
+        artifactId: cached.responseArtifactId,
+        sha256: cached.responseHash ?? "",
+        policy: localOnlyPolicy(),
+      });
+      const stored = JSON.parse(new TextDecoder().decode(raw)) as {
+        ok?: boolean;
+        model?: string;
+        answers?: Record<string, import("@relay/contracts").JudgmentAnswer>;
+        inputTokens?: number;
+        outputTokens?: number;
+        elapsedMs?: number;
+        category?: string;
+      };
+      if (stored.ok === true && stored.answers && typeof stored.answers === "object") {
+        const response: JudgmentResponse = {
+          ok: true,
+          success: {
+            model: stored.model ?? cached.model,
+            answers: stored.answers,
+            inputTokens: Number(stored.inputTokens ?? 0),
+            outputTokens: Number(stored.outputTokens ?? 0),
+            elapsedMs: Number(stored.elapsedMs ?? 0),
+          },
+        };
+        return { record: cached, response, providerCalled: false };
+      }
+    } catch {
+      // Fall through to a fresh provider call when the safe artifact cannot be read.
     }
   }
 
-  const requestBytes = encode({ ...request, requestHash });
+  const requestBytes = safeRequestArtifact(request, requestHash);
   const requestArtifact = await deps.artifacts.put(requestBytes, localOnlyPolicy());
   const judgmentId = deps.ids.next("jud");
   const createdAt = deps.clock.now().toISOString();
@@ -82,14 +170,9 @@ export async function runJudgmentLifecycle(
   };
   await deps.store.upsertJudgment(requested);
 
-  // Provider call outside the persistence transaction boundary.
-  const response = await deps.judgments.judge(
-    { ...request, requestHash },
-    signal,
-  );
+  const response = await deps.judgments.judge({ ...request, requestHash }, signal);
 
-  const responseBytes = encode(response);
-  const responseArtifact = await deps.artifacts.put(responseBytes, localOnlyPolicy());
+  const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
   const completedAt = deps.clock.now().toISOString();
   const completed: JudgmentRecord = {
     ...requested,

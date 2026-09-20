@@ -15,10 +15,7 @@ import type {
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
 import { SqliteLearning } from "./sqlite-learning.js";
 
-const migrationPath = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../packages/storage-schema/migrations/001_core.sql",
-);
+const migrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages/storage-schema/migrations");
 
 export class SqliteEngineStore implements EngineStore {
   private readonly db: DatabaseSync;
@@ -26,10 +23,8 @@ export class SqliteEngineStore implements EngineStore {
 
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
-    this.db.exec(readFileSync(migrationPath, "utf8"));
-    this.db
-      .prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)")
-      .run(new Date().toISOString());
+    this.db.exec("PRAGMA foreign_keys = ON");
+    applyMigrations(this.db);
     this.learning = new SqliteLearning(this.db);
   }
 
@@ -181,7 +176,7 @@ export class SqliteEngineStore implements EngineStore {
   async listActiveCases(): Promise<readonly CaseRecord[]> {
     const rows = this.db
       .prepare(
-        `SELECT * FROM cases WHERE status IN ('active','waiting') ORDER BY priority DESC, created_at`,
+        `SELECT * FROM cases WHERE status IN ('active','waiting','blocked','failed') ORDER BY priority DESC, created_at`,
       )
       .all() as DbCase[];
     return rows.map(mapCase);
@@ -275,7 +270,15 @@ export class SqliteEngineStore implements EngineStore {
     this.db.prepare(`DELETE FROM work_items WHERE work_id = ?`).run(workId);
   }
 
-  async requeue(workId: string, availableAt: string): Promise<void> {
+  async requeue(workId: string, availableAt: string, payload?: Record<string, unknown>): Promise<void> {
+    if (payload) {
+      this.db
+        .prepare(
+          `UPDATE work_items SET available_at = ?, payload_json = ?, lease_owner = NULL, lease_until = NULL WHERE work_id = ?`,
+        )
+        .run(availableAt, JSON.stringify(payload), workId);
+      return;
+    }
     this.db
       .prepare(
         `UPDATE work_items SET available_at = ?, lease_owner = NULL, lease_until = NULL WHERE work_id = ?`,
@@ -389,6 +392,41 @@ export class SqliteEngineStore implements EngineStore {
       }[]
     ).map((row) => ({ workId: row.work_id, reasonCode: row.reason_code, at: row.at }));
   }
+
+  async upsertJudgmentAttempt(record: {
+    readonly attemptId: string;
+    readonly caseId: string;
+    readonly workId?: string;
+    readonly attempt: number;
+    readonly maxAttempts: number;
+    readonly nextAttemptAt?: string | null;
+    readonly failureCategory?: string | null;
+    readonly providerRequestId?: string | null;
+    readonly createdAt: string;
+  }): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO judgment_attempts(
+          attempt_id, case_id, work_id, attempt, max_attempts, next_attempt_at, failure_category, provider_request_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(attempt_id) DO UPDATE SET
+          attempt=excluded.attempt,
+          next_attempt_at=excluded.next_attempt_at,
+          failure_category=excluded.failure_category,
+          provider_request_id=excluded.provider_request_id`,
+      )
+      .run(
+        record.attemptId,
+        record.caseId,
+        record.workId ?? null,
+        record.attempt,
+        record.maxAttempts,
+        record.nextAttemptAt ?? null,
+        record.failureCategory ?? null,
+        record.providerRequestId ?? null,
+        record.createdAt,
+      );
+  }
 }
 
 type DbCase = {
@@ -472,4 +510,23 @@ function mapJudgment(row: DbJudgment): JudgmentRecord {
     ...(row.elapsed_ms != null ? { elapsedMs: row.elapsed_ms } : {}),
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
   };
+}
+
+function applyMigrations(db: DatabaseSync): void {
+  const now = new Date().toISOString();
+  db.exec("BEGIN");
+  try {
+    db.exec(readFileSync(resolve(migrationDir, "001_core.sql"), "utf8"));
+    db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
+    for (const version of [2, 3]) {
+      const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
+      if (applied) continue;
+      db.exec(readFileSync(resolve(migrationDir, `00${version}_${version === 2 ? "learning" : "runtime"}.sql`), "utf8"));
+      db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(version, now);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }

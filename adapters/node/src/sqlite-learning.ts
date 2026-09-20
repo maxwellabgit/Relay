@@ -12,82 +12,8 @@ import type {
 } from "@relay/engine";
 import { RETENTION_MS } from "@relay/engine";
 
-const schema = `
-CREATE TABLE IF NOT EXISTS memories (
-  memory_id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  key TEXT NOT NULL,
-  value_json TEXT NOT NULL,
-  source TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(kind, key)
-);
-CREATE TABLE IF NOT EXISTS work_sessions (
-  session_id TEXT PRIMARY KEY,
-  started_at TEXT NOT NULL,
-  ended_at TEXT,
-  termination TEXT NOT NULL,
-  episode_count INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS work_episodes (
-  episode_id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  case_id TEXT,
-  signature TEXT NOT NULL,
-  outcome TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  completed_at TEXT
-);
-CREATE TABLE IF NOT EXISTS decision_receipts (
-  receipt_id TEXT PRIMARY KEY,
-  case_id TEXT,
-  gate_id TEXT NOT NULL,
-  policy_version TEXT NOT NULL,
-  question_type TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  probabilities_json TEXT NOT NULL,
-  thresholds_json TEXT NOT NULL,
-  selected_option TEXT,
-  result TEXT NOT NULL,
-  reason_code TEXT NOT NULL,
-  latency_ms INTEGER,
-  retries INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS pattern_evidence (
-  signature TEXT PRIMARY KEY,
-  count INTEGER NOT NULL,
-  session_ids_json TEXT NOT NULL,
-  outcomes_json TEXT NOT NULL,
-  first_at TEXT NOT NULL,
-  last_at TEXT NOT NULL,
-  evidence_ids_json TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS expansion_candidates (
-  candidate_id TEXT PRIMARY KEY,
-  signature TEXT NOT NULL,
-  state TEXT NOT NULL,
-  because TEXT NOT NULL,
-  needed TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS review_runs (
-  review_id TEXT PRIMARY KEY,
-  trigger_code TEXT NOT NULL,
-  at TEXT NOT NULL,
-  findings_json TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS dead_letters (
-  work_id TEXT PRIMARY KEY,
-  reason_code TEXT NOT NULL,
-  at TEXT NOT NULL
-);
-`;
-
 export class SqliteLearning implements LearningStore {
-  constructor(private readonly db: DatabaseSync) {
-    this.db.exec(schema);
-  }
+  constructor(private readonly db: DatabaseSync) {}
 
   async putMemory(record: MemoryRecord): Promise<void> {
     this.db
@@ -98,6 +24,10 @@ export class SqliteLearning implements LearningStore {
            value_json=excluded.value_json, source=excluded.source`,
       )
       .run(record.memoryId, record.kind, record.key, JSON.stringify(record.value), record.source, record.createdAt);
+  }
+
+  async deleteMemory(kind: MemoryKind, key: string): Promise<void> {
+    this.db.prepare(`DELETE FROM memories WHERE kind = ? AND key = ?`).run(kind, key);
   }
 
   async getMemory(kind: MemoryKind, key: string): Promise<MemoryRecord | null> {
@@ -240,8 +170,42 @@ export class SqliteLearning implements LearningStore {
 
   async putReview(record: ReviewRecord): Promise<void> {
     this.db
-      .prepare(`INSERT OR IGNORE INTO review_runs(review_id, trigger_code, at, findings_json) VALUES (?, ?, ?, ?)`)
-      .run(record.reviewId, record.triggerCode, record.at, JSON.stringify(record.findings));
+      .prepare(
+        `INSERT OR IGNORE INTO review_runs(
+          review_id, trigger_code, at, findings_json,
+          sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.reviewId,
+        record.triggerCode,
+        record.at,
+        JSON.stringify(record.findings),
+        record.sessionsAtReview,
+        record.episodesAtReview,
+        record.candidatesAtReview,
+        record.builtReflexesAtReview,
+      );
+    this.db
+      .prepare(
+        `INSERT INTO review_cursors(
+          trigger_code, review_id, sessions_at_review, episodes_at_review, candidates_at_review, built_reflexes_at_review
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(trigger_code) DO UPDATE SET
+          review_id=excluded.review_id,
+          sessions_at_review=excluded.sessions_at_review,
+          episodes_at_review=excluded.episodes_at_review,
+          candidates_at_review=excluded.candidates_at_review,
+          built_reflexes_at_review=excluded.built_reflexes_at_review`,
+      )
+      .run(
+        record.triggerCode,
+        record.reviewId,
+        record.sessionsAtReview,
+        record.episodesAtReview,
+        record.candidatesAtReview,
+        record.builtReflexesAtReview,
+      );
   }
 
   async listReviews(): Promise<readonly ReviewRecord[]> {
@@ -251,8 +215,14 @@ export class SqliteLearning implements LearningStore {
   async compact(nowIso: string): Promise<number> {
     const cutoff = new Date(Date.parse(nowIso) - RETENTION_MS).toISOString();
     const result = this.db
-      .prepare(`DELETE FROM work_episodes WHERE outcome = 'abandoned' AND completed_at IS NOT NULL AND completed_at < ?`)
+      .prepare(
+        `DELETE FROM work_episodes
+         WHERE outcome IN ('abandoned', 'failed')
+           AND completed_at IS NOT NULL
+           AND completed_at < ?`,
+      )
       .run(cutoff);
+    this.db.prepare(`DELETE FROM dead_letters WHERE at < ?`).run(cutoff);
     return Number(result.changes);
   }
 }
@@ -262,7 +232,7 @@ type MemoryRow = {
   kind: MemoryKind;
   key: string;
   value_json: string;
-  source: "explicit_user";
+  source: MemoryRecord["source"];
   created_at: string;
 };
 type SessionRow = {
@@ -314,7 +284,16 @@ type CandidateRow = {
   needed: string;
   updated_at: string;
 };
-type ReviewRow = { review_id: string; trigger_code: string; at: string; findings_json: string };
+type ReviewRow = {
+  review_id: string;
+  trigger_code: string;
+  at: string;
+  findings_json: string;
+  sessions_at_review: number;
+  episodes_at_review: number;
+  candidates_at_review: number;
+  built_reflexes_at_review: number;
+};
 
 function mapMemory(row: MemoryRow): MemoryRecord {
   return {
@@ -391,5 +370,9 @@ function mapReview(row: ReviewRow): ReviewRecord {
     triggerCode: row.trigger_code,
     at: row.at,
     findings: JSON.parse(row.findings_json) as string[],
+    sessionsAtReview: row.sessions_at_review,
+    episodesAtReview: row.episodes_at_review,
+    candidatesAtReview: row.candidates_at_review,
+    builtReflexesAtReview: row.built_reflexes_at_review,
   };
 }

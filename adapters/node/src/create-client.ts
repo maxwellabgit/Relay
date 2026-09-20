@@ -1,4 +1,5 @@
 import type { JudgmentPort, TextModelPort } from "@relay/contracts";
+import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
 import { productionReflexes } from "@relay/reflexes";
 import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
@@ -6,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
+import { sqliteStoreInvoke } from "./store-invoke.js";
 import { createFileTraceSink } from "./file-trace.js";
 
 export type NodeHarnessOptions = {
@@ -16,10 +18,12 @@ export type NodeHarnessOptions = {
   readonly ids?: EngineDeps["ids"];
   readonly judgments?: JudgmentPort;
   readonly reflexModules?: EngineDeps["reflexModules"];
+  readonly episodeDefinitions?: EngineDeps["episodeDefinitions"];
 };
 
 export function createNodeHarness(options: NodeHarnessOptions = {}) {
-  const store = new SqliteEngineStore(options.databasePath ?? ":memory:");
+  const sqlite = new SqliteEngineStore(options.databasePath ?? ":memory:");
+  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
   const artifacts = new MemoryArtifactStore();
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
@@ -64,6 +68,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     ids,
     sessionId: options.sessionId ?? "session_test",
     reflexModules: options.reflexModules ?? productionReflexes,
+    ...(options.episodeDefinitions ? { episodeDefinitions: options.episodeDefinitions } : {}),
     storageDetail: "sqlite",
     jevStatus: { ok: true, detail: "recorded" },
     modelStatus: { ok: false, detail: "disabled" },
@@ -80,7 +85,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     engine,
     store,
     artifacts,
-    close: () => store.close(),
+    close: () => sqlite.close(),
   };
 }
 

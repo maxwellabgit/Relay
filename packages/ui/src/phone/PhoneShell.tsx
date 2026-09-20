@@ -1,6 +1,5 @@
-import { useState } from "react";
-import type { FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Composer } from "../assistant/Composer.js";
 import { colors } from "../theme/colors.js";
 
@@ -8,15 +7,11 @@ type Props = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
-  readonly onRemember?: (token: string) => void;
-  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
+  readonly onAction?: (action: ActionCard) => void;
 };
 
-export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember, onCaptureBirthday }: Props) {
+export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Props) {
   const task = [...snapshot.feedItems].reverse().find((item) => item.kind === "task");
-  const token = task ? acronymFromTask(task.summary) : null;
-  const memory = [...snapshot.feedItems].reverse().find((item) => item.kind === "memory");
-  const stored = memory?.summary.startsWith("Remembered ") === true;
 
   return (
     <View style={styles.bezel}>
@@ -71,32 +66,27 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember, onC
           )}
         </ScrollView>
 
-        {task ? (
+        {task || snapshot.actions.length > 0 ? (
           <View style={styles.actions}>
-            <View style={styles.actionCard}>
-              <Text style={styles.actionEyebrow}>Recommended task</Text>
-              <Text style={styles.actionTitle}>{task.summary}</Text>
-            </View>
-            {token ? (
-              <Pressable
-                accessibilityRole="button"
-                disabled={stored}
-                onPress={() => onRemember?.(token)}
-                style={[styles.memory, stored ? styles.memoryStored : null]}
-              >
-                <Text style={styles.memoryLabel}>{stored ? "In memory" : "Add to memory"}</Text>
-                <Text style={styles.memoryValue}>
-                  {memory?.summary ?? `Remember '${token}' after Jev`}
-                </Text>
-              </Pressable>
+            {task ? (
+              <View style={styles.actionCard}>
+                <Text style={styles.actionEyebrow}>Recommended task</Text>
+                <Text style={styles.actionTitle}>{task.summary}</Text>
+              </View>
             ) : null}
+            {snapshot.actions.map((action) => (
+              <Pressable
+                key={action.actionId}
+                accessibilityRole="button"
+                onPress={() => onAction?.(action)}
+                style={styles.actionPressable}
+              >
+                <Text style={styles.actionPressableLabel}>{action.label}</Text>
+              </Pressable>
+            ))}
           </View>
         ) : null}
 
-        <BirthdayCapture
-          memories={snapshot.memories.filter((memory) => memory.kind === "birthday")}
-          {...(onCaptureBirthday !== undefined ? { onCaptureBirthday } : {})}
-        />
         <Composer onSubmit={onSubmit} />
 
         <View style={styles.tabs}>
@@ -107,49 +97,6 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onRemember, onC
         </View>
         <Text style={styles.footer}>Private. Local. In your control.</Text>
       </View>
-    </View>
-  );
-}
-
-function BirthdayCapture({
-  memories,
-  onCaptureBirthday,
-}: {
-  readonly memories: RelaySnapshot["memories"];
-  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
-}) {
-  const [personKey, setPersonKey] = useState("");
-  const [date, setDate] = useState("");
-  return (
-    <View style={styles.birthday}>
-      <Text style={styles.actionEyebrow}>Birthday</Text>
-      <TextInput
-        value={personKey}
-        onChangeText={setPersonKey}
-        placeholder="Name"
-        placeholderTextColor={colors.textDim}
-        style={styles.birthdayInput}
-      />
-      <TextInput
-        value={date}
-        onChangeText={setDate}
-        placeholder="YYYY-MM-DD"
-        placeholderTextColor={colors.textDim}
-        style={styles.birthdayInput}
-      />
-      <View style={styles.birthdayActions}>
-        <Pressable onPress={() => onCaptureBirthday?.(personKey, date, false)} style={styles.memory}>
-          <Text style={styles.memoryLabel}>Check date</Text>
-        </Pressable>
-        <Pressable onPress={() => onCaptureBirthday?.(personKey, date, true)} style={styles.memory}>
-          <Text style={styles.memoryLabel}>Save</Text>
-        </Pressable>
-      </View>
-      {memories.map((memory) => (
-        <Text key={memory.key} style={styles.memoryValue}>
-          {`${memory.key} · ${memory.fields.date ?? ""}`}
-        </Text>
-      ))}
     </View>
   );
 }
@@ -180,13 +127,12 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
       </View>
     );
   }
-    return (
-      <View style={styles.assistantBubble}>
-        <Text style={styles.assistantName}>RELAY</Text>
-        <Text style={styles.assistantText}>{item.summary}</Text>
-      </View>
-    );
-  return null;
+  return (
+    <View style={styles.assistantBubble}>
+      <Text style={styles.assistantName}>RELAY</Text>
+      <Text style={styles.assistantText}>{item.summary}</Text>
+    </View>
+  );
 }
 
 function Tab({ label, active }: { readonly label: string; readonly active: boolean }) {
@@ -196,11 +142,6 @@ function Tab({ label, active }: { readonly label: string; readonly active: boole
       <Text style={[styles.tabLabel, active ? styles.tabLabelOn : null]}>{label}</Text>
     </View>
   );
-}
-
-function acronymFromTask(summary: string): string | null {
-  const match = /definition of ([A-Z0-9]{2,12})/.exec(summary);
-  return match?.[1] ?? null;
 }
 
 const styles = StyleSheet.create({
@@ -389,49 +330,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  memory: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+  actionPressable: {
     backgroundColor: colors.bgElevated,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  memoryLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  memoryStored: {
-    borderColor: colors.ok,
-  },
-  birthday: {
-    gap: 6,
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  birthdayInput: {
+  actionPressableLabel: {
     color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
     fontSize: 13,
-  },
-  birthdayActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  memoryValue: {
-    color: colors.text,
-    fontSize: 12,
     fontWeight: "600",
-    flex: 1,
-    textAlign: "right",
-    marginLeft: 8,
   },
   tabs: {
     flexDirection: "row",

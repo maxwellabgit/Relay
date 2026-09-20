@@ -1,12 +1,14 @@
-import type { TraceEventV1 } from "@relay/contracts";
+import type { RuntimeEventV2 } from "@relay/engine";
 import { isTraceEvent, type TraceSink } from "@relay/engine";
 
 type TauriInternals = {
   invoke?: (command: string, args: Record<string, unknown>) => Promise<unknown>;
 };
 
-export function createBrowserTraceSink(runId = `run_${Date.now().toString(36)}`): TraceSink {
-  const directoryLabel = `.dev-data/runs/${runId}/events.jsonl`;
+export function createBrowserTraceSink(
+  runId = `run_${Date.now().toString(36)}`,
+  directoryLabel = `.dev-data/runs/${runId}/events.jsonl`,
+): TraceSink {
   return {
     runId,
     directoryLabel,
@@ -47,8 +49,8 @@ function tauriInternals(): TauriInternals | null {
   return host.__TAURI_INTERNALS__ ?? null;
 }
 
-function parseTrace(text: string): TraceEventV1[] {
-  const kept: TraceEventV1[] = [];
+function parseTrace(text: string): RuntimeEventV2[] {
+  const kept: RuntimeEventV2[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     try {

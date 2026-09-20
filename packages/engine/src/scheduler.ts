@@ -12,7 +12,7 @@ export type WorkStore = {
   enqueue(item: WorkItem): Promise<void>;
   claimNext(now: string, owner: string, leaseMs: number): Promise<WorkItem | null>;
   complete(workId: string): Promise<void>;
-  requeue(workId: string, availableAt: string): Promise<void>;
+  requeue(workId: string, availableAt: string, payload?: Record<string, unknown>): Promise<void>;
 };
 
 export class Scheduler {

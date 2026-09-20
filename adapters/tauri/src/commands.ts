@@ -22,9 +22,22 @@ export async function secretStatus(): Promise<string> {
 export async function systemOne(
   request: HostedSystemOneRequest,
 ): Promise<HostedSystemOneResponse> {
-  void request;
-  // Native transport lands with secret storage; missing key → disabled.
-  return { ok: false, category: "disabled", message: "native_system_one_pending" };
+  const { invoke } = await import("@tauri-apps/api/core");
+  const result = await invoke<{
+    ok: boolean;
+    status: number;
+    category: string;
+    latency_ms: number;
+    retries: number;
+    body: unknown | null;
+  }>("typesafe_judge", { request: { model: request.model, body: request.payload } });
+  if (!result.ok) return { ok: false, category: result.category, message: result.category };
+  return { ok: true, body: result.body };
+}
+
+export async function openRunFolder(): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string>("open_run_folder");
 }
 
 export async function haloStatus(): Promise<string> {

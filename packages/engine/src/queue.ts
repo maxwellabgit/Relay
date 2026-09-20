@@ -1,6 +1,7 @@
 export type WorkItemType =
   | "source.final"
   | "case.resume"
+  | "judgment.requested"
   | "judgment.completed"
   | "model.completed"
   | "operation.completed"

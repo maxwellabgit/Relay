@@ -71,7 +71,10 @@ describe("autonomous engine", () => {
       });
       await waitFor(async () => {
         const snap = await harness.client.getSnapshot();
-        return snap.feedItems.some((i) => i.kind === "task");
+        return (
+          snap.feedItems.some((i) => i.kind === "task") &&
+          snap.trace.some((line) => line.type === "outcome.recorded")
+        );
       });
       const snap = await harness.client.getSnapshot();
       const tasks = snap.feedItems.filter((i) => i.kind === "task");
@@ -81,7 +84,7 @@ describe("autonomous engine", () => {
       expect(answers).toHaveLength(0);
       expect(snap.gate?.reasonCode).toBe("no_candidates");
       expect(snap.gate?.questionType).toBe("not_applicable");
-      expect(snap.trace.some((line) => line.type === "outcome.completed")).toBe(true);
+      expect(snap.trace.some((line) => line.type === "outcome.recorded")).toBe(true);
       expect(snap.trace.some((line) => (line.result ?? "").includes("Search online"))).toBe(false);
     } finally {
       await harness.client.stop();
@@ -115,13 +118,22 @@ describe("autonomous engine", () => {
     const harness = createNodeHarness({ judgments });
     try {
       await harness.client.start();
-      const result = await harness.client.execute({ type: "RememberToken", token: "MSRP" });
+      const result = await harness.client.execute({
+        type: "UpsertGlossaryEntry",
+        token: "MSRP",
+        expansion: "Manufacturer Suggested Retail Price",
+        confirmed: true,
+      });
       expect(result.ok).toBe(true);
       expect(result.summary).toBe("remembered");
       expect(calls).toEqual([]);
       const snap = await harness.client.getSnapshot();
       expect(snap.memories).toEqual([
-        { kind: "glossary", key: "MSRP", fields: { expansion: "" } },
+        {
+          kind: "glossary",
+          key: "MSRP",
+          fields: { expansion: "Manufacturer Suggested Retail Price", status: "confirmed" },
+        },
       ]);
       expect(snap.gate?.questionType).toBe("user");
       expect(snap.gate?.reasonCode).toBe("explicit_user");
@@ -136,7 +148,12 @@ describe("autonomous engine", () => {
     const first = createNodeHarness({ databasePath });
     try {
       await first.client.start();
-      const stored = await first.client.execute({ type: "RememberToken", token: "MSRP" });
+      const stored = await first.client.execute({
+        type: "UpsertGlossaryEntry",
+        token: "MSRP",
+        expansion: "Manufacturer Suggested Retail Price",
+        confirmed: true,
+      });
       expect(stored.summary).toBe("remembered");
     } finally {
       await first.client.stop();
@@ -149,7 +166,9 @@ describe("autonomous engine", () => {
       await waitFor(async () => (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"));
       const snap = await second.client.getSnapshot();
       expect(snap.feedItems.some((item) => item.kind === "task")).toBe(false);
-      expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toContain("saved locally");
+      expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toContain(
+        "Manufacturer Suggested Retail Price",
+      );
       const trace = await second.client.getSnapshot();
       expect(JSON.stringify(trace.trace)).not.toContain("What does MSRP mean?");
     } finally {

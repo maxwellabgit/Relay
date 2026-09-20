@@ -95,6 +95,7 @@ export type RelaySnapshot = {
   readonly review: ReviewStatus;
   readonly trace: readonly TraceRow[];
   readonly memories: readonly MemoryView[];
+  readonly actions: readonly ActionCard[];
 };
 
 export type ActivityLine = {
@@ -115,6 +116,9 @@ export type RuntimeHeader = {
   readonly logError: string | null;
   readonly mode: "live" | "recorded" | "replay";
   readonly retention: string;
+  readonly deadLetters: number;
+  readonly storageAdapter: string;
+  readonly activeCaseId: string | null;
 };
 
 export type DecisionReceiptView = {
@@ -127,7 +131,9 @@ export type DecisionReceiptView = {
   readonly probabilities: Readonly<Record<string, number>>;
   readonly topProbability: number | null;
   readonly margin: number | null;
+  readonly thresholds: Readonly<Record<string, number>>;
   readonly threshold: number | null;
+  readonly optionLabels: Readonly<Record<string, string>>;
   readonly result: "pass" | "fail" | "wait" | "not_applicable";
   readonly reasonCode: string;
   readonly provider: string;
@@ -145,6 +151,7 @@ export type PatternView = {
   readonly lastAt: string;
   readonly evidenceIds: readonly string[];
   readonly candidateState: string | null;
+  readonly candidateId: string | null;
   readonly because: string;
   readonly needed: string;
 };
@@ -152,7 +159,9 @@ export type PatternView = {
 export type ReviewStatus = {
   readonly completeSessions: number;
   readonly sessionTrigger: number;
-  readonly approvedReflexes: number;
+  readonly approvedCandidates: number;
+  readonly builtReflexes: number;
+  readonly activeReflexes: number;
   readonly reflexTrigger: number;
   readonly completeEpisodes: number;
   readonly episodeTrigger: number;
@@ -166,10 +175,26 @@ export type TraceRow = {
   readonly sequence: number;
   readonly at: string;
   readonly type: string;
+  readonly stage: string | null;
+  readonly status: string | null;
   readonly reasonCode: string | null;
   readonly latencyMs: number | null;
+  readonly durationMs: number | null;
+  readonly attempt: number | null;
   readonly caseId: string | null;
+  readonly episodeId: string | null;
   readonly result: string | null;
+};
+
+export type ActionCard = {
+  readonly actionId: string;
+  readonly kind: "confirm_birthday" | "save_definition" | "replace_memory";
+  readonly label: string;
+  readonly token?: string;
+  readonly expansion?: string;
+  readonly personId?: string;
+  readonly displayName?: string;
+  readonly date?: string;
 };
 
 export type MemoryView = {

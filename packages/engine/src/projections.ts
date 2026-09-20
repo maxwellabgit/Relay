@@ -1,5 +1,6 @@
 import type { RelaySnapshot, StatusChipState } from "@relay/contracts";
 import type { EngineStore } from "./store.js";
+import { RETENTION_LABEL } from "./learning-store.js";
 
 export async function projectSnapshot(
   store: EngineStore,
@@ -60,14 +61,19 @@ export async function projectSnapshot(
       logWritable: false,
       logError: "trace_sink_missing",
       mode: "live",
-      retention: "7d",
+      retention: RETENTION_LABEL,
+      deadLetters: 0,
+      storageAdapter: "unconfigured",
+      activeCaseId: null,
     },
     gate: null,
     patterns: [],
     review: {
       completeSessions: 0,
       sessionTrigger: 12,
-      approvedReflexes: 0,
+      approvedCandidates: 0,
+      builtReflexes: 0,
+      activeReflexes: 0,
       reflexTrigger: 4,
       completeEpisodes: 0,
       episodeTrigger: 25,
@@ -78,5 +84,6 @@ export async function projectSnapshot(
     },
     trace: [],
     memories: [],
+    actions: [],
   };
 }

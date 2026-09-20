@@ -9,7 +9,7 @@ export type CaseKind =
   | "research"
   | "improve";
 
-export type CaseStatus = "active" | "waiting" | "suspended" | "completed" | "cancelled";
+export type CaseStatus = "active" | "waiting" | "suspended" | "completed" | "cancelled" | "blocked" | "failed";
 
 export type CasePhase =
   | "intake"

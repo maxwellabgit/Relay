@@ -1,4 +1,4 @@
-import type { RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, RelaySnapshot } from "@relay/contracts";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { DeveloperConsole } from "./console/DeveloperConsole.js";
 import { PhoneShell } from "./phone/PhoneShell.js";
@@ -8,13 +8,15 @@ export type RelayWorkbenchProps = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
-  readonly onRemember?: (token: string) => void;
-  readonly onCaptureBirthday?: (personKey: string, date: string, confirmed: boolean) => void;
+  readonly onAction?: (action: ActionCard) => void;
   readonly onStartSession?: () => void;
   readonly onEndSession?: () => void;
   readonly showDeveloperPanel?: boolean;
-  readonly traceLines?: string[];
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
+  readonly onOpenLog?: () => void;
+  readonly onApproveCandidate?: (candidateId: string) => void;
+  readonly onRejectCandidate?: (candidateId: string) => void;
+  readonly onSnoozeCandidate?: (candidateId: string) => void;
 };
 
 const WIDE_BREAKPOINT = 960;
@@ -23,13 +25,15 @@ export function RelayWorkbench({
   snapshot,
   onListenChange,
   onSubmit,
-  onRemember,
-  onCaptureBirthday,
+  onAction,
   onStartSession,
   onEndSession,
   showDeveloperPanel,
-  traceLines,
   onReplayFixture,
+  onOpenLog,
+  onApproveCandidate,
+  onRejectCandidate,
+  onSnoozeCandidate,
 }: RelayWorkbenchProps) {
   const { width } = useWindowDimensions();
   const showDev = showDeveloperPanel ?? width >= WIDE_BREAKPOINT;
@@ -41,23 +45,19 @@ export function RelayWorkbench({
           snapshot={snapshot}
           onListenChange={onListenChange}
           onSubmit={onSubmit}
-          {...(onRemember !== undefined ? { onRemember } : {})}
-          {...(onCaptureBirthday !== undefined ? { onCaptureBirthday } : {})}
+          {...(onAction !== undefined ? { onAction } : {})}
         />
       </View>
       {showDev ? (
         <DeveloperConsole
           snapshot={snapshot}
-          {...(traceLines !== undefined ? { traceLines } : {})}
           {...(onReplayFixture !== undefined ? { onReplayFixture } : {})}
           {...(onStartSession !== undefined ? { onStartSession } : {})}
           {...(onEndSession !== undefined ? { onEndSession } : {})}
-          onOpenLog={() => {
-            const path = snapshot.runtime.logPath;
-            if (path && typeof navigator !== "undefined" && navigator.clipboard) {
-              void navigator.clipboard.writeText(path);
-            }
-          }}
+          {...(onOpenLog !== undefined ? { onOpenLog } : {})}
+          {...(onApproveCandidate !== undefined ? { onApproveCandidate } : {})}
+          {...(onRejectCandidate !== undefined ? { onRejectCandidate } : {})}
+          {...(onSnoozeCandidate !== undefined ? { onSnoozeCandidate } : {})}
         />
       ) : null}
     </View>

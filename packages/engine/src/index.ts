@@ -10,5 +10,9 @@ export * from "./inspect.js";
 export * from "./learning-store.js";
 export * from "./store.js";
 export * from "./trace-sink.js";
+export * from "./episodes.js";
+export * from "./ids.js";
+export * from "./runtime-events.js";
+export * from "./runtime-recorder.js";
 export * from "./typesafe-judgment.js";
 

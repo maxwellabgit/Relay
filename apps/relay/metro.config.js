@@ -31,28 +31,29 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 const allowed = new Set([
   "schemaVersion",
   "sequence",
+  "runId",
   "at",
-  "type",
+  "eventType",
+  "stage",
+  "status",
+  "sessionId",
+  "episodeId",
   "caseId",
-  "segmentId",
+  "workId",
   "judgmentId",
+  "receiptId",
   "reflexId",
-  "reflexVersion",
-  "probabilities",
-  "thresholds",
-  "selectedOutcome",
   "reasonCode",
-  "latencyMs",
-  "artifactRef",
+  "durationMs",
+  "attempt",
   "queueDepth",
-  "waitState",
 ]);
 
 function traceLine(value) {
   if (!value || typeof value !== "object") return null;
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
-  if (value.schemaVersion !== 1 || typeof value.sequence !== "number") return null;
-  if (typeof value.at !== "string" || typeof value.type !== "string") return null;
+  if (value.schemaVersion !== 2 || typeof value.sequence !== "number") return null;
+  if (typeof value.at !== "string" || typeof value.eventType !== "string") return null;
   const row = {};
   for (const key of allowed) {
     if (value[key] !== undefined) row[key] = value[key];
@@ -65,7 +66,7 @@ config.server.enhanceMiddleware = (middleware) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname !== "/__relay/trace") return middleware(req, res, next);
     const runId = url.searchParams.get("runId") ?? "";
-    if (!/^run_[a-z0-9]+$/.test(runId)) {
+    if (!/^run_[a-z0-9-]{1,40}$/.test(runId)) {
       res.statusCode = 400;
       res.end("rejected");
       return;

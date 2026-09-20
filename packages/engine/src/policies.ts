@@ -94,18 +94,108 @@ export function askedToken(text: string): string | null {
   return /([A-Z0-9]{2,12})$/.exec(task)?.[1] ?? null;
 }
 
-export function validateBirthday(personKey: string, date: string): string | null {
-  if (!/^[A-Za-z][A-Za-z0-9]{0,24}$/.test(personKey)) return "invalid_person";
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) return "invalid_date";
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const utc = new Date(Date.UTC(year, month - 1, day));
-  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
-    return "invalid_date";
-  }
+export function validateBirthday(displayName: string, date: string): string | null {
+  if (!isPersonName(displayName)) return "invalid_person";
+  if (!parseFlexibleDate(date)) return "invalid_date";
   return null;
+}
+
+export function isPersonName(value: string): boolean {
+  const name = value.normalize("NFKC").trim();
+  if (name.length < 1 || name.length > 80) return false;
+  return /^[\p{L}\p{M}][\p{L}\p{M}\p{N} .'’-]{0,79}$/u.test(name);
+}
+
+export function parseFlexibleDate(
+  value: string,
+): { readonly month: number; readonly day: number; readonly year?: number } | null {
+  const text = value.trim().replace(/\.$/, "");
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    return realDate(year, month, day) ? { month, day, year } : null;
+  }
+  const monthDay = /^(\d{2})-(\d{2})$/.exec(text);
+  if (monthDay) {
+    const month = Number(monthDay[1]);
+    const day = Number(monthDay[2]);
+    return realDate(2024, month, day) ? { month, day } : null;
+  }
+  const named = /^([A-Za-z]+)\s+(\d{1,2})(?:,\s*(\d{4}))?$/.exec(text);
+  if (!named) return null;
+  const month = MONTHS[named[1]!.toLowerCase()];
+  const day = Number(named[2]);
+  const year = named[3] ? Number(named[3]) : undefined;
+  if (!month || !realDate(year ?? 2024, month, day)) return null;
+  return year ? { month, day, year } : { month, day };
+}
+
+export function parseBirthdayUtterance(
+  text: string,
+): { readonly displayName: string; readonly month: number; readonly day: number; readonly year?: number } | null {
+  const match = /^remember that (.+?)['’]s birthday is (.+)$/i.exec(text.trim());
+  if (!match) return null;
+  const displayName = match[1]!.trim();
+  if (!isPersonName(displayName)) return null;
+  const date = parseFlexibleDate(match[2]!);
+  if (!date) return null;
+  return { displayName, ...date };
+}
+
+export function parseGlossaryMeans(text: string): { readonly token: string; readonly expansion: string } | null {
+  const match = /^([A-Za-z0-9]{2,12})\s+means\s+(.+)$/i.exec(text.trim());
+  if (!match) return null;
+  const token = match[1]!.toUpperCase();
+  const expansion = match[2]!.trim().replace(/[.]+$/, "");
+  if (!/^[A-Z0-9]{2,12}$/.test(token) || expansion.length < 2 || expansion.length > 120) return null;
+  return { token, expansion };
+}
+
+const MONTHS: Readonly<Record<string, number>> = {
+  january: 1,
+  february: 2,
+  march: 3,
+  april: 4,
+  may: 5,
+  june: 6,
+  july: 7,
+  august: 8,
+  september: 9,
+  october: 10,
+  november: 11,
+  december: 12,
+};
+
+function realDate(year: number, month: number, day: number): boolean {
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day;
+}
+
+export function validateChoiceDistribution(input: {
+  readonly probabilities: Readonly<Record<string, number>>;
+  readonly declared: string;
+  readonly allowed: readonly string[];
+}): { readonly ok: true } | { readonly ok: false; readonly reasonCode: string } {
+  if (!input.declared) return { ok: false, reasonCode: "missing_choice" };
+  const allowed = new Set([...input.allowed, "no_match"]);
+  if (!allowed.has(input.declared)) return { ok: false, reasonCode: "not_in_options" };
+  const keys = Object.keys(input.probabilities);
+  if (keys.length === 0) return { ok: false, reasonCode: "missing_choice" };
+  let sum = 0;
+  for (const key of keys) {
+    if (!allowed.has(key)) return { ok: false, reasonCode: "not_in_options" };
+    const probability = input.probabilities[key]!;
+    if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+      return { ok: false, reasonCode: "invalid_probability" };
+    }
+    sum += probability;
+  }
+  if (Math.abs(sum - 1) > 0.05) return { ok: false, reasonCode: "distribution_sum" };
+  const top = [...keys].sort((left, right) => input.probabilities[right]! - input.probabilities[left]!)[0];
+  if (top !== input.declared) return { ok: false, reasonCode: "choice_conflict" };
+  return { ok: true };
 }
 
 export function evaluateChoiceGate(input: {

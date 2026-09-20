@@ -6,9 +6,9 @@ export const PATTERN_EPISODE_MINIMUM = 3;
 export const PATTERN_SESSION_MINIMUM = 2;
 export const BENEFIT_YES_MINIMUM = 0.7;
 export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-
-export const CALENDAR_SIGNATURE =
-  "calendar.block|duration=60m|reminder_offset=-1d|start_bucket=noon";
+export const TRACE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const TRACE_ROTATE_BYTES = 100_000_000;
+export const RETENTION_LABEL = "trace 30d/100MB · failed 7d · memories until delete";
 
 export type MemoryKind = "glossary" | "birthday";
 
@@ -17,7 +17,7 @@ export type MemoryRecord = {
   readonly kind: MemoryKind;
   readonly key: string;
   readonly value: Readonly<Record<string, string>>;
-  readonly source: "explicit_user";
+  readonly source: "explicit_user" | "pending";
   readonly createdAt: string;
 };
 
@@ -29,7 +29,7 @@ export type WorkSessionRecord = {
   readonly episodeCount: number;
 };
 
-export type EpisodeOutcome = "completed" | "rejected" | "failed" | "abandoned";
+export type EpisodeOutcome = "completed" | "unresolved" | "suggested" | "rejected" | "failed" | "abandoned";
 
 export type EpisodeRecord = {
   readonly episodeId: string;
@@ -73,9 +73,13 @@ export type CandidateState =
   | "candidate"
   | "proposed"
   | "approved"
+  | "rejected"
+  | "snoozed"
+  | "built"
   | "shadow"
   | "active"
-  | "paused";
+  | "paused"
+  | "retired";
 
 export type CandidateRecord = {
   readonly candidateId: string;
@@ -91,10 +95,15 @@ export type ReviewRecord = {
   readonly triggerCode: string;
   readonly at: string;
   readonly findings: readonly string[];
+  readonly sessionsAtReview: number;
+  readonly episodesAtReview: number;
+  readonly candidatesAtReview: number;
+  readonly builtReflexesAtReview: number;
 };
 
 export type LearningStore = {
   putMemory(record: MemoryRecord): Promise<void>;
+  deleteMemory(kind: MemoryKind, key: string): Promise<void>;
   getMemory(kind: MemoryKind, key: string): Promise<MemoryRecord | null>;
   listMemories(): Promise<readonly MemoryRecord[]>;
   openSession(record: WorkSessionRecord): Promise<void>;
@@ -121,7 +130,7 @@ export type LearningStore = {
 };
 
 export function workSignature(kind: string, fields: Readonly<Record<string, string>>): string | null {
-  if (kind !== "calendar.block" && kind !== "acronym.lookup") return null;
+  if (!/^[a-z][a-z0-9.]{0,31}$/.test(kind)) return null;
   const keys = Object.keys(fields).sort();
   for (const key of keys) {
     const value = fields[key];
@@ -132,18 +141,19 @@ export function workSignature(kind: string, fields: Readonly<Record<string, stri
 }
 
 export function foldPattern(existing: PatternRecord | null, episode: EpisodeRecord): PatternRecord {
+  const successful = episode.outcome === "completed";
   const sessions = new Set(existing?.sessionIds ?? []);
-  sessions.add(episode.sessionId);
+  if (successful) sessions.add(episode.sessionId);
   const outcomes = { ...(existing?.outcomes ?? {}) };
   outcomes[episode.outcome] = (outcomes[episode.outcome] ?? 0) + 1;
   return {
     signature: episode.signature,
-    count: (existing?.count ?? 0) + 1,
+    count: (existing?.count ?? 0) + (successful ? 1 : 0),
     sessionIds: [...sessions],
     outcomes,
     firstAt: existing?.firstAt ?? episode.completedAt ?? episode.startedAt,
     lastAt: episode.completedAt ?? episode.startedAt,
-    evidenceIds: [...(existing?.evidenceIds ?? []), episode.episodeId],
+    evidenceIds: successful ? [...(existing?.evidenceIds ?? []), episode.episodeId] : [...(existing?.evidenceIds ?? [])],
   };
 }
 
@@ -151,19 +161,14 @@ export function patternReady(pattern: PatternRecord): boolean {
   return pattern.count >= PATTERN_EPISODE_MINIMUM && pattern.sessionIds.length >= PATTERN_SESSION_MINIMUM;
 }
 
-export function calendarRecommendation(pattern: PatternRecord): string | null {
-  if (pattern.signature !== CALENDAR_SIGNATURE || !patternReady(pattern)) return null;
-  return `Observed ${pattern.count} completed calendar-block episodes across ${pattern.sessionIds.length} sessions: 60 minutes near noon, reminder one day before. Recommend creating a Calendar Block Reflex?`;
-}
-
 export function reviewTrigger(input: {
   readonly completeSessions: number;
-  readonly approvedReflexes: number;
+  readonly builtReflexes: number;
   readonly completeEpisodes: number;
   readonly qualifiedCandidates: number;
 }): string | null {
   if (input.completeSessions >= REVIEW_SESSION_TRIGGER) return "sessions";
-  if (input.approvedReflexes >= REVIEW_REFLEX_TRIGGER) return "reflexes";
+  if (input.builtReflexes >= REVIEW_REFLEX_TRIGGER) return "reflexes";
   if (input.completeEpisodes >= REVIEW_EPISODE_TRIGGER) return "episodes";
   if (input.qualifiedCandidates >= REVIEW_CANDIDATE_TRIGGER) return "candidates";
   return null;
@@ -180,6 +185,10 @@ export class InMemoryLearning implements LearningStore {
 
   async putMemory(record: MemoryRecord): Promise<void> {
     this.memories.set(`${record.kind}:${record.key}`, record);
+  }
+
+  async deleteMemory(kind: MemoryKind, key: string): Promise<void> {
+    this.memories.delete(`${kind}:${key}`);
   }
 
   async getMemory(kind: MemoryKind, key: string): Promise<MemoryRecord | null> {

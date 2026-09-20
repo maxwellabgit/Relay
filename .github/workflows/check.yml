@@ -13,6 +13,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -21,3 +24,17 @@ jobs:
       - run: npm run test:replay
       - run: npm run test:privacy
       - run: npm run test:architecture
+      - run: npm run build:web
+      - name: Cargo fmt
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check
+      - name: Cargo clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy -- -D warnings
+      - name: Cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+      - run: npm run test:smoke
+      - run: npm run build:desktop
+        env:
+          CI: true

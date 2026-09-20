@@ -6,7 +6,6 @@ import type {
   RuntimeHeader,
   TraceRow,
 } from "@relay/contracts";
-import type { TraceEventV1 } from "@relay/contracts";
 import {
   PATTERN_EPISODE_MINIMUM,
   REVIEW_CANDIDATE_TRIGGER,
@@ -17,11 +16,12 @@ import {
   type LearningStore,
   type ReceiptRecord,
 } from "./learning-store.js";
+import type { RuntimeEventV2 } from "./runtime-events.js";
 
 export async function inspectRuntime(
   learning: LearningStore,
-  traces: readonly TraceEventV1[],
-  header: Omit<RuntimeHeader, "queueDepth" | "sessionId" | "episodeId"> & { queueDepth: number },
+  traces: readonly RuntimeEventV2[],
+  header: Omit<RuntimeHeader, "sessionId">,
 ): Promise<{
   runtime: RuntimeHeader;
   gate: DecisionReceiptView | null;
@@ -30,36 +30,38 @@ export async function inspectRuntime(
   trace: readonly TraceRow[];
   memories: readonly MemoryView[];
 }> {
-  const [sessions, episodes, receipts, patterns, candidates, memories] = await Promise.all([
+  const [sessions, episodes, receipts, patterns, candidates, memories, reviews] = await Promise.all([
     learning.listSessions(),
     learning.listEpisodes(),
     learning.listReceipts(),
     learning.listPatterns(),
     learning.listCandidates(),
     learning.listMemories(),
+    learning.listReviews(),
   ]);
   const open = sessions.find((session) => session.termination === "open") ?? null;
-  const latestEpisode = [...episodes].reverse()[0] ?? null;
   const completeSessions = sessions.filter(
     (session) => session.termination === "completed" && session.episodeCount > 0,
   ).length;
   const completeEpisodes = episodes.filter((episode) => episode.outcome === "completed").length;
-  const approvedReflexes = candidates.filter(
-    (candidate) => candidate.state === "approved" || candidate.state === "active",
+  const lastReview = reviews.at(-1) ?? null;
+  const approvedCandidates = candidates.filter((candidate) => candidate.state === "approved").length;
+  const builtReflexes = candidates.filter((candidate) => candidate.state === "built").length;
+  const activeReflexes = candidates.filter((candidate) => candidate.state === "active").length;
+  const qualifiedCandidates = candidates.filter(
+    (candidate) => candidate.state !== "observing" && candidate.state !== "rejected" && candidate.state !== "snoozed",
   ).length;
-  const qualifiedCandidates = candidates.filter((candidate) => candidate.state !== "observing").length;
   const trigger = reviewTrigger({
-    completeSessions,
-    approvedReflexes,
-    completeEpisodes,
-    qualifiedCandidates,
+    completeSessions: completeSessions - (lastReview?.sessionsAtReview ?? 0),
+    builtReflexes: builtReflexes - (lastReview?.builtReflexesAtReview ?? 0),
+    completeEpisodes: completeEpisodes - (lastReview?.episodesAtReview ?? 0),
+    qualifiedCandidates: qualifiedCandidates - (lastReview?.candidatesAtReview ?? 0),
   });
   const latest = receipts.at(-1) ?? null;
   return {
     runtime: {
       ...header,
       sessionId: open?.sessionId ?? null,
-      episodeId: latestEpisode?.episodeId ?? null,
     },
     gate: latest ? toGate(latest) : null,
     patterns: patterns.map((pattern) => {
@@ -73,6 +75,7 @@ export async function inspectRuntime(
         lastAt: pattern.lastAt,
         evidenceIds: pattern.evidenceIds,
         candidateState: candidate?.state ?? (pattern.count > 0 ? "observing" : null),
+        candidateId: candidate?.candidateId ?? null,
         because: candidate?.because ?? "",
         needed:
           candidate?.needed ??
@@ -86,7 +89,9 @@ export async function inspectRuntime(
     review: {
       completeSessions,
       sessionTrigger: REVIEW_SESSION_TRIGGER,
-      approvedReflexes,
+      approvedCandidates,
+      builtReflexes,
+      activeReflexes,
       reflexTrigger: REVIEW_REFLEX_TRIGGER,
       completeEpisodes,
       episodeTrigger: REVIEW_EPISODE_TRIGGER,
@@ -98,11 +103,16 @@ export async function inspectRuntime(
     trace: traces.slice(-80).map((event) => ({
       sequence: event.sequence,
       at: event.at,
-      type: event.type,
+      type: event.eventType,
+      stage: event.stage,
+      status: event.status,
       reasonCode: event.reasonCode ?? null,
-      latencyMs: event.latencyMs ?? null,
+      latencyMs: event.durationMs ?? null,
+      durationMs: event.durationMs ?? null,
+      attempt: event.attempt ?? null,
       caseId: event.caseId ?? null,
-      result: event.selectedOutcome ?? null,
+      episodeId: event.episodeId ?? null,
+      result: event.status,
     })),
     memories: memories.map((memory) => ({
       kind: memory.kind,
@@ -129,6 +139,8 @@ function toGate(receipt: ReceiptRecord): DecisionReceiptView {
     topProbability: top,
     margin,
     threshold,
+    thresholds: receipt.thresholds,
+    optionLabels: {},
     result: receipt.result,
     reasonCode: receipt.reasonCode,
     provider: receipt.provider,

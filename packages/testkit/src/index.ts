@@ -1,4 +1,5 @@
 export * from "./diagnostics.js";
+export * from "./fixture-sources.js";
 export * from "./live-microphone-source.js";
 export * from "./manual-text-source.js";
 export * from "./memory-artifacts.js";

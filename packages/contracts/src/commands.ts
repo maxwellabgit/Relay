@@ -11,30 +11,40 @@ export type SetListeningCommand = {
   readonly enabled: boolean;
 };
 
-export type RememberTokenCommand = {
-  readonly type: "RememberToken";
+export type UpsertGlossaryEntryCommand = {
+  readonly type: "UpsertGlossaryEntry";
   readonly token: string;
+  readonly expansion: string;
+  readonly confirmed: boolean;
+  readonly replace?: boolean;
 };
 
 export type CaptureBirthdayCommand = {
   readonly type: "CaptureBirthday";
-  readonly personKey: string;
+  readonly displayName: string;
   readonly date: string;
   readonly confirmed: boolean;
+  readonly replace?: boolean;
 };
 
-export type RecordCompletedWorkCommand = {
-  readonly type: "RecordCompletedWork";
-  readonly kind: "calendar.block";
-  readonly fields: {
-    readonly start_bucket: string;
-    readonly duration: string;
-    readonly reminder_offset: string;
-  };
+export type DeleteMemoryCommand = {
+  readonly type: "DeleteMemory";
+  readonly kind: "glossary" | "birthday";
+  readonly key: string;
 };
 
 export type ApproveCandidateCommand = {
   readonly type: "ApproveCandidate";
+  readonly candidateId: string;
+};
+
+export type RejectCandidateCommand = {
+  readonly type: "RejectCandidate";
+  readonly candidateId: string;
+};
+
+export type SnoozeCandidateCommand = {
+  readonly type: "SnoozeCandidate";
   readonly candidateId: string;
 };
 
@@ -169,10 +179,12 @@ export type ReplayFixtureCommand = {
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
-  | RememberTokenCommand
+  | UpsertGlossaryEntryCommand
   | CaptureBirthdayCommand
-  | RecordCompletedWorkCommand
+  | DeleteMemoryCommand
   | ApproveCandidateCommand
+  | RejectCandidateCommand
+  | SnoozeCandidateCommand
   | StartWorkSessionCommand
   | EndWorkSessionCommand
   | ApproveOperationCommand

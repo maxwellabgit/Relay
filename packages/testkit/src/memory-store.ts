@@ -49,6 +49,7 @@ export class MemoryEngineStore implements EngineStore {
   private readonly workItems = new Map<string, WorkRow>();
   private readonly judgments = new Map<string, JudgmentRecord>();
   private readonly deadLetters: { workId: string; reasonCode: string; at: string }[] = [];
+  private readonly judgmentAttempts = new Map<string, unknown>();
   private domainSeq = 0;
 
   close(): void {
@@ -174,7 +175,7 @@ export class MemoryEngineStore implements EngineStore {
 
   async listActiveCases(): Promise<readonly CaseRecord[]> {
     return [...this.cases.values()]
-      .filter((c) => c.status === "active" || c.status === "waiting")
+      .filter((c) => c.status === "active" || c.status === "waiting" || c.status === "blocked" || c.status === "failed")
       .sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -251,12 +252,13 @@ export class MemoryEngineStore implements EngineStore {
     this.workItems.delete(workId);
   }
 
-  async requeue(workId: string, availableAt: string): Promise<void> {
+  async requeue(workId: string, availableAt: string, payload?: Record<string, unknown>): Promise<void> {
     const current = this.workItems.get(workId);
     if (!current) return;
     this.workItems.set(workId, {
       ...current,
       availableAt,
+      ...(payload ? { payload } : {}),
       leaseOwner: null,
       leaseUntil: null,
     });
@@ -325,5 +327,19 @@ export class MemoryEngineStore implements EngineStore {
 
   async listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]> {
     return this.deadLetters;
+  }
+
+  async upsertJudgmentAttempt(record: {
+    readonly attemptId: string;
+    readonly caseId: string;
+    readonly workId?: string;
+    readonly attempt: number;
+    readonly maxAttempts: number;
+    readonly nextAttemptAt?: string | null;
+    readonly failureCategory?: string | null;
+    readonly providerRequestId?: string | null;
+    readonly createdAt: string;
+  }): Promise<void> {
+    this.judgmentAttempts.set(record.attemptId, record);
   }
 }

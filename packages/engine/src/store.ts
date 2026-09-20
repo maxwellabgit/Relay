@@ -61,7 +61,7 @@ export type EngineStore = {
   enqueue(item: WorkItem): Promise<void>;
   claimNext(now: string, owner: string, leaseMs: number): Promise<WorkItem | null>;
   complete(workId: string): Promise<void>;
-  requeue(workId: string, availableAt: string): Promise<void>;
+  requeue(workId: string, availableAt: string, payload?: Record<string, unknown>): Promise<void>;
   upsertJudgment(record: JudgmentRecord): Promise<void>;
   findCompletedJudgmentByHash(requestHash: string): Promise<JudgmentRecord | null>;
   appendDomainEvent(type: string, at: string, payload: Record<string, unknown>): Promise<number>;
@@ -76,5 +76,16 @@ export type EngineStore = {
   countWorkItems(): Promise<number>;
   deadLetter(workId: string, reasonCode: string, at: string): Promise<void>;
   listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]>;
+  upsertJudgmentAttempt(record: {
+    readonly attemptId: string;
+    readonly caseId: string;
+    readonly workId?: string;
+    readonly attempt: number;
+    readonly maxAttempts: number;
+    readonly nextAttemptAt?: string | null;
+    readonly failureCategory?: string | null;
+    readonly providerRequestId?: string | null;
+    readonly createdAt: string;
+  }): Promise<void>;
   readonly learning: LearningStore;
 };
