@@ -46,25 +46,43 @@ describe("windows v1 production-path acceptance", () => {
     const second = createNodeHarness({ databasePath, runsRoot });
     try {
       await second.client.start();
+      const answersBefore = (await second.client.getSnapshot()).feedItems.filter(
+        (item) => item.kind === "answer",
+      ).length;
       await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
-      await waitFor(async () =>
-        (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-      );
+      await waitFor(async () => {
+        const current = await second.client.getSnapshot();
+        const answers = current.feedItems.filter((item) => item.kind === "answer").length;
+        return answers > answersBefore && current.caseExecution?.outcome === "answered";
+      });
       const snap = await second.client.getSnapshot();
       expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toContain(
         "Manufacturer Suggested Retail Price",
       );
-      const runDirs = await readdir(runsRoot);
+      const runDirs = (await readdir(runsRoot)).filter((name) => name.startsWith("run_")).sort();
       expect(runDirs.length).toBeGreaterThan(0);
-      const manifest = JSON.parse(await readFile(join(runsRoot, runDirs[0]!, "manifest.json"), "utf8")) as {
+      const firstRun = runDirs[0]!;
+      const manifest = JSON.parse(await readFile(join(runsRoot, firstRun, "manifest.json"), "utf8")) as {
         runId: string;
         protocolVersion: string;
+        startedAt: string;
+        status: string;
+        endedAt?: string;
+        gitCommit: string;
       };
       expect(manifest.runId).toMatch(/^run_/);
       expect(manifest.protocolVersion).toBe("2");
-      const eventsText = await readFile(join(runsRoot, runDirs[0]!, "events.jsonl"), "utf8");
+      expect(manifest.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(manifest.status).toBe("completed");
+      expect(manifest.endedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(manifest.gitCommit).toBeTruthy();
+      expect(snap.caseExecution).not.toBeNull();
+      expect(snap.caseExecution?.outcome).toBe("answered");
+      expect(snap.caseExecution?.totalMs).toEqual(expect.any(Number));
+      const eventsText = await readFile(join(runsRoot, firstRun, "events.jsonl"), "utf8");
       expect(eventsText).not.toContain("Manufacturer Suggested Retail Price");
       expect(eventsText).toMatch(/case\.created|source\.accepted|answer\.committed|policy\.evaluated/);
+      expect(eventsText).toMatch(/run\.ended/);
     } finally {
       await second.client.stop();
       second.close();

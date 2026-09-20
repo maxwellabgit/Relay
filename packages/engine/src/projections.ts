@@ -112,6 +112,7 @@ export async function projectSnapshot(
     },
     gate: null,
     decision: null,
+    caseExecution: null,
     currentInputPreview: null,
     patterns: [],
     review: {

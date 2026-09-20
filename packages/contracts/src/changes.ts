@@ -104,6 +104,8 @@ export type RelaySnapshot = {
   readonly runtime: RuntimeHeader;
   readonly gate: DecisionReceiptView | null;
   readonly decision: DecisionRunView | null;
+  /** Compact Case execution projection from canonical trace events. */
+  readonly caseExecution: CaseExecutionView | null;
   readonly currentInputPreview: string | null;
   readonly patterns: readonly PatternView[];
   readonly review: ReviewStatus;
@@ -211,6 +213,37 @@ export type DecisionRunView = {
   readonly completedAt: string | null;
   readonly elapsedMs: number | null;
   readonly result: DecisionReceiptView["result"];
+};
+
+/** One step in a Case execution explanation (not a graph / ledger). */
+export type CaseExecutionStepView = {
+  readonly key: string;
+  readonly label: string;
+  readonly state: "passed" | "failed" | "waiting" | "skipped" | "running";
+  /** Delta from previous listed step; 0 for the first step. Null when skipped or unknown. */
+  readonly deltaMs: number | null;
+  /** Wall duration for this stage when the event carried durationMs. */
+  readonly durationMs: number | null;
+};
+
+/**
+ * Compact Case timing projected from canonical trace events.
+ * Total is source.accepted → answer.committed when an answer exists.
+ */
+export type CaseExecutionView = {
+  readonly caseId: string;
+  readonly historical: boolean;
+  readonly steps: readonly CaseExecutionStepView[];
+  /** End-to-end ms when answer.committed is present; otherwise null. */
+  readonly totalMs: number | null;
+  /** User-facing outcome when there is no answer duration. */
+  readonly outcome:
+    | "answered"
+    | "in_progress"
+    | "resolved_without_answer"
+    | "failed"
+    | "blocked"
+    | null;
 };
 
 export type PatternView = {

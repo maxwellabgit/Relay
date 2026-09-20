@@ -36,6 +36,7 @@ const EMPTY_SNAPSHOT: RelaySnapshot = {
   },
   gate: null,
   decision: null,
+  caseExecution: null,
   currentInputPreview: null,
   patterns: [],
   review: {

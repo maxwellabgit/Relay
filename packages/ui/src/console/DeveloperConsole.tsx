@@ -1,4 +1,11 @@
-import type { DecisionReceiptView, PatternView, RelaySnapshot, TraceRow } from "@relay/contracts";
+import type {
+  CaseExecutionStepView,
+  CaseExecutionView,
+  DecisionReceiptView,
+  PatternView,
+  RelaySnapshot,
+  TraceRow,
+} from "@relay/contracts";
 import { useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
@@ -172,6 +179,7 @@ function OverviewPane({
 }) {
   const runtime = snapshot.runtime;
   const review = snapshot.review;
+  const execution = snapshot.caseExecution;
   return (
     <View style={styles.stack}>
       <Text style={styles.title}>Run inspector</Text>
@@ -206,6 +214,24 @@ function OverviewPane({
           <Text style={styles.buttonText}>End session</Text>
         </Pressable>
       </View>
+
+      <Text style={styles.section}>Case execution</Text>
+      {execution == null ? (
+        <Text style={styles.empty}>No Case timing yet.</Text>
+      ) : (
+        <View style={styles.stack}>
+          <Text style={styles.meta}>
+            {`${execution.caseId}${execution.historical ? " · historical" : ""}`}
+          </Text>
+          {execution.steps.map((step) => (
+            <Text key={`${execution.caseId}:${step.key}:${step.label}`} style={styles.trace}>
+              {formatExecutionStep(step)}
+            </Text>
+          ))}
+          <Text style={styles.trace}>{formatExecutionTotal(execution)}</Text>
+        </View>
+      )}
+
       <Text style={styles.section}>Self-review</Text>
       <Text style={styles.meta}>
         {`sessions ${review.completeSessions}/${review.sessionTrigger} · approved ${review.approvedCandidates} · built ${review.builtReflexes}/${review.reflexTrigger} · active ${review.activeReflexes} · episodes ${review.completeEpisodes}/${review.episodeTrigger} · candidates ${review.qualifiedCandidates}/${review.candidateTrigger}`}
@@ -424,6 +450,37 @@ function Line({ label, value }: { readonly label: string; readonly value: string
 
 function formatJson(value: Readonly<Record<string, string | number | boolean | null>>): string {
   return JSON.stringify(value, null, 2);
+}
+
+function formatExecutionStep(step: CaseExecutionStepView): string {
+  const timing =
+    step.state === "skipped"
+      ? "skipped"
+      : step.durationMs != null
+        ? `${Math.round(step.durationMs)} ms`
+        : step.deltaMs == null
+          ? "-"
+          : step.deltaMs === 0
+            ? "0 ms"
+            : `+${Math.round(step.deltaMs)} ms`;
+  return `${padLabel(step.label)}${timing}`;
+}
+
+function formatExecutionTotal(execution: CaseExecutionView): string {
+  if (execution.outcome === "answered" && execution.totalMs != null) {
+    return `${padLabel("Total")}${Math.round(execution.totalMs)} ms`;
+  }
+  if (execution.outcome === "resolved_without_answer") {
+    return `${padLabel("Total")}resolved without answer`;
+  }
+  if (execution.outcome === "failed") return `${padLabel("Total")}failed`;
+  if (execution.outcome === "blocked") return `${padLabel("Total")}blocked`;
+  if (execution.outcome === "in_progress") return `${padLabel("Total")}in progress`;
+  return `${padLabel("Total")}-`;
+}
+
+function padLabel(label: string): string {
+  return `${label.padEnd(22, " ")}`;
 }
 
 function formatTraceLine(row: TraceRow, previous: TraceRow | undefined): string {

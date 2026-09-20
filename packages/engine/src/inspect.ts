@@ -1,4 +1,5 @@
 import type {
+  CaseExecutionView,
   DecisionReceiptView,
   DecisionRunView,
   MemoryView,
@@ -18,6 +19,7 @@ import {
   type ReceiptRecord,
 } from "./learning-store.js";
 import { labelsOrUnavailable } from "./protected-content.js";
+import { projectCaseExecution, selectCaseIdForExecution } from "./project-case-execution.js";
 import { projectDecisionRun, selectReceiptForDecision } from "./project-decision-run.js";
 import type { RuntimeEventV2 } from "./runtime-events.js";
 
@@ -25,10 +27,12 @@ export async function inspectRuntime(
   learning: LearningStore,
   traces: readonly RuntimeEventV2[],
   header: Omit<RuntimeHeader, "sessionId">,
+  caseStatusById: ReadonlyMap<string, "active" | "waiting" | "completed" | "blocked" | "failed"> = new Map(),
 ): Promise<{
   runtime: RuntimeHeader;
   gate: DecisionReceiptView | null;
   decision: DecisionRunView | null;
+  caseExecution: CaseExecutionView | null;
   patterns: readonly PatternView[];
   review: ReviewStatus;
   trace: readonly TraceRow[];
@@ -68,6 +72,18 @@ export async function inspectRuntime(
     activeCaseId: header.activeCaseId,
     historical: selected.historical,
   });
+  const selectedCase = selectCaseIdForExecution(traces, header.activeCaseId);
+  const caseReceipt =
+    selectedCase.caseId == null
+      ? null
+      : ([...receipts].reverse().find((item) => item.caseId === selectedCase.caseId) ?? null);
+  const caseExecution = projectCaseExecution({
+    caseId: selectedCase.caseId,
+    events: traces,
+    receipt: caseReceipt,
+    caseStatus: selectedCase.caseId ? (caseStatusById.get(selectedCase.caseId) ?? null) : null,
+    historical: selectedCase.historical,
+  });
   // Gate remains for migration: prefer correlated selection, else latest receipt (may lack caseId).
   const gateReceipt = selected.receipt ?? receipts.at(-1) ?? null;
   return {
@@ -77,6 +93,7 @@ export async function inspectRuntime(
     },
     gate: gateReceipt ? toGate(gateReceipt) : null,
     decision,
+    caseExecution,
     patterns: patterns.map((pattern) => {
       const candidate = candidates.find((item) => item.signature === pattern.signature) ?? null;
       return {

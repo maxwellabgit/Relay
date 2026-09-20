@@ -41,6 +41,9 @@ export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().
       await compactOldRuns(runsRoot);
       await rotateIfNeeded(file);
       await appendFile(file, `${JSON.stringify(event)}\n`, "utf8");
+      if (event.eventType === "run.ended") {
+        await completeManifest(directory);
+      }
     },
     async read() {
       try {
@@ -62,6 +65,34 @@ export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().
       }
     },
   };
+}
+
+async function completeManifest(directory: string): Promise<void> {
+  const path = join(directory, "manifest.json");
+  try {
+    const text = await readFile(path, "utf8");
+    const manifest = JSON.parse(text) as {
+      status?: string;
+      startedAt?: string;
+      endedAt?: string;
+    };
+    if (manifest.status !== "running") return;
+    await writeFile(
+      path,
+      `${JSON.stringify(
+        {
+          ...manifest,
+          status: "completed",
+          endedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+  } catch {
+    // Leave the manifest untouched if it cannot be closed cleanly.
+  }
 }
 
 async function compactOldRuns(runsRoot: string): Promise<void> {

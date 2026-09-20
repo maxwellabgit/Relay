@@ -22,7 +22,9 @@ jobs:
       - run: npm ci
       - name: Export build SHA
         shell: bash
-        run: echo "EXPO_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+        run: |
+          echo "EXPO_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "GIT_COMMIT=${GITHUB_SHA}" >> "$GITHUB_ENV"
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
@@ -52,3 +54,5 @@ jobs:
       - run: npm run build:desktop
         env:
           CI: true
+          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
+          GIT_COMMIT: ${{ github.sha }}

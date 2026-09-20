@@ -117,6 +117,7 @@ export class RelayEngine {
     this.abort?.abort();
     await this.loopPromise;
     this.loopPromise = null;
+    await this.emitTrace({ type: "run.ended", reasonCode: "completed" });
   }
 
   /** Force a SnapshotReplaced projection after host-side status changes (e.g. audio). */
@@ -137,20 +138,28 @@ export class RelayEngine {
       this.deps.artifacts,
     );
     const deadLetters = (await this.deps.store.listDeadLetters()).length;
-    const inspected = await inspectRuntime(this.deps.store.learning, this.traces, {
-      runId: this.runId(),
-      commit: this.deps.gitCommit ?? "unknown",
-      queueDepth: snapshot.queueDepth,
-      logPath: this.deps.trace?.directoryLabel ?? "",
-      logWritable: this.logError === null && this.deps.trace != null,
-      logError: this.logError,
-      mode: this.deps.mode ?? "live",
-      retention: RETENTION_LABEL,
-      deadLetters,
-      storageAdapter: this.deps.storageDetail ?? "memory",
-      activeCaseId: this.activeCaseId,
-      episodeId: this.activeEpisodeId,
-    });
+    const caseStatusById = new Map(
+      snapshot.cases.map((item) => [item.caseId, item.status as "active" | "waiting" | "completed" | "blocked" | "failed"]),
+    );
+    const inspected = await inspectRuntime(
+      this.deps.store.learning,
+      this.traces,
+      {
+        runId: this.runId(),
+        commit: this.deps.gitCommit ?? "unknown",
+        queueDepth: snapshot.queueDepth,
+        logPath: this.deps.trace?.directoryLabel ?? "",
+        logWritable: this.logError === null && this.deps.trace != null,
+        logError: this.logError,
+        mode: this.deps.mode ?? "live",
+        retention: RETENTION_LABEL,
+        deadLetters,
+        storageAdapter: this.deps.storageDetail ?? "memory",
+        activeCaseId: this.activeCaseId,
+        episodeId: this.activeEpisodeId,
+      },
+      caseStatusById,
+    );
     const gate = inspected.gate
       ? { ...inspected.gate, optionLabels: { ...inspected.gate.optionLabels, ...(this.optionLabels.get(inspected.gate.gateId) ?? {}) } }
       : null;
@@ -159,6 +168,7 @@ export class RelayEngine {
       ...inspected,
       gate,
       decision: inspected.decision,
+      caseExecution: inspected.caseExecution,
       currentInputPreview: this.currentInputPreview,
       actions: [...this.pendingCards.values()],
     };
@@ -237,12 +247,10 @@ export class RelayEngine {
 
     const listening = await this.deps.store.getListening(this.deps.sessionId);
     if (!isAsk && !listening) {
-    await this.note("source.rejected");
+      await this.note("source.rejected");
       await this.emitSnapshot();
       return "";
     }
-
-    await this.note("source.accepted");
 
     const routing = shouldCreateCaseForFinal(segment.origin, isAsk);
     const caseId = this.deps.ids.next("case");
@@ -252,6 +260,13 @@ export class RelayEngine {
       kind: routing.kind,
       priority: routing.priority,
       at,
+    });
+    await this.emitTrace({
+      type: "source.accepted",
+      stage: "source.accept",
+      status: "completed",
+      caseId: record.caseId,
+      reasonCode: isAsk ? "direct_answer" : "detected",
     });
     await this.emitTrace({
       type: "case.created",
@@ -439,13 +454,6 @@ export class RelayEngine {
       const classification = classifyAskText(text);
       await this.deps.store.appendCaseEvent(caseId, current.version, "ask.classified", at, {
         classification,
-      });
-      await this.emitTrace({
-        type: "source.accepted",
-        stage: "source.accept",
-        status: "completed",
-        caseId,
-        reasonCode: classification,
       });
       await this.publishFeedItem({
         itemId: feedItemId(caseId, "ask"),
@@ -1749,6 +1757,7 @@ function modelWorkId(caseId: string): string {
 
 const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "run.started": "run",
+  "run.ended": "run",
   "session.started": "session",
   "session.ended": "session",
   "source.accepted": "source.accept",

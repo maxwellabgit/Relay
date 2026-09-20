@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri:dev": "node ../../tools/with-git-sha.mjs tauri dev",
+    "tauri:build": "node ../../tools/with-git-sha.mjs tauri build",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {

@@ -10,6 +10,7 @@ mod state;
 mod typesafe;
 
 use std::sync::Mutex;
+use tauri::RunEvent;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,6 +33,7 @@ pub fn run() {
             audio::audio_status,
             audio::audio_drain,
             diagnostics::trace_run_dir,
+            diagnostics::complete_trace_run,
             diagnostics::append_trace_event,
             diagnostics::read_trace_events,
             diagnostics::open_run_folder,
@@ -40,6 +42,11 @@ pub fn run() {
             halo::halo_status,
             state::store_execute
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running RELAY desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building RELAY desktop")
+        .run(|_app, event| {
+            if let RunEvent::Exit = event {
+                diagnostics::complete_active_run();
+            }
+        });
 }

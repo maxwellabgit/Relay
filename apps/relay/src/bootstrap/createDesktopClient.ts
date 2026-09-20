@@ -220,6 +220,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         /* ignore */
       }
       await inner.stop();
+      await invoke("complete_trace_run", { runId }).catch(() => null);
     },
     getSnapshot: () => inner.getSnapshot(),
     subscribe: (listener) => inner.subscribe(listener),
