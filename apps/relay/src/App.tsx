@@ -7,6 +7,7 @@ import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClie
 
 const EMPTY_SNAPSHOT: RelaySnapshot = {
   listening: false,
+  hostedProcessingEnabled: false,
   feedItems: [],
   approvals: [],
   connections: [],
@@ -60,6 +61,9 @@ export function App() {
   const handleRef = useRef<AppClientHandle | null>(null);
   const clientRef = useRef<RelayClient | null>(null);
   const [snapshot, setSnapshot] = useState<RelaySnapshot>(EMPTY_SNAPSHOT);
+  const [typeSafeKeyStatus, setTypeSafeKeyStatus] = useState<"present" | "disabled" | "unknown">(
+    "unknown",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -78,6 +82,9 @@ export function App() {
         if (change.type === "SnapshotReplaced") setSnapshot(change.snapshot);
       });
       void created.start();
+      void refreshTypeSafeKeyStatus().then((status) => {
+        if (!cancelled) setTypeSafeKeyStatus(status);
+      });
     });
 
     return () => {
@@ -93,6 +100,7 @@ export function App() {
     <>
       <RelayWorkbench
         snapshot={snapshot}
+        typeSafeKeyStatus={typeSafeKeyStatus}
         onListenChange={(enabled) => {
           void clientRef.current?.execute({ type: "SetListening", enabled });
         }}
@@ -101,6 +109,24 @@ export function App() {
         }}
         onAction={(action) => {
           void handleAction(clientRef.current, action);
+        }}
+        onSetHostedProcessing={(enabled) => {
+          void clientRef.current?.execute({ type: "SetHostedProcessing", enabled });
+        }}
+        onRefreshHealth={() => {
+          void clientRef.current?.execute({ type: "RefreshProviderHealth" }).then(async () => {
+            setTypeSafeKeyStatus(await refreshTypeSafeKeyStatus());
+          });
+        }}
+        onSetTypeSafeKey={async (value) => {
+          await setTypeSafeKey(value);
+          setTypeSafeKeyStatus(await refreshTypeSafeKeyStatus());
+          await clientRef.current?.execute({ type: "RefreshProviderHealth" });
+        }}
+        onDeleteTypeSafeKey={async () => {
+          await deleteTypeSafeKey();
+          setTypeSafeKeyStatus(await refreshTypeSafeKeyStatus());
+          await clientRef.current?.execute({ type: "RefreshProviderHealth" });
         }}
         onStartSession={() => {
           void clientRef.current?.execute({ type: "StartWorkSession" });
@@ -178,4 +204,37 @@ async function openRunFolder(): Promise<void> {
   if (host.__TAURI_INTERNALS__?.invoke) {
     await host.__TAURI_INTERNALS__.invoke("open_run_folder");
   }
+}
+
+async function refreshTypeSafeKeyStatus(): Promise<"present" | "disabled" | "unknown"> {
+  const host = globalThis as {
+    __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+  };
+  if (!host.__TAURI_INTERNALS__?.invoke) return "unknown";
+  try {
+    const status = String((await host.__TAURI_INTERNALS__.invoke("secret_status")) ?? "disabled");
+    return status === "present" ? "present" : "disabled";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function setTypeSafeKey(value: string): Promise<void> {
+  const host = globalThis as {
+    __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+  };
+  if (!host.__TAURI_INTERNALS__?.invoke) throw new Error("tauri_invoke_missing");
+  await host.__TAURI_INTERNALS__.invoke("secret_set", {
+    request: { name: "typesafe_api_key", value },
+  });
+}
+
+async function deleteTypeSafeKey(): Promise<void> {
+  const host = globalThis as {
+    __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+  };
+  if (!host.__TAURI_INTERNALS__?.invoke) throw new Error("tauri_invoke_missing");
+  await host.__TAURI_INTERNALS__.invoke("secret_delete", {
+    request: { name: "typesafe_api_key" },
+  });
 }

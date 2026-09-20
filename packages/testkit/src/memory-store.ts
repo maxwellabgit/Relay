@@ -42,6 +42,7 @@ type WorkRow = WorkItem & {
 export class MemoryEngineStore implements EngineStore {
   readonly learning = new InMemoryLearning();
   private readonly sessions = new Map<string, SessionRow>();
+  private readonly settings = new Map<string, string>();
   private readonly sourceEvents = new Map<string, SourceRow>();
   private readonly cases = new Map<string, CaseRecord>();
   private readonly caseEvents: CaseEventRow[] = [];
@@ -55,6 +56,7 @@ export class MemoryEngineStore implements EngineStore {
 
   close(): void {
     this.sessions.clear();
+    this.settings.clear();
     this.sourceEvents.clear();
     this.cases.clear();
     this.caseEvents.length = 0;
@@ -77,6 +79,14 @@ export class MemoryEngineStore implements EngineStore {
 
   async getListening(sessionId: string): Promise<boolean> {
     return this.sessions.get(sessionId)?.listening === true;
+  }
+
+  async getHostedProcessingEnabled(): Promise<boolean> {
+    return this.settings.get("hosted_processing_enabled") === "true";
+  }
+
+  async setHostedProcessingEnabled(enabled: boolean): Promise<void> {
+    this.settings.set("hosted_processing_enabled", enabled ? "true" : "false");
   }
 
   async persistFinalSource(event: PersistedSourceEvent): Promise<{ inserted: boolean }> {

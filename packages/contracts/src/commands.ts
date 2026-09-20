@@ -11,6 +11,15 @@ export type SetListeningCommand = {
   readonly enabled: boolean;
 };
 
+export type SetHostedProcessingCommand = {
+  readonly type: "SetHostedProcessing";
+  readonly enabled: boolean;
+};
+
+export type RefreshProviderHealthCommand = {
+  readonly type: "RefreshProviderHealth";
+};
+
 export type UpsertGlossaryEntryCommand = {
   readonly type: "UpsertGlossaryEntry";
   readonly token: string;
@@ -179,6 +188,8 @@ export type ReplayFixtureCommand = {
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
+  | SetHostedProcessingCommand
+  | RefreshProviderHealthCommand
   | UpsertGlossaryEntryCommand
   | CaptureBirthdayCommand
   | DeleteMemoryCommand

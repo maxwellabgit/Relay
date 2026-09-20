@@ -66,7 +66,7 @@ pub fn local_model_status() -> LocalModelStatus {
             if !(200..300).contains(&response.status()) {
                 return LocalModelStatus {
                     ok: false,
-                    detail: "unavailable".into(),
+                    detail: "external:unavailable".into(),
                     model: None,
                 };
             }
@@ -83,13 +83,13 @@ pub fn local_model_status() -> LocalModelStatus {
                 });
             LocalModelStatus {
                 ok: true,
-                detail: "ready".into(),
+                detail: "external:ready".into(),
                 model,
             }
         }
         Err(_) => LocalModelStatus {
             ok: false,
-            detail: "unavailable".into(),
+            detail: "external:unavailable".into(),
             model: None,
         },
     }
@@ -176,7 +176,7 @@ mod tests {
         std::env::set_var("RELAY_LOCAL_MODEL_PORT", "59999");
         let status = local_model_status();
         assert!(!status.ok);
-        assert_eq!(status.detail, "unavailable");
+        assert_eq!(status.detail, "external:unavailable");
         std::env::remove_var("RELAY_LOCAL_MODEL_PORT");
     }
 

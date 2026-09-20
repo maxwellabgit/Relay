@@ -32,7 +32,8 @@ Models never gain execution authority. The developer console projects runtime ev
 | Protected artifacts | DPAPI object store under `%LOCALAPPDATA%\RELAY\objects\` via `TauriArtifactStore` |
 | Secrets | DPAPI secret store (`secret_set` / `secret_status` / `secret_delete`); TypeSafe reads store, not env, in production |
 | Feed / source prose | Content-addressed artifacts; SQLite holds refs only (`feed_items`, `source_events`) |
-| Local model | `TauriLocalModelPort` → fixed loopback llama.cpp-compatible service |
+| Local model | `TauriLocalModelPort` → external loopback llama.cpp-compatible server (`external:ready` / `external:unavailable`); start via `./dev/start-model.ps1` |
+| Hosted processing | Application grant `hosted_processing_enabled` (default OFF); key present ≠ disclosure; Settings gear toggles grant + TypeSafe key + health retry |
 | Listen | Tauri `audio_*` commands + `relay_audio.live` NDJSON source; same `ingestFinalSegment` path as replay |
 | Reflex | **One** production Reflex complete: `resolve-acronym@1` (bundled dictionary + memory + bounded Jev Choice) |
 | Restart / timing | Durable SQLite + artifacts; canonical stages include `case.created`, `model.*`, `answer.committed`; run `manifest.json` + `events.jsonl` |
@@ -50,7 +51,8 @@ Models never gain execution authority. The developer console projects runtime ev
 ## Remaining limitations
 
 - Live mic ASR depends on optional local packages (`sounddevice`, `faster-whisper`); without them Listen can start but may emit no finals until a fixture/`RELAY_AUDIO_FIXTURE` is used
-- Local model answers only when a loopback server is available on the configured port (`RELAY_LOCAL_MODEL_PORT`, default 8080)
+- Local model answers only when an external loopback server is available on the configured port (`RELAY_LOCAL_MODEL_PORT`, default 8080). RELAY reports `external:unavailable` when absent and never claims Ask is ready without a capability check (`./dev/start-model.ps1 -StartHint`).
+- Hosted Jev disclosure requires **Allow hosted processing** (default OFF) in addition to a TypeSafe key
 - Manual Windows dogfood checklist in the build directive should still be exercised on a machine with model + optional ASR before calling the gate “shipped”
 
 ## Verification

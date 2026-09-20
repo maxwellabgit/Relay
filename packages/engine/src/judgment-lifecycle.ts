@@ -16,6 +16,8 @@ export type JudgmentLifecycleDeps = {
   readonly judgments: JudgmentPort;
   readonly clock: Clock;
   readonly ids: IdFactory;
+  /** When false, do not dispatch to Jev; return hosted_processing_disabled. Default true if omitted. */
+  readonly isHostedProcessingAllowed?: () => boolean | Promise<boolean>;
 };
 
 function encode(value: unknown): Uint8Array {
@@ -170,6 +172,27 @@ export async function runJudgmentLifecycle(
     ...(request.provider ? { provider: request.provider } : {}),
   };
   await deps.store.upsertJudgment(requested);
+
+  const allowed =
+    deps.isHostedProcessingAllowed == null ? true : await deps.isHostedProcessingAllowed();
+  if (!allowed) {
+    const response: JudgmentResponse = {
+      ok: false,
+      failure: { category: "disabled", message: "hosted_processing_disabled" },
+    };
+    const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
+    const completedAt = deps.clock.now().toISOString();
+    const completed: JudgmentRecord = {
+      ...requested,
+      status: "failed",
+      responseArtifactId: responseArtifact.artifactId,
+      responseHash: responseArtifact.sha256,
+      completedAt,
+      failureCategory: "hosted_processing_disabled",
+    };
+    await deps.store.upsertJudgment(completed);
+    return { record: completed, response, providerCalled: false };
+  }
 
   const response = await deps.judgments.judge({ ...request, requestHash }, signal);
 

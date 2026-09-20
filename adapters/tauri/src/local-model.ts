@@ -10,16 +10,20 @@ export type LocalModelStatus = {
 
 /**
  * Narrow Tauri adapter for the fixed local llama.cpp-compatible loopback service.
- * Does not accept arbitrary URLs — native code owns the endpoint.
+ * Windows V1 uses an externally started server (see `dev/start-model.ps1`).
+ * Native code owns the endpoint; this port does not launch processes.
  */
 export class TauriLocalModelPort implements TextModelPort {
   constructor(private readonly invoke: TauriInvoke) {}
 
   async status(): Promise<LocalModelStatus> {
     const result = (await this.invoke("local_model_status")) as LocalModelStatus;
+    const detail = result?.ok
+      ? "external:ready"
+      : (result?.detail ?? "external:unavailable");
     return {
       ok: result?.ok === true,
-      detail: result?.ok ? "ready" : (result?.detail ?? "unavailable"),
+      detail,
       model: result?.model ?? null,
     };
   }

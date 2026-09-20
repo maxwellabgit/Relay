@@ -45,9 +45,17 @@ describe("TauriLocalModelPort", () => {
   });
 
   it("reports status ready only when native status is ok", async () => {
-    const ready = new TauriLocalModelPort(async () => ({ ok: true, detail: "ready", model: "m" }));
-    await expect(ready.status()).resolves.toEqual({ ok: true, detail: "ready", model: "m" });
-    const down = new TauriLocalModelPort(async () => ({ ok: false, detail: "unavailable", model: null }));
-    await expect(down.status()).resolves.toEqual({ ok: false, detail: "unavailable", model: null });
+    const ready = new TauriLocalModelPort(async () => ({ ok: true, detail: "external:ready", model: "m" }));
+    await expect(ready.status()).resolves.toEqual({ ok: true, detail: "external:ready", model: "m" });
+    const down = new TauriLocalModelPort(async () => ({
+      ok: false,
+      detail: "external:unavailable",
+      model: null,
+    }));
+    await expect(down.status()).resolves.toEqual({
+      ok: false,
+      detail: "external:unavailable",
+      model: null,
+    });
   });
 });

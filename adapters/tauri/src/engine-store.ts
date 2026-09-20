@@ -52,6 +52,14 @@ export class TauriEngineStore implements EngineStore {
     return (await this.call({ op: "get_listening", sessionId })) === true;
   }
 
+  async getHostedProcessingEnabled(): Promise<boolean> {
+    return (await this.call({ op: "get_hosted_processing" })) === true;
+  }
+
+  setHostedProcessingEnabled(enabled: boolean): Promise<void> {
+    return this.voidOp({ op: "set_hosted_processing", enabled });
+  }
+
   async persistFinalSource(event: PersistedSourceEvent): Promise<{ inserted: boolean }> {
     const value = await this.call({ op: "persist_final_source", event });
     const inserted = typeof value === "object" && value !== null && "inserted" in value && value.inserted === true;

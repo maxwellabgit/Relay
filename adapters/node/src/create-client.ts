@@ -96,6 +96,10 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
   const engine = new RelayEngine(deps);
   const client = createRelayClientFromEngine(engine);
 
+  // Recorded harnesses exercise Jev paths without live disclosure; grant is ON for fixtures.
+  // Production desktop defaults to OFF (key present ≠ disclosure permission).
+  void sqlite.setHostedProcessingEnabled(true);
+
   return {
     client,
     engine,

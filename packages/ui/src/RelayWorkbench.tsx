@@ -17,6 +17,11 @@ export type RelayWorkbenchProps = {
   readonly onApproveCandidate?: (candidateId: string) => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
+  readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
+  readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
+  readonly onDeleteTypeSafeKey?: () => Promise<void>;
+  readonly onSetHostedProcessing?: (enabled: boolean) => void;
+  readonly onRefreshHealth?: () => void;
 };
 
 const WIDE_BREAKPOINT = 960;
@@ -34,6 +39,11 @@ export function RelayWorkbench({
   onApproveCandidate,
   onRejectCandidate,
   onSnoozeCandidate,
+  typeSafeKeyStatus,
+  onSetTypeSafeKey,
+  onDeleteTypeSafeKey,
+  onSetHostedProcessing,
+  onRefreshHealth,
 }: RelayWorkbenchProps) {
   const { width } = useWindowDimensions();
   const showDev = showDeveloperPanel ?? width >= WIDE_BREAKPOINT;
@@ -46,6 +56,11 @@ export function RelayWorkbench({
           onListenChange={onListenChange}
           onSubmit={onSubmit}
           {...(onAction !== undefined ? { onAction } : {})}
+          {...(typeSafeKeyStatus !== undefined ? { typeSafeKeyStatus } : {})}
+          {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
+          {...(onDeleteTypeSafeKey !== undefined ? { onDeleteTypeSafeKey } : {})}
+          {...(onSetHostedProcessing !== undefined ? { onSetHostedProcessing } : {})}
+          {...(onRefreshHealth !== undefined ? { onRefreshHealth } : {})}
         />
       </View>
       {showDev ? (

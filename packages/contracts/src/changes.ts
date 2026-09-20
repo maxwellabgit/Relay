@@ -87,6 +87,8 @@ export type StatusChipState = {
 
 export type RelaySnapshot = {
   readonly listening: boolean;
+  /** Application grant for hosted Jev disclosure. Default false. Independent of Listening. */
+  readonly hostedProcessingEnabled: boolean;
   readonly activeCaseId?: string;
   readonly feedItems: readonly FeedItemSnapshot[];
   readonly approvals: readonly ApprovalSnapshot[];

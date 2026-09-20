@@ -23,10 +23,15 @@ export type PersistedSourceEvent = {
   readonly createdAt: string;
 };
 
+export const HOSTED_PROCESSING_SETTING_KEY = "hosted_processing_enabled";
+
 export type EngineStore = {
   ensureSession(sessionId: string, createdAt: string): Promise<void>;
   setListening(sessionId: string, listening: boolean): Promise<void>;
   getListening(sessionId: string): Promise<boolean>;
+  /** Application grant; default false. Independent of Listening. */
+  getHostedProcessingEnabled(): Promise<boolean>;
+  setHostedProcessingEnabled(enabled: boolean): Promise<void>;
   persistFinalSource(event: PersistedSourceEvent): Promise<{ inserted: boolean }>;
   createCase(input: {
     caseId: string;

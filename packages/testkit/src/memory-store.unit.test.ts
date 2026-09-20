@@ -9,6 +9,11 @@ describe("MemoryEngineStore", () => {
     await store.ensureSession("session_1", at);
     await store.setListening("session_1", true);
     expect(await store.getListening("session_1")).toBe(true);
+    expect(await store.getHostedProcessingEnabled()).toBe(false);
+    await store.setHostedProcessingEnabled(true);
+    expect(await store.getHostedProcessingEnabled()).toBe(true);
+    await store.setHostedProcessingEnabled(false);
+    expect(await store.getHostedProcessingEnabled()).toBe(false);
 
     const { inserted } = await store.persistFinalSource({
       sourceEventId: "src_1",

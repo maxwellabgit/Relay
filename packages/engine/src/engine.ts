@@ -55,9 +55,9 @@ export type EngineDeps = {
   readonly episodeDefinitions?: readonly EpisodeDefinition[];
   readonly glasses?: GlassesDisplayPort;
   readonly storageDetail?: string;
-  readonly jevStatus?: { readonly ok: boolean; readonly detail: string };
-  readonly modelStatus?: { readonly ok: boolean; readonly detail: string };
-  readonly audioStatus?: { readonly ok: boolean; readonly detail: string };
+  readonly jevStatus?: { ok: boolean; detail: string };
+  readonly modelStatus?: { ok: boolean; detail: string; model?: string | null };
+  readonly audioStatus?: { ok: boolean; detail: string };
   readonly mode?: "live" | "recorded" | "replay";
   readonly gitCommit?: string;
   readonly trace?: TraceSink;
@@ -171,6 +171,18 @@ export class RelayEngine {
         this.emit({ type: "ListeningChanged", listening: command.enabled });
         await this.emitSnapshot();
         return { ok: true, summary: command.enabled ? "listening_on" : "listening_off" };
+      }
+      case "SetHostedProcessing": {
+        await this.deps.store.setHostedProcessingEnabled(command.enabled);
+        await this.emitSnapshot();
+        return {
+          ok: true,
+          summary: command.enabled ? "hosted_processing_on" : "hosted_processing_off",
+        };
+      }
+      case "RefreshProviderHealth": {
+        await this.emitSnapshot();
+        return { ok: true, summary: "provider_health_refreshed" };
       }
       case "SubmitText": {
         this.currentInputPreview = command.text;
@@ -816,6 +828,7 @@ export class RelayEngine {
         judgments: this.deps.judgments,
         clock: this.deps.clock,
         ids: this.deps.ids,
+        isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
       },
       request,
       this.abort?.signal ?? new AbortController().signal,
@@ -825,9 +838,16 @@ export class RelayEngine {
     const completedAt = this.deps.clock.now().toISOString();
     if (!outcome.response.ok) {
       const category = outcome.response.failure.category;
-      const reasonCode = knownReason(category);
+      const reasonCode =
+        outcome.response.failure.message === "hosted_processing_disabled"
+          ? knownReason("hosted_processing_disabled")
+          : knownReason(category);
       const retrying = isRetryableJudgmentFailure(category) && attempt < JUDGMENT_MAX_ATTEMPTS;
-      const blocked = category === "missing_secret" || category === "authentication";
+      const blocked =
+        category === "missing_secret" ||
+        category === "authentication" ||
+        category === "disabled" ||
+        category === "not_authorized";
       await this.putReceipt({
         caseId,
         gateId: reflexId,
@@ -1055,10 +1075,14 @@ export class RelayEngine {
     const jev = this.deps.jevStatus ?? { ok: false, detail: "missing key" };
     const model = this.deps.modelStatus ?? { ok: false, detail: "disabled" };
     const audio = this.deps.audioStatus ?? { ok: false, detail: "not connected" };
+    const modelDetail =
+      model.ok && model.model
+        ? `${model.detail} · ${model.model}`
+        : model.detail;
     return [
       { id: "engine" as const, label: "Engine", ok: this.running, detail: this.running ? "running" : "stopped" },
       { id: "jev" as const, label: "Jev", ok: jev.ok, detail: jev.detail },
-      { id: "model" as const, label: "Model", ok: model.ok, detail: model.detail },
+      { id: "model" as const, label: "Model", ok: model.ok, detail: modelDetail },
       { id: "audio" as const, label: "Audio", ok: audio.ok, detail: audio.detail },
       { id: "halo" as const, label: "Halo", ok: false, detail: "offline" },
       {
@@ -1351,6 +1375,7 @@ export class RelayEngine {
         judgments: this.deps.judgments,
         clock: this.deps.clock,
         ids: this.deps.ids,
+        isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
       },
       request,
       this.abort?.signal ?? new AbortController().signal,

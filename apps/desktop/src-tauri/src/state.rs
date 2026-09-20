@@ -15,6 +15,8 @@ const MIGRATION_5: &str =
     include_str!("../../../../packages/storage-schema/migrations/005_content_artifacts.sql");
 const MIGRATION_6: &str =
     include_str!("../../../../packages/storage-schema/migrations/006_protected_learning.sql");
+const MIGRATION_7: &str =
+    include_str!("../../../../packages/storage-schema/migrations/007_runtime_settings.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -80,6 +82,7 @@ impl StateDb {
         apply_version(&tx, 4, MIGRATION_4)?;
         apply_version(&tx, 5, MIGRATION_5)?;
         apply_version(&tx, 6, MIGRATION_6)?;
+        apply_version(&tx, 7, MIGRATION_7)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -117,6 +120,8 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "ensure_session" => ensure_session(conn, op),
         "set_listening" => set_listening(conn, op),
         "get_listening" => get_listening(conn, op),
+        "get_hosted_processing" => get_hosted_processing(conn),
+        "set_hosted_processing" => set_hosted_processing(conn, op),
         "persist_final_source" => persist_final_source(conn, op),
         "create_case" => create_case(conn, op),
         "get_case" => get_case(conn, &req_str(op, "caseId")?),
@@ -212,6 +217,40 @@ fn get_listening(conn: &Connection, op: &Value) -> Result<Value, String> {
         .optional()
         .map_err(|error| error.to_string())?;
     Ok(json!(listening == Some(1)))
+}
+
+fn get_hosted_processing(conn: &Connection) -> Result<Value, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value_json FROM app_settings WHERE key = ?1",
+            params!["hosted_processing_enabled"],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let enabled = value
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<bool>(raw).ok())
+        .unwrap_or(false);
+    Ok(json!(enabled))
+}
+
+fn set_hosted_processing(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let enabled = op
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .ok_or("missing_enabled")?;
+    conn.execute(
+        "INSERT INTO app_settings(key, value_json, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+        params![
+            "hosted_processing_enabled",
+            serde_json::to_string(&enabled).map_err(|e| e.to_string())?,
+            now_iso()
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
 }
 
 fn persist_final_source(conn: &Connection, op: &Value) -> Result<Value, String> {

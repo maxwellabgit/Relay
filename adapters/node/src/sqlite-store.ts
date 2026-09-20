@@ -52,6 +52,28 @@ export class SqliteEngineStore implements EngineStore {
     return row?.listening === 1;
   }
 
+  async getHostedProcessingEnabled(): Promise<boolean> {
+    const row = this.db
+      .prepare(`SELECT value_json FROM app_settings WHERE key = ?`)
+      .get("hosted_processing_enabled") as { value_json: string } | undefined;
+    if (!row) return false;
+    try {
+      return JSON.parse(row.value_json) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setHostedProcessingEnabled(enabled: boolean): Promise<void> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO app_settings(key, value_json, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      )
+      .run("hosted_processing_enabled", JSON.stringify(enabled), now);
+  }
+
   async persistFinalSource(event: PersistedSourceEvent): Promise<{ inserted: boolean }> {
     const result = this.db
       .prepare(
@@ -547,12 +569,13 @@ function applyMigrations(db: DatabaseSync): void {
     4: "004_decisions.sql",
     5: "005_content_artifacts.sql",
     6: "006_protected_learning.sql",
+    7: "007_runtime_settings.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6]) {
+    for (const version of [2, 3, 4, 5, 6, 7]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

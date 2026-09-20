@@ -1,6 +1,8 @@
 import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
+import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Composer } from "../assistant/Composer.js";
+import { SettingsSheet } from "../assistant/SettingsSheet.js";
 import { colors } from "../theme/colors.js";
 
 type Props = {
@@ -8,9 +10,26 @@ type Props = {
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
   readonly onAction?: (action: ActionCard) => void;
+  readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
+  readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
+  readonly onDeleteTypeSafeKey?: () => Promise<void>;
+  readonly onSetHostedProcessing?: (enabled: boolean) => void;
+  readonly onRefreshHealth?: () => void;
 };
 
-export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Props) {
+export function PhoneShell({
+  snapshot,
+  onListenChange,
+  onSubmit,
+  onAction,
+  typeSafeKeyStatus = "unknown",
+  onSetTypeSafeKey,
+  onDeleteTypeSafeKey,
+  onSetHostedProcessing,
+  onRefreshHealth,
+}: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   return (
     <View style={styles.bezel}>
       <View style={styles.screen}>
@@ -26,7 +45,14 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Pro
               <Text style={styles.tagline}>Your AI teammate, on your terms</Text>
             </View>
           </View>
-          <Text style={styles.gear}>⚙</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+            onPress={() => setSettingsOpen(true)}
+            hitSlop={8}
+          >
+            <Text style={styles.gear}>⚙</Text>
+          </Pressable>
         </View>
 
         <View style={styles.listenBlock}>
@@ -89,6 +115,23 @@ export function PhoneShell({ snapshot, onListenChange, onSubmit, onAction }: Pro
         </View>
         <Text style={styles.footer}>Private. Local. In your control.</Text>
       </View>
+
+      <SettingsSheet
+        visible={settingsOpen}
+        snapshot={snapshot}
+        typeSafeKeyStatus={typeSafeKeyStatus}
+        onClose={() => setSettingsOpen(false)}
+        onSetTypeSafeKey={async (value) => {
+          if (!onSetTypeSafeKey) return;
+          await onSetTypeSafeKey(value);
+        }}
+        onDeleteTypeSafeKey={async () => {
+          if (!onDeleteTypeSafeKey) return;
+          await onDeleteTypeSafeKey();
+        }}
+        onSetHostedProcessing={(enabled) => onSetHostedProcessing?.(enabled)}
+        onRefreshHealth={() => onRefreshHealth?.()}
+      />
     </View>
   );
 }

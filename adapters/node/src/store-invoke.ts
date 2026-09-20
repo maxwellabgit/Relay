@@ -34,6 +34,11 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return null;
     case "get_listening":
       return store.getListening(str(op, "sessionId"));
+    case "get_hosted_processing":
+      return store.getHostedProcessingEnabled();
+    case "set_hosted_processing":
+      await store.setHostedProcessingEnabled(op.enabled === true);
+      return null;
     case "persist_final_source":
       return store.persistFinalSource(op.event as PersistedSourceEvent);
     case "create_case":

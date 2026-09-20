@@ -46,24 +46,18 @@ export type DesktopClientHandle = {
   stop(): Promise<void>;
 };
 
+type MutableHealth = { ok: boolean; detail: string; model?: string | null };
+
+const HEALTH_POLL_MS = 60_000;
+
 export async function createDesktopClient(options: DesktopClientOptions = {}): Promise<DesktopClientHandle> {
   const invoke = options.invoke ?? requireTauriInvoke();
-  const secret = String((await invoke("secret_status")) ?? "disabled");
   const localModel = options.model ?? new TauriLocalModelPort(invoke);
-  const modelHealth =
-    "status" in localModel && typeof (localModel as TauriLocalModelPort).status === "function"
-      ? await (localModel as TauriLocalModelPort).status()
-      : { ok: false, detail: "unavailable" };
   const audio = new TauriAudioPort(invoke);
-  const audioHealth = { ok: false, detail: "not connected" };
-  try {
-    const status = await audio.status();
-    audioHealth.ok = status.ok;
-    audioHealth.detail = status.capturing ? "capturing" : status.detail;
-  } catch {
-    audioHealth.ok = false;
-    audioHealth.detail = "unavailable";
-  }
+
+  const jevHealth: MutableHealth = { ok: false, detail: "missing key" };
+  const modelHealth: MutableHealth = { ok: false, detail: "external:unavailable", model: null };
+  const audioHealth: MutableHealth = { ok: false, detail: "not connected" };
 
   const runId = `run_${Date.now().toString(36)}`;
   const directory = await invoke("trace_run_dir", { runId }).catch(() => null);
@@ -76,7 +70,18 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const storeInvoke: StoreInvoke = (command, args) => invoke(command, args);
   const artifacts = new TauriArtifactStore(invoke);
   const store = new TauriEngineStore(storeInvoke, artifacts);
-  const judgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
+  const nativeJudgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
+  let refreshProviderHealth: (opts?: { readonly afterFailure?: boolean }) => Promise<void> = async () => {};
+
+  const judgments: JudgmentPort = {
+    async judge(request, signal) {
+      const response = await nativeJudgments.judge(request, signal);
+      if (!response.ok) {
+        void refreshProviderHealth({ afterFailure: true });
+      }
+      return response;
+    },
+  };
 
   const deps: EngineDeps = {
     store,
@@ -88,13 +93,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     sessionId,
     reflexModules: createProductionReflexes(store.learning),
     storageDetail: "sqlite",
-    jevStatus:
-      secret === "present"
-        ? { ok: true, detail: "native typesafe" }
-        : { ok: false, detail: "missing key" },
-    modelStatus: modelHealth.ok
-      ? { ok: true, detail: "ready" }
-      : { ok: false, detail: "unavailable" },
+    jevStatus: jevHealth,
+    modelStatus: modelHealth,
     audioStatus: audioHealth,
     mode: "live",
     gitCommit: resolveBuildSha(),
@@ -106,11 +106,64 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   let stopPump: (() => void) | null = null;
   let acceptIntake = true;
   let handlingSourceFailure = false;
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
 
   const applyAudioHealth = (status: AudioStatus): void => {
     audioHealth.ok = status.ok;
     audioHealth.detail = status.capturing ? "capturing" : status.detail;
   };
+
+  const refreshProviderHealthImpl = async (opts?: { readonly afterFailure?: boolean }): Promise<void> => {
+    const secret = String((await invoke("secret_status").catch(() => "disabled")) ?? "disabled");
+    const hosted = await store.getHostedProcessingEnabled().catch(() => false);
+
+    if (secret !== "present") {
+      jevHealth.ok = false;
+      jevHealth.detail = "missing key";
+    } else if (!hosted) {
+      jevHealth.ok = false;
+      jevHealth.detail = "hosted off";
+    } else {
+      jevHealth.ok = true;
+      jevHealth.detail = opts?.afterFailure ? "degraded" : "ready";
+    }
+
+    try {
+      if ("status" in localModel && typeof (localModel as TauriLocalModelPort).status === "function") {
+        const status = await (localModel as TauriLocalModelPort).status();
+        modelHealth.ok = status.ok;
+        modelHealth.model = status.model ?? null;
+        modelHealth.detail = status.ok
+          ? status.model
+            ? `external:ready · ${status.model}`
+            : "external:ready"
+          : status.detail?.startsWith("external:")
+            ? status.detail
+            : `external:${status.detail || "unavailable"}`;
+      } else {
+        modelHealth.ok = false;
+        modelHealth.detail = "external:unavailable";
+        modelHealth.model = null;
+      }
+    } catch {
+      modelHealth.ok = false;
+      modelHealth.detail = "external:unavailable";
+      modelHealth.model = null;
+    }
+
+    try {
+      const status = await audio.status();
+      applyAudioHealth(status);
+    } catch {
+      audioHealth.ok = false;
+      audioHealth.detail = "unavailable";
+    }
+
+    await engine.refreshSnapshot().catch(() => undefined);
+  };
+  refreshProviderHealth = refreshProviderHealthImpl;
+
+  await refreshProviderHealthImpl();
 
   const client: RelayClient = {
     start: async () => {
@@ -137,7 +190,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
               if (listening) {
                 await inner.execute({ type: "SetListening", enabled: false });
               }
-              await engine.refreshSnapshot();
+              await refreshProviderHealthImpl({ afterFailure: true });
             } catch {
               await engine.refreshSnapshot().catch(() => undefined);
             } finally {
@@ -148,9 +201,17 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
           await engine.refreshSnapshot().catch(() => undefined);
         },
       });
+      if (healthTimer) clearInterval(healthTimer);
+      healthTimer = setInterval(() => {
+        void refreshProviderHealthImpl();
+      }, HEALTH_POLL_MS);
     },
     stop: async () => {
       acceptIntake = false;
+      if (healthTimer) {
+        clearInterval(healthTimer);
+        healthTimer = null;
+      }
       stopPump?.();
       stopPump = null;
       try {
@@ -163,13 +224,24 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     getSnapshot: () => inner.getSnapshot(),
     subscribe: (listener) => inner.subscribe(listener),
     execute: async (command: RelayCommand): Promise<RelayCommandResult> => {
+      if (command.type === "RefreshProviderHealth") {
+        await refreshProviderHealthImpl();
+        return { ok: true, summary: "provider_health_refreshed" };
+      }
+
+      if (command.type === "SetHostedProcessing") {
+        const result = await inner.execute(command);
+        await refreshProviderHealthImpl();
+        return result;
+      }
+
       if (command.type === "SetListening") {
         if (command.enabled) {
           try {
             const status = await audio.start(sessionId);
             applyAudioHealth(status);
             if (!status.ok || !status.capturing) {
-              await engine.refreshSnapshot();
+              await refreshProviderHealthImpl({ afterFailure: true });
               return {
                 ok: false,
                 summary: "audio_unavailable",
@@ -183,7 +255,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
           } catch {
             audioHealth.ok = false;
             audioHealth.detail = "unavailable";
-            await engine.refreshSnapshot().catch(() => undefined);
+            await refreshProviderHealthImpl({ afterFailure: true });
             return { ok: false, summary: "audio_unavailable", error: "unavailable" };
           }
         }
@@ -205,11 +277,13 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         } catch {
           audioHealth.ok = false;
           audioHealth.detail = "unavailable";
-          await engine.refreshSnapshot().catch(() => undefined);
+          await refreshProviderHealthImpl({ afterFailure: true });
           return { ok: false, summary: "audio_stop_failed", error: "unavailable" };
         }
       }
-      return inner.execute(command);
+
+      const result = await inner.execute(command);
+      return result;
     },
   };
 

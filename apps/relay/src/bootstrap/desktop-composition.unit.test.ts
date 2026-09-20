@@ -38,4 +38,14 @@ describe("windows production composition", () => {
     expect(ingestAt).toBeGreaterThan(drainAt);
     expect(listenOffAt).toBeGreaterThan(ingestAt);
   });
+
+  it("refreshes provider health after config changes and exposes hosted processing gate", () => {
+    const path = resolve(root, "apps/relay/src/bootstrap/createDesktopClient.ts");
+    const text = readFileSync(path, "utf8");
+    expect(text).toMatch(/RefreshProviderHealth/);
+    expect(text).toMatch(/SetHostedProcessing/);
+    expect(text).toMatch(/HEALTH_POLL_MS/);
+    expect(text).toMatch(/hosted off/);
+    expect(text).toMatch(/external:ready|external:unavailable/);
+  });
 });

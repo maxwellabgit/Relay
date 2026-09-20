@@ -47,18 +47,21 @@ export async function projectSnapshot(
   status: readonly StatusChipState[],
   artifacts: ArtifactStorePort,
 ): Promise<RelaySnapshot> {
-  const [listening, cases, records, sourceSegments, queueDepth, events] = await Promise.all([
-    store.getListening(sessionId),
-    store.listActiveCases(),
-    store.listFeedItemRecords(),
-    store.listSourceSegments(sessionId),
-    store.countWorkItems(),
-    store.listDomainEvents(80),
-  ]);
+  const [listening, hostedProcessingEnabled, cases, records, sourceSegments, queueDepth, events] =
+    await Promise.all([
+      store.getListening(sessionId),
+      store.getHostedProcessingEnabled(),
+      store.listActiveCases(),
+      store.listFeedItemRecords(),
+      store.listSourceSegments(sessionId),
+      store.countWorkItems(),
+      store.listDomainEvents(80),
+    ]);
   const feedItems = await hydrateFeedItems(records, artifacts);
 
   return {
     listening,
+    hostedProcessingEnabled,
     feedItems,
     approvals: [],
     connections: [],
