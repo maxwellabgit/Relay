@@ -5,6 +5,7 @@ import { productionReflexes } from "@relay/reflexes";
 import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DecisionArtifactStore, decisionArtifactRoot } from "./decision-artifacts.js";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
@@ -19,12 +20,17 @@ export type NodeHarnessOptions = {
   readonly judgments?: JudgmentPort;
   readonly reflexModules?: EngineDeps["reflexModules"];
   readonly episodeDefinitions?: EngineDeps["episodeDefinitions"];
+  readonly durableDecisionArtifacts?: boolean;
 };
 
 export function createNodeHarness(options: NodeHarnessOptions = {}) {
   const sqlite = new SqliteEngineStore(options.databasePath ?? ":memory:");
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
-  const artifacts = new MemoryArtifactStore();
+  const runsRoot = options.runsRoot ?? join(tmpdir(), "relay-runs");
+  const runId = `run_${Date.now().toString(36)}`;
+  const artifacts = options.durableDecisionArtifacts
+    ? new DecisionArtifactStore(decisionArtifactRoot(runsRoot, runId))
+    : new MemoryArtifactStore();
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
   const ids =
@@ -74,7 +80,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     modelStatus: { ok: false, detail: "disabled" },
     mode: "recorded",
     gitCommit: "test",
-    trace: createFileTraceSink(options.runsRoot ?? join(tmpdir(), "relay-runs")),
+    trace: createFileTraceSink(runsRoot, runId),
   };
 
   const engine = new RelayEngine(deps);

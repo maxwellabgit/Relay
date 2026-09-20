@@ -251,7 +251,7 @@ describe("production path", () => {
       const log = (await harness.client.getSnapshot()).runtime.logPath;
       if (log) {
         try {
-          const text = await readFile(log, "utf8");
+          const text = await readFile(join(log, "events.jsonl"), "utf8");
           expect(text).not.toContain("José");
           expect(text).not.toContain("01-04");
         } catch {

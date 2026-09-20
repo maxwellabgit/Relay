@@ -147,7 +147,7 @@ describe("bounded expansion through RelayClient", () => {
       await first.client.execute({ type: "SubmitText", text: `note ${SENTINEL}` });
       await waitFor(async () => (await first.client.getSnapshot()).feedItems.length > 0);
       const logPath = (await first.client.getSnapshot()).runtime.logPath;
-      const log = await readFile(logPath, "utf8");
+      const log = await readFile(join(logPath, "events.jsonl"), "utf8");
       expect(log).not.toContain(SENTINEL);
       expect(log).not.toContain("1990-02-02");
     } finally {
