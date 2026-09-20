@@ -411,27 +411,6 @@ export class RelayEngine {
     const findingSummaries = [...reflex.findings];
     const token = askedToken(text);
     let signature = reflex.signature;
-    if (findingSummaries.length === 0 && token) {
-      const memory = await this.deps.store.learning.getMemory("glossary", token);
-      const expansion = memory?.source === "explicit_user" ? (memory.value.expansion ?? "") : "";
-      if (expansion) {
-        findingSummaries.push(`${token}: ${expansion}`);
-        signature = workSignature("acronym.lookup", { outcome: "memory", token });
-        await this.putReceipt({
-          caseId,
-          gateId: "glossary.memory",
-          policyVersion: "memory@1",
-          questionType: "not_applicable",
-          provider: "not_applicable",
-          probabilities: {},
-          thresholds: {},
-          selectedOption: token,
-          result: "not_applicable",
-          reasonCode: "explicit_memory",
-          latencyMs: null,
-        });
-      }
-    }
 
     const latest = await this.deps.store.getCase(caseId);
     if (!latest) return { kind: "complete" };
@@ -442,14 +421,16 @@ export class RelayEngine {
     });
     if (!completed) return { kind: "complete" };
 
-    if (current.origin === "direct") {
-      await this.publishFeedItem({
-        itemId: this.deps.ids.next("feed"),
-        kind: "ask",
-        summary: structuredAskSummary(text),
-        createdAt: completed.updatedAt,
-        caseId,
-      });
+    if (findingSummaries.length > 0 || current.origin === "direct") {
+      if (current.origin === "direct") {
+        await this.publishFeedItem({
+          itemId: this.deps.ids.next("feed"),
+          kind: "ask",
+          summary: structuredAskSummary(text),
+          createdAt: completed.updatedAt,
+          caseId,
+        });
+      }
       if (findingSummaries.length > 0) {
         await this.publishFeedItem({
           itemId: this.deps.ids.next("feed"),
@@ -458,7 +439,7 @@ export class RelayEngine {
           createdAt: this.deps.clock.now().toISOString(),
           caseId,
         });
-      } else {
+      } else if (current.origin === "direct") {
         const task = definitionSearchTask(text);
         if (task && token && !reflex.suppressSearch) {
           signature = workSignature("acronym.lookup", { outcome: "no_candidates", token });
@@ -684,6 +665,10 @@ export class RelayEngine {
       },
       questions: {
         expansion: { type: "choice", instructions: "Select one allowed option.", criteria, requireNoMatch: true },
+        useful: {
+          type: "noul",
+          instructions: "Is showing an expansion for this acronym useful in the current conversational context?",
+        },
       },
       caseId,
       caseVersion: current.version,
@@ -801,9 +786,21 @@ export class RelayEngine {
       await this.finishCase(caseId, current.version, "failed");
       return { kind: "dead", reasonCode: knownReason(distribution.reasonCode) };
     }
+    const explicitAsk = item.payload.explicitAsk === true;
+    const usefulnessMinimum = Number(
+      (parsed as { displayUsefulnessMinimum?: number }).displayUsefulnessMinimum ?? 0.7,
+    );
     const gate = evaluateChoiceGate({ probabilities, minimum, marginMinimum });
-    const pass = gate.pass && gate.selected === declared;
-    const reasonCode = pass ? "policy_pass" : knownReason(gate.reasonCode);
+    let pass = gate.pass && gate.selected === declared && gate.selected !== "no_match";
+    let reasonCode = pass ? "policy_pass" : knownReason(gate.reasonCode);
+    if (pass && !explicitAsk) {
+      const useful = outcome.response.success.answers.useful;
+      if (!useful || useful.type !== "noul" || useful.probabilityYes < usefulnessMinimum) {
+        pass = false;
+        reasonCode = "below_usefulness";
+      }
+    }
+    const label = pass ? (labelById[gate.selected!] ?? "") : "";
     await this.putReceipt({
       caseId,
       gateId: reflexId,
@@ -811,8 +808,12 @@ export class RelayEngine {
       questionType: "choice",
       provider: request.provider ?? "unknown",
       probabilities,
-      thresholds: { choiceProbabilityMinimum: minimum, choiceMarginMinimum: marginMinimum },
-      selectedOption: gate.selected,
+      thresholds: {
+        choiceProbabilityMinimum: minimum,
+        choiceMarginMinimum: marginMinimum,
+        displayUsefulnessMinimum: usefulnessMinimum,
+      },
+      selectedOption: pass ? label : gate.selected,
       selectedOptionId: gate.selected,
       optionLabels: labelById,
       reflexId,
@@ -835,9 +836,9 @@ export class RelayEngine {
       durationMs,
       attempt,
     });
-    const label = labelById[gate.selected] ?? "";
-    if (pass && gate.selected !== "no_match" && label) {
+    if (pass && label) {
       await this.finishCase(caseId, current.version, "completed");
+      const token = String(item.payload.token ?? "");
       await this.publishFeedItem({
         itemId: this.deps.ids.next("feed"),
         kind: "answer",
@@ -845,7 +846,6 @@ export class RelayEngine {
         createdAt: this.deps.clock.now().toISOString(),
         caseId,
       });
-      const token = String(item.payload.token ?? "");
       const signature = workSignature("acronym.lookup", { outcome: "choice", token });
       if (signature) await this.recordEpisode(signature, caseId, "completed");
       await this.offerGlossary(token, label);

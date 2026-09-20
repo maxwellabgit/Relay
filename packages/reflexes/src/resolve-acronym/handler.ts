@@ -10,6 +10,7 @@ import type {
 import { resolveAcronymDefinition } from "./definition.js";
 import { detectAcronymTokens } from "./detector.js";
 import { buildAcronymQuestions } from "./questions.js";
+import { bundledDictionaryLookup } from "./glossary-lookup.js";
 import policy from "./policy.v1.json" with { type: "json" };
 
 export type AcronymPolicyV1 = {
@@ -21,9 +22,10 @@ export type AcronymPolicyV1 = {
 };
 
 export type GlossaryLookup = {
-  exactProject(token: string): string | null;
-  exactGlobal(token: string): string | null;
-  searchWindow(token: string, text: string): string[];
+  exactUser(token: string): Promise<string | null>;
+  exactProject(token: string): Promise<string | null>;
+  exactBundled(token: string): Promise<string | null>;
+  searchWindow(token: string, text: string): Promise<string[]>;
 };
 
 export type AcronymEvaluateExtras = {
@@ -34,9 +36,10 @@ export type AcronymEvaluateExtras = {
 };
 
 const defaultGlossary: GlossaryLookup = {
-  exactProject: () => null,
-  exactGlobal: (token) => (token === "API" ? "Application Programming Interface" : null),
-  searchWindow: (token, text) => {
+  exactUser: async () => null,
+  exactProject: async () => null,
+  exactBundled: async (token) => bundledDictionaryLookup(token),
+  searchWindow: async (token, text) => {
     const re = new RegExp(
       `${token}\\s+(?:means|stands for|=)\\s+([A-Za-z][A-Za-z\\s-]{2,80})`,
       "i",
@@ -113,28 +116,23 @@ export function createResolveAcronymModule(
         };
       }
 
+      const user = await glossary.exactUser(token);
+      if (user) {
+        return finding(token, user, context, "explicit_memory");
+      }
+      const project = await glossary.exactProject(token);
+      if (project) {
+        return finding(token, project, context, "exact_glossary");
+      }
+      const bundled = await glossary.exactBundled(token);
+      const contextCandidates = await glossary.searchWindow(token, text);
       const candidates = new Set<string>();
-      const project = glossary.exactProject(token);
-      if (project) candidates.add(project);
-      const global = glossary.exactGlobal(token);
-      if (global) candidates.add(global);
-      for (const c of glossary.searchWindow(token, text)) candidates.add(c);
+      if (bundled) candidates.add(bundled);
+      for (const c of contextCandidates) candidates.add(c);
 
       const list = [...candidates];
       if (list.length === 1) {
-        return {
-          type: "finding",
-          summary: `${token}: ${list[0]}`,
-          sourceRefs: context.triggerSourceRefs,
-          judgmentIds: [],
-          evidenceDrafts: [
-            {
-              kind: "acronym",
-              summary: `${token} = ${list[0]}`,
-              sourceRefs: context.triggerSourceRefs,
-            },
-          ],
-        };
+        return finding(token, list[0]!, context, bundled === list[0] ? "exact_glossary" : "context_candidate");
       }
 
       if (list.length === 0) {
@@ -146,7 +144,6 @@ export function createResolveAcronymModule(
         };
       }
 
-      // Multiple candidates → engine will submit Jev Choice + Noul using these questions.
       void buildAcronymQuestions(list);
       if (extras.judgmentAnswers) {
         const decision = applyAcronymPolicy(extras.judgmentAnswers, { isExplicitAsk });
@@ -158,19 +155,7 @@ export function createResolveAcronymModule(
             judgmentIds: [],
           };
         }
-        return {
-          type: "finding",
-          summary: `${token}: ${decision.expansion}`,
-          sourceRefs: context.triggerSourceRefs,
-          judgmentIds: [],
-          evidenceDrafts: [
-            {
-              kind: "acronym",
-              summary: `${token} = ${decision.expansion}`,
-              sourceRefs: context.triggerSourceRefs,
-            },
-          ],
-        };
+        return finding(token, decision.expansion, context, decision.reasonCode);
       }
 
       return {
@@ -179,15 +164,39 @@ export function createResolveAcronymModule(
         sourceRefs: context.triggerSourceRefs,
         judgmentIds: [],
         clarificationPrompt: JSON.stringify({
-        token,
-        optionIds: list,
-        policyVersion: "resolve-acronym@1",
-        choiceProbabilityMinimum: (policy as AcronymPolicyV1).choiceProbabilityMinimum,
-        choiceMarginMinimum: (policy as AcronymPolicyV1).choiceMarginMinimum,
-      }),
+          token,
+          optionIds: list,
+          policyVersion: "resolve-acronym@1",
+          choiceProbabilityMinimum: (policy as AcronymPolicyV1).choiceProbabilityMinimum,
+          choiceMarginMinimum: (policy as AcronymPolicyV1).choiceMarginMinimum,
+          displayUsefulnessMinimum: (policy as AcronymPolicyV1).displayUsefulnessMinimum,
+        }),
       };
     },
   };
 }
 
+function finding(
+  token: string,
+  expansion: string,
+  context: ReflexContext,
+  reasonCode: string,
+): ReflexResult {
+  void reasonCode;
+  return {
+    type: "finding",
+    summary: `${token}: ${expansion}`,
+    sourceRefs: context.triggerSourceRefs,
+    judgmentIds: [],
+    evidenceDrafts: [
+      {
+        kind: "acronym",
+        summary: `${token} = ${expansion}`,
+        sourceRefs: context.triggerSourceRefs,
+      },
+    ],
+  };
+}
+
+/** Production module uses bundled dictionary only until host injects store-backed glossary. */
 export const resolveAcronymV1 = createResolveAcronymModule();

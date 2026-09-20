@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyAcronymPolicy, detectAcronymTokens } from "./index.js";
+import { applyAcronymPolicy, bundledDictionaryLookup, createResolveAcronymModule, detectAcronymTokens } from "./index.js";
+import { createFixtureGlossaryLookup } from "./resolve-acronym/glossary-lookup.js";
 
 describe("resolve-acronym", () => {
   it("detects deterministic uppercase tokens", () => {
@@ -7,6 +8,90 @@ describe("resolve-acronym", () => {
       "API",
       "BESS",
     ]);
+  });
+
+  it("resolves bundled dictionary hits without Jev", async () => {
+    const module = createResolveAcronymModule();
+    const result = await module.evaluate({
+      caseId: "c1",
+      caseVersion: 1,
+      reflex: { id: "resolve-acronym", version: 1 },
+      triggerSourceRefs: [],
+      eligibleConnections: [],
+      remainingBudgets: { maxSourceAttempts: 1, maxJudgmentRounds: 1, maxHostedTokens: 0 },
+      now: new Date().toISOString(),
+      observationText: "What does API mean?",
+      triggerToken: "API",
+      isExplicitAsk: true,
+    });
+    expect(result.type).toBe("finding");
+    expect(result.summary).toContain("Application Programming Interface");
+    expect(bundledDictionaryLookup("API")).toBe("Application Programming Interface");
+  });
+
+  it("prefers explicit user memory over bundled dictionary", async () => {
+    const module = createResolveAcronymModule({
+      glossary: {
+        exactUser: async () => "Always Prefer Intent",
+        exactProject: async () => null,
+        exactBundled: async () => "Application Programming Interface",
+        searchWindow: async () => [],
+      },
+    });
+    const result = await module.evaluate({
+      caseId: "c1",
+      caseVersion: 1,
+      reflex: { id: "resolve-acronym", version: 1 },
+      triggerSourceRefs: [],
+      eligibleConnections: [],
+      remainingBudgets: { maxSourceAttempts: 1, maxJudgmentRounds: 1, maxHostedTokens: 0 },
+      now: new Date().toISOString(),
+      observationText: "API",
+      triggerToken: "API",
+      isExplicitAsk: true,
+    });
+    expect(result.summary).toContain("Always Prefer Intent");
+  });
+
+  it("requests Jev for multiple context candidates", async () => {
+    const module = createResolveAcronymModule({
+      glossary: createFixtureGlossaryLookup({
+        ABC: ["Alpha Beta Corp", "Another Big Choice"],
+      }),
+    });
+    const result = await module.evaluate({
+      caseId: "c1",
+      caseVersion: 1,
+      reflex: { id: "resolve-acronym", version: 1 },
+      triggerSourceRefs: [],
+      eligibleConnections: [],
+      remainingBudgets: { maxSourceAttempts: 1, maxJudgmentRounds: 1, maxHostedTokens: 0 },
+      now: new Date().toISOString(),
+      observationText: "ABC",
+      triggerToken: "ABC",
+      isExplicitAsk: true,
+    });
+    expect(result.type).toBe("clarification_required");
+  });
+
+  it("does not invent unknown acronyms", async () => {
+    const module = createResolveAcronymModule({
+      glossary: createFixtureGlossaryLookup({}),
+    });
+    const result = await module.evaluate({
+      caseId: "c1",
+      caseVersion: 1,
+      reflex: { id: "resolve-acronym", version: 1 },
+      triggerSourceRefs: [],
+      eligibleConnections: [],
+      remainingBudgets: { maxSourceAttempts: 1, maxJudgmentRounds: 1, maxHostedTokens: 0 },
+      now: new Date().toISOString(),
+      observationText: "ZXQPV",
+      triggerToken: "ZXQPV",
+      isExplicitAsk: true,
+    });
+    expect(result.type).toBe("no_action");
+    expect(result.summary).toBe("no_candidates");
   });
 
   it("applies versioned display policy over recorded probabilities", () => {

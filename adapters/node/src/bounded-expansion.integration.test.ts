@@ -174,9 +174,11 @@ describe("bounded expansion through RelayClient", () => {
 function ambiguous() {
   return createResolveAcronymModule({
     glossary: {
-      exactProject: () => null,
-      exactGlobal: (token) => (token === "API" ? "Application Programming Interface" : null),
-      searchWindow: (token) => (token === "BESS" ? ["Battery Energy Storage", "Bessemer"] : []),
+      exactUser: async () => null,
+      exactProject: async () => null,
+      exactBundled: async (token) =>
+        token === "API" ? "Application Programming Interface" : null,
+      searchWindow: async (token) => (token === "BESS" ? ["Battery Energy Storage", "Bessemer"] : []),
     },
   });
 }

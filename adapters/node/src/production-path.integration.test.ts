@@ -279,9 +279,10 @@ function benefitPort(): JudgmentPort {
 function ambiguous() {
   return createResolveAcronymModule({
     glossary: {
-      exactProject: () => null,
-      exactGlobal: () => null,
-      searchWindow: (token) => (token === "BESS" ? ["Battery Energy Storage", "Bessemer"] : []),
+      exactUser: async () => null,
+      exactProject: async () => null,
+      exactBundled: async () => null,
+      searchWindow: async (token) => (token === "BESS" ? ["Battery Energy Storage", "Bessemer"] : []),
     },
   });
 }

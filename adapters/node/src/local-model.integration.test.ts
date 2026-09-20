@@ -8,7 +8,7 @@ describe("local model generation path", () => {
       async generate(request) {
         expect(request.taskKind).toBe("direct_answer");
         expect(request.promptVersion).toBe("direct-answer.v1");
-        expect(request.prompt).toContain("TCP");
+        expect(request.prompt).toContain("connection-oriented");
         return {
           ok: true,
           text: "TCP is connection-oriented; UDP is connectionless.",
@@ -29,7 +29,7 @@ describe("local model generation path", () => {
     await harness.client.start();
     await harness.client.execute({
       type: "SubmitText",
-      text: "What is the difference between TCP and UDP?",
+      text: "What is the difference between connection-oriented and connectionless transport?",
     });
     await waitFor(async () =>
       (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
@@ -51,7 +51,10 @@ describe("local model generation path", () => {
       },
     });
     await harness.client.start();
-    await harness.client.execute({ type: "SubmitText", text: "Explain DNS briefly." });
+    await harness.client.execute({
+      type: "SubmitText",
+      text: "Explain how recursive name resolution works in practice without inventing tools.",
+    });
     await waitFor(async () =>
       (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
     );

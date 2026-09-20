@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { createProductionIds, createRelayClientFromEngine, RelayEngine } from "@relay/engine";
-import { productionReflexes } from "@relay/reflexes";
+import { createProductionReflexes } from "@relay/reflexes";
 import { createFileTraceSink } from "./file-trace.js";
 import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
 import { SqliteEngineStore } from "./sqlite-store.js";
@@ -96,7 +96,7 @@ function openComposition(databasePath: string, runsRoot: string) {
     clock: { now: () => new Date() },
     ids,
     sessionId: ids.next("session"),
-    reflexModules: productionReflexes,
+    reflexModules: createProductionReflexes(store.learning),
     storageDetail: "sqlite",
     jevStatus: { ok: false, detail: "missing key" },
     modelStatus: { ok: false, detail: "disabled" },

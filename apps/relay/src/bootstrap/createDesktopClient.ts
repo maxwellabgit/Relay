@@ -20,7 +20,7 @@ import {
   TYPESAFE_MODEL,
   type EngineDeps,
 } from "@relay/engine";
-import { productionReflexes } from "@relay/reflexes";
+import { createProductionReflexes } from "@relay/reflexes";
 import { createBrowserTraceSink } from "./trace-log";
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -86,7 +86,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     clock: options.clock ?? { now: () => new Date() },
     ids,
     sessionId,
-    reflexModules: productionReflexes,
+    reflexModules: createProductionReflexes(store.learning),
     storageDetail: "sqlite",
     jevStatus:
       secret === "present"

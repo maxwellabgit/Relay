@@ -1,7 +1,7 @@
 import type { JudgmentPort, TextModelPort } from "@relay/contracts";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
-import { productionReflexes } from "@relay/reflexes";
+import { createProductionReflexes } from "@relay/reflexes";
 import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,7 +81,7 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
     clock,
     ids,
     sessionId: options.sessionId ?? "session_test",
-    reflexModules: options.reflexModules ?? productionReflexes,
+    reflexModules: options.reflexModules ?? createProductionReflexes(store.learning),
     ...(options.episodeDefinitions ? { episodeDefinitions: options.episodeDefinitions } : {}),
     storageDetail: "sqlite",
     jevStatus: { ok: true, detail: "recorded" },
