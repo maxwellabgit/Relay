@@ -14,6 +14,7 @@ import type {
   RelaySnapshot,
 } from "@relay/contracts";
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
+import { migrateLegacyProtectedContent } from "./migrate-legacy-protected.js";
 import { SqliteLearning } from "./sqlite-learning.js";
 
 const migrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages/storage-schema/migrations");
@@ -27,6 +28,19 @@ export class SqliteEngineStore implements EngineStore {
     this.db.exec("PRAGMA foreign_keys = ON");
     applyMigrations(this.db);
     this.learning = new SqliteLearning(this.db, artifacts);
+  }
+
+  /** Apply idempotent legacy plaintext → artifact scrub (no-op when already protected). */
+  async migrateLegacyContent(artifacts: ArtifactStorePort): Promise<void> {
+    await migrateLegacyProtectedContent(this.db, artifacts);
+  }
+
+  static async open(filename = ":memory:", artifacts?: ArtifactStorePort): Promise<SqliteEngineStore> {
+    const store = new SqliteEngineStore(filename, artifacts);
+    if (artifacts) {
+      await store.migrateLegacyContent(artifacts);
+    }
+    return store;
   }
 
   close(): void {
@@ -570,12 +584,13 @@ function applyMigrations(db: DatabaseSync): void {
     5: "005_content_artifacts.sql",
     6: "006_protected_learning.sql",
     7: "007_runtime_settings.sql",
+    8: "008_protect_legacy_content.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

@@ -11,7 +11,7 @@ const SENTINEL = "PRIVACY_SENTINEL_7f3a9c2e";
 
 describe("bounded expansion through RelayClient", () => {
   it("does not treat three unrelated unknowns as one repeated task", async () => {
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       for (const token of ["MSRP", "BESS", "OEM"]) {
@@ -41,7 +41,7 @@ describe("bounded expansion through RelayClient", () => {
         return recordedSuccess({ benefit: { type: "noul", probabilityYes: 0.8 } });
       },
     };
-    const harness = createNodeHarness({ judgments, episodeDefinitions: [calendarBlockEpisode] });
+    const harness = await createNodeHarness({ judgments, episodeDefinitions: [calendarBlockEpisode] });
     try {
       await harness.client.start();
       const fields = { start_bucket: "noon", duration: "60m", reminder_offset: "-1d" };
@@ -71,7 +71,7 @@ describe("bounded expansion through RelayClient", () => {
   });
 
   it("shows a bounded Jev failure for an ambiguous acronym and does not invent a definition", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       reflexModules: [ambiguous()],
       judgments: {
         async judge() {
@@ -97,7 +97,7 @@ describe("bounded expansion through RelayClient", () => {
   });
 
   it("completes an ambiguous choice when Jev returns a probability above the threshold", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       reflexModules: [ambiguous()],
       judgments: {
         async judge() {
@@ -129,7 +129,7 @@ describe("bounded expansion through RelayClient", () => {
   it("stores a confirmed birthday and keeps the sentinel out of the run log", async () => {
     const runsRoot = await mkdtemp(join(tmpdir(), "relay-privacy-"));
     const databasePath = join(runsRoot, "state.sqlite");
-    const first = createNodeHarness({ databasePath, runsRoot });
+    const first = await createNodeHarness({ databasePath, runsRoot });
     try {
       await first.client.start();
       expect(
@@ -154,7 +154,7 @@ describe("bounded expansion through RelayClient", () => {
       await first.client.stop();
       first.close();
     }
-    const second = createNodeHarness({ databasePath, runsRoot });
+    const second = await createNodeHarness({ databasePath, runsRoot });
     try {
       await second.client.start();
       const snap = await second.client.getSnapshot();

@@ -17,7 +17,7 @@ describe("local model generation path", () => {
         };
       },
     };
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       model,
       judgments: {
         async judge() {
@@ -56,7 +56,7 @@ describe("local model generation path", () => {
   });
 
   it("keeps the engine alive when the local model fails", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       model: {
         async generate() {
           return { ok: false, failureReason: "model_unavailable" };

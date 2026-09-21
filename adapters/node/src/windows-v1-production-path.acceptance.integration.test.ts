@@ -17,7 +17,7 @@ describe("windows v1 production-path acceptance", () => {
     const databasePath = join(root, "state.sqlite");
     const runsRoot = join(root, "runs");
 
-    const first = createNodeHarness({ databasePath, runsRoot });
+    const first = await createNodeHarness({ databasePath, runsRoot });
     try {
       await first.client.start();
       await first.client.execute({
@@ -43,7 +43,7 @@ describe("windows v1 production-path acceptance", () => {
       first.close();
     }
 
-    const second = createNodeHarness({ databasePath, runsRoot });
+    const second = await createNodeHarness({ databasePath, runsRoot });
     try {
       await second.client.start();
       const answersBefore = (await second.client.getSnapshot()).feedItems.filter(
@@ -94,7 +94,7 @@ describe("windows restart recovery checkpoints", () => {
   it("does not silently overwrite conflicting glossary memory", async () => {
     const root = await mkdtemp(join(tmpdir(), "relay-restart-"));
     const databasePath = join(root, "state.sqlite");
-    const first = createNodeHarness({ databasePath });
+    const first = await createNodeHarness({ databasePath });
     try {
       await first.client.start();
       const saved = await first.client.execute({
@@ -117,7 +117,7 @@ describe("windows restart recovery checkpoints", () => {
       first.close();
     }
 
-    const second = createNodeHarness({ databasePath });
+    const second = await createNodeHarness({ databasePath });
     try {
       await second.client.start();
       const memories = await second.store.learning.listMemories();
@@ -140,7 +140,7 @@ describe("windows restart recovery checkpoints", () => {
     const root = await mkdtemp(join(tmpdir(), "relay-judgment-resume-"));
     const databasePath = join(root, "state.sqlite");
     const runsRoot = join(root, "runs");
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       databasePath,
       runsRoot,
       durableDecisionArtifacts: true,

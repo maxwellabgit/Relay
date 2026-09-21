@@ -17,6 +17,8 @@ const MIGRATION_6: &str =
     include_str!("../../../../packages/storage-schema/migrations/006_protected_learning.sql");
 const MIGRATION_7: &str =
     include_str!("../../../../packages/storage-schema/migrations/007_runtime_settings.sql");
+const MIGRATION_8: &str =
+    include_str!("../../../../packages/storage-schema/migrations/008_protect_legacy_content.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -83,7 +85,17 @@ impl StateDb {
         apply_version(&tx, 5, MIGRATION_5)?;
         apply_version(&tx, 6, MIGRATION_6)?;
         apply_version(&tx, 7, MIGRATION_7)?;
+        apply_version(&tx, 8, MIGRATION_8)?;
         tx.commit().map_err(|error| error.to_string())?;
+        self.migrate_legacy_protected_content()?;
+        Ok(())
+    }
+
+    fn migrate_legacy_protected_content(&mut self) -> Result<(), String> {
+        migrate_legacy_memories(&self.conn)?;
+        migrate_legacy_receipts(&self.conn)?;
+        migrate_legacy_candidates(&self.conn)?;
+        migrate_legacy_reviews(&self.conn)?;
         Ok(())
     }
 }
@@ -106,6 +118,240 @@ fn apply_version(conn: &Connection, version: i64, sql: &str) -> Result<(), Strin
         params![version, now_iso()],
     )
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn migrate_legacy_memories(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT memory_id, kind, value_json, metadata_json FROM memories
+             WHERE value_json IS NOT NULL AND value_json != '{}'
+               AND (content_artifact_id IS NULL OR content_artifact_id = '')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String, String)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "{}".into()),
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (memory_id, kind, value_json, metadata_json) in rows {
+        let value: Value = parse_json(&value_json).unwrap_or(json!({}));
+        if !value.is_object() {
+            conn.execute(
+                "UPDATE memories SET value_json='{}' WHERE memory_id=?1",
+                params![memory_id],
+            )
+            .map_err(|e| e.to_string())?;
+            continue;
+        }
+        let obj = value.as_object().cloned().unwrap_or_default();
+        let mut existing_meta: serde_json::Map<String, Value> =
+            parse_json(&metadata_json)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+        let mut prose = serde_json::Map::new();
+        if kind == "glossary" {
+            if let Some(expansion) = obj.get("expansion").and_then(|v| v.as_str()) {
+                if !expansion.is_empty() {
+                    prose.insert("expansion".into(), json!(expansion));
+                }
+            }
+            for (k, v) in &obj {
+                if k == "expansion" {
+                    continue;
+                }
+                if let Some(s) = v.as_str() {
+                    existing_meta.insert(k.clone(), json!(s));
+                }
+            }
+        } else {
+            if let Some(display) = obj.get("displayName").and_then(|v| v.as_str()) {
+                if !display.is_empty() {
+                    prose.insert("displayName".into(), json!(display));
+                }
+            }
+            for (k, v) in &obj {
+                if k == "displayName" {
+                    continue;
+                }
+                if let Some(s) = v.as_str() {
+                    existing_meta.insert(k.clone(), json!(s));
+                }
+            }
+        }
+        let plain = serde_json::to_vec(&Value::Object(prose)).map_err(|e| e.to_string())?;
+        let put = crate::artifacts::put_plain_bytes(&plain)?;
+        conn.execute(
+            "UPDATE memories
+             SET content_artifact_id=?1, content_sha256=?2, metadata_json=?3, value_json='{}'
+             WHERE memory_id=?4",
+            params![
+                put.artifact_id,
+                put.sha256,
+                Value::Object(existing_meta).to_string(),
+                memory_id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn migrate_legacy_receipts(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT receipt_id, selected_option, selected_option_id, option_labels_json,
+                    labels_artifact_id, labels_sha256
+             FROM decision_receipts
+             WHERE (option_labels_json IS NOT NULL AND option_labels_json != '{}')
+                OR (selected_option IS NOT NULL AND selected_option != ''
+                    AND (selected_option_id IS NULL OR selected_option_id = ''))",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "{}".into()),
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (receipt_id, selected_option, selected_option_id, labels_json, labels_id, labels_sha) in rows
+    {
+        let labels: Value = parse_json(&labels_json).unwrap_or(json!({}));
+        let mut artifact_id = labels_id;
+        let mut artifact_sha = labels_sha;
+        if labels.as_object().map(|o| !o.is_empty()).unwrap_or(false)
+            && (artifact_id.is_none() || artifact_sha.is_none())
+        {
+            let plain = serde_json::to_vec(&labels).map_err(|e| e.to_string())?;
+            let put = crate::artifacts::put_plain_bytes(&plain)?;
+            artifact_id = Some(put.artifact_id);
+            artifact_sha = Some(put.sha256);
+        }
+        let selected_id = resolve_selected_option_id(
+            selected_option.as_deref(),
+            selected_option_id.as_deref(),
+            &labels,
+        );
+        conn.execute(
+            "UPDATE decision_receipts
+             SET labels_artifact_id=?1, labels_sha256=?2, option_labels_json='{}',
+                 selected_option=?3, selected_option_id=?4
+             WHERE receipt_id=?5",
+            params![artifact_id, artifact_sha, selected_id, selected_id, receipt_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn resolve_selected_option_id(
+    selected_option: Option<&str>,
+    selected_option_id: Option<&str>,
+    labels: &Value,
+) -> Option<String> {
+    if let Some(id) = selected_option_id.filter(|s| !s.is_empty()) {
+        return Some(id.to_string());
+    }
+    let selected = selected_option.filter(|s| !s.is_empty())?;
+    if let Some(obj) = labels.as_object() {
+        if obj.contains_key(selected) {
+            return Some(selected.to_string());
+        }
+        for (id, label) in obj {
+            if label.as_str() == Some(selected) {
+                return Some(id.clone());
+            }
+        }
+    }
+    Some(selected.to_string())
+}
+
+fn migrate_legacy_candidates(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT candidate_id, because FROM expansion_candidates
+             WHERE because IS NOT NULL AND because != ''
+               AND (because_artifact_id IS NULL OR because_artifact_id = '')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (candidate_id, because) in rows {
+        let put = crate::artifacts::put_plain_bytes(because.as_bytes())?;
+        conn.execute(
+            "UPDATE expansion_candidates
+             SET because_artifact_id=?1, because_sha256=?2, because=''
+             WHERE candidate_id=?3",
+            params![put.artifact_id, put.sha256, candidate_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn migrate_legacy_reviews(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT review_id, findings_json FROM review_runs
+             WHERE findings_json IS NOT NULL AND findings_json != '[]'
+               AND (findings_artifact_id IS NULL OR findings_artifact_id = '')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(stmt);
+    for (review_id, findings_json) in rows {
+        let findings: Value = parse_json(&findings_json).unwrap_or(json!([]));
+        if findings.as_array().map(|a| a.is_empty()).unwrap_or(true) {
+            conn.execute(
+                "UPDATE review_runs SET findings_json='[]' WHERE review_id=?1",
+                params![review_id],
+            )
+            .map_err(|e| e.to_string())?;
+            continue;
+        }
+        let plain = serde_json::to_vec(&findings).map_err(|e| e.to_string())?;
+        let put = crate::artifacts::put_plain_bytes(&plain)?;
+        conn.execute(
+            "UPDATE review_runs
+             SET findings_artifact_id=?1, findings_sha256=?2, findings_json='[]'
+             WHERE review_id=?3",
+            params![put.artifact_id, put.sha256, review_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

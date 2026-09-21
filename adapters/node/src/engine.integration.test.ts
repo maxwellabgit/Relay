@@ -18,7 +18,7 @@ async function waitFor(
 
 describe("autonomous engine", () => {
   it("starts a queue loop independent of React and processes Ask without pausing Listen", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       ids: (() => {
         let n = 0;
         return { next: (prefix: string) => `${prefix}_${++n}` };
@@ -62,7 +62,7 @@ describe("autonomous engine", () => {
   });
 
   it("recommends a search task for an unknown acronym instead of inventing a definition", async () => {
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       await harness.client.execute({
@@ -93,7 +93,7 @@ describe("autonomous engine", () => {
   });
 
   it("persists final source events before scheduling case work", async () => {
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       await harness.client.execute({ type: "SubmitText", text: "BESS glossary check" });
@@ -115,7 +115,7 @@ describe("autonomous engine", () => {
         return { ok: false, failure: { category: "missing_secret", message: "typesafe_key_missing" } };
       },
     };
-    const harness = createNodeHarness({ judgments });
+    const harness = await createNodeHarness({ judgments });
     try {
       await harness.client.start();
       const result = await harness.client.execute({
@@ -145,7 +145,7 @@ describe("autonomous engine", () => {
 
   it("retrieves an explicit memory after restart instead of searching again", async () => {
     const databasePath = join(tmpdir(), `relay-memory-${Date.now()}.sqlite`);
-    const first = createNodeHarness({ databasePath });
+    const first = await createNodeHarness({ databasePath });
     try {
       await first.client.start();
       const stored = await first.client.execute({
@@ -159,7 +159,7 @@ describe("autonomous engine", () => {
       await first.client.stop();
       first.close();
     }
-    const second = createNodeHarness({ databasePath });
+    const second = await createNodeHarness({ databasePath });
     try {
       await second.client.start();
       await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });

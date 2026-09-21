@@ -14,7 +14,7 @@ describe("production path", () => {
   it("desktop_memory_survives_restart", async () => {
     const appData = await mkdtemp(join(tmpdir(), "relay-app-"));
     const databasePath = join(appData, "state.sqlite");
-    const first = createNodeHarness({ databasePath });
+    const first = await createNodeHarness({ databasePath });
     try {
       await first.client.start();
       const saved = await first.client.execute({
@@ -28,7 +28,7 @@ describe("production path", () => {
       await first.client.stop();
       first.close();
     }
-    const second = createNodeHarness({ databasePath });
+    const second = await createNodeHarness({ databasePath });
     try {
       await second.client.start();
       await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
@@ -47,7 +47,7 @@ describe("production path", () => {
   it("desktop_learning_state_survives_restart", async () => {
     const appData = await mkdtemp(join(tmpdir(), "relay-learn-"));
     const databasePath = join(appData, "state.sqlite");
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       episodeDefinitions: [calendarBlockEpisode],
       judgments: benefitPort(),
@@ -64,7 +64,7 @@ describe("production path", () => {
       await first.client.stop();
       first.close();
     }
-    const second = createNodeHarness({ databasePath, episodeDefinitions: [calendarBlockEpisode] });
+    const second = await createNodeHarness({ databasePath, episodeDefinitions: [calendarBlockEpisode] });
     try {
       await second.client.start();
       const sessions = await second.store.learning.listSessions();
@@ -97,7 +97,7 @@ describe("production path", () => {
         });
       },
     };
-    const harness = createNodeHarness({ judgments, reflexModules: [ambiguous()] });
+    const harness = await createNodeHarness({ judgments, reflexModules: [ambiguous()] });
     try {
       await harness.client.start();
       await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
@@ -115,7 +115,7 @@ describe("production path", () => {
   });
 
   it("nonretryable_judgment_terminates", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       reflexModules: [ambiguous()],
       judgments: {
         async judge() {
@@ -137,7 +137,7 @@ describe("production path", () => {
   });
 
   it("unknown_lookup_is_not_completed_work", async () => {
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       await harness.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
@@ -154,7 +154,7 @@ describe("production path", () => {
   });
 
   it("glossary_rejects_empty_expansion", async () => {
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       const rejected = await harness.client.execute({
@@ -178,7 +178,7 @@ describe("production path", () => {
       eligibleOutcomes: ["completed"] as const,
       normalize: () => "notes.tick|bucket=a",
     };
-    const harness = createNodeHarness({ episodeDefinitions: [bare], judgments: benefitPort() });
+    const harness = await createNodeHarness({ episodeDefinitions: [bare], judgments: benefitPort() });
     try {
       await harness.client.start();
       for (let index = 0; index < 3; index += 1) {
@@ -199,7 +199,7 @@ describe("production path", () => {
   });
 
   it("review_resets_after_completion", async () => {
-    const harness = createNodeHarness({ episodeDefinitions: [calendarBlockEpisode] });
+    const harness = await createNodeHarness({ episodeDefinitions: [calendarBlockEpisode] });
     try {
       await harness.client.start();
       await fillSessions(harness, 12);
@@ -238,7 +238,7 @@ describe("production path", () => {
     expect(validateBirthday("O’Connor", "12-31")).toBeNull();
     expect(validateBirthday("李明", "03-08")).toBeNull();
     expect(parseBirthdayUtterance("Remember that Rasmi’s birthday is January 4")?.displayName).toBe("Rasmi");
-    const harness = createNodeHarness();
+    const harness = await createNodeHarness();
     try {
       await harness.client.start();
       const saved = await harness.client.execute({

@@ -39,7 +39,7 @@ describe("hosted processing authority", () => {
       }),
     );
     const judgments: JudgmentPort = { judge };
-    const harness = createNodeHarness({ judgments, reflexModules: [ambiguous()] });
+    const harness = await createNodeHarness({ judgments, reflexModules: [ambiguous()] });
     await harness.store.setHostedProcessingEnabled(false);
     await harness.client.start();
     try {
@@ -75,7 +75,7 @@ describe("hosted processing authority", () => {
       }),
     );
     const judgments: JudgmentPort = { judge };
-    const harness = createNodeHarness({ judgments, reflexModules: [ambiguous()] });
+    const harness = await createNodeHarness({ judgments, reflexModules: [ambiguous()] });
     await harness.client.start();
     try {
       await harness.client.execute({ type: "SetHostedProcessing", enabled: true });

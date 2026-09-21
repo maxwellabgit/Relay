@@ -25,7 +25,7 @@ export type NodeHarnessOptions = {
   readonly durableDecisionArtifacts?: boolean;
 };
 
-export function createNodeHarness(options: NodeHarnessOptions = {}) {
+export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   const databasePath = options.databasePath ?? ":memory:";
   const runsRoot = options.runsRoot ?? join(tmpdir(), "relay-runs");
   const runId = `run_${Date.now().toString(36)}`;
@@ -35,8 +35,8 @@ export function createNodeHarness(options: NodeHarnessOptions = {}) {
       : databasePath !== ":memory:"
         ? new FileArtifactStore(fileArtifactRootForDatabase(databasePath))
         : new MemoryArtifactStore();
-  const sqlite = new SqliteEngineStore(databasePath, artifacts);
-  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
+  const sqlite = await SqliteEngineStore.open(databasePath, artifacts);
+  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
   const ids =

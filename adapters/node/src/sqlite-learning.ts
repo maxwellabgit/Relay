@@ -399,17 +399,6 @@ export class SqliteLearning implements LearningStore {
       } catch {
         prose = {};
       }
-    } else if (row.value_json && row.value_json !== "{}") {
-      // Legacy rows written before protected-content migration.
-      const legacy = JSON.parse(row.value_json) as Record<string, string>;
-      return {
-        memoryId: row.memory_id,
-        kind: row.kind,
-        key: row.key,
-        value: legacy,
-        source: row.source,
-        createdAt: row.created_at,
-      };
     }
     return {
       memoryId: row.memory_id,
@@ -435,15 +424,8 @@ export class SqliteLearning implements LearningStore {
       } catch {
         optionLabels = labelsOrUnavailable(optionIds.length > 0 ? optionIds : ["unavailable"], null);
       }
-    } else {
-      const legacy = JSON.parse(row.option_labels_json ?? "{}") as Record<string, string>;
-      optionLabels =
-        Object.keys(legacy).length > 0
-          ? legacy
-          : labelsOrUnavailable(optionIds, null);
-      if (Object.keys(legacy).length === 0 && optionIds.length === 0) {
-        optionLabels = {};
-      }
+    } else if (optionIds.length > 0) {
+      optionLabels = labelsOrUnavailable(optionIds, null);
     }
     const selectedOptionId = row.selected_option_id ?? row.selected_option;
     return {
@@ -484,8 +466,6 @@ export class SqliteLearning implements LearningStore {
       } catch {
         because = "unavailable";
       }
-    } else if (row.because) {
-      because = row.because;
     }
     return {
       candidateId: row.candidate_id,
@@ -509,8 +489,6 @@ export class SqliteLearning implements LearningStore {
       } catch {
         findings = ["unavailable"];
       }
-    } else if (row.findings_json && row.findings_json !== "[]") {
-      findings = JSON.parse(row.findings_json) as string[];
     }
     return {
       reviewId: row.review_id,

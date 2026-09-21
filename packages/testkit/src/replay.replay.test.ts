@@ -15,7 +15,7 @@ describe("transcript replay", () => {
   });
 
   it("streams finals into the engine and produces acronym outcomes", async () => {
-    const harness = createNodeHarness({ sessionId: "replay_session" });
+    const harness = await createNodeHarness({ sessionId: "replay_session" });
     try {
       await harness.client.start();
       const result = await runReplay({

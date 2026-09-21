@@ -27,7 +27,7 @@ describe("windows v1 crash recovery", () => {
   it("A: crash after source persistence before source work completion — case processed once", async () => {
     const { databasePath, runsRoot } = await tempRoots();
     let caseId = "";
-    const first = createNodeHarness({ databasePath, runsRoot });
+    const first = await createNodeHarness({ databasePath, runsRoot });
     try {
       await first.client.execute({
         type: "UpsertGlossaryEntry",
@@ -48,7 +48,7 @@ describe("windows v1 crash recovery", () => {
       await simulateCrash(first);
     }
 
-    const second = createNodeHarness({ databasePath, runsRoot });
+    const second = await createNodeHarness({ databasePath, runsRoot });
     try {
       await second.client.start();
       await waitFor(async () => {
@@ -70,7 +70,7 @@ describe("windows v1 crash recovery", () => {
 
   it("B: crash with model work queued — model resumes; one answer", async () => {
     const { databasePath, runsRoot } = await tempRoots();
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       model: disabledModel(),
@@ -86,7 +86,7 @@ describe("windows v1 crash recovery", () => {
     }
 
     let modelCalls = 0;
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       model: countingModel(() => {
@@ -119,7 +119,7 @@ describe("windows v1 crash recovery", () => {
 
   it("C: crash while model work is leased — after lease expiration work reclaimed; one answer", async () => {
     const { databasePath, runsRoot } = await tempRoots();
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       model: disabledModel(),
@@ -139,7 +139,7 @@ describe("windows v1 crash recovery", () => {
     expireLease(databasePath, "model.requested");
 
     let modelCalls = 0;
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       model: countingModel(() => {
@@ -165,7 +165,7 @@ describe("windows v1 crash recovery", () => {
 
   it("D: crash after answer persisted before case complete — answer reused; no duplicate", async () => {
     const { databasePath, runsRoot } = await tempRoots();
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       model: countingModel(() => MODEL_ANSWER),
@@ -190,7 +190,7 @@ describe("windows v1 crash recovery", () => {
     leaveAnswerWithoutCaseComplete(databasePath, caseId);
 
     let modelCalls = 0;
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       model: {
@@ -218,7 +218,7 @@ describe("windows v1 crash recovery", () => {
   it("E: crash after Jev request persistence — recovers and retries", async () => {
     const { databasePath, runsRoot } = await tempRoots();
     const crashGate = new AbortController();
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       reflexModules: [ambiguousBess()],
@@ -252,7 +252,7 @@ describe("windows v1 crash recovery", () => {
     expireLease(databasePath, "judgment.requested");
 
     let providerCalls = 0;
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       reflexModules: [ambiguousBess()],
@@ -291,7 +291,7 @@ describe("windows v1 crash recovery", () => {
   it("F: crash after completed Jev response — cached judgment reused; provider not recalled", async () => {
     const { databasePath, runsRoot } = await tempRoots();
     let providerCalls = 0;
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       reflexModules: [ambiguousBess()],
@@ -332,7 +332,7 @@ describe("windows v1 crash recovery", () => {
     requeueCompletedJudgmentWork(databasePath, caseId);
 
     let secondCalls = 0;
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       reflexModules: [ambiguousBess()],
@@ -364,7 +364,7 @@ describe("windows v1 crash recovery", () => {
     const sessionId = "session_crash_g";
     const at = "2026-09-20T18:00:00.000Z";
 
-    const first = createNodeHarness({ databasePath, runsRoot });
+    const first = await createNodeHarness({ databasePath, runsRoot });
     try {
       // Torn write that atomic recordCompletedEpisode prevents: episode row only.
       const db = new DatabaseSync(databasePath);
@@ -381,7 +381,7 @@ describe("windows v1 crash recovery", () => {
       await simulateCrash(first);
     }
 
-    const second = createNodeHarness({ databasePath, runsRoot });
+    const second = await createNodeHarness({ databasePath, runsRoot });
     try {
       await second.client.start();
       const pattern = await second.store.learning.recordCompletedEpisode({
@@ -416,7 +416,7 @@ describe("windows v1 crash recovery", () => {
 
   it("H: missing/corrupt protected artifact — unavailable state; engine stays alive", async () => {
     const { databasePath, runsRoot } = await tempRoots();
-    const first = createNodeHarness({
+    const first = await createNodeHarness({
       databasePath,
       runsRoot,
       model: countingModel(() => MODEL_ANSWER),
@@ -442,7 +442,7 @@ describe("windows v1 crash recovery", () => {
     const artifactPath = join(dirname(databasePath), "objects", `${artifactId}.bin`);
     await unlink(artifactPath);
 
-    const second = createNodeHarness({
+    const second = await createNodeHarness({
       databasePath,
       runsRoot,
       model: countingModel(() => "Engine still answers new asks."),

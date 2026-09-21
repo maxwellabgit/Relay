@@ -33,7 +33,7 @@ const backends: Opened[] = [
       const dir = await mkdtemp(join(tmpdir(), "relay-contract-"));
       const path = join(dir, "state.sqlite");
       const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(path));
-      let store = new SqliteEngineStore(path, artifacts);
+      let store = await SqliteEngineStore.open(path, artifacts);
       return {
         store,
         close: async () => {
@@ -42,7 +42,7 @@ const backends: Opened[] = [
         },
         reopen: async () => {
           store.close();
-          store = new SqliteEngineStore(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
+          store = await SqliteEngineStore.open(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
           return store;
         },
       };
@@ -55,7 +55,7 @@ const backends: Opened[] = [
       const dir = await mkdtemp(join(tmpdir(), "relay-tauri-contract-"));
       const path = join(dir, "state.sqlite");
       const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(path));
-      let sqlite = new SqliteEngineStore(path, artifacts);
+      let sqlite = await SqliteEngineStore.open(path, artifacts);
       const wrap = (current: SqliteEngineStore) => new TauriEngineStore(sqliteStoreInvoke(current));
       return {
         store: wrap(sqlite),
@@ -65,7 +65,7 @@ const backends: Opened[] = [
         },
         reopen: async () => {
           sqlite.close();
-          sqlite = new SqliteEngineStore(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
+          sqlite = await SqliteEngineStore.open(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
           return wrap(sqlite);
         },
       };

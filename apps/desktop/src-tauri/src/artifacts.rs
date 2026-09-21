@@ -143,11 +143,16 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 pub fn artifact_put(request: ArtifactPutRequest) -> Result<ArtifactPutResult, String> {
     let _ = request.policy;
     let plain = decode_b64(&request.bytes_b64)?;
-    let digest = sha256_hex(&plain);
+    put_plain_bytes(&plain)
+}
+
+/// Content-addressed DPAPI put used by Tauri commands and StateDb legacy migration.
+pub fn put_plain_bytes(plain: &[u8]) -> Result<ArtifactPutResult, String> {
+    let digest = sha256_hex(plain);
     let artifact_id = format!("artifact_{}", &digest[..24.min(digest.len())]);
     let path = objects_dir()?.join(format!("{artifact_id}.bin"));
     if !path.exists() {
-        let protected = protect(&plain)?;
+        let protected = protect(plain)?;
         atomic_write(&path, &protected)?;
     }
     Ok(ArtifactPutResult {

@@ -22,7 +22,7 @@ describe("windows production composition smoke", () => {
     await mkdir(runsRoot, { recursive: true });
     process.env.LOCALAPPDATA = join(root, "LOCALAPPDATA");
 
-    const first = openComposition(databasePath, runsRoot);
+    const first = await openComposition(databasePath, runsRoot);
     try {
       await first.client.start();
       const glossary = await first.client.execute({
@@ -47,7 +47,7 @@ describe("windows production composition smoke", () => {
       first.close();
     }
 
-    const second = openComposition(databasePath, runsRoot);
+    const second = await openComposition(databasePath, runsRoot);
     try {
       await second.client.start();
       await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
@@ -75,10 +75,10 @@ describe("windows production composition smoke", () => {
   });
 });
 
-function openComposition(databasePath: string, runsRoot: string) {
+async function openComposition(databasePath: string, runsRoot: string) {
   const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(databasePath));
-  const sqlite = new SqliteEngineStore(databasePath, artifacts);
-  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite));
+  const sqlite = await SqliteEngineStore.open(databasePath, artifacts);
+  const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
   const ids = createProductionIds();
   const engine = new RelayEngine({
     store,

@@ -33,7 +33,7 @@ async function replay(): Promise<void> {
     protocolVersion: "1",
   });
   diag.writeManifest({ fixtureHashes: { [fixture]: "pending" } });
-  const harness = createNodeHarness({ sessionId: "replay_session" });
+  const harness = await createNodeHarness({ sessionId: "replay_session" });
   try {
     await harness.client.start();
     const result = await runReplay({

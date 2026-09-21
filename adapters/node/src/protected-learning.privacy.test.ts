@@ -20,7 +20,7 @@ describe("protected learning privacy boundary", () => {
     const dbPath = join(root, "state.sqlite");
     const runsRoot = join(root, "runs");
     try {
-      const harness = createNodeHarness({
+      const harness = await createNodeHarness({
         databasePath: dbPath,
         runsRoot,
         sessionId: "session_privacy",

@@ -23,7 +23,7 @@ function micSegment(sessionId: string, segmentId: string, text: string, sequence
 
 describe("listen intake gate", () => {
   it("rejects observed segments while Listen is OFF", async () => {
-    const harness = createNodeHarness({ sessionId: "session_listen_off" });
+    const harness = await createNodeHarness({ sessionId: "session_listen_off" });
     await harness.client.start();
     const caseId = await harness.engine.ingestFinalSegment(
       micSegment("session_listen_off", "seg_off", "We need the API ready", 1),
@@ -37,7 +37,7 @@ describe("listen intake gate", () => {
   });
 
   it("accepts observed segments while Listen is ON and keeps Ask working", async () => {
-    const harness = createNodeHarness({
+    const harness = await createNodeHarness({
       sessionId: "session_listen_on",
       model: {
         async generate() {
@@ -66,7 +66,7 @@ describe("listen intake gate", () => {
   });
 
   it("deduplicates identical final segment revisions", async () => {
-    const harness = createNodeHarness({ sessionId: "session_dedupe" });
+    const harness = await createNodeHarness({ sessionId: "session_dedupe" });
     await harness.client.start();
     await harness.client.execute({ type: "SetListening", enabled: true });
     const segment = micSegment("session_dedupe", "seg_dup", "Duplicate final", 1);
