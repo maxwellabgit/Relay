@@ -26,22 +26,17 @@ export async function runReplay(options: ReplayOptions): Promise<{
   let finals = 0;
   const ac = new AbortController();
 
-  await options.engine.execute({ type: "SetListening", enabled: true });
-
   for await (const event of source.events(ac.signal)) {
     collected.push(event);
     if (event.type === "segment.interim") continue;
     if (event.type === "segment.speaker_revised") continue;
     if (event.type === "segment.final") {
       finals += 1;
-      await options.engine.ingestFinalSegment(
-        {
-          ...event.segment,
-          segmentId: `${captureSessionId}_${event.segment.segmentId}_${finals}`,
-          sessionId: options.sessionId,
-        },
-        false,
-      );
+      await options.engine.ingestReplayFinalSegment({
+        ...event.segment,
+        segmentId: `${captureSessionId}_${event.segment.segmentId}_${finals}`,
+        sessionId: options.sessionId,
+      });
     }
   }
 

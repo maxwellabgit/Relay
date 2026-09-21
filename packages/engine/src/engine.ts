@@ -223,8 +223,28 @@ export class RelayEngine {
     }
   }
 
-  /** Test/helper: inject a final transcript segment as if a source emitted it. */
+  /** Live/mic observation final — requires Listening ON unless this is a direct Ask. */
   async ingestFinalSegment(segment: TranscriptSegmentV1, isAsk: boolean): Promise<string> {
+    return this.commitFinalSegment(segment, { isAsk, requireListening: !isAsk });
+  }
+
+  /**
+   * Developer/fixture replay final — does not require Listening and must not start audio.
+   * Only scripted_transcript / audio_file origins are accepted.
+   */
+  async ingestReplayFinalSegment(segment: TranscriptSegmentV1): Promise<string> {
+    if (segment.origin !== "scripted_transcript" && segment.origin !== "audio_file") {
+      await this.note("source.rejected");
+      await this.emitSnapshot();
+      return "";
+    }
+    return this.commitFinalSegment(segment, { isAsk: false, requireListening: false });
+  }
+
+  private async commitFinalSegment(
+    segment: TranscriptSegmentV1,
+    opts: { readonly isAsk: boolean; readonly requireListening: boolean },
+  ): Promise<string> {
     const bytes = encodeText(segment.text);
     const sha256 = await sha256Hex(bytes);
     const artifact = await this.deps.artifacts.put(bytes, localOnlyPolicy());
@@ -245,14 +265,16 @@ export class RelayEngine {
       return "";
     }
 
-    const listening = await this.deps.store.getListening(this.deps.sessionId);
-    if (!isAsk && !listening) {
-      await this.note("source.rejected");
-      await this.emitSnapshot();
-      return "";
+    if (opts.requireListening) {
+      const listening = await this.deps.store.getListening(this.deps.sessionId);
+      if (!listening) {
+        await this.note("source.rejected");
+        await this.emitSnapshot();
+        return "";
+      }
     }
 
-    const routing = shouldCreateCaseForFinal(segment.origin, isAsk);
+    const routing = shouldCreateCaseForFinal(segment.origin, opts.isAsk);
     const caseId = this.deps.ids.next("case");
     const record = await this.deps.store.createCase({
       caseId,
@@ -266,14 +288,14 @@ export class RelayEngine {
       stage: "source.accept",
       status: "completed",
       caseId: record.caseId,
-      reasonCode: isAsk ? "direct_answer" : "detected",
+      reasonCode: opts.isAsk ? "direct_answer" : "detected",
     });
     await this.emitTrace({
       type: "case.created",
       stage: "case.create",
       status: "completed",
       caseId: record.caseId,
-      reasonCode: isAsk ? "direct_answer" : "detected",
+      reasonCode: opts.isAsk ? "direct_answer" : "detected",
     });
 
     await this.scheduler.enqueue(
@@ -285,7 +307,7 @@ export class RelayEngine {
         segmentId: segment.segmentId,
         textArtifactId: artifact.artifactId,
         textSha256: sha256,
-        isAsk,
+        isAsk: opts.isAsk,
       },
       routing.priority,
       this.deps.ids,

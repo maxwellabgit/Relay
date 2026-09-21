@@ -27,7 +27,7 @@ describe("transcript replay", () => {
       });
       const snap = await harness.client.getSnapshot();
       expect(result.finals).toBe(2);
-      expect(snap.listening).toBe(true);
+      expect(snap.listening).toBe(false);
       expect(snap.sourceSegments.length).toBeGreaterThan(0);
       expect(snap.cases.length + snap.feedItems.length).toBeGreaterThan(0);
     } finally {

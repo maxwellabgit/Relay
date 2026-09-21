@@ -36,6 +36,50 @@ describe("listen intake gate", () => {
     harness.close();
   });
 
+  it("accepts replay finals while Listen is OFF without enabling Listening", async () => {
+    const harness = await createNodeHarness({ sessionId: "session_replay_off" });
+    await harness.client.start();
+    expect((await harness.client.getSnapshot()).listening).toBe(false);
+    const caseId = await harness.engine.ingestReplayFinalSegment({
+      schemaVersion: 1,
+      sourceId: "fixture",
+      sessionId: "session_replay_off",
+      segmentId: "seg_replay_1",
+      revision: 1,
+      sequence: 1,
+      startMs: 0,
+      endMs: 500,
+      speakerKey: null,
+      speakerConfidence: null,
+      text: "We should check the API before launch.",
+      textConfidence: null,
+      final: true,
+      origin: "scripted_transcript",
+      cursor: null,
+    });
+    expect(caseId).toMatch(/^case_/);
+    expect((await harness.client.getSnapshot()).listening).toBe(false);
+    await harness.client.stop();
+    harness.close();
+  });
+
+  it("still rejects microphone observation while Listen is OFF", async () => {
+    const harness = await createNodeHarness({ sessionId: "session_mic_off" });
+    await harness.client.start();
+    const rejected = await harness.engine.ingestFinalSegment(
+      micSegment("session_mic_off", "seg_mic", "Live mic should stay gated", 1),
+      false,
+    );
+    expect(rejected).toBe("");
+    const replayRejected = await harness.engine.ingestReplayFinalSegment({
+      ...micSegment("session_mic_off", "seg_mic_replay", "Mic origin is not replay", 2),
+      origin: "microphone",
+    });
+    expect(replayRejected).toBe("");
+    await harness.client.stop();
+    harness.close();
+  });
+
   it("accepts observed segments while Listen is ON and keeps Ask working", async () => {
     const harness = await createNodeHarness({
       sessionId: "session_listen_on",

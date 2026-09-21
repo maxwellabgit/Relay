@@ -150,7 +150,6 @@ export function App() {
         onReplayFixture={async (fixture, speed) => {
           const handle = handleRef.current;
           if (!handle || fixture !== "acronym-basic") return;
-          await clientRef.current?.execute({ type: "SetListening", enabled: true });
           const captureId = `capture_${Date.now()}`;
           let previousAt = 0;
           let index = 0;
@@ -160,14 +159,11 @@ export function App() {
             const gap = speed === 0 ? 0 : Math.max(0, event.atMs - previousAt) / speed;
             previousAt = event.atMs;
             if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
-            await handle.engine.ingestFinalSegment(
-              {
-                ...event.segment,
-                segmentId: `${captureId}_${event.segment.segmentId}_${index}`,
-                sessionId: snapshot.runtime.sessionId ?? "session_web",
-              },
-              false,
-            );
+            await handle.engine.ingestReplayFinalSegment({
+              ...event.segment,
+              segmentId: `${captureId}_${event.segment.segmentId}_${index}`,
+              sessionId: snapshot.runtime.sessionId ?? "session_web",
+            });
           }
         }}
       />
