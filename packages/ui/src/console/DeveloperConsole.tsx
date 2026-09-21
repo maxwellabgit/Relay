@@ -51,7 +51,11 @@ export function DeveloperConsole({
   const [reasonFilter, setReasonFilter] = useState<string | null>(null);
 
   const rows = paused ? frozen : snapshot.trace;
-  const tree = useMemo(() => projectJevTree(snapshot.decision), [snapshot.decision]);
+  const receivedRequest = receivedRequestText(snapshot);
+  const tree = useMemo(
+    () => projectJevTree(snapshot.decision, receivedRequest),
+    [snapshot.decision, receivedRequest],
+  );
 
   const filtered = rows.filter((row) => {
     if (stageFilter && row.stage !== stageFilter) return false;
@@ -95,9 +99,7 @@ export function DeveloperConsole({
           </View>
           <View style={styles.jevSide}>
             <SideCard title="Current input">
-              <Text style={styles.sideBody}>
-                {snapshot.currentInputPreview ?? "No live input preview."}
-              </Text>
+              <Text style={styles.sideBody}>{receivedRequest ?? "No request text yet."}</Text>
               <Text style={styles.sideMeta}>
                 {snapshot.currentInputPreview ? "not saved" : "preview cleared"}
                 {tree.caseId ? ` · case ${tree.caseId}` : ""}
@@ -446,6 +448,17 @@ function FilterRow({
 
 function Line({ label, value }: { readonly label: string; readonly value: string }) {
   return <Text style={styles.line}>{`${label}: ${value}`}</Text>;
+}
+
+function receivedRequestText(snapshot: RelaySnapshot): string | null {
+  const caseId = snapshot.decision?.caseId ?? snapshot.caseExecution?.caseId ?? null;
+  const asks = snapshot.feedItems.filter((item) => item.kind === "ask");
+  const matched = caseId ? asks.filter((item) => item.caseId === caseId) : asks;
+  const latest = matched.at(-1) ?? asks.at(-1);
+  const text = latest?.summary.trim();
+  if (text) return text;
+  const preview = snapshot.currentInputPreview?.trim();
+  return preview || null;
 }
 
 function formatJson(value: Readonly<Record<string, string | number | boolean | null>>): string {

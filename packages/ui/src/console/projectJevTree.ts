@@ -29,7 +29,10 @@ export type JevTreeView = {
 /**
  * UI adapter over DecisionRunView. Does not invent stages or durations.
  */
-export function projectJevTree(decision: DecisionRunView | null): JevTreeView {
+export function projectJevTree(
+  decision: DecisionRunView | null,
+  receivedRequest: string | null = null,
+): JevTreeView {
   if (!decision) {
     return {
       totalMs: null,
@@ -44,7 +47,7 @@ export function projectJevTree(decision: DecisionRunView | null): JevTreeView {
 
   const nodes: JevTreeNode[] = decision.stages.map((stage, index) => ({
     step: index + 1,
-    title: stage.title,
+    title: stage.stage === "source.accept" && receivedRequest ? receivedRequest : stage.title,
     detail: stage.reasonCode ?? stage.state,
     durationMs: stage.durationMs,
     status: mapStatus(stage.state),
