@@ -18,11 +18,13 @@ describe("windows production composition smoke", () => {
     const appData = join(root, "LOCALAPPDATA", "RELAY");
     await mkdir(appData, { recursive: true });
     const databasePath = join(appData, "state.sqlite");
-    const runsRoot = join(appData, "runs");
+    const diagnosticsRoot = join(appData, "diagnostics");
+    const runsRoot = join(diagnosticsRoot, "runs");
     await mkdir(runsRoot, { recursive: true });
     process.env.LOCALAPPDATA = join(root, "LOCALAPPDATA");
+    process.env.RELAY_DIAGNOSTICS_ROOT = diagnosticsRoot;
 
-    const first = await openComposition(databasePath, runsRoot);
+    const first = await openComposition(databasePath, runsRoot, diagnosticsRoot);
     try {
       await first.client.start();
       const glossary = await first.client.execute({
@@ -47,7 +49,7 @@ describe("windows production composition smoke", () => {
       first.close();
     }
 
-    const second = await openComposition(databasePath, runsRoot);
+    const second = await openComposition(databasePath, runsRoot, diagnosticsRoot);
     try {
       await second.client.start();
       await second.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
@@ -67,6 +69,11 @@ describe("windows production composition smoke", () => {
       expect(text.length).toBeGreaterThan(0);
       expect(text.includes(SENTINEL)).toBe(false);
       expect(text.toLowerCase().includes("manufacturer suggested")).toBe(false);
+      const latest = JSON.parse(
+        await readFile(join(diagnosticsRoot, "latest.json"), "utf8"),
+      ) as { runId?: string; runDir?: string };
+      expect(latest.runId).toMatch(/^run_/);
+      expect(runDirs.some((name) => latest.runDir?.includes(name))).toBe(true);
     } finally {
       await second.client.stop();
       second.close();
@@ -75,7 +82,7 @@ describe("windows production composition smoke", () => {
   });
 });
 
-async function openComposition(databasePath: string, runsRoot: string) {
+async function openComposition(databasePath: string, runsRoot: string, diagnosticsRoot: string) {
   const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(databasePath));
   const sqlite = await SqliteEngineStore.open(databasePath, artifacts);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
@@ -102,7 +109,7 @@ async function openComposition(databasePath: string, runsRoot: string) {
     modelStatus: { ok: false, detail: "disabled" },
     mode: "live",
     gitCommit: "smoke",
-    trace: createFileTraceSink(runsRoot),
+    trace: createFileTraceSink({ runsRoot, diagnosticsRoot, commit: "smoke", profile: "smoke" }),
   });
   return {
     client: createRelayClientFromEngine(engine),

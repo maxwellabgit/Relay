@@ -3,6 +3,7 @@ export * from "./cases.js";
 export * from "./changes.js";
 export * from "./client.js";
 export * from "./commands.js";
+export * from "./diagnostics.js";
 export * from "./glasses.js";
 export * from "./judgments.js";
 export * from "./operations.js";

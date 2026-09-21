@@ -23,13 +23,13 @@ type Props = {
   readonly onSnoozeCandidate?: (candidateId: string) => void;
 };
 
-type Tab = "overview" | "jev" | "logs";
+type Tab = "case" | "decisions" | "events";
 
 const SPEEDS = [0, 1, 10] as const;
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "jev", label: "Execution Timeline" },
-  { id: "logs", label: "Logs" },
+  { id: "case", label: "Current Case" },
+  { id: "decisions", label: "Decisions" },
+  { id: "events", label: "Run Events" },
 ];
 
 export function DeveloperConsole({
@@ -42,7 +42,7 @@ export function DeveloperConsole({
   onRejectCandidate,
   onSnoozeCandidate,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("jev");
+  const [tab, setTab] = useState<Tab>("case");
   const [speed, setSpeed] = useState<number>(0);
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState(snapshot.trace);
@@ -83,62 +83,76 @@ export function DeveloperConsole({
         ))}
       </View>
 
-      {tab === "overview" ? (
-        <OverviewPane
-          snapshot={snapshot}
-          {...(onOpenLog !== undefined ? { onOpenLog } : {})}
-          {...(onStartSession !== undefined ? { onStartSession } : {})}
-          {...(onEndSession !== undefined ? { onEndSession } : {})}
-        />
-      ) : null}
-
-      {tab === "jev" ? (
-        <View style={styles.jevLayout}>
-          <View style={styles.jevMain}>
-            <JevDecisionTree tree={tree} />
-          </View>
-          <View style={styles.jevSide}>
-            <SideCard title="Current input">
-              <Text style={styles.sideBody}>{receivedRequest ?? "No request text yet."}</Text>
-              <Text style={styles.sideMeta}>
-                {snapshot.currentInputPreview ? "not saved" : "preview cleared"}
-                {tree.caseId ? ` · case ${tree.caseId}` : ""}
-                {tree.decisionId ? ` · decision ${tree.decisionId}` : ""}
-                {tree.historical ? " · historical" : ""}
-              </Text>
-            </SideCard>
-            <SideCard title="Jev output">
-              <Text style={styles.code}>{formatJson(tree.output)}</Text>
-            </SideCard>
-            <SideCard title="Evidence">
-              {snapshot.patterns.length === 0 ? (
-                <Text style={styles.empty}>No completed-episode patterns yet.</Text>
-              ) : (
-                snapshot.patterns.slice(0, 4).map((pattern) => (
-                  <Text key={pattern.signature} style={styles.sideBody}>
-                    {`${pattern.signature} · ${pattern.count}× · ${pattern.candidateState ?? "observing"}`}
-                  </Text>
-                ))
-              )}
-            </SideCard>
-            <SideCard title="Trace">
-              {[...chronological].slice(-6).reverse().map((row) => (
-                <Text key={row.sequence} style={styles.traceMini}>
-                  {`${formatTime(row.at)} · ${row.stage ?? row.type} · ${row.status ?? "-"}`}
+      {tab === "case" ? (
+        <View style={styles.caseLayout}>
+          <OverviewPane
+            snapshot={snapshot}
+            {...(onOpenLog !== undefined ? { onOpenLog } : {})}
+            {...(onStartSession !== undefined ? { onStartSession } : {})}
+            {...(onEndSession !== undefined ? { onEndSession } : {})}
+          />
+          <View style={styles.jevLayout}>
+            <View style={styles.jevMain}>
+              <JevDecisionTree tree={tree} />
+            </View>
+            <View style={styles.jevSide}>
+              <SideCard title="Current input">
+                <Text style={styles.sideBody}>{receivedRequest ?? "No request text yet."}</Text>
+                <Text style={styles.sideMeta}>
+                  {snapshot.currentInputPreview ? "not saved" : "preview cleared"}
+                  {tree.caseId ? ` · case ${tree.caseId}` : ""}
+                  {tree.decisionId ? ` · decision ${tree.decisionId}` : ""}
+                  {tree.historical ? " · historical" : ""}
                 </Text>
-              ))}
-              <Text style={tree.completed ? styles.footerOk : styles.footerWait}>
-                {tree.completed
-                  ? `Completed${tree.totalMs != null ? ` in ${Math.round(tree.totalMs)} ms` : ""}`
-                  : "In progress"}
-              </Text>
-            </SideCard>
-            <GateDetails gate={snapshot.gate} />
+              </SideCard>
+              <SideCard title="Trace">
+                {[...chronological].slice(-6).reverse().map((row) => (
+                  <Text key={row.sequence} style={styles.traceMini}>
+                    {`${formatTime(row.at)} · ${row.stage ?? row.type} · ${row.status ?? "-"}`}
+                  </Text>
+                ))}
+                <Text style={tree.completed ? styles.footerOk : styles.footerWait}>
+                  {tree.completed
+                    ? `Completed${tree.totalMs != null ? ` in ${Math.round(tree.totalMs)} ms` : ""}`
+                    : "In progress"}
+                </Text>
+              </SideCard>
+              <GateDetails gate={snapshot.gate} />
+            </View>
           </View>
         </View>
       ) : null}
 
-      {tab === "logs" ? (
+      {tab === "decisions" ? (
+        <View style={styles.jevSide}>
+          {hasJudgmentEvidence(snapshot) ? (
+            <>
+              <SideCard title="Jev output">
+                <Text style={styles.code}>{formatJson(tree.output)}</Text>
+              </SideCard>
+              <SideCard title="Evidence">
+                {snapshot.patterns.length === 0 ? (
+                  <Text style={styles.empty}>No completed-episode patterns yet.</Text>
+                ) : (
+                  snapshot.patterns.slice(0, 4).map((pattern) => (
+                    <Text key={pattern.signature} style={styles.sideBody}>
+                      {`${pattern.signature} · ${pattern.count}× · ${pattern.candidateState ?? "observing"}`}
+                    </Text>
+                  ))
+                )}
+              </SideCard>
+            </>
+          ) : (
+            <SideCard title="Decisions">
+              <Text style={styles.empty}>
+                No Jev judgment events for this Case. Deterministic paths show not_observed here.
+              </Text>
+            </SideCard>
+          )}
+        </View>
+      ) : null}
+
+      {tab === "events" ? (
         <LogsPane
           snapshot={snapshot}
           chronological={chronological}
@@ -461,6 +475,16 @@ function receivedRequestText(snapshot: RelaySnapshot): string | null {
   return preview || null;
 }
 
+function hasJudgmentEvidence(snapshot: RelaySnapshot): boolean {
+  if (snapshot.decision?.judgmentId) return true;
+  return snapshot.trace.some(
+    (row) =>
+      (row.stage?.startsWith("judgment") ?? false) ||
+      (row.type?.startsWith("judgment.") ?? false) ||
+      Boolean(row.judgmentId),
+  );
+}
+
 function formatJson(value: Readonly<Record<string, string | number | boolean | null>>): string {
   return JSON.stringify(value, null, 2);
 }
@@ -561,6 +585,7 @@ const styles = StyleSheet.create({
   tabTextActive: { color: colors.cyan },
   stack: { gap: 8 },
   jevLayout: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignItems: "flex-start" },
+  caseLayout: { gap: 14 },
   jevMain: { flexGrow: 1, flexBasis: 420, minWidth: 320 },
   jevSide: { flexGrow: 1, flexBasis: 260, minWidth: 240, gap: 10 },
   sideCard: {

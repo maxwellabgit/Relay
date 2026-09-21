@@ -274,7 +274,7 @@ async function waitForRunArtifacts(
   relayRoot: string,
   timeoutMs: number,
 ): Promise<{ runDir: string; eventsPath: string }> {
-  const runsRoot = join(relayRoot, "runs");
+  const runsRoot = join(relayRoot, "diagnostics", "runs");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {

@@ -1,14 +1,50 @@
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { DiagnosticLatestPointer, DiagnosticLiveSummary } from "@relay/contracts";
 import { TRACE_RETENTION_MS, TRACE_ROTATE_BYTES } from "@relay/engine";
 import { isTraceEvent, type TraceSink } from "@relay/engine";
 import type { RuntimeEventV2 } from "@relay/engine";
+import { createDiagnosticPathPort } from "./diagnostic-paths.js";
 
-export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().toString(36)}`): TraceSink {
+export type FileTraceOptions = {
+  readonly runsRoot?: string;
+  readonly diagnosticsRoot?: string;
+  readonly runId?: string;
+  readonly commit?: string;
+  readonly profile?: string;
+  readonly mode?: DiagnosticLatestPointer["mode"];
+};
+
+export function createFileTraceSink(
+  runsRootOrOptions: string | FileTraceOptions = "",
+  runIdArg = `run_${Date.now().toString(36)}`,
+): TraceSink {
+  const options: FileTraceOptions =
+    typeof runsRootOrOptions === "string"
+      ? {
+          ...(runsRootOrOptions ? { runsRoot: runsRootOrOptions } : {}),
+          runId: runIdArg,
+        }
+      : runsRootOrOptions;
+  const paths = createDiagnosticPathPort(
+    {
+      ...process.env,
+      ...(options.diagnosticsRoot
+        ? { RELAY_DIAGNOSTICS_ROOT: options.diagnosticsRoot }
+        : {}),
+    },
+    process.cwd(),
+  );
+  const runsRoot = options.runsRoot ?? paths.runsRoot();
+  const runId = options.runId ?? runIdArg;
   const directory = join(runsRoot, runId);
   const file = join(directory, "events.jsonl");
   const startedAt = new Date().toISOString();
+  const commit = options.commit ?? "test";
+  const profile = options.profile ?? "node-harness";
+  const mode = options.mode ?? "test";
   let wroteManifest = false;
+
   return {
     runId,
     directoryLabel: directory,
@@ -23,13 +59,14 @@ export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().
               schemaVersion: 1,
               runId,
               applicationVersion: "0.1.0",
-              gitCommit: "test",
+              gitCommit: commit,
               protocolVersion: "2",
               reflexVersions: { "resolve-acronym": 1 },
               policyVersions: { "resolve-acronym@1": "v1" },
               providerModes: ["recorded"],
               startedAt,
               status: "running",
+              uncleanShutdown: false,
             },
             null,
             2,
@@ -37,12 +74,43 @@ export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().
           "utf8",
         );
         wroteManifest = true;
+        await writeLatestAndHeartbeat({
+          paths,
+          runId,
+          runDir: directory,
+          commit,
+          profile,
+          mode,
+          cleanShutdown: null,
+          uncleanShutdown: false,
+        });
+        await writeLiveSummaryStub({ paths, runId, runDir: directory, commit, profile });
       }
       await compactOldRuns(runsRoot);
       await rotateIfNeeded(file);
       await appendFile(file, `${JSON.stringify(event)}\n`, "utf8");
+      await writeLatestAndHeartbeat({
+        paths,
+        runId,
+        runDir: directory,
+        commit,
+        profile,
+        mode,
+        cleanShutdown: null,
+        uncleanShutdown: false,
+      });
       if (event.eventType === "run.ended") {
-        await completeManifest(directory);
+        await completeManifest(directory, true);
+        await writeLatestAndHeartbeat({
+          paths,
+          runId,
+          runDir: directory,
+          commit,
+          profile,
+          mode,
+          cleanShutdown: true,
+          uncleanShutdown: false,
+        });
       }
     },
     async read() {
@@ -67,7 +135,90 @@ export function createFileTraceSink(runsRoot: string, runId = `run_${Date.now().
   };
 }
 
-async function completeManifest(directory: string): Promise<void> {
+async function writeLatestAndHeartbeat(input: {
+  paths: ReturnType<typeof createDiagnosticPathPort>;
+  runId: string;
+  runDir: string;
+  commit: string;
+  profile: string;
+  mode: DiagnosticLatestPointer["mode"];
+  cleanShutdown: boolean | null;
+  uncleanShutdown: boolean;
+}): Promise<void> {
+  await mkdir(input.paths.diagnosticsRoot(), { recursive: true });
+  const now = new Date().toISOString();
+  const latest: DiagnosticLatestPointer = {
+    schemaVersion: 1,
+    runId: input.runId,
+    runDir: input.runDir,
+    commit: input.commit,
+    profile: input.profile,
+    mode: input.mode,
+    startedAt: now,
+    heartbeatAt: now,
+    pid: process.pid,
+    cleanShutdown: input.cleanShutdown,
+    uncleanShutdown: input.uncleanShutdown,
+  };
+  const tmp = `${input.paths.latestPointerPath()}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(latest, null, 2)}\n`, "utf8");
+  await rename(tmp, input.paths.latestPointerPath());
+  await writeFile(
+    join(input.runDir, "heartbeat.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        runId: input.runId,
+        at: now,
+        pid: process.pid,
+        status: input.cleanShutdown === true ? "completed" : "running",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+async function writeLiveSummaryStub(input: {
+  paths: ReturnType<typeof createDiagnosticPathPort>;
+  runId: string;
+  runDir: string;
+  commit: string;
+  profile: string;
+}): Promise<void> {
+  const summary: DiagnosticLiveSummary = {
+    schemaVersion: 1,
+    runId: input.runId,
+    commit: input.commit,
+    profile: input.profile,
+    providerReadiness: { jev: "not_observed", model: "not_observed", audio: "not_observed" },
+    queue: { ready: 0, oldestReadyMs: 0, deadLetters: 0 },
+    activeCases: 0,
+    waitingCases: 0,
+    failedCases: 0,
+    latestCase: { caseId: null, stage: null, blocker: null },
+    latestJudgment: {
+      questionSet: null,
+      selectedRoute: null,
+      policyResult: null,
+      observed: false,
+    },
+    latestTool: { toolId: null, result: null, observed: false },
+    deadLetters: 0,
+    retrySchedule: null,
+    paths: {
+      runDir: input.runDir,
+      eventsPath: join(input.runDir, "events.jsonl"),
+      liveSummaryPath: join(input.runDir, "live-summary.json"),
+      latestPointerPath: input.paths.latestPointerPath(),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  await writeFile(join(input.runDir, "live-summary.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+}
+
+async function completeManifest(directory: string, clean: boolean): Promise<void> {
   const path = join(directory, "manifest.json");
   try {
     const text = await readFile(path, "utf8");
@@ -75,6 +226,7 @@ async function completeManifest(directory: string): Promise<void> {
       status?: string;
       startedAt?: string;
       endedAt?: string;
+      uncleanShutdown?: boolean;
     };
     if (manifest.status !== "running") return;
     await writeFile(
@@ -82,8 +234,9 @@ async function completeManifest(directory: string): Promise<void> {
       `${JSON.stringify(
         {
           ...manifest,
-          status: "completed",
+          status: clean ? "completed" : "unclean_shutdown",
           endedAt: new Date().toISOString(),
+          uncleanShutdown: !clean,
         },
         null,
         2,
@@ -91,36 +244,31 @@ async function completeManifest(directory: string): Promise<void> {
       "utf8",
     );
   } catch {
-    // Leave the manifest untouched if it cannot be closed cleanly.
-  }
-}
-
-async function compactOldRuns(runsRoot: string): Promise<void> {
-  const cutoff = Date.now() - TRACE_RETENTION_MS;
-  let entries: string[] = [];
-  try {
-    entries = await readdir(runsRoot);
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const dir = join(runsRoot, entry);
-    try {
-      const info = await stat(dir);
-      if (!info.isDirectory() || info.mtimeMs >= cutoff) continue;
-      await rm(dir, { recursive: true, force: true });
-    } catch {
-      // Leave a directory that cannot be removed.
-    }
+    // Ignore missing manifest.
   }
 }
 
 async function rotateIfNeeded(file: string): Promise<void> {
   try {
     const info = await stat(file);
-    if (info.size < TRACE_ROTATE_BYTES) return;
-    await rename(file, `${file}.${Date.now()}`);
+    if (info.size <= TRACE_ROTATE_BYTES) return;
+    await rename(file, `${file}.${Date.now()}.rotated`);
   } catch {
-    // The file does not exist yet.
+    // File may not exist yet.
+  }
+}
+
+async function compactOldRuns(runsRoot: string): Promise<void> {
+  try {
+    const entries = await readdir(runsRoot, { withFileTypes: true });
+    const cutoff = Date.now() - TRACE_RETENTION_MS;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("run_")) continue;
+      const full = join(runsRoot, entry.name);
+      const info = await stat(full);
+      if (info.mtimeMs < cutoff) await rm(full, { recursive: true, force: true });
+    }
+  } catch {
+    // Root may not exist yet.
   }
 }

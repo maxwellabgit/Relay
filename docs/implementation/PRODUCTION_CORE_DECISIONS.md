@@ -24,8 +24,9 @@ Durable architecture decisions for the production-core branch. Prefer amending t
 - User owns disclosure, connection scope, write enablement, operation approval, Reflex activation.
 - Listening and hosted processing remain separate permissions.
 
-## ADR-PC-004 — Execution Timeline naming
+## ADR-PC-005 — Canonical diagnostics root
 
-- **Decision:** Consumer/developer UI must not label deterministic paths as a “Jev Decision Tree.”
-- **Replace with:** “Execution Timeline.” Jev detail renders only when canonical judgment events exist.
-- **Preserve:** `05997c1` Ask text hydration from feed items.
+- **Decision:** Live diagnostics live under `%LOCALAPPDATA%\RELAY\diagnostics\` with atomic `latest.json`, per-run `heartbeat.json` / `live-summary.json` / `events.jsonl`, override via `RELAY_DIAGNOSTICS_ROOT`.
+- **Why:** Desktop previously wrote under `RELAY\runs` while replay CLI used repo `./runs`, blocking live Cursor analysis.
+- **CLI:** `diagnose:latest`, `diagnose:case`, `logs:follow`, `e2e:last`, `compare:runs`.
+- **Console:** Current Case / Decisions / Run Events; Jev detail only when judgment evidence exists.

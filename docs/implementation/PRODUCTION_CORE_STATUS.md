@@ -11,19 +11,18 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Named history | `9fce11241019321d3d326c5b37f7578efc8d5630`, `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7` |
 | Preservation tag | `relay-dotnet-a6bf987` (confirmed present) |
 | Pre-existing user changes | none |
-| Active phase | Phase 1 — committing / CI / Bugbot |
-| Last green gate | Phase 1 local `verify:v1` PASS |
-| Active blocker | none |
-| Latest diagnostic bundle | `.dev-data/e2e/msrp-headed-latest/` |
+| Active phase | Phase 2 IN_PROGRESS |
+| Last green gate | Phase 1 CI green + Bugbot pass (`af22805`) |
 | Phase 0 commit | `bc3689eadc1e166475bc8c1009f81b3f3842eacc` |
+| Phase 1 commits | `1c3f666`, `af22805` |
 
 ## Phase states
 
 | Phase | State | Notes |
 | --- | --- | --- |
 | 0 Repair truthful baseline | GREEN | CI run https://github.com/maxwellabgit/Relay/actions/runs/35652324585 |
-| 1 Remove retired architecture | IN_PROGRESS | C# tree deleted; docs/UI scrubbed; boundary tests added |
-| 2 Live correlated diagnostics | NOT_STARTED | |
+| 1 Remove retired architecture | GREEN | Bugbot pass; CI `35663319075` / `35663633131` |
+| 2 Live correlated diagnostics | IN_PROGRESS | latest.json, heartbeat, live-summary, diagnose CLI, console IA |
 | 3 Decompose engine | NOT_STARTED | |
 | 4 Tool and operation kernel | NOT_STARTED | |
 | 5 Ambient triage / recommendations | NOT_STARTED | |

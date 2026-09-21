@@ -66,7 +66,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const directoryLabel =
     typeof directory === "string" && directory.length > 0
       ? directory
-      : `%LOCALAPPDATA%\\RELAY\\runs\\${runId}`;
+      : `%LOCALAPPDATA%\\RELAY\\diagnostics\\runs\\${runId}`;
   const ids = options.ids ?? createProductionIds();
   const sessionId = ids.next("session");
   const storeInvoke: StoreInvoke = (command, args) => invoke(command, args);
