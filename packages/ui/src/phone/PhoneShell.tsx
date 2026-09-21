@@ -1,5 +1,5 @@
 import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Composer } from "../assistant/Composer.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
@@ -29,6 +29,7 @@ export function PhoneShell({
   onRefreshHealth,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const threadRef = useRef<ScrollView>(null);
 
   return (
     <View style={styles.bezel}>
@@ -79,7 +80,14 @@ export function PhoneShell({
           </Text>
         </View>
 
-        <ScrollView style={styles.thread} contentContainerStyle={styles.threadContent}>
+        <ScrollView
+          ref={threadRef}
+          style={styles.thread}
+          contentContainerStyle={styles.threadContent}
+          onContentSizeChange={() => {
+            threadRef.current?.scrollToEnd({ animated: false });
+          }}
+        >
           {snapshot.feedItems.length === 0 ? (
             <Text style={styles.empty}>
               Ask what an unknown acronym means. RELAY recommends a search instead of inventing a

@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "entries": {
     "API": "Application Programming Interface",
+    "MSRP": "Manufacturer's Suggested Retail Price",
     "UDP": "User Datagram Protocol",
     "TCP": "Transmission Control Protocol",
     "HTTP": "Hypertext Transfer Protocol",

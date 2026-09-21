@@ -27,6 +27,7 @@ describe("resolve-acronym", () => {
     expect(result.type).toBe("finding");
     expect(result.summary).toContain("Application Programming Interface");
     expect(bundledDictionaryLookup("API")).toBe("Application Programming Interface");
+    expect(bundledDictionaryLookup("MSRP")).toBe("Manufacturer's Suggested Retail Price");
   });
 
   it("prefers explicit user memory over bundled dictionary", async () => {

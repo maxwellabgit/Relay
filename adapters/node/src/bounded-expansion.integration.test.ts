@@ -14,7 +14,7 @@ describe("bounded expansion through RelayClient", () => {
     const harness = await createNodeHarness();
     try {
       await harness.client.start();
-      for (const token of ["MSRP", "BESS", "OEM"]) {
+      for (const token of ["ZXQPV", "BESS", "OEM"]) {
         await harness.client.execute({ type: "SubmitText", text: `What does ${token} mean?` });
         await waitFor(async () =>
           (await harness.client.getSnapshot()).feedItems.some((item) => item.summary.includes(token) && item.kind === "task"),

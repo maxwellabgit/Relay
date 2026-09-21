@@ -140,7 +140,7 @@ describe("production path", () => {
     const harness = await createNodeHarness();
     try {
       await harness.client.start();
-      await harness.client.execute({ type: "SubmitText", text: "What does MSRP mean?" });
+      await harness.client.execute({ type: "SubmitText", text: "What does ZXQPV mean?" });
       await waitFor(async () => (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "task"));
       await harness.client.execute({ type: "EndWorkSession" });
       const episodes = await harness.store.learning.listEpisodes();

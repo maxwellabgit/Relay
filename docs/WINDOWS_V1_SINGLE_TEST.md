@@ -9,8 +9,13 @@ This is the check that `resolve-acronym@1` runs on the desktop workbench. It is 
 From the repo root, on `main`:
 
 ```powershell
+npm run test:manual:msrp
 npm run dev:desktop
 ```
+
+The preflight must print `MSRP manual-test preflight PASS` before the desktop workbench is opened.
+It runs the same engine path in an isolated profile and verifies the exact answer, trace lifecycle,
+and absence of model/Jev calls.
 
 Leave **Listen off**.
 
@@ -19,10 +24,11 @@ Leave **Listen off**.
 In the Ask field, type exactly:
 
 ```text
-What does API mean?
+What is MSRP?
 ```
 
-The screen should show **Application Programming Interface**.
+The screen should show **Manufacturer's Suggested Retail Price**. The conversation automatically
+scrolls to the newest Ask and answer.
 
 ## Where the log is
 
