@@ -8,45 +8,45 @@
 
 ## Wrap-up commits (on main)
 
-1. `2cd857d` — `privacy: migrate legacy prose into protected artifacts`
-2. `3899bf5` — `replay: decouple developer fixtures from live listening`
-3. `b3a44a4` — `authority: fail closed on hosted judgment dispatch`
-4. `6170013` — `authority: make Jev status evidence based`
-5. `d55208e` — `docs: reconcile Windows V1 release-candidate state`
-6. `6250c79` — `dev: add Windows V1 readiness gate`
-7. `2e00c8f` — `test: wait for case completion in crash-recovery B/C/E/H`
+1. `2cd857d` - `privacy: migrate legacy prose into protected artifacts`
+2. `3899bf5` - `replay: decouple developer fixtures from live listening`
+3. `b3a44a4` - `authority: fail closed on hosted judgment dispatch`
+4. `6170013` - `authority: make Jev status evidence based`
+5. `d55208e` - `docs: reconcile Windows V1 release-candidate state`
+6. `6250c79` - `dev: add Windows V1 readiness gate`
+7. `2e00c8f` - `test: wait for case completion in crash-recovery B/C/E/H`
 
 ## Freeze commits (on main)
 
-1. `b0aeafa` — `fix: isolate Jev health from audio and model failures`
-2. `fae977d` — `dev: distinguish code readiness from dogfood readiness`
-3. tip — `docs: freeze Windows V1 release-candidate record`
+1. `b0aeafa` - `fix: isolate Jev health from audio and model failures`
+2. `fae977d` - `dev: distinguish code readiness from dogfood readiness`
+3. `c3249aa` / `a698018` - `docs: freeze Windows V1 release-candidate record` (+ tip SHA pin)
 
-**Final main SHA:** _(set to `git rev-parse HEAD` in the pin commit after verify)_
+**Final main SHA:** `a698018148e3cb2d6fa30084876a0945f523ebf3`
 
 ## Automated gates (freeze pass)
 
 ```text
 npm run verify:v1
-→ verify:v1 PASS (record after freeze verify)
+-> verify:v1 PASS (record after freeze verify)
 
 npm run readiness:windows
-→ CODE READY / PASS
+-> CODE READY / PASS
 
 npm run readiness:dogfood
-→ NOT READY FOR DOGFOOD on this machine (expected until model + audio doctor pass)
+-> NOT READY FOR DOGFOOD on this machine (expected until model + audio doctor pass)
   - Local model unavailable
   - Microphone / Whisper may fail until operator setup
 
 GitHub Actions check for final main SHA:
-→ record after push (exact-HEAD only; do not infer from prior SHAs such as 2e00c8f)
+-> record after push (exact-HEAD only; do not infer from prior SHAs such as 2e00c8f)
 ```
 
 Prior wrap tip `2e00c8f` had a green `check` run (`35548087632`) before this freeze pass.
 
 ## Manual Windows dogfood
 
-Status: **pending** — not run on this machine.
+Status: **pending** - not run on this machine.
 
 | Prerequisite | Observed this session |
 | --- | --- |
@@ -55,7 +55,7 @@ Status: **pending** — not run on this machine.
 | TypeSafe key via Settings | Not exercised |
 | Real microphone Listen | Not exercised |
 
-Operator: `npm run readiness:dogfood` must PASS, then `npm run dev:desktop` and the freeze-pass Tests A–H.
+Operator: `npm run readiness:dogfood` must PASS, then `npm run dev:desktop` and the freeze-pass Tests A-H.
 
 ## Installed NSIS smoke
 
@@ -87,7 +87,7 @@ npm run dev:desktop
 
 - Local model: external loopback (`external:ready` / `external:unavailable`)
 - Audio: Listen fails closed without `source.ready`; Replay is independent of Listen/audio health
-- Jev: key ≠ disclosure; chip evidence-based (`configured` until successful request); audio/model failures do not mark Jev degraded
+- Jev: key != disclosure; chip evidence-based (`configured` until successful request); audio/model failures do not mark Jev degraded
 
 ## Known remaining limitations
 
