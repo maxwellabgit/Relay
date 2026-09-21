@@ -288,7 +288,7 @@ function ambiguous() {
 }
 
 async function fillSessions(
-  harness: ReturnType<typeof createNodeHarness>,
+  harness: Awaited<ReturnType<typeof createNodeHarness>>,
   count: number,
 ): Promise<void> {
   for (let index = 0; index < count; index += 1) {

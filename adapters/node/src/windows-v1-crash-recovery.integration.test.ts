@@ -14,7 +14,7 @@ const MODEL_ANSWER = "TCP is connection-oriented; UDP is connectionless.";
 const BESS_ASK = "What does BESS mean?";
 const BESS_EXPANSION = "Battery Energy Storage";
 
-type Harness = ReturnType<typeof createNodeHarness>;
+type Harness = Awaited<ReturnType<typeof createNodeHarness>>;
 
 /**
  * Windows V1 Stage 6 — crash recovery boundaries.

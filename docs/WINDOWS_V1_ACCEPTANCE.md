@@ -8,14 +8,12 @@
 
 ## Wrap-up commits (this pass)
 
-1. `privacy: migrate legacy prose into protected artifacts`
-2. `replay: decouple developer fixtures from live listening`
-3. `authority: fail closed on hosted judgment dispatch`
-4. `authority: make Jev status evidence based`
-5. `docs: reconcile Windows V1 release-candidate state`
-6. `dev: add Windows V1 readiness gate`
-
-Record SHAs with `git log --oneline 88d5437..HEAD` after the wrap commits land.
+1. `2cd857d` — `privacy: migrate legacy prose into protected artifacts`
+2. `3899bf5` — `replay: decouple developer fixtures from live listening`
+3. `b3a44a4` — `authority: fail closed on hosted judgment dispatch`
+4. `6170013` — `authority: make Jev status evidence based`
+5. `d55208e` — `docs: reconcile Windows V1 release-candidate state`
+6. tip — `dev: add Windows V1 readiness gate` (`git rev-parse --short HEAD`)
 
 ## Automated gates
 

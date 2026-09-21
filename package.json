@@ -29,6 +29,7 @@
     "test:architecture": "vitest run --project architecture",
     "test:smoke": "vitest run --project integration adapters/node/src/production-smoke.integration.test.ts",
     "verify:v1": "node tools/verify-v1.mjs",
+    "readiness:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/windows-v1-readiness.ps1",
     "audio:prepare": "npm run prepare:audio --workspace @relay/audio-tools",
     "halo:emulator": "python -m relay_halo.bridge --emulator",
     "halo:test": "python -m pytest tools/halo/tests -q",
