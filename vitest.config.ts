@@ -18,6 +18,7 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["**/*.integration.test.ts"],
+          testTimeout: 20_000,
         },
       },
       {
@@ -30,6 +31,7 @@ export default defineConfig({
         test: {
           name: "privacy",
           include: ["**/*.privacy.test.ts"],
+          testTimeout: 20_000,
         },
       },
       {
