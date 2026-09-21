@@ -20,15 +20,15 @@
 
 1. `b0aeafa` - `fix: isolate Jev health from audio and model failures`
 2. `fae977d` - `dev: distinguish code readiness from dogfood readiness`
-3. `1af9d8d` - `docs: freeze Windows V1 release-candidate record`
+3. `81eb0ec` - `docs: freeze Windows V1 release-candidate record`
 
-**Final main SHA:** `1af9d8dcaf418b08f31445b29c4db643c0c78faf`
+**Final main SHA:** `81eb0ec1b20d8beb27a3acb07eb5b0632d251edd`
 
 ## Automated gates (freeze pass)
 
 ```text
 npm run verify:v1
--> verify:v1 PASS (record after freeze verify)
+-> verify:v1 PASS
 
 npm run readiness:windows
 -> CODE READY / PASS
@@ -38,8 +38,8 @@ npm run readiness:dogfood
   - Local model unavailable
   - Microphone / Whisper may fail until operator setup
 
-GitHub Actions check for final main SHA:
--> record after push (exact-HEAD only; do not infer from prior SHAs such as 2e00c8f)
+GitHub Actions check for 81eb0ec1b20d8beb27a3acb07eb5b0632d251edd:
+-> record after push (exact-HEAD only)
 ```
 
 Prior wrap tip `2e00c8f` had a green `check` run (`35548087632`) before this freeze pass.
