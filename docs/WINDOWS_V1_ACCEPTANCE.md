@@ -20,9 +20,9 @@
 
 1. `b0aeafa` - `fix: isolate Jev health from audio and model failures`
 2. `fae977d` - `dev: distinguish code readiness from dogfood readiness`
-3. `790780f` - `docs: freeze / pin Windows V1 release-candidate record`
+3. `1af9d8d` - `docs: freeze Windows V1 release-candidate record`
 
-**Final main SHA:** `790780f51e11b7ac8c4323323e45747095b4479d`
+**Final main SHA:** `1af9d8dcaf418b08f31445b29c4db643c0c78faf`
 
 ## Automated gates (freeze pass)
 
