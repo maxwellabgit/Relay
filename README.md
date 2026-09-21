@@ -317,20 +317,33 @@ No feature may add a generic model-controlled HTTP request, shell command, files
 ## Repository shape
 
 ```text
-src/
-  Relay.Core/             domain records, policies, runtime interfaces
-  Relay.Infrastructure/   SQLite, encrypted objects, Jev/local-model clients, OAuth
-  Relay.Connectors/       Google, GitHub, public search, Plaid adapters
-  Relay.Desktop/          WinUI shell and application-owned background runtime
-tests/
-  Relay.Core.Tests/
-  Relay.Integration.Tests/
-  Relay.Desktop.Tests/
-dev/
-  dogfood and privacy/recovery gates
-docs/
-  architecture, connector contract, Reflex contract, status
+apps/
+  relay/                 Expo Web / shared UI host
+  desktop/               Tauri 2 Windows shell (DPAPI, SQLite, audio, secrets)
+packages/
+  contracts/             shared command/snapshot/event types
+  engine/                deterministic runtime (RelayEngine)
+  reflexes/              versioned Reflex modules
+  ui/                    Feed, Settings, developer console
+  storage-schema/        SQLite migrations
+  testkit/               recorded fixtures and harness helpers
+adapters/
+  node/                  Node SQLite / file adapters (tests + smoke)
+  tauri/                 Tauri invoke ports
+  expo/                  Expo/browser demo adapters
+tools/
+  verification/          shared V1 gate manifest
+  e2e/                   headed Windows journeys
+  manual/                Node preflights (not desktop E2E)
+  replay/                replay CLI + architecture boundary tests
+  halo/                  Halo display protocol emulator
+  audio/                 local ASR packaging
+dev/                     Tauri launch, model start, readiness scripts
+docs/                    status, acceptance, architecture, privacy, Reflexes
 ```
+
+The retired C# / WinUI tree is preserved only by tag `relay-dotnet-a6bf987`
+(`docs/archive/DOTNET_BASELINE.md`). It is not a competing implementation target.
 
 The production solution does not compile legacy minds, generated-tool workers, autonomous agents, or generic workflow synthesis. Useful prototypes remain available in Git history and may return only through a versioned beta design.
 

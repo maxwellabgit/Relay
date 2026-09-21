@@ -41,4 +41,4 @@ Results on this machine:
 5. Confirm `runs/<run-id>/events.jsonl` grows without raw transcript
 6. Restart and confirm completed work is not repeated
 
-WinUI baseline launcher preserved as `./dev/run-dotnet-baseline.ps1`. `Relay.Desktop` removed from `Relay.slnx`.
+WinUI / C# host removed from the active tree. Archive: tag `relay-dotnet-a6bf987` (`docs/archive/DOTNET_BASELINE.md`).

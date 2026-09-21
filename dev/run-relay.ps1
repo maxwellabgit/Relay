@@ -5,8 +5,6 @@
 .DESCRIPTION
   Creates an isolated run directory under ./runs, writes a pointer, and launches
   `npm run dev:desktop` (Tauri 2 wrapping the shared Expo Web UI).
-
-  The previous WinUI launcher is preserved as ./dev/run-dotnet-baseline.ps1.
 #>
 param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -46,6 +44,5 @@ $env:RELAY_RUN_DIR = $runDir
 Write-Host "Run $runId"
 Write-Host "  runDir: $runDir"
 Write-Host "  Starting Tauri workbench (npm run dev:desktop)..."
-Write-Host "  Baseline WinUI launcher: ./dev/run-dotnet-baseline.ps1"
 
 npm run dev:desktop

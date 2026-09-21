@@ -21,7 +21,9 @@ RELAY’s production runtime moves off WinUI and C# hosts to a shared, platform-
 
 ### C# disposition
 
-C# and WinUI remain **reference-only until cutover**. They characterize behavior and supply porting sources for hardened contracts. They are not a second production engine and must not receive new feature work in parallel with the TypeScript runtime.
+C# and WinUI are **retired**. The freeze is tag `relay-dotnet-a6bf987` only
+(`docs/archive/DOTNET_BASELINE.md`). Do not restore the `src/` / `tests/` / `Relay.slnx`
+tree onto active branches. All new work targets the TypeScript + Tauri stack.
 
 ### Adapter boundary
 
@@ -31,5 +33,5 @@ No platform adapter (Tauri, Expo/iOS, audio, storage, BLE, secrets) may contain 
 
 * Stage 1 delivers a Tauri + Expo Web workbench with autonomous engine loop, replay, recorded Jev, acronym Reflex, shared SQLite schema, and live diagnostics.
 * Stage 2 attaches Halo display through `GlassesDisplayPort`.
-* Stage 3 ships the same contracts on iPhone via Expo/EAS/TestFlight.
-* WinUI must not advance work from `RenderSurface` / pump-on-render after cutover.
+* Stage 3 ships the same contracts on iPhone via Expo/EAS/TestFlight after Windows V1 gates are green.
+* The WinUI host is absent from the active tree.

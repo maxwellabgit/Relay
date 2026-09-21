@@ -115,12 +115,6 @@ export function PhoneShell({
 
         <Composer onSubmit={onSubmit} />
 
-        <View style={styles.tabs}>
-          <Tab label="Home" active={false} />
-          <Tab label="Listen" active />
-          <Tab label="Cases" active={false} />
-          <Tab label="Memory" active={false} />
-        </View>
         <Text style={styles.footer}>Private. Local. In your control.</Text>
       </View>
 
@@ -178,15 +172,6 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
       <Text style={styles.assistantText} testID="relay-feed-answer-text">
         {item.summary}
       </Text>
-    </View>
-  );
-}
-
-function Tab({ label, active }: { readonly label: string; readonly active: boolean }) {
-  return (
-    <View style={styles.tab}>
-      <View style={[styles.tabMark, active ? styles.tabMarkOn : null]} />
-      <Text style={[styles.tabLabel, active ? styles.tabLabelOn : null]}>{label}</Text>
     </View>
   );
 }
@@ -390,39 +375,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  tabs: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  tab: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-  },
-  tabMark: {
-    width: 16,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "transparent",
-  },
-  tabMarkOn: {
-    backgroundColor: colors.cyan,
-  },
-  tabLabel: {
-    color: colors.textDim,
-    fontSize: 11,
-  },
-  tabLabelOn: {
-    color: colors.cyan,
-    fontWeight: "700",
-  },
   footer: {
     color: colors.textDim,
     fontSize: 10,
     textAlign: "center",
     paddingBottom: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
 });
