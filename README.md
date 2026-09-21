@@ -42,8 +42,8 @@ real text or live local speech
 ### What Windows V1 currently includes
 
 - Working typed Ask with local model generation when a loopback model server is available.
-- Listen intake via allowlisted local audio process (finals only) into the same engine path as replay.
-- Protected DPAPI artifacts and secrets on Windows; feed/source prose is not stored as raw SQLite prose.
+- Listen intake via allowlisted local audio process (finals only); developer Replay uses a separate ingest path that does not enable Listening.
+- Protected DPAPI artifacts and secrets on Windows; feed/source/learning prose is not stored as raw SQLite prose (legacy rows migrate on open).
 - One complete Reflex: `resolve-acronym@1` (memory → bundled dictionary → context candidates → optional Jev Choice).
 - Developer console as a projection of real Case / Jev / model / policy events.
 
