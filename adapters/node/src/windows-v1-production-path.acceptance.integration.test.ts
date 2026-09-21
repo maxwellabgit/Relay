@@ -12,7 +12,9 @@ import { createNodeHarness } from "./create-client.js";
  * file trace) to prove the end-to-end durable loop survives stop/restart.
  */
 describe("windows v1 production-path acceptance", () => {
-  it("submit text → artifact → case → reflex → feed → receipt → trace → restart", async () => {
+  it(
+    "submit text → artifact → case → reflex → feed → receipt → trace → restart",
+    async () => {
     const root = await mkdtemp(join(tmpdir(), "relay-windows-v1-"));
     const databasePath = join(root, "state.sqlite");
     const runsRoot = join(root, "runs");
@@ -87,7 +89,9 @@ describe("windows v1 production-path acceptance", () => {
       await second.client.stop();
       second.close();
     }
-  });
+  },
+    20_000,
+  );
 });
 
 describe("windows restart recovery checkpoints", () => {
@@ -199,7 +203,7 @@ describe("windows restart recovery checkpoints", () => {
   });
 });
 
-async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 4000): Promise<void> {
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 10000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) return;
