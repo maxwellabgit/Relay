@@ -28,32 +28,61 @@ type Call = (op: Record<string, unknown>) => Promise<unknown>;
 
 export class TauriEngineStore implements EngineStore {
   readonly learning: LearningStore;
+  /** Serializes all store IPC so multi-op transactions cannot interleave. */
+  private gate: Promise<void> = Promise.resolve();
+  private lockDepth = 0;
 
   constructor(
     private readonly invoke: StoreInvoke,
     artifacts?: ArtifactStorePort,
   ) {
-    const call: Call = (op) => this.invoke("store_execute", { op });
+    const call: Call = (op) => this.withStoreLock(() => this.invoke("store_execute", { op }));
     this.learning = new TauriLearning(call, artifacts);
     this.call = call;
   }
 
   private readonly call: Call;
 
-  async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
-    await this.call({ op: "begin_transaction" });
-    try {
-      const result = await work();
-      await this.call({ op: "commit_transaction" });
-      return result;
-    } catch (error) {
+  private async withStoreLock<T>(work: () => Promise<T>): Promise<T> {
+    if (this.lockDepth > 0) {
+      this.lockDepth += 1;
       try {
-        await this.call({ op: "rollback_transaction" });
-      } catch {
-        // ignore rollback failures after a failed begin/commit
+        return await work();
+      } finally {
+        this.lockDepth -= 1;
       }
-      throw error;
     }
+    let release!: () => void;
+    const prev = this.gate;
+    this.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await prev;
+    this.lockDepth = 1;
+    try {
+      return await work();
+    } finally {
+      this.lockDepth = 0;
+      release();
+    }
+  }
+
+  async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
+    return this.withStoreLock(async () => {
+      await this.invoke("store_execute", { op: { op: "begin_transaction" } });
+      try {
+        const result = await work();
+        await this.invoke("store_execute", { op: { op: "commit_transaction" } });
+        return result;
+      } catch (error) {
+        try {
+          await this.invoke("store_execute", { op: { op: "rollback_transaction" } });
+        } catch {
+          // ignore rollback failures after a failed begin/commit
+        }
+        throw error;
+      }
+    });
   }
 
   ensureSession(sessionId: string, createdAt: string): Promise<void> {
