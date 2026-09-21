@@ -15,6 +15,7 @@ import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
   createProductionIds,
   createRelayClientFromEngine,
+  JevHealthTracker,
   parseTypeSafeBody,
   RelayEngine,
   TYPESAFE_MODEL,
@@ -55,7 +56,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const localModel = options.model ?? new TauriLocalModelPort(invoke);
   const audio = new TauriAudioPort(invoke);
 
-  const jevHealth: MutableHealth = { ok: false, detail: "missing key" };
+  const jevTracker = new JevHealthTracker();
+  const jevHealth = jevTracker.state;
   const modelHealth: MutableHealth = { ok: false, detail: "external:unavailable", model: null };
   const audioHealth: MutableHealth = { ok: false, detail: "not connected" };
 
@@ -76,7 +78,10 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const judgments: JudgmentPort = {
     async judge(request, signal) {
       const response = await nativeJudgments.judge(request, signal);
-      if (!response.ok) {
+      if (response.ok) {
+        jevTracker.noteSuccess();
+      } else {
+        jevTracker.noteFailure();
         void refreshProviderHealth({ afterFailure: true });
       }
       return response;
@@ -117,16 +122,13 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     const secret = String((await invoke("secret_status").catch(() => "disabled")) ?? "disabled");
     const hosted = await store.getHostedProcessingEnabled().catch(() => false);
 
-    if (secret !== "present") {
-      jevHealth.ok = false;
-      jevHealth.detail = "missing key";
-    } else if (!hosted) {
-      jevHealth.ok = false;
-      jevHealth.detail = "hosted off";
-    } else {
-      jevHealth.ok = true;
-      jevHealth.detail = opts?.afterFailure ? "degraded" : "ready";
+    if (opts?.afterFailure) {
+      jevTracker.noteFailure();
     }
+    jevTracker.apply({
+      secretPresent: secret === "present",
+      hostedEnabled: hosted,
+    });
 
     try {
       if ("status" in localModel && typeof (localModel as TauriLocalModelPort).status === "function") {

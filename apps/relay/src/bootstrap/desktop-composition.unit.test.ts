@@ -45,7 +45,8 @@ describe("windows production composition", () => {
     expect(text).toMatch(/RefreshProviderHealth/);
     expect(text).toMatch(/SetHostedProcessing/);
     expect(text).toMatch(/HEALTH_POLL_MS/);
-    expect(text).toMatch(/hosted off/);
+    expect(text).toMatch(/JevHealthTracker/);
+    expect(text).toMatch(/noteSuccess|noteFailure/);
     expect(text).toMatch(/external:ready|external:unavailable/);
   });
 });
