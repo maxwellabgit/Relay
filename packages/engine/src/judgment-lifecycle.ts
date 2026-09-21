@@ -1,6 +1,7 @@
 import type {
   ArtifactStorePort,
   JudgmentAnswer,
+  JudgmentFailure,
   JudgmentPort,
   JudgmentRecord,
   JudgmentRequest,
@@ -16,7 +17,10 @@ export type JudgmentLifecycleDeps = {
   readonly judgments: JudgmentPort;
   readonly clock: Clock;
   readonly ids: IdFactory;
-  /** When false, do not dispatch to Jev; return hosted_processing_disabled. Default true if omitted. */
+  /**
+   * When false, do not dispatch to Jev; return hosted_processing_disabled.
+   * Missing callback fails closed (not authorized). Thrown errors → not_authorized.
+   */
   readonly isHostedProcessingAllowed?: () => boolean | Promise<boolean>;
 };
 
@@ -173,12 +177,26 @@ export async function runJudgmentLifecycle(
   };
   await deps.store.upsertJudgment(requested);
 
-  const allowed =
-    deps.isHostedProcessingAllowed == null ? true : await deps.isHostedProcessingAllowed();
-  if (!allowed) {
+  let allowed = false;
+  let gateFailure: JudgmentFailure | null = null;
+  if (deps.isHostedProcessingAllowed == null) {
+    allowed = false;
+    gateFailure = { category: "not_authorized", message: "hosted_processing_disabled" };
+  } else {
+    try {
+      allowed = await deps.isHostedProcessingAllowed();
+      if (!allowed) {
+        gateFailure = { category: "disabled", message: "hosted_processing_disabled" };
+      }
+    } catch {
+      allowed = false;
+      gateFailure = { category: "not_authorized", message: "hosted_processing_disabled" };
+    }
+  }
+  if (!allowed && gateFailure) {
     const response: JudgmentResponse = {
       ok: false,
-      failure: { category: "disabled", message: "hosted_processing_disabled" },
+      failure: gateFailure,
     };
     const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
     const completedAt = deps.clock.now().toISOString();
@@ -188,7 +206,8 @@ export async function runJudgmentLifecycle(
       responseArtifactId: responseArtifact.artifactId,
       responseHash: responseArtifact.sha256,
       completedAt,
-      failureCategory: "hosted_processing_disabled",
+      failureCategory:
+        gateFailure.category === "not_authorized" ? "not_authorized" : "hosted_processing_disabled",
     };
     await deps.store.upsertJudgment(completed);
     return { record: completed, response, providerCalled: false };
