@@ -53,7 +53,12 @@ describe("windows v1 crash recovery", () => {
       await second.client.start();
       await waitFor(async () => {
         const snap = await second.client.getSnapshot();
-        return snap.feedItems.some((item) => item.kind === "answer");
+        const caseRow = await second.store.getCase(caseId);
+        return (
+          snap.feedItems.some((item) => item.kind === "answer") &&
+          caseRow?.status === "completed" &&
+          (await second.store.countWorkItems()) === 0
+        );
       });
       const snap = await second.client.getSnapshot();
       const answers = snap.feedItems.filter((item) => item.kind === "answer");

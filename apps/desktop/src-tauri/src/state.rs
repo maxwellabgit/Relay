@@ -135,7 +135,8 @@ fn migrate_legacy_memories(conn: &Connection) -> Result<(), String> {
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "{}".into()),
+                row.get::<_, Option<String>>(3)?
+                    .unwrap_or_else(|| "{}".into()),
             ))
         })
         .map_err(|e| e.to_string())?
@@ -153,11 +154,10 @@ fn migrate_legacy_memories(conn: &Connection) -> Result<(), String> {
             continue;
         }
         let obj = value.as_object().cloned().unwrap_or_default();
-        let mut existing_meta: serde_json::Map<String, Value> =
-            parse_json(&metadata_json)
-                .ok()
-                .and_then(|v| v.as_object().cloned())
-                .unwrap_or_default();
+        let mut existing_meta: serde_json::Map<String, Value> = parse_json(&metadata_json)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
         let mut prose = serde_json::Map::new();
         if kind == "glossary" {
             if let Some(expansion) = obj.get("expansion").and_then(|v| v.as_str()) {
@@ -207,6 +207,14 @@ fn migrate_legacy_memories(conn: &Connection) -> Result<(), String> {
 }
 
 fn migrate_legacy_receipts(conn: &Connection) -> Result<(), String> {
+    struct LegacyReceipt {
+        receipt_id: String,
+        selected_option: Option<String>,
+        selected_option_id: Option<String>,
+        labels_json: String,
+        labels_id: Option<String>,
+        labels_sha: Option<String>,
+    }
     let mut stmt = conn
         .prepare(
             "SELECT receipt_id, selected_option, selected_option_id, option_labels_json,
@@ -217,33 +225,27 @@ fn migrate_legacy_receipts(conn: &Connection) -> Result<(), String> {
                     AND (selected_option_id IS NULL OR selected_option_id = ''))",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = stmt
+    let rows: Vec<LegacyReceipt> = stmt
         .query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "{}".into()),
-                row.get(4)?,
-                row.get(5)?,
-            ))
+            Ok(LegacyReceipt {
+                receipt_id: row.get(0)?,
+                selected_option: row.get(1)?,
+                selected_option_id: row.get(2)?,
+                labels_json: row
+                    .get::<_, Option<String>>(3)?
+                    .unwrap_or_else(|| "{}".into()),
+                labels_id: row.get(4)?,
+                labels_sha: row.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     drop(stmt);
-    for (receipt_id, selected_option, selected_option_id, labels_json, labels_id, labels_sha) in rows
-    {
-        let labels: Value = parse_json(&labels_json).unwrap_or(json!({}));
-        let mut artifact_id = labels_id;
-        let mut artifact_sha = labels_sha;
+    for row in rows {
+        let labels: Value = parse_json(&row.labels_json).unwrap_or(json!({}));
+        let mut artifact_id = row.labels_id;
+        let mut artifact_sha = row.labels_sha;
         if labels.as_object().map(|o| !o.is_empty()).unwrap_or(false)
             && (artifact_id.is_none() || artifact_sha.is_none())
         {
@@ -253,8 +255,8 @@ fn migrate_legacy_receipts(conn: &Connection) -> Result<(), String> {
             artifact_sha = Some(put.sha256);
         }
         let selected_id = resolve_selected_option_id(
-            selected_option.as_deref(),
-            selected_option_id.as_deref(),
+            row.selected_option.as_deref(),
+            row.selected_option_id.as_deref(),
             &labels,
         );
         conn.execute(
@@ -262,7 +264,13 @@ fn migrate_legacy_receipts(conn: &Connection) -> Result<(), String> {
              SET labels_artifact_id=?1, labels_sha256=?2, option_labels_json='{}',
                  selected_option=?3, selected_option_id=?4
              WHERE receipt_id=?5",
-            params![artifact_id, artifact_sha, selected_id, selected_id, receipt_id],
+            params![
+                artifact_id,
+                artifact_sha,
+                selected_id,
+                selected_id,
+                row.receipt_id
+            ],
         )
         .map_err(|e| e.to_string())?;
     }

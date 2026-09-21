@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
   Diagnostic Windows V1 readiness gate (no secrets printed).
@@ -6,6 +5,7 @@
 .DESCRIPTION
   Runs required structural checks for the TypeScript/Tauri Windows path.
   Exits nonzero when a required check fails. Does not claim dogfood or NSIS install passed.
+  Compatible with Windows PowerShell 5.1 and PowerShell 7+.
 #>
 param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
