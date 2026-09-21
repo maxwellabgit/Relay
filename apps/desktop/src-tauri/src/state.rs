@@ -19,6 +19,8 @@ const MIGRATION_7: &str =
     include_str!("../../../../packages/storage-schema/migrations/007_runtime_settings.sql");
 const MIGRATION_8: &str =
     include_str!("../../../../packages/storage-schema/migrations/008_protect_legacy_content.sql");
+const MIGRATION_9: &str =
+    include_str!("../../../../packages/storage-schema/migrations/009_work_correlation.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -86,6 +88,7 @@ impl StateDb {
         apply_version(&tx, 6, MIGRATION_6)?;
         apply_version(&tx, 7, MIGRATION_7)?;
         apply_version(&tx, 8, MIGRATION_8)?;
+        apply_version(&tx, 9, MIGRATION_9)?;
         tx.commit().map_err(|error| error.to_string())?;
         self.migrate_legacy_protected_content()?;
         Ok(())
@@ -720,7 +723,7 @@ fn list_source_segments(conn: &Connection, op: &Value) -> Result<Value, String> 
 fn enqueue(conn: &Connection, op: &Value) -> Result<Value, String> {
     let item = req_obj(op, "item")?;
     conn.execute(
-        "INSERT OR IGNORE INTO work_items(work_id, type, priority, available_at, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT OR IGNORE INTO work_items(work_id, type, priority, available_at, payload_json, created_at, parent_work_id, correlation_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             req_str(item, "workId")?,
             req_str(item, "type")?,
@@ -728,6 +731,8 @@ fn enqueue(conn: &Connection, op: &Value) -> Result<Value, String> {
             req_str(item, "availableAt")?,
             json_text(item.get("payload").unwrap_or(&json!({})))?,
             req_str(item, "createdAt")?,
+            opt_str(item, "parentWorkId"),
+            opt_str(item, "correlationId"),
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -738,7 +743,7 @@ fn claim_next(conn: &Connection, op: &Value) -> Result<Value, String> {
     let now = req_str(op, "now")?;
     let row = conn
         .query_row(
-            "SELECT work_id, type, priority, available_at, payload_json, created_at FROM work_items
+            "SELECT work_id, type, priority, available_at, payload_json, created_at, parent_work_id, correlation_id FROM work_items
              WHERE available_at <= ?1 AND (lease_until IS NULL OR lease_until < ?1)
              ORDER BY priority DESC, created_at LIMIT 1",
             params![now],
@@ -750,12 +755,24 @@ fn claim_next(conn: &Connection, op: &Value) -> Result<Value, String> {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some((work_id, kind, priority, available_at, payload, created_at)) = row else {
+    let Some((
+        work_id,
+        kind,
+        priority,
+        available_at,
+        payload,
+        created_at,
+        parent_work_id,
+        correlation_id,
+    )) = row
+    else {
         return Ok(Value::Null);
     };
     let lease_until = shift_iso(&now, req_i64(op, "leaseMs")?)?;
@@ -768,14 +785,27 @@ fn claim_next(conn: &Connection, op: &Value) -> Result<Value, String> {
     if changed == 0 {
         return Ok(Value::Null);
     }
-    Ok(json!({
+    let mut value = json!({
         "workId": work_id,
         "type": kind,
         "priority": priority,
         "availableAt": available_at,
         "payload": parse_json(&payload)?,
         "createdAt": created_at,
-    }))
+    });
+    if let Some(parent) = parent_work_id {
+        value
+            .as_object_mut()
+            .ok_or_else(|| "object".to_string())?
+            .insert("parentWorkId".into(), json!(parent));
+    }
+    if let Some(correlation) = correlation_id {
+        value
+            .as_object_mut()
+            .ok_or_else(|| "object".to_string())?
+            .insert("correlationId".into(), json!(correlation));
+    }
+    Ok(value)
 }
 
 fn requeue(conn: &Connection, op: &Value) -> Result<Value, String> {

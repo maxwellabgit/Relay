@@ -28,6 +28,7 @@ type Call = (op: Record<string, unknown>) => Promise<unknown>;
 
 export class TauriEngineStore implements EngineStore {
   readonly learning: LearningStore;
+  runInTransaction?: <T>(work: () => Promise<T>) => Promise<T>;
 
   constructor(
     private readonly invoke: StoreInvoke,

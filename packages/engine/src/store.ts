@@ -92,5 +92,10 @@ export type EngineStore = {
     readonly providerRequestId?: string | null;
     readonly createdAt: string;
   }): Promise<void>;
+  /**
+   * Optional atomic multi-step boundary. When absent, callers use
+   * {@link runInTransaction} which falls through to the callback.
+   */
+  runInTransaction?<T>(work: () => Promise<T>): Promise<T>;
   readonly learning: LearningStore;
 };

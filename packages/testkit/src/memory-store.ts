@@ -251,6 +251,8 @@ export class MemoryEngineStore implements EngineStore {
       availableAt: current.availableAt,
       payload: current.payload,
       createdAt: current.createdAt,
+      ...(current.parentWorkId ? { parentWorkId: current.parentWorkId } : {}),
+      ...(current.correlationId ? { correlationId: current.correlationId } : {}),
     };
   }
 
@@ -333,6 +335,10 @@ export class MemoryEngineStore implements EngineStore {
 
   async listDeadLetters(): Promise<readonly { workId: string; reasonCode: string; at: string }[]> {
     return this.deadLetters;
+  }
+
+  async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
+    return work();
   }
 
   async upsertJudgmentAttempt(record: {

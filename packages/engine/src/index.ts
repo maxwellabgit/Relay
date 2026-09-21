@@ -18,6 +18,8 @@ export * from "./episodes.js";
 export * from "./ids.js";
 export * from "./runtime-events.js";
 export * from "./runtime-recorder.js";
+export * from "./transactions.js";
 export * from "./typesafe-judgment.js";
 export * from "./prompts/index.js";
+export type { WorkCorrelation } from "./queue.js";
 

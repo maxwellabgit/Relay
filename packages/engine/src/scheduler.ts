@@ -1,4 +1,4 @@
-import type { WorkItem, WorkItemType } from "./queue.js";
+import type { WorkCorrelation, WorkItem, WorkItemType } from "./queue.js";
 
 export type Clock = {
   now(): Date;
@@ -29,6 +29,7 @@ export class Scheduler {
     priority: number,
     ids: IdFactory,
     delayMs = 0,
+    correlation?: WorkCorrelation,
   ): Promise<string> {
     const now = this.clock.now();
     const availableAt = new Date(now.getTime() + delayMs).toISOString();
@@ -40,6 +41,8 @@ export class Scheduler {
       availableAt,
       payload,
       createdAt: now.toISOString(),
+      ...(correlation?.parentWorkId ? { parentWorkId: correlation.parentWorkId } : {}),
+      ...(correlation?.correlationId ? { correlationId: correlation.correlationId } : {}),
     });
     return workId;
   }

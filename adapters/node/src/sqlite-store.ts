@@ -286,8 +286,9 @@ export class SqliteEngineStore implements EngineStore {
   async enqueue(item: WorkItem): Promise<void> {
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO work_items(work_id, type, priority, available_at, payload_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO work_items(
+           work_id, type, priority, available_at, payload_json, created_at, parent_work_id, correlation_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         item.workId,
@@ -296,6 +297,8 @@ export class SqliteEngineStore implements EngineStore {
         item.availableAt,
         JSON.stringify(item.payload),
         item.createdAt,
+        item.parentWorkId ?? null,
+        item.correlationId ?? null,
       );
   }
 
@@ -325,7 +328,25 @@ export class SqliteEngineStore implements EngineStore {
       availableAt: row.available_at,
       payload: JSON.parse(row.payload_json) as Record<string, unknown>,
       createdAt: row.created_at,
+      ...(row.parent_work_id ? { parentWorkId: row.parent_work_id } : {}),
+      ...(row.correlation_id ? { correlationId: row.correlation_id } : {}),
     };
+  }
+
+  async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = await work();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // ignore rollback failures after a failed begin/commit
+      }
+      throw error;
+    }
   }
 
   async complete(workId: string): Promise<void> {
@@ -512,6 +533,8 @@ type DbWork = {
   available_at: string;
   payload_json: string;
   created_at: string;
+  parent_work_id: string | null;
+  correlation_id: string | null;
 };
 
 type DbJudgment = {
@@ -585,12 +608,13 @@ function applyMigrations(db: DatabaseSync): void {
     6: "006_protected_learning.sql",
     7: "007_runtime_settings.sql",
     8: "008_protect_legacy_content.sql",
+    9: "009_work_correlation.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7, 8]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8, 9]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

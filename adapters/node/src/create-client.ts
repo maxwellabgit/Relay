@@ -100,6 +100,9 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   // Production desktop defaults to OFF (key present ≠ disclosure permission).
   void sqlite.setHostedProcessingEnabled(true);
 
+  // Bind sqlite transaction boundary onto the invoke-backed store facade.
+  store.runInTransaction = <T>(work: () => Promise<T>) => sqlite.runInTransaction(work);
+
   return {
     client,
     engine,
