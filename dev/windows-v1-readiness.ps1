@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-  Diagnostic Windows V1 readiness gate (no secrets printed).
+  Code/structural Windows V1 readiness gate (no secrets printed).
 
 .DESCRIPTION
   Runs required structural checks for the TypeScript/Tauri Windows path.
-  Exits nonzero when a required check fails. Does not claim dogfood or NSIS install passed.
+  Environment services (local model, live audio) are informational only.
+  Exits nonzero when a required code check fails.
+  Does not claim dogfood readiness — use readiness:dogfood for that.
   Compatible with Windows PowerShell 5.1 and PowerShell 7+.
 #>
 param(
@@ -30,7 +32,7 @@ function Write-Check {
   }
 }
 
-Write-Host "RELAY Windows V1 readiness (diagnostic)"
+Write-Host "RELAY Windows V1 code readiness"
 Write-Host ("repo: {0}" -f $RepoRoot)
 Write-Host ""
 
@@ -65,7 +67,7 @@ Write-Host "Running focused unit/integration/privacy/replay suites..."
 $suites = @(
   @{
     name = "unit:hosted+jev"
-    command = "npm run test:unit -- packages/engine/src/hosted-processing.unit.test.ts packages/engine/src/jev-health.unit.test.ts"
+    command = "npm run test:unit -- packages/engine/src/hosted-processing.unit.test.ts packages/engine/src/jev-health.unit.test.ts apps/relay/src/bootstrap/desktop-composition.unit.test.ts"
   },
   @{
     name = "integration:listen"
@@ -91,29 +93,29 @@ foreach ($suite in $suites) {
 }
 
 Write-Host ""
-Write-Host "Optional environment (informational only):"
+Write-Host "Environment (informational only - not required for CODE READY):"
 $modelPort = if ($env:RELAY_LOCAL_MODEL_PORT) { $env:RELAY_LOCAL_MODEL_PORT } else { "8080" }
 try {
   $resp = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/v1/models" -f $modelPort) -TimeoutSec 2 -UseBasicParsing
   Write-Host ("  local model : reachable on :{0} (status {1})" -f $modelPort, $resp.StatusCode)
 } catch {
-  Write-Host ("  local model : not reachable on :{0} (Ask may show external:unavailable)" -f $modelPort)
+  Write-Host ("  local model : not reachable on :{0}" -f $modelPort)
 }
 
 $audioDoctor = Join-Path $RepoRoot "tools/audio"
 if (Test-Path $audioDoctor) {
-  Write-Host "  audio tools : present under tools/audio (run python -m relay_audio.doctor separately)"
+  Write-Host "  audio tools : present under tools/audio (use readiness:dogfood for live checks)"
 } else {
   Write-Host "  audio tools : missing tools/audio"
 }
 
-Write-Host "  secrets     : not inspected (never printed by this gate)"
-Write-Host "  dogfood/NSIS: not claimed - see docs/WINDOWS_V1_ACCEPTANCE.md"
+Write-Host "  TypeSafe key : verify in RELAY Settings (never inspected here)"
+Write-Host "  dogfood/NSIS : not claimed - run readiness:dogfood / manual install smoke"
 
 Write-Host ""
 if ($script:failed -gt 0) {
-  Write-Host ("readiness:windows FAILED ({0} required check(s))" -f $script:failed) -ForegroundColor Red
+  Write-Host ("CODE NOT READY ({0} required check(s) failed)" -f $script:failed) -ForegroundColor Red
   exit 1
 }
-Write-Host "readiness:windows passed (diagnostic; manual dogfood still separate)"
+Write-Host "CODE READY"
 exit 0
