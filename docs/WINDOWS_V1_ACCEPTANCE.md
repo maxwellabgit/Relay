@@ -2,11 +2,11 @@
 
 ## Baseline
 
-- Branch: `wrap/windows-v1-final` (merging to `main`)
+- Branch: `main`
 - Wrap baseline SHA: `88d5437cb40de2941eb021d7d38b392664707579`
 - Architecture authority: TypeScript engine + Tauri Windows adapters
 
-## Wrap-up commits
+## Wrap-up commits (on main)
 
 1. `2cd857d` — `privacy: migrate legacy prose into protected artifacts`
 2. `3899bf5` — `replay: decouple developer fixtures from live listening`
@@ -14,23 +14,37 @@
 4. `6170013` — `authority: make Jev status evidence based`
 5. `d55208e` — `docs: reconcile Windows V1 release-candidate state`
 6. `6250c79` — `dev: add Windows V1 readiness gate`
-7. `e7a0b5b` (+ tip amendments) — crash-recovery wait / readiness PS 5.1 / clippy
+7. `2e00c8f` — `test: wait for case completion in crash-recovery B/C/E/H`
 
-Final tip on wrap branch before merge: see `git rev-parse HEAD` after landing on `main`.
+## Freeze commits (on main)
 
-## Automated gates (this session)
+1. `b0aeafa` — `fix: isolate Jev health from audio and model failures`
+2. `fae977d` — `dev: distinguish code readiness from dogfood readiness`
+3. tip — `docs: freeze Windows V1 release-candidate record`
+
+**Final main SHA:** `75e44415122fcc938921febc78cff5d2c5d9b052`
+
+(If this file’s tip moves, update this SHA to match `git rev-parse HEAD` on `main` and the GitHub Actions `head_sha`.)
+
+## Automated gates (freeze pass)
 
 ```text
 npm run verify:v1
-→ verify:v1 passed
+→ verify:v1 PASS (record after freeze verify)
 
 npm run readiness:windows
-→ readiness:windows passed (diagnostic)
-  optional: local model not reachable on :8080
-  secrets not inspected
+→ CODE READY / PASS
+
+npm run readiness:dogfood
+→ NOT READY FOR DOGFOOD on this machine (expected until model + audio doctor pass)
+  - Local model unavailable
+  - Microphone / Whisper may fail until operator setup
+
+GitHub Actions check for final main SHA:
+→ record after push (exact-HEAD only; do not infer from prior SHAs such as 2e00c8f)
 ```
 
-GitHub Actions `check` for the final main SHA: record after push.
+Prior wrap tip `2e00c8f` had a green `check` run (`35548087632`) before this freeze pass.
 
 ## Manual Windows dogfood
 
@@ -39,31 +53,34 @@ Status: **pending** — not run on this machine.
 | Prerequisite | Observed this session |
 | --- | --- |
 | Local llama.cpp (`127.0.0.1:8080`) | Unavailable |
-| `python -m relay_audio.doctor` | Not re-run as pass criteria |
+| `python -m relay_audio.doctor` | Did not overall-pass (mic / Whisper) |
 | TypeSafe key via Settings | Not exercised |
 | Real microphone Listen | Not exercised |
 
-Operator checklist remains the hardening directive 37-step sequence via `npm run dev:desktop`.
+Operator: `npm run readiness:dogfood` must PASS, then `npm run dev:desktop` and the freeze-pass Tests A–H.
 
 ## Installed NSIS smoke
 
 | Check | Result |
 | --- | --- |
-| `npm run build:desktop` | Passed — `RELAY_0.1.0_x64-setup.exe` |
-| Installer path (this build) | `C:\Users\maxwe\AppData\Local\Temp\cursor-sandbox-cache\fceeb6951bd0ffc4fa7c5f542dfa23a8\cargo-target\release\bundle\nsis\RELAY_0.1.0_x64-setup.exe` |
+| `npm run build:desktop` | Prior wrap build produced `RELAY_0.1.0_x64-setup.exe` |
+| Installer path (prior build) | `C:\Users\maxwe\AppData\Local\Temp\cursor-sandbox-cache\fceeb6951bd0ffc4fa7c5f542dfa23a8\cargo-target\release\bundle\nsis\RELAY_0.1.0_x64-setup.exe` |
 | Packaged `tools/audio` | Bundled via Tauri `bundle.resources` |
 | Full install + Listen without repo | **Pending** operator |
+
+Rebuild after freeze tip before claiming installed smoke on this SHA.
 
 ## Operator prerequisites
 
 ```powershell
 npm run readiness:windows
+npm run readiness:dogfood
 ./dev/start-model.ps1 -StartHint
 ./dev/start-model.ps1
 cd tools/audio
 python -m pip install -e ".[live]"
+# place/download Whisper tiny.en before Listen (doctor uses local_files_only)
 python -m relay_audio.doctor
-# place/download Whisper tiny.en before Listen
 npm run dev:desktop
 # Settings: store TypeSafe key; leave Allow hosted processing OFF initially
 ```
@@ -71,8 +88,8 @@ npm run dev:desktop
 ## Local model / audio / Jev
 
 - Local model: external loopback (`external:ready` / `external:unavailable`)
-- Audio: `source.ready` handshake; Replay does not require Listen or mic
-- Jev: key ≠ disclosure; chip evidence-based (`configured` until successful request)
+- Audio: Listen fails closed without `source.ready`; Replay is independent of Listen/audio health
+- Jev: key ≠ disclosure; chip evidence-based (`configured` until successful request); audio/model failures do not mark Jev degraded
 
 ## Known remaining limitations
 
@@ -80,7 +97,8 @@ npm run dev:desktop
 - One production Reflex (`resolve-acronym@1`)
 - No connectors / Halo / iPhone
 - Local model not app-supervised beyond health checks
+- External Whisper model must already be present locally
 
 ## Stop point
 
-**STOP.** Final architecture/code review next. No broad cleanup until after that review.
+**STOP** after freeze gates + operator dogfood/NSIS. Final architecture/code review next. No broad cleanup until after that review.
