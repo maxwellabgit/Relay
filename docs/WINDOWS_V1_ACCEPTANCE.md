@@ -22,9 +22,7 @@
 2. `fae977d` — `dev: distinguish code readiness from dogfood readiness`
 3. tip — `docs: freeze Windows V1 release-candidate record`
 
-**Final main SHA:** `75e44415122fcc938921febc78cff5d2c5d9b052`
-
-(If this file’s tip moves, update this SHA to match `git rev-parse HEAD` on `main` and the GitHub Actions `head_sha`.)
+**Final main SHA:** _(set to `git rev-parse HEAD` in the pin commit after verify)_
 
 ## Automated gates (freeze pass)
 
