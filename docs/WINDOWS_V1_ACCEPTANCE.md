@@ -20,9 +20,10 @@
 
 1. `b0aeafa` - `fix: isolate Jev health from audio and model failures`
 2. `fae977d` - `dev: distinguish code readiness from dogfood readiness`
-3. `81eb0ec` - `docs: freeze Windows V1 release-candidate record`
+3. `81eb0ec` / subsequent docs pins - `docs: freeze Windows V1 release-candidate record`
+4. `03aa9a8` - `test: raise production-path acceptance timeout for CI`
 
-**Final main SHA:** `81eb0ec1b20d8beb27a3acb07eb5b0632d251edd`
+**Final main SHA (CI-green tip):** `03aa9a851991b339f57ff8da4921b01b0aa1624c`
 
 ## Automated gates (freeze pass)
 
@@ -38,11 +39,11 @@ npm run readiness:dogfood
   - Local model unavailable
   - Microphone / Whisper may fail until operator setup
 
-GitHub Actions check for 81eb0ec1b20d8beb27a3acb07eb5b0632d251edd:
--> record after push (exact-HEAD only)
+GitHub Actions check for 03aa9a851991b339f57ff8da4921b01b0aa1624c:
+-> PASS (run 35550744256)
 ```
 
-Prior wrap tip `2e00c8f` had a green `check` run (`35548087632`) before this freeze pass.
+Prior wrap tip `2e00c8f` also had a green `check` run (`35548087632`).
 
 ## Manual Windows dogfood
 
