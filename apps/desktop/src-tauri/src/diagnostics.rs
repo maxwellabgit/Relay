@@ -226,6 +226,34 @@ fn mark_prior_unclean_runs() {
     }
 }
 
+fn resolve_started_at(run_id: &str, run_dir_path: &Path) -> String {
+    if let Ok(root) = diagnostics_root() {
+        let pointer = root.join("latest.json");
+        if let Ok(text) = fs::read_to_string(&pointer) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+                if value.get("runId").and_then(|item| item.as_str()) == Some(run_id) {
+                    if let Some(started) = value.get("startedAt").and_then(|item| item.as_str()) {
+                        if !started.is_empty() {
+                            return started.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let manifest = run_dir_path.join("manifest.json");
+    if let Ok(text) = fs::read_to_string(&manifest) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+            if let Some(started) = value.get("startedAt").and_then(|item| item.as_str()) {
+                if !started.is_empty() {
+                    return started.to_string();
+                }
+            }
+        }
+    }
+    utc_now_iso()
+}
+
 fn write_latest_pointer(
     run_id: &str,
     run_dir_path: &Path,
@@ -240,7 +268,7 @@ fn write_latest_pointer(
         "commit": env!("GIT_COMMIT"),
         "profile": std::env::var("RELAY_PROFILE").unwrap_or_else(|_| "desktop".to_string()),
         "mode": "live",
-        "startedAt": utc_now_iso(),
+        "startedAt": resolve_started_at(run_id, run_dir_path),
         "heartbeatAt": utc_now_iso(),
         "pid": std::process::id(),
         "cleanShutdown": clean_shutdown,
@@ -249,7 +277,12 @@ fn write_latest_pointer(
     write_atomic(&pointer, &format!("{}\n", body))
 }
 
-fn write_heartbeat(run_id: &str) -> Result<(), String> {
+fn write_heartbeat_status(
+    run_id: &str,
+    status: &str,
+    clean_shutdown: Option<bool>,
+    unclean_shutdown: bool,
+) -> Result<(), String> {
     let dir = run_dir(run_id)?;
     let path = dir.join("heartbeat.json");
     let body = serde_json::json!({
@@ -257,10 +290,14 @@ fn write_heartbeat(run_id: &str) -> Result<(), String> {
         "runId": run_id,
         "at": utc_now_iso(),
         "pid": std::process::id(),
-        "status": "running"
+        "status": status
     });
     write_atomic(&path, &format!("{}\n", body))?;
-    write_latest_pointer(run_id, &dir, None, false)
+    write_latest_pointer(run_id, &dir, clean_shutdown, unclean_shutdown)
+}
+
+fn write_heartbeat(run_id: &str) -> Result<(), String> {
+    write_heartbeat_status(run_id, "running", None, false)
 }
 
 fn write_live_summary_stub(run_id: &str) -> Result<(), String> {
@@ -338,8 +375,16 @@ fn complete_manifest(run_id: &str, clean: bool) -> Result<(), String> {
         serde_json::Value::Bool(!clean),
     );
     write_atomic(&path, &format!("{}\n", value))?;
-    let dir = run_dir(run_id)?;
-    write_latest_pointer(run_id, &dir, Some(clean), !clean)?;
+    write_heartbeat_status(
+        run_id,
+        if clean {
+            "completed"
+        } else {
+            "unclean_shutdown"
+        },
+        Some(clean),
+        !clean,
+    )?;
     Ok(())
 }
 

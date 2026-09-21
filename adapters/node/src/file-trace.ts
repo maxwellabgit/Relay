@@ -43,6 +43,13 @@ export function createFileTraceSink(
   const commit = options.commit ?? "test";
   const profile = options.profile ?? "node-harness";
   const mode = options.mode ?? "test";
+  const canonicalRuns = paths.runsRoot().replace(/[/\\]+$/, "").toLowerCase();
+  const effectiveRuns = runsRoot.replace(/[/\\]+$/, "").toLowerCase();
+  const publishLatest =
+    options.diagnosticsRoot != null ||
+    effectiveRuns === canonicalRuns ||
+    effectiveRuns.startsWith(`${canonicalRuns}${canonicalRuns.includes("\\") ? "\\" : "/"}`) ||
+    /[/\\]diagnostics[/\\]runs(?:[/\\]|$)/i.test(runsRoot);
   let wroteManifest = false;
 
   return {
@@ -74,33 +81,25 @@ export function createFileTraceSink(
           "utf8",
         );
         wroteManifest = true;
-        await writeLatestAndHeartbeat({
-          paths,
-          runId,
-          runDir: directory,
-          commit,
-          profile,
-          mode,
-          cleanShutdown: null,
-          uncleanShutdown: false,
-        });
+        if (publishLatest) {
+          await writeLatestAndHeartbeat({
+            paths,
+            runId,
+            runDir: directory,
+            commit,
+            profile,
+            mode,
+            startedAt,
+            cleanShutdown: null,
+            uncleanShutdown: false,
+          });
+        }
         await writeLiveSummaryStub({ paths, runId, runDir: directory, commit, profile });
       }
       await compactOldRuns(runsRoot);
       await rotateIfNeeded(file);
       await appendFile(file, `${JSON.stringify(event)}\n`, "utf8");
-      await writeLatestAndHeartbeat({
-        paths,
-        runId,
-        runDir: directory,
-        commit,
-        profile,
-        mode,
-        cleanShutdown: null,
-        uncleanShutdown: false,
-      });
-      if (event.eventType === "run.ended") {
-        await completeManifest(directory, true);
+      if (publishLatest) {
         await writeLatestAndHeartbeat({
           paths,
           runId,
@@ -108,9 +107,26 @@ export function createFileTraceSink(
           commit,
           profile,
           mode,
-          cleanShutdown: true,
+          startedAt,
+          cleanShutdown: null,
           uncleanShutdown: false,
         });
+      }
+      if (event.eventType === "run.ended") {
+        await completeManifest(directory, true);
+        if (publishLatest) {
+          await writeLatestAndHeartbeat({
+            paths,
+            runId,
+            runDir: directory,
+            commit,
+            profile,
+            mode,
+            startedAt,
+            cleanShutdown: true,
+            uncleanShutdown: false,
+          });
+        }
       }
     },
     async read() {
@@ -142,6 +158,7 @@ async function writeLatestAndHeartbeat(input: {
   commit: string;
   profile: string;
   mode: DiagnosticLatestPointer["mode"];
+  startedAt: string;
   cleanShutdown: boolean | null;
   uncleanShutdown: boolean;
 }): Promise<void> {
@@ -154,7 +171,7 @@ async function writeLatestAndHeartbeat(input: {
     commit: input.commit,
     profile: input.profile,
     mode: input.mode,
-    startedAt: now,
+    startedAt: input.startedAt,
     heartbeatAt: now,
     pid: process.pid,
     cleanShutdown: input.cleanShutdown,

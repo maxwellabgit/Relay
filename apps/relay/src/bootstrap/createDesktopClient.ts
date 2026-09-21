@@ -1,11 +1,13 @@
 import type {
   ArtifactStorePort,
+  DiagnosticLiveSummary,
   JudgmentPort,
   JudgmentRequest,
   JudgmentResponse,
   RelayClient,
   RelayCommand,
   RelayCommandResult,
+  RelaySnapshot,
   TextModelPort,
 } from "@relay/contracts";
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
@@ -110,9 +112,74 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const engine = new RelayEngine(deps);
   const inner = createRelayClientFromEngine(engine);
   let stopPump: (() => void) | null = null;
+  let stopLiveSummary: (() => void) | null = null;
   let acceptIntake = true;
   let handlingSourceFailure = false;
   let healthTimer: ReturnType<typeof setInterval> | null = null;
+
+  const publishLiveSummary = (snapshot: RelaySnapshot): void => {
+    const statusOf = (id: string) => snapshot.status.find((chip) => chip.id === id)?.detail ?? "not_observed";
+    const activeCases = snapshot.cases.filter((item) => item.status === "active").length;
+    const waitingCases = snapshot.cases.filter((item) => item.status === "waiting").length;
+    const failedCases = snapshot.cases.filter(
+      (item) => item.status === "failed" || item.status === "blocked",
+    ).length;
+    const focusCase =
+      snapshot.cases.find((item) => item.caseId === snapshot.runtime.activeCaseId) ??
+      snapshot.cases.find((item) => item.status === "active" || item.status === "waiting") ??
+      snapshot.cases[0] ??
+      null;
+    const wait = focusCase
+      ? snapshot.waits.find((item) => item.caseId === focusCase.caseId)
+      : undefined;
+    const summary: DiagnosticLiveSummary = {
+      schemaVersion: 1,
+      runId,
+      commit: snapshot.runtime.commit || resolveBuildSha(),
+      profile: "desktop",
+      providerReadiness: {
+        jev: statusOf("jev"),
+        model: statusOf("model"),
+        audio: statusOf("audio"),
+      },
+      queue: {
+        ready: snapshot.runtime.queueDepth,
+        oldestReadyMs: 0,
+        deadLetters: snapshot.runtime.deadLetters,
+      },
+      activeCases,
+      waitingCases,
+      failedCases,
+      latestCase: {
+        caseId: focusCase?.caseId ?? null,
+        stage: focusCase?.phase ?? null,
+        blocker: wait?.waitKind ?? null,
+      },
+      latestJudgment: {
+        questionSet: snapshot.decision?.gateId ?? snapshot.gate?.gateId ?? null,
+        selectedRoute: snapshot.decision?.selectedOptionId ?? snapshot.gate?.selectedOptionId ?? null,
+        policyResult: snapshot.decision?.result ?? snapshot.gate?.result ?? null,
+        observed: Boolean(snapshot.decision ?? snapshot.gate),
+      },
+      latestTool: { toolId: null, result: null, observed: false },
+      deadLetters: snapshot.runtime.deadLetters,
+      retrySchedule: null,
+      paths: {
+        runDir: directoryLabel,
+        eventsPath: `${directoryLabel}\\events.jsonl`,
+        liveSummaryPath: `${directoryLabel}\\live-summary.json`,
+        latestPointerPath: "%LOCALAPPDATA%\\RELAY\\diagnostics\\latest.json",
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    void invoke("write_live_summary", { runId, body: JSON.stringify(summary) }).catch(() => null);
+  };
+
+  stopLiveSummary = inner.subscribe((change) => {
+    if (change.type === "SnapshotReplaced") {
+      publishLiveSummary(change.snapshot);
+    }
+  });
 
   const applyAudioHealth = (status: AudioStatus): void => {
     audioHealth.ok = status.ok;
@@ -218,6 +285,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       }
       stopPump?.();
       stopPump = null;
+      stopLiveSummary?.();
+      stopLiveSummary = null;
       try {
         await audio.stop();
       } catch {
