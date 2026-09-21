@@ -22,8 +22,9 @@
 2. `fae977d` - `dev: distinguish code readiness from dogfood readiness`
 3. `81eb0ec` / subsequent docs pins - `docs: freeze Windows V1 release-candidate record`
 4. `03aa9a8` - `test: raise production-path acceptance timeout for CI`
+5. `9237836` - `test: raise integration and privacy vitest timeouts for CI`
 
-**Final main SHA (CI-green tip):** `03aa9a851991b339f57ff8da4921b01b0aa1624c`
+**Final main SHA (CI-green tip):** `9237836042793dc28ced794b1066fe7a0a4b6438`
 
 ## Automated gates (freeze pass)
 
@@ -39,8 +40,10 @@ npm run readiness:dogfood
   - Local model unavailable
   - Microphone / Whisper may fail until operator setup
 
-GitHub Actions check for 03aa9a851991b339f57ff8da4921b01b0aa1624c:
--> PASS (run 35550744256)
+GitHub Actions check for 9237836042793dc28ced794b1066fe7a0a4b6438:
+-> PASS (run 35552370959)
+
+Prior CI-green code tip `03aa9a8` also PASS (run 35550744256)
 ```
 
 Prior wrap tip `2e00c8f` also had a green `check` run (`35548087632`).
