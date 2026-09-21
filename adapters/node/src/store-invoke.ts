@@ -177,6 +177,15 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return store.learning.listReviews();
     case "compact":
       return store.learning.compact(str(op, "nowIso"));
+    case "begin_transaction":
+      await store.beginTransaction();
+      return null;
+    case "commit_transaction":
+      await store.commitTransaction();
+      return null;
+    case "rollback_transaction":
+      await store.rollbackTransaction();
+      return null;
     default:
       throw new Error(`unknown_op:${String(op.op)}`);
   }

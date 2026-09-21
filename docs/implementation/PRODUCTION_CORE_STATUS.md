@@ -11,12 +11,12 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Named history | `9fce11241019321d3d326c5b37f7578efc8d5630`, `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7` |
 | Preservation tag | `relay-dotnet-a6bf987` (confirmed present) |
 | Pre-existing user changes | none |
-| Active phase | Phase 3 GREEN |
-| Last green gate | Phase 3 `verify:v1` PASS (engine decompose) |
+| Active phase | Phase 3 IN_PROGRESS |
+| Last green gate | Phase 3 `verify:v1` PASS + desktop txn wiring |
 | Phase 0 commit | `bc3689eadc1e166475bc8c1009f81b3f3842eacc` |
 | Phase 1 commits | `1c3f666`, `af22805` |
 | Phase 2 commits | `f0ad739`, `a7e4208` |
-| Phase 3 commit | `25719f9` |
+| Phase 3 commits | `25719f9`, `a69c40f` (+ desktop txn fix pending) |
 
 ## Phase states
 

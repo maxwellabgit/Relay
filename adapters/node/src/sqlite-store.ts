@@ -21,6 +21,7 @@ const migrationDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../
 
 export class SqliteEngineStore implements EngineStore {
   private readonly db: DatabaseSync;
+  private txnDepth = 0;
   readonly learning: SqliteLearning;
 
   constructor(filename = ":memory:", artifacts?: ArtifactStorePort) {
@@ -333,18 +334,43 @@ export class SqliteEngineStore implements EngineStore {
     };
   }
 
+  async beginTransaction(): Promise<void> {
+    if (this.txnDepth === 0) {
+      this.db.exec("BEGIN IMMEDIATE");
+    }
+    this.txnDepth += 1;
+  }
+
+  async commitTransaction(): Promise<void> {
+    if (this.txnDepth === 0) {
+      throw new Error("no_transaction");
+    }
+    this.txnDepth -= 1;
+    if (this.txnDepth === 0) {
+      this.db.exec("COMMIT");
+    }
+  }
+
+  async rollbackTransaction(): Promise<void> {
+    if (this.txnDepth === 0) {
+      return;
+    }
+    this.txnDepth = 0;
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failures after a failed begin/commit
+    }
+  }
+
   async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
-    this.db.exec("BEGIN IMMEDIATE");
+    await this.beginTransaction();
     try {
       const result = await work();
-      this.db.exec("COMMIT");
+      await this.commitTransaction();
       return result;
     } catch (error) {
-      try {
-        this.db.exec("ROLLBACK");
-      } catch {
-        // ignore rollback failures after a failed begin/commit
-      }
+      await this.rollbackTransaction();
       throw error;
     }
   }

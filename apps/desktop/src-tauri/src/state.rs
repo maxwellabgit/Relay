@@ -25,6 +25,8 @@ const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
     conn: Connection,
+    /// Depth of an explicit multi-op transaction opened via begin_transaction.
+    txn_depth: u32,
 }
 
 impl StateDb {
@@ -49,27 +51,69 @@ impl StateDb {
         let conn = Connection::open(path).map_err(|error| error.to_string())?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| error.to_string())?;
-        let mut db = Self { conn };
+        let mut db = Self { conn, txn_depth: 0 };
         db.migrate()?;
         Ok(db)
     }
 
     pub fn execute(&mut self, op: &Value) -> Result<Value, String> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| error.to_string())?;
-        let result = dispatch(&tx, op);
-        match result {
-            Ok(value) => {
-                tx.commit().map_err(|error| error.to_string())?;
-                Ok(value)
-            }
-            Err(error) => {
-                let _ = tx.rollback();
-                Err(error)
+        match op.get("op").and_then(|value| value.as_str()).unwrap_or("") {
+            "begin_transaction" => self.begin_transaction(),
+            "commit_transaction" => self.commit_transaction(),
+            "rollback_transaction" => self.rollback_transaction(),
+            _ if self.txn_depth > 0 => dispatch(&self.conn, op),
+            _ => {
+                let tx = self
+                    .conn
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(|error| error.to_string())?;
+                let result = dispatch(&tx, op);
+                match result {
+                    Ok(value) => {
+                        tx.commit().map_err(|error| error.to_string())?;
+                        Ok(value)
+                    }
+                    Err(error) => {
+                        let _ = tx.rollback();
+                        Err(error)
+                    }
+                }
             }
         }
+    }
+
+    fn begin_transaction(&mut self) -> Result<Value, String> {
+        if self.txn_depth == 0 {
+            self.conn
+                .execute_batch("BEGIN IMMEDIATE")
+                .map_err(|error| error.to_string())?;
+        }
+        self.txn_depth = self.txn_depth.saturating_add(1);
+        Ok(Value::Null)
+    }
+
+    fn commit_transaction(&mut self) -> Result<Value, String> {
+        if self.txn_depth == 0 {
+            return Err("no_transaction".into());
+        }
+        self.txn_depth -= 1;
+        if self.txn_depth == 0 {
+            self.conn
+                .execute_batch("COMMIT")
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(Value::Null)
+    }
+
+    fn rollback_transaction(&mut self) -> Result<Value, String> {
+        if self.txn_depth == 0 {
+            return Ok(Value::Null);
+        }
+        self.txn_depth = 0;
+        self.conn
+            .execute_batch("ROLLBACK")
+            .map_err(|error| error.to_string())?;
+        Ok(Value::Null)
     }
 
     fn migrate(&mut self) -> Result<(), String> {
@@ -1915,6 +1959,71 @@ mod tests {
         assert!(error.is_err());
         let rows = db.execute(&json!({ "op": "list_memories" })).unwrap();
         assert_eq!(rows.as_array().unwrap().len(), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn explicit_transaction_rolls_back_multi_op() {
+        let (mut db, path) = temp_db();
+        db.execute(&json!({ "op": "begin_transaction" })).unwrap();
+        db.execute(&json!({
+            "op": "create_case",
+            "caseId": "case_tx",
+            "origin": "direct",
+            "kind": "resolve",
+            "priority": 1,
+            "at": "2020-01-01T00:00:00.000Z"
+        }))
+        .unwrap();
+        db.execute(&json!({
+            "op": "append_domain_event",
+            "type": "source.case_bound",
+            "at": "2020-01-01T00:00:00.000Z",
+            "payload": { "caseId": "case_tx" }
+        }))
+        .unwrap();
+        db.execute(&json!({ "op": "rollback_transaction" }))
+            .unwrap();
+        let missing = db
+            .execute(&json!({ "op": "get_case", "caseId": "case_tx" }))
+            .unwrap();
+        assert!(missing.is_null());
+        let events = db
+            .execute(&json!({ "op": "list_domain_events", "limit": 10 }))
+            .unwrap();
+        assert_eq!(events.as_array().unwrap().len(), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn explicit_transaction_commits_multi_op() {
+        let (mut db, path) = temp_db();
+        db.execute(&json!({ "op": "begin_transaction" })).unwrap();
+        db.execute(&json!({
+            "op": "create_case",
+            "caseId": "case_ok",
+            "origin": "direct",
+            "kind": "resolve",
+            "priority": 1,
+            "at": "2020-01-01T00:00:00.000Z"
+        }))
+        .unwrap();
+        db.execute(&json!({
+            "op": "append_domain_event",
+            "type": "source.case_bound",
+            "at": "2020-01-01T00:00:00.000Z",
+            "payload": { "caseId": "case_ok" }
+        }))
+        .unwrap();
+        db.execute(&json!({ "op": "commit_transaction" })).unwrap();
+        let live = db
+            .execute(&json!({ "op": "get_case", "caseId": "case_ok" }))
+            .unwrap();
+        assert_eq!(live["caseId"], "case_ok");
+        let events = db
+            .execute(&json!({ "op": "list_domain_events", "limit": 10 }))
+            .unwrap();
+        assert_eq!(events.as_array().unwrap().len(), 1);
         let _ = std::fs::remove_file(path);
     }
 }

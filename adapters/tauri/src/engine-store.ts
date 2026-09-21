@@ -28,7 +28,6 @@ type Call = (op: Record<string, unknown>) => Promise<unknown>;
 
 export class TauriEngineStore implements EngineStore {
   readonly learning: LearningStore;
-  runInTransaction?: <T>(work: () => Promise<T>) => Promise<T>;
 
   constructor(
     private readonly invoke: StoreInvoke,
@@ -40,6 +39,22 @@ export class TauriEngineStore implements EngineStore {
   }
 
   private readonly call: Call;
+
+  async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
+    await this.call({ op: "begin_transaction" });
+    try {
+      const result = await work();
+      await this.call({ op: "commit_transaction" });
+      return result;
+    } catch (error) {
+      try {
+        await this.call({ op: "rollback_transaction" });
+      } catch {
+        // ignore rollback failures after a failed begin/commit
+      }
+      throw error;
+    }
+  }
 
   ensureSession(sessionId: string, createdAt: string): Promise<void> {
     return this.voidOp({ op: "ensure_session", sessionId, createdAt });
