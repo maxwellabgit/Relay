@@ -18,8 +18,10 @@ export function Composer({ onSubmit, disabled = false }: Props) {
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={styles.wrap} testID="relay-composer">
       <TextInput
+        testID="relay-composer-input"
+        accessibilityLabel="Ask RELAY"
         value={text}
         onChangeText={setText}
         placeholder="Ask RELAY…"
@@ -30,6 +32,9 @@ export function Composer({ onSubmit, disabled = false }: Props) {
         returnKeyType="send"
       />
       <Pressable
+        testID="relay-composer-send"
+        accessibilityRole="button"
+        accessibilityLabel="Send"
         onPress={send}
         disabled={disabled || !text.trim()}
         style={[styles.button, (!text.trim() || disabled) && styles.buttonDisabled]}

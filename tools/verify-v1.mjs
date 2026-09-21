@@ -1,35 +1,14 @@
 #!/usr/bin/env node
 /**
  * RELAY V1 verification gate. Stops on first failure and writes a sanitized summary.
+ * Step list comes from tools/verification/manifest.mjs (shared with GitHub Actions).
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { verificationManifest } from "./verification/manifest.mjs";
 
-const steps = [
-  { name: "format", command: "npm", args: ["run", "format:check"] },
-  { name: "lint", command: "npm", args: ["run", "lint"] },
-  { name: "typecheck", command: "npm", args: ["run", "typecheck"] },
-  { name: "unit", command: "npm", args: ["run", "test:unit"] },
-  { name: "architecture", command: "npm", args: ["run", "test:architecture"] },
-  { name: "integration", command: "npm", args: ["run", "test:integration"] },
-  { name: "replay", command: "npm", args: ["run", "test:replay"] },
-  { name: "privacy", command: "npm", args: ["run", "test:privacy"] },
-  { name: "web-export", command: "npm", args: ["run", "build:web"] },
-  { name: "ios-export", command: "npm", args: ["run", "export:ios", "--workspace", "@relay/app"] },
-  { name: "halo", command: "npm", args: ["run", "halo:test"] },
-  { name: "cargo-fmt", command: "cargo", args: ["fmt", "--check"], cwd: "apps/desktop/src-tauri" },
-  {
-    name: "cargo-clippy",
-    command: "cargo",
-    args: ["clippy", "--", "-D", "warnings"],
-    cwd: "apps/desktop/src-tauri",
-  },
-  { name: "cargo-test", command: "cargo", args: ["test"], cwd: "apps/desktop/src-tauri" },
-  { name: "smoke", command: "npm", args: ["run", "test:smoke"] },
-  { name: "desktop-build", command: "npm", args: ["run", "build:desktop"], env: { CI: "true" } },
-];
-
+const steps = verificationManifest.steps;
 const started = new Date().toISOString();
 const results = [];
 

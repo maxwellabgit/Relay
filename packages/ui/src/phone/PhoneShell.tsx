@@ -147,14 +147,16 @@ export function PhoneShell({
 function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
   if (item.kind === "ask") {
     return (
-      <View style={styles.userBubble}>
-        <Text style={styles.userText}>{item.summary}</Text>
+      <View style={styles.userBubble} testID={`relay-feed-ask-${item.itemId}`}>
+        <Text style={styles.userText} testID="relay-feed-ask-text">
+          {item.summary}
+        </Text>
       </View>
     );
   }
   if (item.kind === "task") {
     return (
-      <View style={styles.assistantBubble}>
+      <View style={styles.assistantBubble} testID={`relay-feed-task-${item.itemId}`}>
         <Text style={styles.assistantName}>RELAY</Text>
         <Text style={styles.taskEyebrow}>Recommended task</Text>
         <Text style={styles.assistantText}>{item.summary}</Text>
@@ -163,7 +165,7 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
   }
   if (item.kind === "memory") {
     return (
-      <View style={styles.assistantBubble}>
+      <View style={styles.assistantBubble} testID={`relay-feed-memory-${item.itemId}`}>
         <Text style={styles.assistantName}>RELAY</Text>
         <Text style={styles.taskEyebrow}>Memory</Text>
         <Text style={styles.assistantText}>{item.summary}</Text>
@@ -171,9 +173,11 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
     );
   }
   return (
-    <View style={styles.assistantBubble}>
+    <View style={styles.assistantBubble} testID={`relay-feed-answer-${item.itemId}`}>
       <Text style={styles.assistantName}>RELAY</Text>
-      <Text style={styles.assistantText}>{item.summary}</Text>
+      <Text style={styles.assistantText} testID="relay-feed-answer-text">
+        {item.summary}
+      </Text>
     </View>
   );
 }

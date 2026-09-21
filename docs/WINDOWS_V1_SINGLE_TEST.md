@@ -10,12 +10,13 @@ From the repo root, on `main`:
 
 ```powershell
 npm run test:manual:msrp
+npm run test:e2e:msrp    # optional headed Tauri proof with isolated profile
 npm run dev:desktop
 ```
 
 The preflight must print `MSRP manual-test preflight PASS` before the desktop workbench is opened.
 It runs the same engine path in an isolated profile and verifies the exact answer, trace lifecycle,
-and absence of model/Jev calls.
+and absence of model/Jev calls. `test:e2e:msrp` is the headed Tauri composition proof; it is not a substitute for `test:smoke`.
 
 Leave **Listen off**.
 

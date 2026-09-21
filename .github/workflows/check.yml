@@ -25,33 +25,8 @@ jobs:
         run: |
           echo "EXPO_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "GIT_COMMIT=${GITHUB_SHA}" >> "$GITHUB_ENV"
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:unit
-      - run: npm run test:integration
-      - run: npm run test:replay
-      - run: npm run test:privacy
-      - run: npm run test:architecture
-      - run: npm run build:web
-      - name: Export iOS
-        run: npm run export:ios --workspace @relay/app
-      - name: Install Halo test extra
-        working-directory: tools/halo
-        run: python -m pip install -e ".[test]"
-      - name: Halo protocol tests
-        run: npm run halo:test
-      - name: Cargo fmt
-        working-directory: apps/desktop/src-tauri
-        run: cargo fmt --check
-      - name: Cargo clippy
-        working-directory: apps/desktop/src-tauri
-        run: cargo clippy -- -D warnings
-      - name: Cargo test
-        working-directory: apps/desktop/src-tauri
-        run: cargo test
-      - run: npm run test:smoke
-      - run: npm run build:desktop
+      - name: Verify V1 (shared manifest)
+        run: npm run verify:v1
         env:
           CI: true
           EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}

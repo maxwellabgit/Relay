@@ -11,8 +11,10 @@ export function JevDecisionTree({ tree }: Props) {
     <View style={styles.root}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Jev Decision Tree</Text>
-          <Text style={styles.subtitle}>How Jev reached a bounded judgment for this request.</Text>
+          <Text style={styles.title}>Execution Timeline</Text>
+          <Text style={styles.subtitle}>
+            Deterministic, model, Jev, policy, and tool stages for this request.
+          </Text>
         </View>
         <Text style={styles.total}>
           {tree.totalMs != null ? `Total response time ${Math.round(tree.totalMs)} ms` : "Total response time —"}

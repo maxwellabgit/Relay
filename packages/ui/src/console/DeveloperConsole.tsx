@@ -28,7 +28,7 @@ type Tab = "overview" | "jev" | "logs";
 const SPEEDS = [0, 1, 10] as const;
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
-  { id: "jev", label: "Jev Decision Tree" },
+  { id: "jev", label: "Execution Timeline" },
   { id: "logs", label: "Logs" },
 ];
 
