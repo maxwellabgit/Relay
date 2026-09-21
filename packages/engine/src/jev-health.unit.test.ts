@@ -39,7 +39,7 @@ describe("projectJevHealth", () => {
 });
 
 describe("JevHealthTracker", () => {
-  it("does not clear degraded to ready on periodic refresh without success", () => {
+  it("does not invent ready on config refresh after failure; success restores ready", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
     expect(tracker.state.detail).toBe("configured");
@@ -51,6 +51,33 @@ describe("JevHealthTracker", () => {
     expect(tracker.state).toEqual({ ok: true, detail: "ready" });
     tracker.apply({ secretPresent: true, hostedEnabled: true });
     expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+  });
+
+  it("keeps configured when only configuration apply runs (audio/model refresh path)", () => {
+    const tracker = new JevHealthTracker();
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    expect(tracker.state).toEqual({ ok: true, detail: "configured" });
+    // Simulates refreshConfiguredHealth after mic/model failure — apply only.
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    expect(tracker.state).toEqual({ ok: true, detail: "configured" });
+  });
+
+  it("keeps ready when only configuration apply runs after prior success", () => {
+    const tracker = new JevHealthTracker();
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    tracker.noteSuccess();
+    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+  });
+
+  it("marks degraded only from noteFailure, not from apply", () => {
+    const tracker = new JevHealthTracker();
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    tracker.apply({ secretPresent: true, hostedEnabled: true });
+    expect(tracker.state.detail).toBe("configured");
+    tracker.noteFailure();
+    expect(tracker.state).toEqual({ ok: false, detail: "degraded" });
   });
 
   it("drops to hosted off without clearing outcome memory for later re-enable", () => {

@@ -73,17 +73,18 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const artifacts = new TauriArtifactStore(invoke);
   const store = new TauriEngineStore(storeInvoke, artifacts);
   const nativeJudgments: JudgmentPort = options.judgments ?? createNativeJudgmentPort(invoke);
-  let refreshProviderHealth: (opts?: { readonly afterFailure?: boolean }) => Promise<void> = async () => {};
+  let refreshConfiguredHealth: () => Promise<void> = async () => {};
 
   const judgments: JudgmentPort = {
     async judge(request, signal) {
       const response = await nativeJudgments.judge(request, signal);
+      // Only JudgmentPort outcomes may create Jev provider evidence.
       if (response.ok) {
         jevTracker.noteSuccess();
       } else {
         jevTracker.noteFailure();
-        void refreshProviderHealth({ afterFailure: true });
       }
+      void refreshConfiguredHealth();
       return response;
     },
   };
@@ -118,13 +119,14 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     audioHealth.detail = status.capturing ? "capturing" : status.detail;
   };
 
-  const refreshProviderHealthImpl = async (opts?: { readonly afterFailure?: boolean }): Promise<void> => {
+  /**
+   * Configuration + local capability refresh only.
+   * Does not call noteSuccess/noteFailure — those require a real JudgmentPort result.
+   */
+  const refreshConfiguredHealthImpl = async (): Promise<void> => {
     const secret = String((await invoke("secret_status").catch(() => "disabled")) ?? "disabled");
     const hosted = await store.getHostedProcessingEnabled().catch(() => false);
 
-    if (opts?.afterFailure) {
-      jevTracker.noteFailure();
-    }
     jevTracker.apply({
       secretPresent: secret === "present",
       hostedEnabled: hosted,
@@ -163,9 +165,9 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
 
     await engine.refreshSnapshot().catch(() => undefined);
   };
-  refreshProviderHealth = refreshProviderHealthImpl;
+  refreshConfiguredHealth = refreshConfiguredHealthImpl;
 
-  await refreshProviderHealthImpl();
+  await refreshConfiguredHealthImpl();
 
   const client: RelayClient = {
     start: async () => {
@@ -192,7 +194,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
               if (listening) {
                 await inner.execute({ type: "SetListening", enabled: false });
               }
-              await refreshProviderHealthImpl({ afterFailure: true });
+              await refreshConfiguredHealthImpl();
             } catch {
               await engine.refreshSnapshot().catch(() => undefined);
             } finally {
@@ -205,7 +207,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       });
       if (healthTimer) clearInterval(healthTimer);
       healthTimer = setInterval(() => {
-        void refreshProviderHealthImpl();
+        void refreshConfiguredHealthImpl();
       }, HEALTH_POLL_MS);
     },
     stop: async () => {
@@ -228,13 +230,13 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     subscribe: (listener) => inner.subscribe(listener),
     execute: async (command: RelayCommand): Promise<RelayCommandResult> => {
       if (command.type === "RefreshProviderHealth") {
-        await refreshProviderHealthImpl();
+        await refreshConfiguredHealthImpl();
         return { ok: true, summary: "provider_health_refreshed" };
       }
 
       if (command.type === "SetHostedProcessing") {
         const result = await inner.execute(command);
-        await refreshProviderHealthImpl();
+        await refreshConfiguredHealthImpl();
         return result;
       }
 
@@ -244,7 +246,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
             const status = await audio.start(sessionId);
             applyAudioHealth(status);
             if (!status.ok || !status.capturing) {
-              await refreshProviderHealthImpl({ afterFailure: true });
+              await refreshConfiguredHealthImpl();
               return {
                 ok: false,
                 summary: "audio_unavailable",
@@ -258,7 +260,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
           } catch {
             audioHealth.ok = false;
             audioHealth.detail = "unavailable";
-            await refreshProviderHealthImpl({ afterFailure: true });
+            await refreshConfiguredHealthImpl();
             return { ok: false, summary: "audio_unavailable", error: "unavailable" };
           }
         }
@@ -280,7 +282,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         } catch {
           audioHealth.ok = false;
           audioHealth.detail = "unavailable";
-          await refreshProviderHealthImpl({ afterFailure: true });
+          await refreshConfiguredHealthImpl();
           return { ok: false, summary: "audio_stop_failed", error: "unavailable" };
         }
       }

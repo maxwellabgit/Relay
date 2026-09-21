@@ -47,6 +47,30 @@ describe("windows production composition", () => {
     expect(text).toMatch(/HEALTH_POLL_MS/);
     expect(text).toMatch(/JevHealthTracker/);
     expect(text).toMatch(/noteSuccess|noteFailure/);
+    expect(text).toMatch(/refreshConfiguredHealth/);
     expect(text).toMatch(/external:ready|external:unavailable/);
+  });
+
+  it("isolates Jev provider evidence from audio and model refresh paths", () => {
+    const path = resolve(root, "apps/relay/src/bootstrap/createDesktopClient.ts");
+    const text = readFileSync(path, "utf8");
+    expect(text).not.toMatch(/afterFailure/);
+    expect(text).toMatch(/Only JudgmentPort outcomes may create Jev provider evidence/);
+
+    const noteFailureCount = (text.match(/noteFailure\(/g) ?? []).length;
+    const noteSuccessCount = (text.match(/noteSuccess\(/g) ?? []).length;
+    expect(noteFailureCount).toBe(1);
+    expect(noteSuccessCount).toBe(1);
+
+    const judgeBlockStart = text.indexOf("async judge(request, signal)");
+    expect(judgeBlockStart).toBeGreaterThan(-1);
+    const judgeBlock = text.slice(judgeBlockStart, text.indexOf("return response;", judgeBlockStart) + 20);
+    expect(judgeBlock).toMatch(/noteSuccess\(/);
+    expect(judgeBlock).toMatch(/noteFailure\(/);
+
+    // Audio failure / source-death paths refresh config health only.
+    const audioFailSlice = text.slice(text.indexOf('if (command.enabled)'));
+    expect(audioFailSlice).toMatch(/refreshConfiguredHealthImpl\(\)/);
+    expect(audioFailSlice).not.toMatch(/noteFailure\(/);
   });
 });
