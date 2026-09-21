@@ -106,9 +106,13 @@ describe("windows v1 crash recovery", () => {
         leaseUntil: null,
       });
       await second.client.start();
-      await waitFor(async () =>
-        (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-      );
+      await waitFor(async () => {
+        const snap = await second.client.getSnapshot();
+        return (
+          snap.feedItems.some((item) => item.kind === "answer") &&
+          (await second.store.getCase(caseId))?.status === "completed"
+        );
+      });
       const snap = await second.client.getSnapshot();
       const answers = snap.feedItems.filter((item) => item.kind === "answer");
       expect(answers).toHaveLength(1);
@@ -154,9 +158,13 @@ describe("windows v1 crash recovery", () => {
     });
     try {
       await second.client.start();
-      await waitFor(async () =>
-        (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-      );
+      await waitFor(async () => {
+        const snap = await second.client.getSnapshot();
+        return (
+          snap.feedItems.some((item) => item.kind === "answer") &&
+          (await second.store.getCase(caseId))?.status === "completed"
+        );
+      });
       const snap = await second.client.getSnapshot();
       expect(snap.feedItems.filter((item) => item.kind === "answer")).toHaveLength(1);
       expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toBe(MODEL_ANSWER);
@@ -278,9 +286,14 @@ describe("windows v1 crash recovery", () => {
     });
     try {
       await second.client.start();
-      await waitFor(async () =>
-        (await second.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-      );
+      await waitFor(async () => {
+        const snap = await second.client.getSnapshot();
+        return (
+          snap.feedItems.some((item) => item.kind === "answer") &&
+          (await second.store.getCase(caseId))?.status === "completed" &&
+          judgmentStatus(databasePath) === "completed"
+        );
+      });
       const snap = await second.client.getSnapshot();
       expect(snap.feedItems.filter((item) => item.kind === "answer")).toHaveLength(1);
       expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toBe(BESS_EXPANSION);
@@ -432,9 +445,13 @@ describe("windows v1 crash recovery", () => {
       await first.client.start();
       const accepted = await first.client.execute({ type: "SubmitText", text: GENERAL_ASK });
       caseId = accepted.caseId ?? "";
-      await waitFor(async () =>
-        (await first.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
-      );
+      await waitFor(async () => {
+        const snap = await first.client.getSnapshot();
+        return (
+          snap.feedItems.some((item) => item.kind === "answer") &&
+          (await first.store.getCase(caseId))?.status === "completed"
+        );
+      });
       const records = await first.store.listFeedItemRecords();
       const answer = records.find((item) => item.itemId === `feed_${caseId}_answer`);
       expect(answer).toBeTruthy();
@@ -760,7 +777,7 @@ function requeueCompletedJudgmentWork(databasePath: string, caseId: string): voi
   }
 }
 
-async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 5000): Promise<void> {
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 10000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) return;
