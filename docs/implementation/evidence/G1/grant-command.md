@@ -1,5 +1,6 @@
 # G1 session grant command — not a green gate
 
+Grant command SHA: `33251e563c09bf20d4a8b5173e2ca740cc92200b`.  
 Parent grant enforcement: `b9e3247017a449ec1116b3961ea0757a12403367`.
 
 This slice does not green G1. Still open: two semantic rounds, resume-exactly-once, and the live canary.
