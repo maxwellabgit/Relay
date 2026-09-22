@@ -14,7 +14,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | Historical foundation tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Exact-tip CI (reviewed baseline) | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (`head_sha` = `1862daa…`, verify:v1 only) |
 | Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
-| Active gate | G4 UI and developer console |
+| Active gate | G1 Live Jev (canary blocked); later code slices continue where a Linux VM can prove them |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
@@ -25,9 +25,9 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | F0 Reopen + release truth | GREEN | `a80e8cc9f2b66e62e845e7efff1ac20d83a272fd` | https://github.com/maxwellabgit/Relay/actions/runs/35734873042 PASS | See `evidence/F0/` |
 | F1 V1 contracts + matrix | GREEN | `3473b83195376ce5515efce4947f58355451ea2e` | https://github.com/maxwellabgit/Relay/actions/runs/35737611615 PASS | See `evidence/F1/` |
 | F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Not GREEN: physical relaunch plus G3 stubs |
-| F3 Tiny model + Reflexes | IN PROGRESS | — | Four reviewed modules registered; model tournament not run | Not GREEN: G1 context and G3 device tournament |
+| F3 Tiny model + Reflexes | IN PROGRESS | — | One local typed repair at `f94a4bb`; model tournament not run | Not GREEN: G1 canary and G3 device tournament |
 | F4 UI lifecycle quality | CODE LANDED | — | Boot surfaces and internal-channel console gate at `5f83b2f` | Not GREEN: visual, keyboard, screen-reader, device a11y |
-| F5 Observability | CODE LANDED | — | Live summary derived from events; `diagnose:latest --explain`; redacted export | Not GREEN: grant, budget, request id, and retry fields still missing. verify:v1 on `1862daa` does not close this |
+| F5 Observability | CODE LANDED | — | Judgment evidence fields at `d634121`; typed corpus at `f94a4bb` | Not GREEN: CI lanes are not all green at one SHA |
 | F6 Product proof tests | BLOCKED | — | — | Not GREEN: twelve headed journeys are not implemented |
 | F7 Privacy / store | BLOCKED | — | — | Awaits F6; human Apple metadata |
 | F8 TestFlight RC | BLOCKED | — | — | Awaits the G8 exit, not a human-only leftover |
@@ -41,9 +41,9 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
 | G1 Live Jev | OPEN | Protocol, grant, rounds, and judgment evidence landed. Still open: live canary |
 | G2 Core semantics | OPEN | Semantics and export purity landed at `589598a`. Still open: Windows installer and headed product proof |
-| G3 Mobile model, speech, diagnostics | OPEN | Trace and fail-closed listening at `80f741b`. Speech suspend and relaunch at `0be8c6f`. Still open: model tournament, real speech, both phones |
+| G3 Mobile model, speech, diagnostics | OPEN | Trace and fail-closed listening at `80f741b`. Speech suspend and relaunch at `0be8c6f`. One local typed repair at `f94a4bb`. Still open: model tournament, real speech, both phones |
 | G4 UI and developer console | OPEN | Boot surfaces at `5f83b2f`. Console filters, copy, and export at `d0cca3b`. Still open: visual matrix, keyboard-only Windows, screen reader, screenshot diffs |
-| G5 Production CI lanes | OPEN | Rust, headed, speech, model, and purity lanes are not all green at one SHA |
+| G5 Production CI lanes | OPEN | Deterministic typed corpus at `f94a4bb`. Still open: Rust, headed, speech corpus, pinned model, and purity lanes at one SHA |
 | G6 Headed Windows journeys | OPEN | One deterministic journey only; eleven product journeys missing |
 | G7 Windows release rehearsal | OPEN | Human script after G6; not started |
 | G8 TestFlight | OPEN | Zero EAS project id, `REPLACE_WITH_*`, Apple/EAS login, device acceptance |
@@ -90,10 +90,11 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | G4 console filters `d0cca3b` | `tsc -b` exit 0. Unit 139, architecture 21, integration 75, replay 2, privacy 5 PASS. Gate remains OPEN |
 | 2026-09-22 | G3 speech session `0be8c6f` | `tsc -b` exit 0. Unit 142, architecture 21, integration 76, replay 2, privacy 5 PASS. Gate remains OPEN |
 | 2026-09-22 | G1 judgment evidence `d634121` | `tsc -b` exit 0. Unit 143, architecture 21, integration 76, replay 2, privacy 5 PASS. Gate remains OPEN |
+| 2026-09-22 | G5 typed corpus `f94a4bb` | `tsc -b` exit 0. Unit 147, architecture 21, integration 76, replay 2, privacy 5 PASS. G3 and G5 remain OPEN |
 
 ## Next exact action
 
-Do not mark G1 GREEN. Judgment evidence landed at `d634121`. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. The Windows installer and headed journeys are still open. Do not mark G3 GREEN. Trace and fail-closed listening landed at `80f741b`. Speech suspend and relaunch landed at `0be8c6f`. The on-device model tournament and real speech still need an iPhone 15 Pro Max and a Galaxy S23 Ultra. Do not mark G4 GREEN. Boot surfaces landed at `5f83b2f`. Console filters, copy, and export landed at `d0cca3b`. Visual, keyboard-only, screen-reader, and device proof are still open. A recorded-audio transcription corpus still needs a pinned on-device speech runtime. That runtime is not selected here.
+Do not mark G1 GREEN. Judgment evidence landed at `d634121`. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. The Windows installer and headed journeys are still open. Do not mark G3 GREEN. Trace and fail-closed listening landed at `80f741b`. Speech suspend and relaunch landed at `0be8c6f`. One local typed repair landed at `f94a4bb`. The on-device model tournament and real speech still need an iPhone 15 Pro Max and a Galaxy S23 Ultra. Do not mark G4 GREEN. Boot surfaces landed at `5f83b2f`. Console filters, copy, and export landed at `d0cca3b`. Visual, keyboard-only, screen-reader, and device proof are still open. Do not mark G5 GREEN. The typed corpus is a deterministic lower layer only. A recorded-audio transcription corpus still needs a pinned on-device speech runtime. That runtime is not selected here.
 
 ## GREEN rule
 
