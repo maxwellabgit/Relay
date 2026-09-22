@@ -10,6 +10,8 @@
   "references": [
     { "path": "../../packages/contracts" },
     { "path": "../../packages/engine" },
-    { "path": "../tauri" }
+    { "path": "../../packages/sqlite-core" },
+    { "path": "../tauri" },
+    { "path": "../expo" }
   ]
 }

@@ -11,7 +11,7 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | Reviewed tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Implementation parent | `4a4529d1529adf6d6460e17e2797e02b16135182` |
 | Exact-tip CI (reviewed foundation) | https://github.com/maxwellabgit/Relay/actions/runs/35727102376 PASS (`head_sha` = `4b64928…`) |
-| Active phase | F1 |
+| Active phase | F2 (code landed; physical device rehydrate still required) |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are **FOUNDATION COMPLETE** only (not V1 complete) |
 
@@ -20,8 +20,8 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | Phase | State | Tip SHA (when GREEN) | Exact CI / evidence | Notes |
 | --- | --- | --- | --- | --- |
 | F0 Reopen + release truth | GREEN | `a80e8cc9f2b66e62e845e7efff1ac20d83a272fd` | https://github.com/maxwellabgit/Relay/actions/runs/35734873042 PASS | See `evidence/F0/` |
-| F1 V1 contracts + matrix | IN PROGRESS | — | — | Product contract + capability matrix + ID/version freeze |
-| F2 Mobile composition | BLOCKED | — | — | Awaits F1 |
+| F1 V1 contracts + matrix | GREEN | `3473b83195376ce5515efce4947f58355451ea2e` | https://github.com/maxwellabgit/Relay/actions/runs/35737611615 PASS | See `evidence/F1/` |
+| F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Physical iPhone/Android relaunch still required before GREEN |
 | F3 Tiny model + Reflexes | BLOCKED | — | — | Awaits F2 |
 | F4 UI lifecycle quality | BLOCKED | — | — | Awaits F3 |
 | F5 Observability | BLOCKED | — | — | Awaits F4 |
@@ -56,11 +56,12 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | Prior parent-SHA Actions `35684028985` on `4a4529d` | Historical PASS — must not be cited as tip proof for `4b64928` docs |
 | 2026-09-22 | F0 commit `0e3fe8d` / lint fix `a80e8cc` | Local gates PASS |
 | 2026-09-22 | Exact-tip Actions `35734873042` on `a80e8cc` | PASS — F0 GREEN |
-| 2026-09-22 | F1 started | Product contract + capability matrix |
+| 2026-09-22 | Exact-tip Actions `35737611615` on `3473b83` | PASS — F1 GREEN |
+| 2026-09-22 | F2 mobile composition | Shared sqlite-core + encrypted artifacts + createMobileClient.native; device proof outstanding |
 
 ## Next exact action
 
-Finish F1: capability manifest, composition purity tests, marketing version 1.0.0 + permanent IDs; push for exact-tip CI; then F2.
+F2 code is in tree but not GREEN: run the physical iPhone and Android create/relaunch/rehydrate check on a custom native Expo client. Continue F3–F5 code that does not require devices; do not claim mobile production proof from Node alone.
 
 ## GREEN rule
 

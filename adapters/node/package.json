@@ -17,11 +17,13 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@relay/sqlite-core": "0.1.0",
     "@relay/contracts": "0.1.0",
     "@relay/engine": "0.1.0",
     "@relay/reflexes": "0.1.0",
     "@relay/testkit": "0.1.0",
-    "@relay/adapter-tauri": "0.1.0"
+    "@relay/adapter-tauri": "0.1.0",
+    "@relay/adapter-expo": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.1",

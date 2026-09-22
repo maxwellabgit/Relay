@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SqlHandle } from "./sql-handle.js";
 import type { ArtifactStorePort } from "@relay/contracts";
 import { localOnlyPolicy } from "@relay/contracts";
 import type {
@@ -25,7 +25,7 @@ import {
 
 export class SqliteLearning implements LearningStore {
   constructor(
-    private readonly db: DatabaseSync,
+    private readonly db: SqlHandle,
     private readonly artifacts?: ArtifactStorePort,
   ) {}
 

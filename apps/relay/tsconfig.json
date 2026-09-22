@@ -16,6 +16,7 @@
     { "path": "../../packages/reflexes" },
     { "path": "../../packages/testkit" },
     { "path": "../../packages/ui" },
-    { "path": "../../adapters/tauri" }
+    { "path": "../../adapters/tauri" },
+    { "path": "../../adapters/expo" }
   ]
 }

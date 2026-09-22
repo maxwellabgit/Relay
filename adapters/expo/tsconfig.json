@@ -7,5 +7,9 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../../packages/contracts" }]
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/sqlite-core" }
+  ]
 }

@@ -6,7 +6,7 @@ import type { EngineStore, WorkItem } from "@relay/engine";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { MemoryEngineStore } from "@relay/testkit/browser";
 import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
-import { SqliteEngineStore } from "./sqlite-store.js";
+import { openSqliteEngineStore, type SqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
 
 const AT = "2020-01-01T00:00:00.000Z";
@@ -33,7 +33,7 @@ const backends: Opened[] = [
       const dir = await mkdtemp(join(tmpdir(), "relay-contract-"));
       const path = join(dir, "state.sqlite");
       const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(path));
-      let store = await SqliteEngineStore.open(path, artifacts);
+      let store = await openSqliteEngineStore(path, artifacts);
       return {
         store,
         close: async () => {
@@ -42,7 +42,7 @@ const backends: Opened[] = [
         },
         reopen: async () => {
           store.close();
-          store = await SqliteEngineStore.open(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
+          store = await openSqliteEngineStore(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
           return store;
         },
       };
@@ -55,7 +55,7 @@ const backends: Opened[] = [
       const dir = await mkdtemp(join(tmpdir(), "relay-tauri-contract-"));
       const path = join(dir, "state.sqlite");
       const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(path));
-      let sqlite = await SqliteEngineStore.open(path, artifacts);
+      let sqlite = await openSqliteEngineStore(path, artifacts);
       const wrap = (current: SqliteEngineStore) => new TauriEngineStore(sqliteStoreInvoke(current));
       return {
         store: wrap(sqlite),
@@ -65,7 +65,7 @@ const backends: Opened[] = [
         },
         reopen: async () => {
           sqlite.close();
-          sqlite = await SqliteEngineStore.open(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
+          sqlite = await openSqliteEngineStore(path, new FileArtifactStore(fileArtifactRootForDatabase(path)));
           return wrap(sqlite);
         },
       };

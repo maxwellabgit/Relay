@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
-import { SqliteEngineStore } from "./sqlite-store.js";
+import { openSqliteEngineStore } from "./sqlite-store.js";
 
 const LEGACY_MEMORY = "LEGACY_MEMORY_SENTINEL_008_a1b2";
 const LEGACY_LABEL = "LEGACY_LABEL_SENTINEL_008_c3d4";
@@ -26,7 +26,7 @@ describe("legacy protected content migration 008", () => {
       seedPreProtectionDb(dbPath);
 
       const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(dbPath));
-      const store = await SqliteEngineStore.open(dbPath, artifacts);
+      const store = await openSqliteEngineStore(dbPath, artifacts);
 
       const memories = await store.learning.listMemories();
       expect(memories.some((m) => m.value.expansion === LEGACY_MEMORY)).toBe(true);
@@ -56,7 +56,7 @@ describe("legacy protected content migration 008", () => {
 
       store.close();
 
-      const again = await SqliteEngineStore.open(
+      const again = await openSqliteEngineStore(
         dbPath,
         new FileArtifactStore(fileArtifactRootForDatabase(dbPath)),
       );

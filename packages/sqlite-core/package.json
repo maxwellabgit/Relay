@@ -1,21 +1,21 @@
 {
-  "name": "@relay/adapter-expo",
+  "name": "@relay/sqlite-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
     "@relay/contracts": "0.1.0",
-    "@relay/engine": "0.1.0",
-    "@relay/sqlite-core": "0.1.0",
-    "expo-sqlite": "~57.0.3"
+    "@relay/engine": "0.1.0"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

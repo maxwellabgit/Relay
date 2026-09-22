@@ -68,7 +68,20 @@ describe("production composition purity", () => {
     expect(text).not.toContain("MemoryEngineStore");
     expect(text).toContain("EXPO_PUBLIC_RELAY_ALLOW_DEMO");
     expect(text).toContain("createMobileClient");
+    expect(text).toContain("isNativeMobile");
     expect(text).toContain("isExplicitDemoAllowed");
+  });
+
+  it("createMobileClient uses the expo durable backend and not testkit", () => {
+    const text = readFileSync(
+      resolve(root, "apps/relay/src/bootstrap/createMobileClient.native.ts"),
+      "utf8",
+    );
+    expect(text).toContain("openMobileBackend");
+    expect(text).not.toContain("@relay/testkit");
+    expect(text).not.toContain("MemoryEngineStore");
+    expect(text).not.toContain("MemoryArtifactStore");
+    expect(text).toContain("createTypeSafeJudgmentPort");
   });
 
   it("Expo app config freezes permanent mobile id and marketing 1.0.0", () => {

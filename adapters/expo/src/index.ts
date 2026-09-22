@@ -1,10 +1,8 @@
-/** Expo/iOS adapter — SecureStore secrets and expo-sqlite land with TestFlight builds. */
+/** Expo mobile adapter — durable SQLite, encrypted artifacts, foreground speech, lifecycle. */
 
-export type ExpoSecretStore = {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<void>;
-  delete(key: string): Promise<void>;
-};
+import type { SecretStore } from "./encrypted-artifacts.js";
+
+export type ExpoSecretStore = SecretStore;
 
 export type ExpoSystemOneTransport = {
   systemOne(request: {
@@ -18,6 +16,7 @@ export type ExpoSystemOneTransport = {
 
 /**
  * Missing key means disabled — never a fake positive, never compile secrets into JS.
+ * Hosted requests go through createTypeSafeJudgmentPort in the mobile client.
  */
 export function createExpoSystemOneTransport(secrets: ExpoSecretStore): ExpoSystemOneTransport {
   return {
@@ -31,4 +30,21 @@ export function createExpoSystemOneTransport(secrets: ExpoSecretStore): ExpoSyst
   };
 }
 
-export const EXPO_ADAPTER_BOOTSTRAP = "0.1.0" as const;
+export {
+  EncryptedArtifactStore,
+  MemoryByteFiles,
+  MemorySecretStore,
+  type ByteFilePort,
+  type SecretStore,
+} from "./encrypted-artifacts.js";
+export { openExpoSqliteHandle, wrapExpoSqlite } from "./expo-sqlite.js";
+export {
+  createMobileLifecycle,
+  createUnavailableForegroundSpeech,
+  type ForegroundSpeechPort,
+  type MobileLifecycle,
+  type SpeechStatus,
+} from "./lifecycle.js";
+export { openMobileBackend, type MobileBackend } from "./mobile-backend.js";
+
+export const EXPO_ADAPTER_BOOTSTRAP = "1.0.0" as const;

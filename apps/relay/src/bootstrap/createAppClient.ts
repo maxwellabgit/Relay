@@ -3,6 +3,7 @@ import type { RelayEngine } from "@relay/engine";
 import { Platform } from "react-native";
 import { createBrowserDemoClient } from "./createBrowserDemoClient";
 import { createDesktopClient } from "./createDesktopClient";
+import { createMobileClient } from "./createMobileClient";
 
 export type AppClientHandle = {
   readonly client: RelayClient;
@@ -24,15 +25,10 @@ type TauriHost = {
 export async function createAppClient(): Promise<AppClientHandle> {
   if (isTauri()) return createDesktopClient();
 
+  if (isNativeMobile()) return createMobileClient();
+
   if (isExplicitDemoAllowed()) {
     return createBrowserDemoClient();
-  }
-
-  if (isNativeMobile()) {
-    throw new Error(
-      "RELAY mobile production composition is not ready (finalization F2). " +
-        "Set EXPO_PUBLIC_RELAY_ALLOW_DEMO=1 only for an explicit in-memory demo — never as product proof.",
-    );
   }
 
   throw new Error(

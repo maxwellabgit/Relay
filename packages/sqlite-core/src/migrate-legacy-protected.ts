@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SqlHandle } from "./sql-handle.js";
 import type { ArtifactStorePort } from "@relay/contracts";
 import { localOnlyPolicy } from "@relay/contracts";
 import { packMemoryValue, putJsonArtifact, type MemoryKind } from "@relay/engine";
@@ -8,7 +8,7 @@ import { packMemoryValue, putJsonArtifact, type MemoryKind } from "@relay/engine
  * Safe to run on every open after schema migrations.
  */
 export async function migrateLegacyProtectedContent(
-  db: DatabaseSync,
+  db: SqlHandle,
   artifacts: ArtifactStorePort,
 ): Promise<{ memories: number; receipts: number; candidates: number; reviews: number }> {
   const counts = { memories: 0, receipts: 0, candidates: 0, reviews: 0 };
@@ -19,7 +19,7 @@ export async function migrateLegacyProtectedContent(
   return counts;
 }
 
-async function migrateMemories(db: DatabaseSync, artifacts: ArtifactStorePort): Promise<number> {
+async function migrateMemories(db: SqlHandle, artifacts: ArtifactStorePort): Promise<number> {
   const rows = db
     .prepare(
       `SELECT memory_id, kind, key, value_json, content_artifact_id, metadata_json
@@ -65,7 +65,7 @@ async function migrateMemories(db: DatabaseSync, artifacts: ArtifactStorePort): 
   return n;
 }
 
-async function migrateReceipts(db: DatabaseSync, artifacts: ArtifactStorePort): Promise<number> {
+async function migrateReceipts(db: SqlHandle, artifacts: ArtifactStorePort): Promise<number> {
   const rows = db
     .prepare(
       `SELECT receipt_id, selected_option, selected_option_id, option_labels_json,
@@ -111,7 +111,7 @@ async function migrateReceipts(db: DatabaseSync, artifacts: ArtifactStorePort): 
   return n;
 }
 
-async function migrateCandidates(db: DatabaseSync, artifacts: ArtifactStorePort): Promise<number> {
+async function migrateCandidates(db: SqlHandle, artifacts: ArtifactStorePort): Promise<number> {
   const rows = db
     .prepare(
       `SELECT candidate_id, because, because_artifact_id, because_sha256
@@ -138,7 +138,7 @@ async function migrateCandidates(db: DatabaseSync, artifacts: ArtifactStorePort)
   return n;
 }
 
-async function migrateReviews(db: DatabaseSync, artifacts: ArtifactStorePort): Promise<number> {
+async function migrateReviews(db: SqlHandle, artifacts: ArtifactStorePort): Promise<number> {
   const rows = db
     .prepare(
       `SELECT review_id, findings_json, findings_artifact_id, findings_sha256

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DecisionArtifactStore, decisionArtifactRoot } from "./decision-artifacts.js";
 import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
 import { MemoryArtifactStore } from "./memory-artifacts.js";
-import { SqliteEngineStore } from "./sqlite-store.js";
+import { openSqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
 import { createFileTraceSink } from "./file-trace.js";
 
@@ -37,7 +37,7 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
       : databasePath !== ":memory:"
         ? new FileArtifactStore(fileArtifactRootForDatabase(databasePath))
         : new MemoryArtifactStore();
-  const sqlite = await SqliteEngineStore.open(databasePath, artifacts);
+  const sqlite = await openSqliteEngineStore(databasePath, artifacts);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
   let n = 0;
   const clock = options.clock ?? { now: () => new Date() };
@@ -116,4 +116,4 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   };
 }
 
-export { MemoryArtifactStore, SqliteEngineStore };
+export { openSqliteEngineStore, SqliteEngineStore } from "./sqlite-store.js";

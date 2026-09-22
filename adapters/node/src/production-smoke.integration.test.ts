@@ -7,7 +7,7 @@ import { createProductionIds, createRelayClientFromEngine, RelayEngine } from "@
 import { createProductionReflexes } from "@relay/reflexes";
 import { createFileTraceSink } from "./file-trace.js";
 import { FileArtifactStore, fileArtifactRootForDatabase } from "./file-artifacts.js";
-import { SqliteEngineStore } from "./sqlite-store.js";
+import { openSqliteEngineStore } from "./sqlite-store.js";
 import { sqliteStoreInvoke } from "./store-invoke.js";
 
 const SENTINEL = "PRIVACY_SENTINEL_7f3a9c2e";
@@ -84,7 +84,7 @@ describe("windows production composition smoke", () => {
 
 async function openComposition(databasePath: string, runsRoot: string, diagnosticsRoot: string) {
   const artifacts = new FileArtifactStore(fileArtifactRootForDatabase(databasePath));
-  const sqlite = await SqliteEngineStore.open(databasePath, artifacts);
+  const sqlite = await openSqliteEngineStore(databasePath, artifacts);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
   const ids = createProductionIds();
   const engine = new RelayEngine({
