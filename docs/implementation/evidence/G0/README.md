@@ -3,6 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Gate | G0 |
+| G0 SHA | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` |
 | Parent baseline | `1862daacc8d06c6bc367c85b4cd523779d99b8fa` |
 | Parent CI | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (verify:v1 only) |
 | Branch | `cursor/live-jev-g0-truth-45e9` |
@@ -12,7 +13,7 @@
 | rustc | `1.83.0 (90b35a623 2024-11-26)` |
 | cargo | `1.83.0 (5ffbef321 2024-10-29)` |
 
-The G0 commit SHA is the revision that introduces this file. It is a descendant of `1862daa`. It does not green G1–G8 or F2–F8.
+G0 landed in `e281f2ce4bbbad17c4be0720dc6bd92839f12107`, a descendant of `1862daa`. This stamp commit only records that SHA. It does not green G1–G8 or F2–F8.
 
 ## What changed
 
@@ -24,10 +25,10 @@ The G0 commit SHA is the revision that introduces this file. It is a descendant 
 ## Focused test
 
 ```text
-npx vitest run apps/relay/src/bootstrap/v1-capability.unit.test.ts
+npx vitest run --project unit apps/relay/src/bootstrap/v1-capability.unit.test.ts
 ```
 
-Result is recorded in the G0 commit message after the command exits 0.
+Result: exit 0, 12 tests passed, on parent `1862daa` before commit `e281f2c`.
 
 ## Still open
 

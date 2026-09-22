@@ -14,7 +14,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | Historical foundation tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Exact-tip CI (reviewed baseline) | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (`head_sha` = `1862daa…`, verify:v1 only) |
 | Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
-| Active gate | G0 truth freeze; G1 is next |
+| Active gate | G1 live Jev |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
@@ -38,7 +38,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 
 | Gate | State | What blocks GREEN |
 | --- | --- | --- |
-| G0 Freeze the truth | GREEN | Evidence in `evidence/G0/`. Parent baseline `1862daa`. G0 SHA is the commit that adds that evidence |
+| G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
 | G1 Live Jev | OPEN | Ambient content, `jev-latest`, scoped grants, Retry-After, diagnostics, live canary |
 | G2 Core semantics | OPEN | `App.tsx` testkit import; note/fact/recommendation distinction; bundle purity |
 | G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
@@ -79,6 +79,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | F2 mobile composition | Shared sqlite-core + encrypted artifacts + createMobileClient.native; device proof outstanding |
 | 2026-09-22 | Exact-tip Actions `35742750378` on `1862daa` | PASS — verify:v1 only. Does not green G1–G8 or F2–F8 |
 | 2026-09-22 | Review verdict against `1862daa` | NO-GO. Remaining work is code plus device, not human-only |
+| 2026-09-22 | G0 commit `e281f2c` | Local capability unit test PASS (12). Status docs agree. G1–G8 remain open |
 
 ## Next exact action
 
