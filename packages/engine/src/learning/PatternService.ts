@@ -6,7 +6,10 @@ import {
   BENEFIT_YES_MINIMUM,
   patternReady,
   RETENTION_LABEL,
+  type CandidateBuildMeta,
+  type CandidateState,
   type EpisodeOutcome,
+  type PatternEvidenceRecord,
   type ReceiptRecord,
 } from "../learning-store.js";
 import { knownReason } from "../runtime-events.js";
@@ -15,6 +18,12 @@ import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import type { EngineTrace } from "../engine-helpers.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
+import type { AuthorityState } from "../operations/AuthorityState.js";
+import {
+  buildReflexFromTemplate,
+  evaluateShadow,
+  templateIdForSignature,
+} from "./reflex-templates.js";
 
 export type PatternServiceDeps = {
   readonly store: EngineStore;
@@ -32,6 +41,7 @@ export type PatternServiceDeps = {
   readonly setActiveEpisodeId: (id: string | null) => void;
   readonly emitSnapshot: () => Promise<void>;
   readonly runId: () => string;
+  readonly authority?: AuthorityState;
 };
 
 export class PatternService {
@@ -45,6 +55,11 @@ export class PatternService {
     const candidates = await this.deps.store.learning.listCandidates();
     const current = candidates.find((candidate) => candidate.candidateId === candidateId);
     if (!current || current.state !== "proposed") return { ok: false, summary: "not_proposed" };
+
+    if (state === "approved") {
+      return this.approveForBuild(current.candidateId);
+    }
+
     await this.deps.store.learning.putCandidate({
       ...current,
       state,
@@ -52,13 +67,167 @@ export class PatternService {
       updatedAt: this.deps.clock.now().toISOString(),
     });
     await this.deps.trace.emit({
-      type: state === "approved" ? "candidate.approved" : "candidate.rejected",
+      type: "candidate.rejected",
       stage: "proposal.create",
       status: "completed",
       reasonCode,
     });
     await this.deps.emitSnapshot();
     return { ok: true, summary: state };
+  }
+
+  /**
+   * Approval at proposed authorizes building only a template-bounded definition.
+   * Runs shadow evaluation and stops at activation_ready — never auto-activates.
+   */
+  async approveForBuild(
+    candidateId: string,
+    reasonCode: "user_approval" = "user_approval",
+  ): Promise<RelayCommandResult> {
+    const candidates = await this.deps.store.learning.listCandidates();
+    const current = candidates.find((candidate) => candidate.candidateId === candidateId);
+    if (!current || current.state !== "proposed") return { ok: false, summary: "not_proposed" };
+
+    const templateId = templateIdForSignature(current.signature);
+    if (!templateId) return { ok: false, summary: "no_template" };
+
+    const at = this.deps.clock.now().toISOString();
+    await this.deps.store.learning.putCandidate({
+      ...current,
+      state: "approved_for_build",
+      needed: "build",
+      updatedAt: at,
+    });
+
+    const version = 1;
+    const definition = buildReflexFromTemplate({
+      templateId,
+      signature: current.signature,
+      version,
+    });
+    const pattern = await this.deps.store.learning.getPattern(current.signature);
+    const shadow = evaluateShadow(definition, current.signature, pattern?.count ?? 0, at);
+    if (!shadow.pass) {
+      await this.deps.store.learning.putCandidate({
+        ...current,
+        state: "built",
+        needed: "shadow_failed",
+        updatedAt: this.deps.clock.now().toISOString(),
+        meta: {
+          reflexId: definition.id,
+          reflexVersion: definition.version,
+          templateId,
+          shadowPass: false,
+          shadowReportJson: JSON.stringify(shadow),
+        },
+      });
+      await this.deps.emitSnapshot();
+      return { ok: false, summary: "shadow_failed" };
+    }
+
+    if (this.deps.authority) {
+      await this.deps.authority.setReflexState(
+        {
+          reflex: { id: definition.id, version: definition.version },
+          stateVersion: 1,
+          activation: "inactive",
+          runs: { runCount: 0, successCount: 0, failureCount: 0 },
+        },
+        at,
+      );
+    }
+
+    const meta: CandidateBuildMeta = {
+      reflexId: definition.id,
+      reflexVersion: definition.version,
+      templateId,
+      shadowPass: true,
+      shadowReportJson: JSON.stringify(shadow),
+      priorActivation: "inactive",
+    };
+    await this.deps.store.learning.putCandidate({
+      ...current,
+      state: "activation_ready",
+      needed: "",
+      because: current.because,
+      updatedAt: this.deps.clock.now().toISOString(),
+      meta,
+    });
+    await this.deps.trace.emit({
+      type: "candidate.approved",
+      stage: "proposal.create",
+      status: "completed",
+      reasonCode,
+    });
+    await this.deps.emitSnapshot();
+    return {
+      ok: true,
+      summary: "activation_ready",
+      reflexId: definition.id,
+      reflexVersion: definition.version,
+    };
+  }
+
+  async canActivateBuiltReflex(
+    reflexId: string,
+    reflexVersion: number,
+  ): Promise<{ ok: true } | { ok: false; summary: string }> {
+    const candidates = await this.deps.store.learning.listCandidates();
+    const match = candidates.find(
+      (c) => c.meta?.reflexId === reflexId && c.meta?.reflexVersion === reflexVersion,
+    );
+    // Built-from-template reflexes require activation_ready (or already active/paused for re-activate).
+    if (!match) return { ok: true }; // production/builtin reflexes without candidate rows
+    if (match.state === "activation_ready" || match.state === "active" || match.state === "paused") {
+      return { ok: true };
+    }
+    return { ok: false, summary: "not_activation_ready" };
+  }
+
+  async markCandidateActivation(
+    reflexId: string,
+    reflexVersion: number,
+    activation: "active" | "paused" | "rolled_back",
+  ): Promise<void> {
+    const candidates = await this.deps.store.learning.listCandidates();
+    const match = candidates.find(
+      (c) => c.meta?.reflexId === reflexId && c.meta?.reflexVersion === reflexVersion,
+    );
+    if (!match) return;
+    const state: CandidateState =
+      activation === "active" ? "active" : activation === "paused" ? "paused" : "rolled_back";
+    await this.deps.store.learning.putCandidate({
+      ...match,
+      state,
+      updatedAt: this.deps.clock.now().toISOString(),
+      ...(match.meta
+        ? {
+            meta: {
+              ...match.meta,
+              priorActivation: activation === "rolled_back" ? "inactive" : activation,
+            },
+          }
+        : {}),
+    });
+  }
+
+  async recordPatternEvidence(
+    input: Omit<PatternEvidenceRecord, "evidenceId" | "createdAt"> & { evidenceId?: string },
+  ): Promise<void> {
+    const record: PatternEvidenceRecord = {
+      evidenceId: input.evidenceId ?? this.deps.ids.next("pev"),
+      signature: input.signature,
+      sourceClass: input.sourceClass,
+      routeOrTool: input.routeOrTool,
+      userAction: input.userAction,
+      outcomeClass: input.outcomeClass,
+      duplicateCount: input.duplicateCount,
+      timeToActionMs: input.timeToActionMs,
+      feedback: input.feedback,
+      caseId: input.caseId,
+      createdAt: this.deps.clock.now().toISOString(),
+    };
+    await this.deps.store.learning.putPatternEvidence(record);
   }
 
   async startWorkSession(): Promise<RelayCommandResult> {
@@ -125,6 +294,17 @@ export class PatternService {
     let pattern = null;
     if (outcome === "completed") {
       pattern = await this.deps.store.learning.recordCompletedEpisode(record);
+      await this.recordPatternEvidence({
+        signature,
+        sourceClass: "verified_work",
+        routeOrTool: signature.split("|")[0] ?? null,
+        userAction: "completed",
+        outcomeClass: "completed",
+        duplicateCount: 0,
+        timeToActionMs: null,
+        feedback: null,
+        caseId,
+      });
       if (pattern && patternReady(pattern)) {
         await this.considerCandidate(pattern.signature, pattern.count, pattern.sessionIds.length);
       }
@@ -174,7 +354,18 @@ export class PatternService {
     const existing = (await this.deps.store.learning.listCandidates()).find(
       (candidate) => candidate.candidateId === candidateId,
     );
-    if (existing && (existing.state === "proposed" || existing.state === "approved" || existing.state === "active")) {
+    // Exactly one reviewable proposal — never multiply proposals for the same signature.
+    if (
+      existing &&
+      (existing.state === "proposed" ||
+        existing.state === "approved" ||
+        existing.state === "approved_for_build" ||
+        existing.state === "built" ||
+        existing.state === "shadow" ||
+        existing.state === "activation_ready" ||
+        existing.state === "active" ||
+        existing.state === "paused")
+    ) {
       return;
     }
     const kind = signature.split("|")[0] ?? "";
@@ -204,7 +395,7 @@ export class PatternService {
       request,
       this.deps.getAbortSignal(),
     );
-    let state: "candidate" | "proposed" = "candidate";
+    let state: "qualified" | "proposed" = "qualified";
     let needed = "jev_benefit_noul";
     let result: ReceiptRecord["result"] = "wait";
     let reason = "jev_unavailable";

@@ -23,6 +23,8 @@ const MIGRATION_9: &str =
     include_str!("../../../../packages/storage-schema/migrations/009_work_correlation.sql");
 const MIGRATION_10: &str =
     include_str!("../../../../packages/storage-schema/migrations/010_candidate_events.sql");
+const MIGRATION_11: &str =
+    include_str!("../../../../packages/storage-schema/migrations/011_pattern_evidence_events.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -135,6 +137,7 @@ impl StateDb {
         apply_version(&tx, 8, MIGRATION_8)?;
         apply_version(&tx, 9, MIGRATION_9)?;
         apply_version(&tx, 10, MIGRATION_10)?;
+        apply_version(&tx, 11, MIGRATION_11)?;
         tx.commit().map_err(|error| error.to_string())?;
         self.migrate_legacy_protected_content()?;
         Ok(())

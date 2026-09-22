@@ -61,9 +61,40 @@ describe("bounded expansion through RelayClient", () => {
         type: "ApproveCandidate",
         candidateId: `cand_${pattern?.signature}`,
       });
-      expect(approved.summary).toBe("approved");
-      expect((await harness.client.getSnapshot()).review.approvedCandidates).toBe(1);
-      expect((await harness.client.getSnapshot()).review.builtReflexes).toBe(0);
+      expect(approved.summary).toBe("activation_ready");
+      expect(approved.reflexId).toBe("reflex.calendar-block");
+      expect(approved.reflexVersion).toBe(1);
+      const afterApprove = await harness.client.getSnapshot();
+      expect(afterApprove.review.approvedCandidates).toBe(1);
+      expect(afterApprove.review.builtReflexes).toBe(1);
+      expect(afterApprove.patterns[0]?.candidateState).toBe("activation_ready");
+      expect(afterApprove.reflexes.some((r) => r.reflex.id === "reflex.calendar-block")).toBe(true);
+
+      // Exactly one proposal — replaying more episodes does not create a second candidate.
+      await harness.engine.completeVerifiedWork("calendar.block", fields);
+      await harness.client.execute({ type: "EndWorkSession" });
+      const stillOne = (await harness.client.getSnapshot()).patterns.filter(
+        (p) => p.candidateId === `cand_${pattern?.signature}`,
+      );
+      expect(stillOne).toHaveLength(1);
+
+      const activated = await harness.client.execute({
+        type: "ActivateReflex",
+        reflex: { id: "reflex.calendar-block", version: 1 },
+        expectedStateVersion: 1,
+      });
+      expect(activated.ok).toBe(true);
+      expect((await harness.client.getSnapshot()).review.activeReflexes).toBe(1);
+
+      const rolled = await harness.client.execute({
+        type: "RollbackReflex",
+        reflex: { id: "reflex.calendar-block", version: 1 },
+        expectedStateVersion: 2,
+      });
+      expect(rolled.ok).toBe(true);
+      expect((await harness.client.getSnapshot()).review.activeReflexes).toBe(0);
+      const evidence = await harness.store.learning.listPatternEvidence(pattern?.signature);
+      expect(evidence.length).toBeGreaterThanOrEqual(3);
     } finally {
       await harness.client.stop();
       harness.close();

@@ -2,6 +2,7 @@ import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contrac
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Composer } from "../assistant/Composer.js";
+import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
 import { colors } from "../theme/colors.js";
 
@@ -15,6 +16,10 @@ type Props = {
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
   readonly onRefreshHealth?: () => void;
+  readonly onApproveCandidate?: (candidateId: string) => void;
+  readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
 };
 
 export function PhoneShell({
@@ -27,8 +32,13 @@ export function PhoneShell({
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
   onRefreshHealth,
+  onApproveCandidate,
+  onActivateReflex,
+  onPauseReflex,
+  onRollbackReflex,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const threadRef = useRef<ScrollView>(null);
 
   return (
@@ -46,14 +56,24 @@ export function PhoneShell({
               <Text style={styles.tagline}>Your AI teammate, on your terms</Text>
             </View>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open settings"
-            onPress={() => setSettingsOpen(true)}
-            hitSlop={8}
-          >
-            <Text style={styles.gear}>⚙</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open library"
+              onPress={() => setLibraryOpen(true)}
+              hitSlop={8}
+            >
+              <Text style={styles.gear}>Library</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+              onPress={() => setSettingsOpen(true)}
+              hitSlop={8}
+            >
+              <Text style={styles.gear}>⚙</Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.listenBlock}>
@@ -134,6 +154,15 @@ export function PhoneShell({
         onSetHostedProcessing={(enabled) => onSetHostedProcessing?.(enabled)}
         onRefreshHealth={() => onRefreshHealth?.()}
       />
+      <LibrarySheet
+        open={libraryOpen}
+        snapshot={snapshot}
+        onClose={() => setLibraryOpen(false)}
+        {...(onApproveCandidate ? { onApproveCandidate } : {})}
+        {...(onActivateReflex ? { onActivateReflex } : {})}
+        {...(onPauseReflex ? { onPauseReflex } : {})}
+        {...(onRollbackReflex ? { onRollbackReflex } : {})}
+      />
     </View>
   );
 }
@@ -200,6 +229,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   brandRow: {
     flexDirection: "row",

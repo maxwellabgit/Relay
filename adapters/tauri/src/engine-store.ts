@@ -19,6 +19,7 @@ import type {
   LearningStore,
   MemoryKind,
   MemoryRecord,
+  PatternEvidenceRecord,
   PatternRecord,
   PersistedSourceEvent,
   ReceiptRecord,
@@ -450,6 +451,17 @@ class TauriLearning implements LearningStore {
     return Promise.all(rows.map((row) => this.hydrateCandidate(row)));
   }
 
+  putPatternEvidence(record: PatternEvidenceRecord): Promise<void> {
+    return this.voidOp({ op: "put_pattern_evidence", record });
+  }
+
+  async listPatternEvidence(signature?: string): Promise<readonly PatternEvidenceRecord[]> {
+    return (await this.call({
+      op: "list_pattern_evidence",
+      ...(signature ? { signature } : {}),
+    })) as PatternEvidenceRecord[];
+  }
+
   async putReview(record: ReviewRecord): Promise<void> {
     if (!this.artifacts) {
       await this.voidOp({ op: "put_review", record });
@@ -559,6 +571,7 @@ class TauriLearning implements LearningStore {
       because,
       needed: row.needed,
       updatedAt: row.updatedAt,
+      ...(row.meta ? { meta: row.meta } : {}),
     };
   }
 

@@ -117,6 +117,7 @@ export class RelayEngine {
     const emitSnapshot = () => this.projector.emitSnapshot();
     const getAbortSignal = () => this.abort?.signal ?? new AbortController().signal;
 
+    this.authority = new AuthorityState(deps.store);
     this.patterns = new PatternService({
       store: deps.store,
       artifacts: deps.artifacts,
@@ -135,6 +136,7 @@ export class RelayEngine {
       },
       emitSnapshot,
       runId: () => resolveRunId(this.deps.trace?.runId),
+      authority: this.authority,
     });
 
     this.intake = new SourceIntake({
@@ -200,13 +202,13 @@ export class RelayEngine {
       offerGlossary: (token, expansion) => this.cases.offerGlossary(token, expansion),
     });
 
-    this.authority = new AuthorityState(deps.store);
     this.operations = new OperationService({
       authority: this.authority,
       clock: deps.clock,
       ids: deps.ids,
       trace: this.trace,
       emitSnapshot,
+      patterns: this.patterns,
     });
 
     const registry = new ToolRegistry();

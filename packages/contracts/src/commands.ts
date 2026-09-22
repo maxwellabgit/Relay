@@ -195,6 +195,12 @@ export type PauseReflexCommand = {
   readonly expectedStateVersion: number;
 };
 
+export type RollbackReflexCommand = {
+  readonly type: "RollbackReflex";
+  readonly reflex: ReflexRef;
+  readonly expectedStateVersion: number;
+};
+
 export type ReplayFixtureCommand = {
   readonly type: "ReplayFixture";
   readonly fixturePath: string;
@@ -234,6 +240,7 @@ export type RelayCommand =
   | DeleteImportedConnectionContentCommand
   | ActivateReflexCommand
   | PauseReflexCommand
+  | RollbackReflexCommand
   | ReplayFixtureCommand;
 
 export type RelayCommandResult = {
@@ -243,5 +250,7 @@ export type RelayCommandResult = {
   readonly operationId?: string;
   readonly connectionId?: string;
   readonly authorizationAttemptId?: string;
+  readonly reflexId?: string;
+  readonly reflexVersion?: number;
   readonly error?: string;
 };

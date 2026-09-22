@@ -7,6 +7,7 @@ import type {
   LearningStore,
   MemoryKind,
   MemoryRecord,
+  PatternEvidenceRecord,
   PatternRecord,
   ReceiptRecord,
   ReviewRecord,
@@ -290,8 +291,8 @@ export class SqliteLearning implements LearningStore {
       .prepare(
         `INSERT OR REPLACE INTO expansion_candidates(
            candidate_id, signature, state, because, needed, updated_at,
-           because_artifact_id, because_sha256
-         ) VALUES (?, ?, ?, '', ?, ?, ?, ?)`,
+           because_artifact_id, because_sha256, meta_json
+         ) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?)`,
       )
       .run(
         record.candidateId,
@@ -301,12 +302,47 @@ export class SqliteLearning implements LearningStore {
         record.updatedAt,
         becauseArtifactId,
         becauseSha256,
+        record.meta ? JSON.stringify(record.meta) : null,
       );
   }
 
   async listCandidates(): Promise<readonly CandidateRecord[]> {
     const rows = this.db.prepare(`SELECT * FROM expansion_candidates`).all() as CandidateRow[];
     return Promise.all(rows.map((row) => this.mapCandidate(row)));
+  }
+
+  async putPatternEvidence(record: PatternEvidenceRecord): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO pattern_evidence_events(
+          evidence_id, signature, source_class, route_or_tool, user_action, outcome_class,
+          duplicate_count, time_to_action_ms, feedback, case_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.evidenceId,
+        record.signature,
+        record.sourceClass,
+        record.routeOrTool,
+        record.userAction,
+        record.outcomeClass,
+        record.duplicateCount,
+        record.timeToActionMs,
+        record.feedback,
+        record.caseId,
+        record.createdAt,
+      );
+  }
+
+  async listPatternEvidence(signature?: string): Promise<readonly PatternEvidenceRecord[]> {
+    const rows = (
+      signature
+        ? (this.db
+            .prepare(`SELECT * FROM pattern_evidence_events WHERE signature = ?`)
+            .all(signature) as EvidenceRow[])
+        : (this.db.prepare(`SELECT * FROM pattern_evidence_events`).all() as EvidenceRow[])
+    );
+    return rows.map(mapEvidence);
   }
 
   async putReview(record: ReviewRecord & {
@@ -474,6 +510,9 @@ export class SqliteLearning implements LearningStore {
       because,
       needed: row.needed,
       updatedAt: row.updated_at,
+      ...(row.meta_json
+        ? { meta: JSON.parse(row.meta_json) as NonNullable<CandidateRecord["meta"]> }
+        : {}),
     };
   }
 
@@ -573,6 +612,20 @@ type CandidateRow = {
   updated_at: string;
   because_artifact_id: string | null;
   because_sha256: string | null;
+  meta_json?: string | null;
+};
+type EvidenceRow = {
+  evidence_id: string;
+  signature: string;
+  source_class: string;
+  route_or_tool: string | null;
+  user_action: string;
+  outcome_class: string;
+  duplicate_count: number;
+  time_to_action_ms: number | null;
+  feedback: string | null;
+  case_id: string | null;
+  created_at: string;
 };
 type ReviewRow = {
   review_id: string;
@@ -616,5 +669,20 @@ function mapPattern(row: PatternRow): PatternRecord {
     firstAt: row.first_at,
     lastAt: row.last_at,
     evidenceIds: JSON.parse(row.evidence_ids_json) as string[],
+  };
+}
+function mapEvidence(row: EvidenceRow): PatternEvidenceRecord {
+  return {
+    evidenceId: row.evidence_id,
+    signature: row.signature,
+    sourceClass: row.source_class as PatternEvidenceRecord["sourceClass"],
+    routeOrTool: row.route_or_tool,
+    userAction: row.user_action as PatternEvidenceRecord["userAction"],
+    outcomeClass: row.outcome_class,
+    duplicateCount: row.duplicate_count,
+    timeToActionMs: row.time_to_action_ms,
+    feedback: row.feedback,
+    caseId: row.case_id,
+    createdAt: row.created_at,
   };
 }

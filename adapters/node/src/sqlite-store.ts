@@ -736,12 +736,13 @@ function applyMigrations(db: DatabaseSync): void {
     8: "008_protect_legacy_content.sql",
     9: "009_work_correlation.sql",
     10: "010_candidate_events.sql",
+    11: "011_pattern_evidence_events.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

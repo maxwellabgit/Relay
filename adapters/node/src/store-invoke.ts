@@ -13,6 +13,7 @@ import type {
   EpisodeRecord,
   MemoryKind,
   MemoryRecord,
+  PatternEvidenceRecord,
   PatternRecord,
   PersistedSourceEvent,
   ReceiptRecord,
@@ -179,6 +180,13 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return null;
     case "list_candidates":
       return store.learning.listCandidates();
+    case "put_pattern_evidence":
+      await store.learning.putPatternEvidence(op.record as PatternEvidenceRecord);
+      return null;
+    case "list_pattern_evidence":
+      return store.learning.listPatternEvidence(
+        typeof op.signature === "string" ? op.signature : undefined,
+      );
     case "put_review":
       await store.learning.putReview(op.record as ReviewRecord);
       return null;

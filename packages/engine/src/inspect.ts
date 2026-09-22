@@ -53,11 +53,20 @@ export async function inspectRuntime(
   ).length;
   const completeEpisodes = episodes.filter((episode) => episode.outcome === "completed").length;
   const lastReview = reviews.at(-1) ?? null;
-  const approvedCandidates = candidates.filter((candidate) => candidate.state === "approved").length;
-  const builtReflexes = candidates.filter((candidate) => candidate.state === "built").length;
+  const approvedCandidates = candidates.filter((candidate) =>
+    ["approved", "approved_for_build", "built", "shadow", "activation_ready", "active", "paused"].includes(
+      candidate.state,
+    ),
+  ).length;
+  const builtReflexes = candidates.filter((candidate) =>
+    ["built", "shadow", "activation_ready", "active", "paused", "rolled_back"].includes(candidate.state),
+  ).length;
   const activeReflexes = candidates.filter((candidate) => candidate.state === "active").length;
   const qualifiedCandidates = candidates.filter(
-    (candidate) => candidate.state !== "observing" && candidate.state !== "rejected" && candidate.state !== "snoozed",
+    (candidate) =>
+      candidate.state !== "observing" &&
+      candidate.state !== "rejected" &&
+      candidate.state !== "snoozed",
   ).length;
   const trigger = reviewTrigger({
     completeSessions: completeSessions - (lastReview?.sessionsAtReview ?? 0),

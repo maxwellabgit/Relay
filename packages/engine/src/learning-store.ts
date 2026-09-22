@@ -78,15 +78,51 @@ export type PatternRecord = {
 export type CandidateState =
   | "observing"
   | "candidate"
+  | "qualified"
   | "proposed"
   | "approved"
+  | "approved_for_build"
   | "rejected"
   | "snoozed"
   | "built"
   | "shadow"
+  | "activation_ready"
   | "active"
   | "paused"
-  | "retired";
+  | "retired"
+  | "rolled_back";
+
+export type PatternEvidenceUserAction =
+  | "accepted"
+  | "edited"
+  | "rejected"
+  | "ignored"
+  | "undid"
+  | "completed";
+
+export type PatternEvidenceRecord = {
+  readonly evidenceId: string;
+  readonly signature: string;
+  /** Source class only — never raw prose. */
+  readonly sourceClass: "direct_ask" | "observed" | "verified_work" | "ambient" | "tool";
+  readonly routeOrTool: string | null;
+  readonly userAction: PatternEvidenceUserAction;
+  readonly outcomeClass: string;
+  readonly duplicateCount: number;
+  readonly timeToActionMs: number | null;
+  readonly feedback: string | null;
+  readonly caseId: string | null;
+  readonly createdAt: string;
+};
+
+export type CandidateBuildMeta = {
+  readonly reflexId: string;
+  readonly reflexVersion: number;
+  readonly templateId: string;
+  readonly shadowPass: boolean;
+  readonly shadowReportJson: string;
+  readonly priorActivation?: "inactive" | "active" | "paused";
+};
 
 export type CandidateRecord = {
   readonly candidateId: string;
@@ -95,6 +131,7 @@ export type CandidateRecord = {
   readonly because: string;
   readonly needed: string;
   readonly updatedAt: string;
+  readonly meta?: CandidateBuildMeta;
 };
 
 export type ReviewRecord = {
@@ -133,6 +170,8 @@ export type LearningStore = {
   listPatterns(): Promise<readonly PatternRecord[]>;
   putCandidate(record: CandidateRecord): Promise<void>;
   listCandidates(): Promise<readonly CandidateRecord[]>;
+  putPatternEvidence(record: PatternEvidenceRecord): Promise<void>;
+  listPatternEvidence(signature?: string): Promise<readonly PatternEvidenceRecord[]>;
   putReview(record: ReviewRecord): Promise<void>;
   listReviews(): Promise<readonly ReviewRecord[]>;
   compact(nowIso: string): Promise<number>;
@@ -193,6 +232,7 @@ export class InMemoryLearning implements LearningStore {
   private readonly receipts: ReceiptRecord[] = [];
   private readonly patterns = new Map<string, PatternRecord>();
   private readonly candidates = new Map<string, CandidateRecord>();
+  private readonly evidenceEvents: PatternEvidenceRecord[] = [];
   private readonly reviews: ReviewRecord[] = [];
 
   async putMemory(record: MemoryRecord): Promise<void> {
@@ -280,6 +320,16 @@ export class InMemoryLearning implements LearningStore {
 
   async listCandidates(): Promise<readonly CandidateRecord[]> {
     return [...this.candidates.values()];
+  }
+
+  async putPatternEvidence(record: PatternEvidenceRecord): Promise<void> {
+    if (this.evidenceEvents.some((row) => row.evidenceId === record.evidenceId)) return;
+    this.evidenceEvents.push(record);
+  }
+
+  async listPatternEvidence(signature?: string): Promise<readonly PatternEvidenceRecord[]> {
+    if (!signature) return [...this.evidenceEvents];
+    return this.evidenceEvents.filter((row) => row.signature === signature);
   }
 
   async putReview(record: ReviewRecord): Promise<void> {

@@ -12,6 +12,7 @@ import {
 } from "@relay/contracts";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineTrace } from "../engine-helpers.js";
+import type { PatternService } from "../learning/PatternService.js";
 import {
   formatActionKey,
   type AuthorityState,
@@ -26,6 +27,7 @@ export type OperationServiceDeps = {
   readonly ids: IdFactory;
   readonly trace: EngineTrace;
   readonly emitSnapshot: () => Promise<void>;
+  readonly patterns?: PatternService;
 };
 
 /**
@@ -97,6 +99,8 @@ export class OperationService {
         return this.setReflex(command.reflex, command.expectedStateVersion, "active");
       case "PauseReflex":
         return this.setReflex(command.reflex, command.expectedStateVersion, "paused");
+      case "RollbackReflex":
+        return this.rollbackReflex(command.reflex, command.expectedStateVersion);
       default:
         return null;
     }
@@ -428,6 +432,12 @@ export class OperationService {
     const stateVersion = current?.stateVersion ?? 0;
     const version = tryMutateReflex(stateVersion, expectedStateVersion);
     if (!version.ok) return { ok: false, summary: version.error, error: version.error };
+
+    if (activation === "active" && this.deps.patterns) {
+      const gate = await this.deps.patterns.canActivateBuiltReflex(reflex.id, reflex.version);
+      if (!gate.ok) return { ok: false, summary: gate.summary, error: gate.summary };
+    }
+
     await this.deps.authority.setReflexState(
       {
         reflex,
@@ -437,8 +447,34 @@ export class OperationService {
       },
       at,
     );
+    await this.deps.patterns?.markCandidateActivation(reflex.id, reflex.version, activation);
     await this.deps.emitSnapshot();
     return { ok: true, summary: activation === "active" ? "reflex_activated" : "reflex_paused" };
+  }
+
+  private async rollbackReflex(
+    reflex: { readonly id: string; readonly version: number },
+    expectedStateVersion: number,
+  ): Promise<RelayCommandResult> {
+    const at = this.deps.clock.now().toISOString();
+    const projection = await this.deps.authority.project();
+    const key = `${reflex.id}@${reflex.version}`;
+    const current = projection.reflexes.find((r) => `${r.reflex.id}@${r.reflex.version}` === key);
+    const stateVersion = current?.stateVersion ?? 0;
+    const version = tryMutateReflex(stateVersion, expectedStateVersion);
+    if (!version.ok) return { ok: false, summary: version.error, error: version.error };
+    await this.deps.authority.setReflexState(
+      {
+        reflex,
+        stateVersion: stateVersion + 1,
+        activation: "inactive",
+        runs: current?.runs ?? { runCount: 0, successCount: 0, failureCount: 0 },
+      },
+      at,
+    );
+    await this.deps.patterns?.markCandidateActivation(reflex.id, reflex.version, "rolled_back");
+    await this.deps.emitSnapshot();
+    return { ok: true, summary: "reflex_rolled_back" };
   }
 
   private async requireConnection(
