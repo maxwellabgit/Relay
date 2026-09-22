@@ -90,20 +90,25 @@ export function App() {
     void modelDeliveryRef.current.start(controller.signal).then(setModelDelivery);
   };
 
-  const runCommand = async (command: RelayCommand): Promise<void> => {
+  const runCommand = async (command: RelayCommand): Promise<boolean> => {
     const client = clientRef.current;
     if (!client) {
       setNotice("client_not_ready");
-      return;
+      return false;
     }
     inFlight.current += 1;
     setBusy(true);
     setNotice(null);
     try {
       const result = await client.execute(command);
-      if (!result.ok) setNotice(result.error ?? result.summary);
+      if (!result.ok) {
+        setNotice(result.error ?? result.summary);
+        return false;
+      }
+      return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "command_failed");
+      return false;
     } finally {
       inFlight.current = Math.max(0, inFlight.current - 1);
       setBusy(inFlight.current > 0);
@@ -185,9 +190,7 @@ export function App() {
         onListenChange={(enabled) => {
           void runCommand({ type: "SetListening", enabled });
         }}
-        onSubmit={(text) => {
-          void runCommand({ type: "SubmitText", text });
-        }}
+        onSubmit={(text) => runCommand({ type: "SubmitText", text })}
         onCancelActive={() => {
           void runCommand({ type: "CancelActive" });
         }}

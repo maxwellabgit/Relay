@@ -32,7 +32,7 @@ import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
 type Props = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
-  readonly onSubmit: (text: string) => void;
+  readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
   readonly onAction?: (action: ActionCard) => void;
   readonly onAcceptAmbient?: (recommendationId: string) => void;
   readonly onDismissAmbient?: (recommendationId: string) => void;

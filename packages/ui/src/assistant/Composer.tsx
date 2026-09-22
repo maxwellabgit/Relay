@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme/colors.js";
 import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
+import { canSendComposer, nextComposerDraft } from "./composer-draft.js";
 
 type Props = {
-  readonly onSubmit: (text: string) => void;
+  readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
   readonly onCancel?: () => void;
   readonly disabled?: boolean;
   readonly listening?: boolean;
@@ -21,12 +22,24 @@ export function Composer({
   waitingLabel = null,
 }: Props) {
   const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
 
   const send = () => {
-    const trimmed = text.trim();
-    if (!trimmed || disabled || busy) return;
-    onSubmit(trimmed);
-    setText("");
+    const submitted = text.trim();
+    if (!canSendComposer({ text: submitted, disabled, busy, sending: sendingRef.current })) return;
+    sendingRef.current = true;
+    setSending(true);
+    void Promise.resolve(onSubmit(submitted))
+      .then((accepted) => {
+        if (accepted === false) return;
+        setText((current) => nextComposerDraft(current, submitted, true));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        sendingRef.current = false;
+        setSending(false);
+      });
   };
 
   const placeholder = listening ? "Listening… you can still ask" : "Ask RELAY";
@@ -75,8 +88,11 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Send"
             onPress={send}
-            disabled={disabled || busy || !text.trim()}
-            style={[styles.button, (!text.trim() || disabled || busy) && styles.buttonDisabled]}
+            disabled={!canSendComposer({ text, disabled, busy, sending })}
+            style={[
+              styles.button,
+              !canSendComposer({ text, disabled, busy, sending }) && styles.buttonDisabled,
+            ]}
           >
             <Text style={styles.buttonText}>Send</Text>
           </Pressable>
