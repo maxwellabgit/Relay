@@ -11,7 +11,7 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | Reviewed tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Implementation parent | `4a4529d1529adf6d6460e17e2797e02b16135182` |
 | Exact-tip CI (reviewed) | https://github.com/maxwellabgit/Relay/actions/runs/35727102376 PASS (`head_sha` = `4b64928…`) |
-| Active phase | F0 |
+| Active phase | F0 (local gates done; awaiting exact-tip CI on `0e3fe8d`) |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are **FOUNDATION COMPLETE** only (not V1 complete) |
 
@@ -54,7 +54,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | --- | --- | --- |
 | 2026-09-22 | Reviewed exact-tip Actions `35727102376` on `4b64928` | PASS (verify:v1 only; not V1 product complete) |
 | 2026-09-22 | Prior parent-SHA Actions `35684028985` on `4a4529d` | Historical PASS — must not be cited as tip proof for `4b64928` docs |
-| 2026-09-22 | F0 reopen started on `cursor/v1-testflight-finalization-45e9` | IN PROGRESS |
+| 2026-09-22 | F0 commit `0e3fe8d` pushed to `cursor/v1-testflight-finalization-45e9` | Local format/arch/unit/golden PASS; awaiting exact-tip Actions |
 
 ## Next exact action
 
