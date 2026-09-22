@@ -2,11 +2,13 @@ import type { ToolResultEnvelope } from "@relay/contracts";
 import type { ToolBudgets } from "@relay/contracts";
 import type { WorkDisposition } from "../judgments/JudgmentService.js";
 import type { ArtifactStorePort, JudgmentPort, TextModelPort } from "@relay/contracts";
+import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import { PRIORITY_DIRECT, type WorkItem } from "../queue.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
+import { knownReason } from "../runtime-events.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -300,10 +302,19 @@ export class ToolBroker {
       for (const scope of connection.grantedOAuthScopes) scopes.add(scope);
       for (const scope of connection.readScopes) scopes.add(scope);
     }
-    const hasPublicDisclosure = projection.disclosures.some((g) => g.disclosure === "public");
+    const publicSearchConnected = connected.has("public-search");
+    const hasPublicDisclosure = projection.disclosures.some((grant) => {
+      if (grant.disclosure !== "public") return false;
+      const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
+      return connection?.connector.id === "public-search" && connection.connected;
+    });
+    const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();
+    // Public-search (and any Jev Choice among tools) requires hosted processing + connected connector + disclosure.
     const publicSearchAvailable =
+      hostedEnabled &&
       this.deps.registry.get(TOOL_PUBLIC_SEARCH) != null &&
-      (connected.has("public-search") || hasPublicDisclosure);
+      publicSearchConnected &&
+      hasPublicDisclosure;
     return filterEligibleTools(this.deps.registry.definitions(), {
       caseOrigin: "direct",
       remaining,
@@ -352,9 +363,30 @@ export class ToolBroker {
     };
 
     const started = Date.now();
-    const response = await this.deps.judgments.judge(request, this.deps.getAbortSignal());
+    const outcome = await runJudgmentLifecycle(
+      {
+        store: this.deps.store,
+        artifacts: this.deps.artifacts,
+        judgments: this.deps.judgments,
+        clock: this.deps.clock,
+        ids: this.deps.ids,
+        isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+      },
+      request,
+      this.deps.getAbortSignal(),
+    );
     const durationMs = Date.now() - started;
-    if (!response.ok) {
+    if (!outcome.response.ok) {
+      const category = outcome.response.failure.category;
+      const reasonCode =
+        outcome.response.failure.message === "hosted_processing_disabled"
+          ? knownReason("hosted_processing_disabled")
+          : knownReason(category);
+      const blocked =
+        category === "missing_secret" ||
+        category === "authentication" ||
+        category === "disabled" ||
+        category === "not_authorized";
       await this.deps.outcomes.putReceipt({
         caseId,
         gateId: "tool.route",
@@ -364,22 +396,25 @@ export class ToolBroker {
         probabilities: {},
         thresholds: { choiceProbabilityMinimum: 0.65, choiceMarginMinimum: 0.15 },
         selectedOption: null,
-        result: "fail",
-        reasonCode: response.failure.category,
+        result: blocked ? "blocked" : "fail",
+        reasonCode,
         latencyMs: durationMs,
+        judgmentId: outcome.record.judgmentId,
       });
       await this.deps.trace.emit({
         type: "judgment.failed",
         stage: "judgment.response",
         status: "failed",
         caseId,
-        reasonCode: response.failure.category,
+        judgmentId: outcome.record.judgmentId,
+        reasonCode,
         durationMs,
       });
-      return { ok: false, status: "blocked" };
+      void item;
+      return { ok: false, status: blocked ? "blocked" : "failed" };
     }
 
-    const answer = response.success.answers.route;
+    const answer = outcome.response.success.answers.route;
     if (!answer || answer.type !== "choice") return { ok: false, status: "failed" };
 
     const probabilities = { ...answer.probabilities };
@@ -411,6 +446,7 @@ export class ToolBroker {
       selectedOption: selected,
       selectedOptionId: selected,
       optionLabels: Object.fromEntries(optionIds.map((id) => [id, id])),
+      judgmentId: outcome.record.judgmentId,
       result: pass ? "pass" : "fail",
       reasonCode: pass ? (control ? "no_match" : "policy_pass") : gate.reasonCode,
       latencyMs: durationMs,
@@ -420,6 +456,7 @@ export class ToolBroker {
       stage: "judgment.response",
       status: "completed",
       caseId,
+      judgmentId: outcome.record.judgmentId,
       reasonCode: pass ? (control ? "no_match" : "policy_pass") : gate.reasonCode,
       durationMs,
     });

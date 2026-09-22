@@ -331,6 +331,13 @@ export class OperationService {
     const at = this.deps.clock.now().toISOString();
     const connection = await this.requireConnection(command.connectionId, command.expectedConnectionVersion);
     if (!connection.ok) return connection.result;
+    if (command.disclosure === "public" && connection.row.connector.id !== "public-search") {
+      return {
+        ok: false,
+        summary: "disclosure_not_allowed",
+        error: "disclosure_not_allowed",
+      };
+    }
     const grantId = this.deps.ids.next("grant");
     const grant: DisclosureGrantRecord = {
       grantId,

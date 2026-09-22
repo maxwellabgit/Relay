@@ -59,7 +59,7 @@ export function filterEligibleTools(
     }
     if (tool.disclosure === "public") {
       if (!context.publicSearchAvailable) return false;
-      if (!context.hasPublicDisclosure && !context.connectedConnectorIds.has("public-search")) {
+      if (!context.hasPublicDisclosure || !context.connectedConnectorIds.has("public-search")) {
         return false;
       }
     }
@@ -74,7 +74,7 @@ export function filterEligibleTools(
 function scopeSatisfiedByConnection(scope: string, context: EligibilityContext): boolean {
   if (scope === "memory.read") return true;
   if (scope === "public-search.read") {
-    return context.connectedConnectorIds.has("public-search") || context.hasPublicDisclosure;
+    return context.connectedConnectorIds.has("public-search") && context.hasPublicDisclosure;
   }
   if (scope === "assistant.respond") return true;
   return context.grantedScopes.has(scope);

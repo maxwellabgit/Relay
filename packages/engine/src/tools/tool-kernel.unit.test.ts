@@ -107,16 +107,28 @@ describe("tool eligibility", () => {
     expect(ids).not.toContain("shell.exec@1");
   });
 
-  it("includes public-search only when connected or disclosed", () => {
+  it("includes public-search only when connected and disclosed", () => {
     const eligible = filterEligibleTools(defs, {
       caseOrigin: "direct",
       remaining: DEFAULT_TOOL_BUDGETS,
       connectedConnectorIds: new Set(["public-search"]),
       grantedScopes: new Set(),
-      hasPublicDisclosure: false,
+      hasPublicDisclosure: true,
       publicSearchAvailable: true,
     });
     expect(eligible.map((tool) => tool.id)).toContain(TOOL_PUBLIC_SEARCH);
+  });
+
+  it("excludes public-search when only a non-search disclosure exists", () => {
+    const eligible = filterEligibleTools(defs, {
+      caseOrigin: "direct",
+      remaining: DEFAULT_TOOL_BUDGETS,
+      connectedConnectorIds: new Set(["calendar"]),
+      grantedScopes: new Set(),
+      hasPublicDisclosure: true,
+      publicSearchAvailable: false,
+    });
+    expect(eligible.map((tool) => tool.id)).not.toContain(TOOL_PUBLIC_SEARCH);
   });
 });
 

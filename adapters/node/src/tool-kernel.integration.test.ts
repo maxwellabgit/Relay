@@ -231,6 +231,17 @@ describe("tool and operation kernel", () => {
           (r) => r.reflex.id === "reflex.preserve-important-information" && r.activation === "active",
         ),
       ).toBe(true);
+      connection = snap.connections.find((c) => c.connectionId === connectionId)!;
+      const badDisclosure = await harness.client.execute({
+        type: "GrantHostedDisclosure",
+        connectionId,
+        expectedConnectionVersion: connection.connectionVersion,
+        disclosure: "public",
+        sensitivity: 0,
+        purpose: "should_fail",
+      });
+      expect(badDisclosure.ok).toBe(false);
+      expect(badDisclosure.error).toBe("disclosure_not_allowed");
     } finally {
       await harness.client.stop();
       harness.close();
