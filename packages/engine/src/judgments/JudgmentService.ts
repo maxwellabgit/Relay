@@ -9,9 +9,12 @@ import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
+import { JEV_MODEL } from "../typesafe-judgment.js";
+import { acronymProviderState } from "./acronym-state.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
 import type { PatternService } from "../learning/PatternService.js";
+import type { JudgmentResponse } from "@relay/contracts";
 
 export type WorkDisposition =
   | { readonly kind: "complete" }
@@ -33,6 +36,11 @@ export type JudgmentServiceDeps = {
   readonly getActiveCaseId: () => string | null;
   readonly offerGlossary: (token: string, expansion: string) => Promise<void>;
 };
+
+function providerRequestIdFrom(response: JudgmentResponse): string | null {
+  if (response.ok) return response.success.providerRequestId ?? null;
+  return response.failure.providerRequestId ?? null;
+}
 
 export class JudgmentService {
   constructor(private readonly deps: JudgmentServiceDeps) {}
@@ -86,16 +94,15 @@ export class JudgmentService {
     const request: JudgmentRequest = {
       questionSetId: "judgment.acronym-choice",
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: JEV_MODEL,
       provider: this.deps.mode === "recorded" ? "recorded" : "typesafe",
-      state: {
+      state: acronymProviderState({
         token: String(item.payload.token ?? parsed.token ?? ""),
+        contextExcerpt: String(item.payload.contextExcerpt ?? ""),
         optionCount: optionIds.length,
         explicitAsk: item.payload.explicitAsk === true,
-        provenance: "glossary_window",
-        policyVersion: "resolve-acronym@1",
-        sourceRef: String(item.payload.sourceEventId ?? ""),
-      },
+        sourceEventId: String(item.payload.sourceEventId ?? ""),
+      }),
       questions: {
         expansion: { type: "choice", instructions: "Select one allowed option.", criteria, requireNoMatch: true },
         useful: {
@@ -164,7 +171,7 @@ export class JudgmentService {
           maxAttempts: JUDGMENT_MAX_ATTEMPTS,
           nextAttemptAt,
           failureCategory: category,
-          providerRequestId: outcome.record.judgmentId,
+          providerRequestId: providerRequestIdFrom(outcome.response),
           createdAt: this.deps.clock.now().toISOString(),
         });
         await this.deps.trace.emit({

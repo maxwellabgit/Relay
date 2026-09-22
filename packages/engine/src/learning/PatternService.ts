@@ -13,6 +13,7 @@ import {
   type ReceiptRecord,
 } from "../learning-store.js";
 import { knownReason } from "../runtime-events.js";
+import { JEV_MODEL } from "../typesafe-judgment.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
@@ -375,7 +376,7 @@ export class PatternService {
     const request: JudgmentRequest = {
       questionSetId: "judgment.expansion-benefit",
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: JEV_MODEL,
       provider: this.deps.mode === "recorded" ? "recorded" : "typesafe",
       state: { count, sessions },
       questions: {

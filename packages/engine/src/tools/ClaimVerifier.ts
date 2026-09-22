@@ -15,6 +15,7 @@ import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
+import { JEV_MODEL } from "../typesafe-judgment.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 
@@ -248,7 +249,7 @@ export class ClaimVerifier {
     const request = {
       questionSetId: CLAIM_SOURCE_CHOICE_SET,
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: JEV_MODEL,
       provider: this.deps.mode === "recorded" ? "recorded" : "typesafe",
       state: {
         optionCount: pool.length,
@@ -339,7 +340,7 @@ export class ClaimVerifier {
     const request = {
       questionSetId: CLAIM_SUPPORT_SET,
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: JEV_MODEL,
       provider: this.deps.mode === "recorded" ? "recorded" : "typesafe",
       state: {
         claimPreview: claim.slice(0, 160),

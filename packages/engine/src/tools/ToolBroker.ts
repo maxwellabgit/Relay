@@ -9,6 +9,7 @@ import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { knownReason, structuralToolId } from "../runtime-events.js";
+import { JEV_MODEL } from "../typesafe-judgment.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -456,7 +457,7 @@ export class ToolBroker {
     const request = {
       questionSetId: "judgment.tool-route",
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: JEV_MODEL,
       provider: this.deps.mode === "recorded" ? "recorded" : "typesafe",
       state: {
         optionCount: optionIds.length,

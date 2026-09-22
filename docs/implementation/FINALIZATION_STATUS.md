@@ -39,7 +39,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | Gate | State | What blocks GREEN |
 | --- | --- | --- |
 | G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
-| G1 Live Jev | OPEN | Ambient content, `jev-latest`, scoped grants, Retry-After, diagnostics, live canary |
+| G1 Live Jev | OPEN | Protocol slice landed (model, excerpt, retries). Still open: scoped grant, budget, two-round limit, resume-once, live canary |
 | G2 Core semantics | OPEN | `App.tsx` testkit import; note/fact/recommendation distinction; bundle purity |
 | G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
 | G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
@@ -83,7 +83,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 
 ## Next exact action
 
-Execute G1 in `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md`: centralize `jev-latest`, send authorized ambient and acronym context, replace the global hosted-processing boolean with a scoped grant, and add Retry-After backoff. Do not mark G1 GREEN until the automated suite and the human live canary both have evidence. Do not request, read, or commit a Jev key.
+Continue G1. The provider model is `jev-latest`, ambient and acronym requests include authorized context, and 429/529 retries honor Retry-After. Do not mark G1 GREEN. Next code is the scoped disclosure grant, byte/request budget, two-round limit, and one-time resume. The live canary stays blocked until those automated tests pass and a human imports the key outside this agent.
 
 ## GREEN rule
 

@@ -114,6 +114,7 @@ export class CaseRuntime {
           attempt: 1,
           explicitAsk: isAsk,
           sourceEventId,
+          contextExcerpt: text.slice(0, 400),
         },
         PRIORITY_DIRECT,
         this.deps.ids,

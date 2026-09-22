@@ -80,6 +80,7 @@ export type JudgmentFailure = {
   readonly category: JudgmentFailureCategory;
   readonly message: string;
   readonly httpStatus?: number;
+  readonly providerRequestId?: string;
 };
 
 export type JudgmentResponse =

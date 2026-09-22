@@ -19,6 +19,8 @@ import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { encodeText, type EngineTrace } from "../engine-helpers.js";
 import { decideAmbientRoute, type AmbientRouteDecision } from "./route-policy.js";
+import { ambientProviderState } from "./provider-state.js";
+import { JEV_MODEL } from "../typesafe-judgment.js";
 
 export const AMBIENT_QUESTION_SET_ID = "judgment.ambient-triage";
 export const AMBIENT_QUESTION_SET_VERSION = "ambient-triage@1";
@@ -457,11 +459,11 @@ export class AmbientTriage {
     const request: JudgmentRequest = {
       questionSetId: AMBIENT_QUESTION_SET_ID,
       questionSetVersion: AMBIENT_QUESTION_SET_VERSION,
-      model: "typesafe",
+      model: JEV_MODEL,
       provider: "typesafe",
       caseId,
       caseVersion,
-      state: { origin: "observed" },
+      state: ambientProviderState(text),
       sourceObjectRefs: [{ artifactId: sourceRef.artifactId, sha256: sourceRef.sha256 }],
       questions: {
         worth_remembering: {

@@ -48,6 +48,7 @@ export async function canonicalizeRequestHash(request: JudgmentRequest): Promise
     state: sanitizeState(
       request.state && typeof request.state === "object" ? (request.state as Record<string, unknown>) : {},
     ),
+    stateDigest: await sha256Hex(encode(request.state ?? null)),
     sources: (request.sourceObjectRefs ?? []).map((s) => s.sha256).sort(),
   };
   return sha256Hex(encode(canonical));
@@ -87,6 +88,9 @@ function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
       ok: false,
       category: response.failure.category,
       httpStatus: response.failure.httpStatus ?? null,
+      ...(response.failure.providerRequestId
+        ? { providerRequestId: response.failure.providerRequestId }
+        : {}),
     });
   }
   const answers: Record<string, unknown> = {};
@@ -110,6 +114,9 @@ function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
     inputTokens: response.success.inputTokens,
     outputTokens: response.success.outputTokens,
     elapsedMs: response.success.elapsedMs,
+    ...(response.success.providerRequestId
+      ? { providerRequestId: response.success.providerRequestId }
+      : {}),
   });
 }
 

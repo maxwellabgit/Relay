@@ -19,9 +19,9 @@ import {
   createRelayClientFromEngine,
   JevHealthTracker,
   observeDiagnostics,
-  parseTypeSafeBody,
   RelayEngine,
-  TYPESAFE_MODEL,
+  runTypeSafeAttempts,
+  wireTypeSafeBody,
   type DiagnosticObservation,
   type EngineDeps,
 } from "@relay/engine";
@@ -446,39 +446,50 @@ function retryScheduleFrom(snapshot: RelaySnapshot): string | null {
 function createNativeJudgmentPort(invoke: TauriInvoke): JudgmentPort {
   return {
     async judge(request: JudgmentRequest, signal: AbortSignal): Promise<JudgmentResponse> {
-      if (signal.aborted) {
-        return { ok: false, failure: { category: "cancelled", message: "jev_cancelled" } };
-      }
-      const result = (await invoke("typesafe_judge", {
-        request: {
-          model: request.model || TYPESAFE_MODEL,
-          body: {
-            model: request.model || TYPESAFE_MODEL,
-            questions: request.questions,
-            state: request.state,
-            questionSetId: request.questionSetId,
-            questionSetVersion: request.questionSetVersion,
-          },
+      const body = wireTypeSafeBody(request);
+      return runTypeSafeAttempts({
+        signal,
+        questions: request.questions,
+        perform: async () => {
+          if (signal.aborted) return { kind: "transport", reason: "cancelled" };
+          const result = (await invoke("typesafe_judge", {
+            request: { model: body.model, body },
+          })) as {
+            ok: boolean;
+            status?: number;
+            category?: string;
+            latency_ms?: number;
+            body?: unknown;
+            retry_after?: string | null;
+            request_id?: string | null;
+          };
+          if (result?.category === "missing_secret") {
+            return {
+              kind: "terminal",
+              failure: { category: "missing_secret", message: "typesafe_key_missing" },
+            };
+          }
+          const status = Number(result?.status ?? (result?.ok ? 200 : 0));
+          if (result?.ok && result.body) {
+            return {
+              kind: "http",
+              status: status || 200,
+              bodyText: JSON.stringify(result.body),
+              retryAfter: result.retry_after ?? null,
+              requestId: result.request_id ?? null,
+              elapsedMs: Number(result.latency_ms ?? 0),
+            };
+          }
+          return {
+            kind: "http",
+            status,
+            bodyText: "",
+            retryAfter: result?.retry_after ?? null,
+            requestId: result?.request_id ?? null,
+            elapsedMs: Number(result?.latency_ms ?? 0),
+          };
         },
-      })) as {
-        ok: boolean;
-        category: string;
-        latency_ms?: number;
-        body?: unknown;
-      };
-      if (!result?.ok) {
-        const category = (result?.category || "missing_secret") as JudgmentResponse extends {
-          ok: false;
-          failure: { category: infer C };
-        }
-          ? C
-          : "missing_secret";
-        return {
-          ok: false,
-          failure: { category, message: result?.category || "missing_secret" },
-        };
-      }
-      return parseTypeSafeBody(JSON.stringify(result.body ?? {}), Number(result.latency_ms ?? 0));
+      });
     },
   };
 }

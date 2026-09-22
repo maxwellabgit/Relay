@@ -80,7 +80,7 @@ describe("runJudgmentLifecycle hosted processing gate", () => {
       {
         questionSetId: "judgment.acronym-choice",
         questionSetVersion: "1",
-        model: "jev-1.13.0",
+        model: "jev-latest",
         state: { token: "API" },
         questions: {
           expansion: {
@@ -121,7 +121,7 @@ describe("runJudgmentLifecycle hosted processing gate", () => {
       {
         questionSetId: "judgment.acronym-choice",
         questionSetVersion: "1",
-        model: "jev-1.13.0",
+        model: "jev-latest",
         state: { token: "API" },
         questions: {
           expansion: {
@@ -161,7 +161,7 @@ describe("runJudgmentLifecycle hosted processing gate", () => {
       {
         questionSetId: "judgment.acronym-choice",
         questionSetVersion: "1",
-        model: "jev-1.13.0",
+        model: "jev-latest",
         state: { token: "API" },
         questions: {
           expansion: {
@@ -206,7 +206,7 @@ describe("runJudgmentLifecycle hosted processing gate", () => {
     const request = {
       questionSetId: "judgment.acronym-choice",
       questionSetVersion: "1",
-      model: "jev-1.13.0",
+      model: "jev-latest",
       state: { token: "API" },
       questions: {
         expansion: {
@@ -286,7 +286,7 @@ describe("runJudgmentLifecycle hosted processing gate", () => {
       {
         questionSetId: "judgment.acronym-choice",
         questionSetVersion: "1",
-        model: "jev-1.13.0",
+        model: "jev-latest",
         state: { token: "API" },
         questions: {
           expansion: {

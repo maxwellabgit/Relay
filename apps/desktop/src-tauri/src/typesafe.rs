@@ -17,34 +17,62 @@ pub struct TypesafeJudgeResult {
     pub latency_ms: u64,
     pub retries: u32,
     pub body: Option<serde_json::Value>,
+    pub retry_after: Option<String>,
+    pub request_id: Option<String>,
 }
 
-fn fail(category: &str, status: u16, latency_ms: u64, retries: u32) -> TypesafeJudgeResult {
+fn fail(
+    category: &str,
+    status: u16,
+    latency_ms: u64,
+    retry_after: Option<String>,
+    request_id: Option<String>,
+) -> TypesafeJudgeResult {
     TypesafeJudgeResult {
         ok: false,
         status,
         category: category.to_string(),
         latency_ms,
-        retries,
+        retries: 0,
         body: None,
+        retry_after,
+        request_id,
     }
 }
 
 fn category_for_status(status: u16) -> &'static str {
     match status {
         401 => "authentication",
-        422 => "validation",
+        402 | 422 => "validation",
         429 => "rate_limited",
         529 => "overloaded",
         _ => "network",
     }
 }
 
+fn header_value(response: &ureq::Response, name: &str) -> Option<String> {
+    response.header(name).map(str::to_string)
+}
+
+fn response_meta(response: &ureq::Response) -> (Option<String>, Option<String>) {
+    let retry_after = header_value(response, "retry-after");
+    let request_id = header_value(response, "x-request-id")
+        .or_else(|| header_value(response, "request-id"));
+    (retry_after, request_id)
+}
+
+struct HttpExchange {
+    status: u16,
+    body: Option<serde_json::Value>,
+    retry_after: Option<String>,
+    request_id: Option<String>,
+}
+
 fn post_once(
     agent: &ureq::Agent,
     api_key: &str,
     body: &serde_json::Value,
-) -> Result<(u16, Option<serde_json::Value>), (u16, bool)> {
+) -> Result<HttpExchange, HttpExchange> {
     match agent
         .post("https://api.typesafe.ai/v1/systemone")
         .set("Authorization", &format!("Bearer {api_key}"))
@@ -53,18 +81,45 @@ fn post_once(
     {
         Ok(response) => {
             let status = response.status();
+            let (retry_after, request_id) = response_meta(&response);
             if !(200..300).contains(&status) {
-                return Err((status, status == 429 || status == 529));
+                return Err(HttpExchange {
+                    status,
+                    body: None,
+                    retry_after,
+                    request_id,
+                });
             }
             match response.into_json::<serde_json::Value>() {
-                Ok(parsed) => Ok((status, Some(parsed))),
-                Err(_) => Err((status, false)),
+                Ok(parsed) => Ok(HttpExchange {
+                    status,
+                    body: Some(parsed),
+                    retry_after,
+                    request_id,
+                }),
+                Err(_) => Err(HttpExchange {
+                    status,
+                    body: None,
+                    retry_after,
+                    request_id,
+                }),
             }
         }
-        Err(ureq::Error::Status(status, _response)) => {
-            Err((status, status == 429 || status == 529))
+        Err(ureq::Error::Status(status, response)) => {
+            let (retry_after, request_id) = response_meta(&response);
+            Err(HttpExchange {
+                status,
+                body: None,
+                retry_after,
+                request_id,
+            })
         }
-        Err(ureq::Error::Transport(_)) => Err((0, false)),
+        Err(ureq::Error::Transport(_)) => Err(HttpExchange {
+            status: 0,
+            body: None,
+            retry_after: None,
+            request_id: None,
+        }),
     }
 }
 
@@ -76,7 +131,13 @@ pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
     let api_key = match read_typesafe_api_key() {
         Ok(value) => value,
         Err(_) => {
-            return fail("missing_secret", 0, started.elapsed().as_millis() as u64, 0);
+            return fail(
+                "missing_secret",
+                0,
+                started.elapsed().as_millis() as u64,
+                None,
+                None,
+            );
         }
     };
 
@@ -84,39 +145,30 @@ pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
         .timeout(Duration::from_secs(15))
         .build();
 
-    let mut retries: u32 = 0;
-    let mut attempt = 0u32;
-    loop {
-        attempt += 1;
-        match post_once(&agent, &api_key, &request.body) {
-            Ok((status, body)) => {
-                return TypesafeJudgeResult {
-                    ok: true,
-                    status,
-                    category: "ok".to_string(),
-                    latency_ms: started.elapsed().as_millis() as u64,
-                    retries,
-                    body,
-                };
-            }
-            Err((status, retryable)) => {
-                if retryable && attempt < 2 {
-                    retries = 1;
-                    std::thread::sleep(Duration::from_millis(250));
-                    continue;
-                }
-                let category = if status == 0 {
-                    "network"
-                } else {
-                    category_for_status(status)
-                };
-                return fail(
-                    category,
-                    status,
-                    started.elapsed().as_millis() as u64,
-                    retries,
-                );
-            }
+    match post_once(&agent, &api_key, &request.body) {
+        Ok(exchange) => TypesafeJudgeResult {
+            ok: true,
+            status: exchange.status,
+            category: "ok".to_string(),
+            latency_ms: started.elapsed().as_millis() as u64,
+            retries: 0,
+            body: exchange.body,
+            retry_after: exchange.retry_after,
+            request_id: exchange.request_id,
+        },
+        Err(exchange) => {
+            let category = if exchange.status == 0 {
+                "network"
+            } else {
+                category_for_status(exchange.status)
+            };
+            fail(
+                category,
+                exchange.status,
+                started.elapsed().as_millis() as u64,
+                exchange.retry_after,
+                exchange.request_id,
+            )
         }
     }
 }
