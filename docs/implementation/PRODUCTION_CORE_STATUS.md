@@ -11,13 +11,14 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Named history | `9fce11241019321d3d326c5b37f7578efc8d5630`, `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7` |
 | Preservation tag | `relay-dotnet-a6bf987` (confirmed present) |
 | Pre-existing user changes | none |
-| Active phase | Phase 5 GREEN |
-| Last green gate | Phase 5 verify:v1 pass |
+| Active phase | Phase 6 NOT_STARTED |
+| Last green gate | Phase 5 Bugbot pass + verify:v1 |
 | Phase 0 commit | `bc3689eadc1e166475bc8c1009f81b3f3842eacc` |
 | Phase 1 commits | `1c3f666`, `af22805` |
 | Phase 2 commits | `f0ad739`, `a7e4208` |
 | Phase 3 commits | `25719f9`, `a69c40f`, `85d6351`, `145edf4`, `66fa6f5` |
 | Phase 4 commits | `641473d`, `c739032`, `87c2695` |
+| Phase 5 commits | `e23a1a8`, `1abde49` |
 
 ## Phase states
 
@@ -28,19 +29,20 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | 2 Live correlated diagnostics | GREEN | Bugbot pass; CI https://github.com/maxwellabgit/Relay/actions/runs/35666297066 on `a7e4208` |
 | 3 Decompose engine | GREEN | Bugbot pass (`66fa6f5`); desktop txn + exclusive store mutex; CI `35668646353`+ |
 | 4 Tool and operation kernel | GREEN | Bugbot pass (`87c2695`); hosted gate + public-search connector |
-| 5 Ambient triage / recommendations | GREEN | CandidateEvent, ambient Jev triage, Preserve Important Information |
+| 5 Ambient triage / recommendations | GREEN | Bugbot pass (`1abde49`); hosted resume, accept all primaries, deduped receipts |
 | 6 Claim verification + GitHub read | NOT_STARTED | |
 | 7 Bounded Reflex creation | NOT_STARTED | |
 | 8 Professional UI + Windows hardening | NOT_STARTED | |
 
 ## Next exact action
 
-Phase 5 complete; run Bugbot on latest commit; begin Phase 6 claim verification.
+Begin Phase 6 claim verification + GitHub read (`claim.verify@1`).
 
 ## Evidence log
 
 | When (UTC) | Command / event | Result |
 | --- | --- | --- |
+| 2026-09-22 | Phase 5 Bugbot PASS (hosted resume, accept primaries, deduped receipts) | PASS on `1abde49` |
 | 2026-09-22 | Phase 5 ambient candidate triage; `npm run verify:v1` | PASS |
 | 2026-09-22 | Phase 4 Bugbot PASS (hosted gate + public-search) | PASS on `87c2695` |
 | 2026-09-22 | Phase 4 tool/operation kernel; `npm run verify:v1` | PASS |
