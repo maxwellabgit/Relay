@@ -1,5 +1,6 @@
-import type { DecisionRunView, TranscriptEvent } from "@relay/contracts";
+import type { DecisionRunView, TranscriptEvent, TranscriptSourcePort } from "@relay/contracts";
 import type { RelayEngine } from "@relay/engine";
+import { RecordedAudioSource } from "./recorded-audio-source.js";
 import {
   ScriptedTranscriptSource,
   virtualClock,
@@ -19,9 +20,31 @@ export async function runReplay(options: ReplayOptions): Promise<{
   readonly finals: number;
   readonly decisions: readonly DecisionRunView[];
 }> {
-  const captureSessionId = options.captureSessionId ?? `capture_${options.sessionId}`;
   const clock = options.speed === 0 ? virtualClock() : wallClock();
   const source = new ScriptedTranscriptSource(options.fixturePath, options.speed, clock);
+  return ingestPreparedSource(options, source);
+}
+
+/** Prepared segment list. This does not start a microphone or a speech package. */
+export async function runRecordedAudio(options: ReplayOptions): Promise<{
+  readonly events: TranscriptEvent[];
+  readonly finals: number;
+  readonly decisions: readonly DecisionRunView[];
+}> {
+  const clock = options.speed === 0 ? virtualClock() : wallClock();
+  const source = new RecordedAudioSource(options.fixturePath, options.speed, clock);
+  return ingestPreparedSource(options, source);
+}
+
+async function ingestPreparedSource(
+  options: ReplayOptions,
+  source: TranscriptSourcePort,
+): Promise<{
+  readonly events: TranscriptEvent[];
+  readonly finals: number;
+  readonly decisions: readonly DecisionRunView[];
+}> {
+  const captureSessionId = options.captureSessionId ?? `capture_${options.sessionId}`;
   const collected: TranscriptEvent[] = [];
   let finals = 0;
   const ac = new AbortController();
