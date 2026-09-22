@@ -23,7 +23,9 @@ Lower-layer counts reported for `31ffec5` (tsc exit 0, unit 169, architecture 21
 
 ## Code tip this ledger describes
 
-`57d9a012a5ede76c6317d7e91bf15486afbe61f0` on local `main`. Not pushed.
+Product evidence SHA: `57d9a012a5ede76c6317d7e91bf15486afbe61f0` on local `main`. Not pushed.
+
+Ledger introduction SHA: `13de8d77f0b6f7f849aa598398c6335330647535`.
 
 | SHA | Commit |
 | --- | --- |
