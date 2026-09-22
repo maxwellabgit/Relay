@@ -28,6 +28,12 @@ for (const step of steps) {
   };
   results.push(entry);
   if (!entry.ok) {
+    if (result.stdout?.trim()) {
+      console.error(result.stdout.trimEnd());
+    }
+    if (result.stderr?.trim()) {
+      console.error(result.stderr.trimEnd());
+    }
     writeSummary({
       started,
       finished: new Date().toISOString(),

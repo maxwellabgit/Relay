@@ -564,7 +564,7 @@ function uniqueValues(values: readonly (string | null)[]): string[] {
 }
 
 const styles = StyleSheet.create({
-  panel: { flex: 1, backgroundColor: colors.console, minWidth: 420 },
+  panel: { flex: 1, backgroundColor: colors.console, minWidth: 0 },
   content: { padding: 18, gap: 12 },
   tabs: {
     flexDirection: "row",
@@ -586,8 +586,8 @@ const styles = StyleSheet.create({
   stack: { gap: 8 },
   jevLayout: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignItems: "flex-start" },
   caseLayout: { gap: 14 },
-  jevMain: { flexGrow: 1, flexBasis: 420, minWidth: 320 },
-  jevSide: { flexGrow: 1, flexBasis: 260, minWidth: 240, gap: 10 },
+  jevMain: { flexGrow: 1, flexBasis: 420, minWidth: 0 },
+  jevSide: { flexGrow: 1, flexBasis: 260, minWidth: 0, gap: 10 },
   sideCard: {
     borderWidth: 1,
     borderColor: colors.border,

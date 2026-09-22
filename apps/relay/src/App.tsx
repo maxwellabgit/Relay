@@ -138,6 +138,19 @@ export function App() {
         onApproveCandidate={(candidateId) => {
           void clientRef.current?.execute({ type: "ApproveCandidate", candidateId });
         }}
+        onAcceptAmbient={(recommendationId) => {
+          void clientRef.current?.execute({ type: "AcceptAmbientRecommendation", recommendationId });
+        }}
+        onDismissAmbient={(recommendationId) => {
+          void clientRef.current?.execute({ type: "DismissAmbientRecommendation", recommendationId });
+        }}
+        onFeedbackAmbient={(recommendationId, feedback) => {
+          void clientRef.current?.execute({
+            type: "FeedbackAmbientRecommendation",
+            recommendationId,
+            feedback,
+          });
+        }}
         onActivateReflex={(reflexId, version, stateVersion) => {
           void clientRef.current?.execute({
             type: "ActivateReflex",

@@ -40,19 +40,20 @@ Shared manifest: `tools/verification/manifest.mjs`.
 
 ## Manual Windows dogfood
 
-Status: **pending** — not claimed by the production-core automated gate.
+Status: **operator-driven** via `npm run readiness:dogfood` — not claimed by the automated gate.
 
 ## Installed NSIS smoke
 
-Status: **NOT_RUN** on the production-core branch until Phase 8 release proof.
+Status: **PASS** on production-core Phase 8 — `.dev-data/nsis-smoke-latest/result.json` (`silent_install_and_launch_ok`).
+
+## Headed Windows E2E
+
+Status: **PASS** — `npm run test:e2e:msrp` evidence under `.dev-data/e2e/msrp-headed-latest/`.
 
 ## Known remaining limitations
 
-- Only one production Reflex (`resolve-acronym@1`) is complete
-- Most connector/operation/approval commands still return `unsupported_command`
-- Live diagnostics (`latest.json`) land in Phase 2
-- Headed E2E covers deterministic MSRP only in Phase 0; full golden journeys are Phase 8
-
+- Golden journeys 2–12 are proven via integration harnesses (`npm run test:e2e:golden`); only journey 1 is headed desktop UI.
+- Live model/audio/Jev dogfood remains a manual operator gate.
 ## Stop point
 
 Production-core work proceeds phase-by-phase on `cursor/relay-production-core`. Windows V1 remains the release target; iPhone productization does not start until Windows V1 gates are green.

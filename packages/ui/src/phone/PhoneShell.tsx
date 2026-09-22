@@ -1,16 +1,26 @@
-import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
-import { useRef, useState } from "react";
+import type { ActionCard, FeedItemSnapshot, RelaySnapshot, StatusChipState } from "@relay/contracts";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  AmbientRecommendationCard,
+  type AmbientFeedback,
+} from "../assistant/AmbientRecommendationCard.js";
 import { Composer } from "../assistant/Composer.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
 import { colors } from "../theme/colors.js";
+import { usePrefersReducedMotion } from "../theme/reducedMotion.js";
+import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
 
 type Props = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void;
   readonly onAction?: (action: ActionCard) => void;
+  readonly onAcceptAmbient?: (recommendationId: string) => void;
+  readonly onDismissAmbient?: (recommendationId: string) => void;
+  readonly onFeedbackAmbient?: (recommendationId: string, feedback: AmbientFeedback) => void;
+  readonly onCancelActive?: () => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
   readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
@@ -20,6 +30,8 @@ type Props = {
   readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  /** When false, render full-bleed product surface (Expo/mobile). Default true for desktop workbench. */
+  readonly showBezel?: boolean;
 };
 
 export function PhoneShell({
@@ -27,6 +39,10 @@ export function PhoneShell({
   onListenChange,
   onSubmit,
   onAction,
+  onAcceptAmbient,
+  onDismissAmbient,
+  onFeedbackAmbient,
+  onCancelActive,
   typeSafeKeyStatus = "unknown",
   onSetTypeSafeKey,
   onDeleteTypeSafeKey,
@@ -36,107 +52,170 @@ export function PhoneShell({
   onActivateReflex,
   onPauseReflex,
   onRollbackReflex,
+  showBezel = true,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [listenElapsedSec, setListenElapsedSec] = useState(0);
+  const listenStartedAt = useRef<number | null>(null);
   const threadRef = useRef<ScrollView>(null);
+  const reducedMotion = usePrefersReducedMotion();
 
-  return (
-    <View style={styles.bezel}>
-      <View style={styles.screen}>
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={styles.mark}>
-              <View style={[styles.bar, styles.barShort]} />
-              <View style={[styles.bar, styles.barMid]} />
-              <View style={[styles.bar, styles.barTall]} />
-            </View>
-            <View style={styles.brandText}>
-              <Text style={styles.brand}>RELAY</Text>
-              <Text style={styles.tagline}>Your AI teammate, on your terms</Text>
-            </View>
-          </View>
-          <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open library"
-              onPress={() => setLibraryOpen(true)}
-              hitSlop={8}
-            >
-              <Text style={styles.gear}>Library</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open settings"
-              onPress={() => setSettingsOpen(true)}
-              hitSlop={8}
-            >
-              <Text style={styles.gear}>⚙</Text>
-            </Pressable>
-          </View>
+  useEffect(() => {
+    if (!snapshot.listening) {
+      listenStartedAt.current = null;
+      setListenElapsedSec(0);
+      return;
+    }
+    if (listenStartedAt.current == null) {
+      listenStartedAt.current = Date.now();
+    }
+    const timer = setInterval(() => {
+      const started = listenStartedAt.current;
+      if (started != null) {
+        setListenElapsedSec(Math.floor((Date.now() - started) / 1000));
+      }
+    }, reducedMotion ? 1000 : 500);
+    return () => clearInterval(timer);
+  }, [snapshot.listening, reducedMotion]);
+
+  const health = aggregateHealth(snapshot.status, snapshot.providerHealth);
+  const ambientActions = snapshot.actions.filter((a) => a.kind === "ambient_recommendation");
+  const otherActions = snapshot.actions.filter((a) => a.kind !== "ambient_recommendation");
+  const waitingLabel =
+    snapshot.waits.length > 0
+      ? `Waiting · ${snapshot.waits[0]?.waitKind ?? "work"}`
+      : snapshot.queueDepth > 0
+        ? `Working · ${snapshot.queueDepth} queued`
+        : null;
+
+  const screen = (
+    <View style={styles.screen}>
+      <View style={styles.header}>
+        <View style={styles.brandRow}>
+          <Text style={styles.brand} accessibilityRole="header">
+            RELAY
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Health ${health.label}`}
+            onPress={() => setSettingsOpen(true)}
+            style={styles.healthHit}
+            hitSlop={8}
+          >
+            <View
+              style={[
+                styles.healthDot,
+                health.level === "ok"
+                  ? styles.healthOk
+                  : health.level === "warn"
+                    ? styles.healthWarn
+                    : styles.healthBad,
+              ]}
+            />
+          </Pressable>
         </View>
+        <View style={styles.headerActions}>
+          {snapshot.listening ? (
+            <Text
+              style={styles.stopwatch}
+              accessibilityLabel={`Listening for ${formatElapsed(listenElapsedSec)}`}
+            >
+              {formatElapsed(listenElapsedSec)}
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open library"
+            onPress={() => setLibraryOpen(true)}
+            hitSlop={8}
+            style={styles.headerBtn}
+          >
+            <Text style={styles.headerBtnLabel}>Library</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+            onPress={() => setSettingsOpen(true)}
+            hitSlop={8}
+            style={styles.headerBtn}
+          >
+            <Text style={styles.headerBtnLabel}>Settings</Text>
+          </Pressable>
+        </View>
+      </View>
 
-        <View style={styles.listenBlock}>
-          <View style={styles.wave}>
-            {[10, 18, 28, 16, 24, 12, 20].map((height, index) => (
+      <View style={styles.listenRow}>
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: snapshot.listening }}
+          accessibilityLabel="Listening"
+          onPress={() => onListenChange(!snapshot.listening)}
+          style={[styles.listenBtn, snapshot.listening ? styles.listenOn : styles.listenOff]}
+        >
+          <View style={[styles.dot, snapshot.listening ? styles.dotOn : styles.dotOff]} />
+          <Text style={styles.listenLabel}>{snapshot.listening ? "Listening" : "Listen"}</Text>
+        </Pressable>
+        {snapshot.listening && !reducedMotion ? (
+          <View style={styles.wave} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            {[10, 18, 28, 16, 24].map((height, index) => (
               <View key={index} style={[styles.waveBar, { height }]} />
             ))}
           </View>
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: snapshot.listening }}
-            onPress={() => onListenChange(!snapshot.listening)}
-            style={[styles.listenBtn, snapshot.listening ? styles.listenOn : styles.listenOff]}
-          >
-            <View style={[styles.dot, snapshot.listening ? styles.dotOn : styles.dotOff]} />
-            <Text style={styles.listenLabel}>
-              {snapshot.listening ? "Listening On" : "Listening Off"}
-            </Text>
-          </Pressable>
-          <Text style={styles.listenHint}>
-            {snapshot.listening
-              ? "I'm listening. Speak naturally."
-              : "Listening is off. Ask directly, or turn listening on."}
-          </Text>
-        </View>
-
-        <ScrollView
-          ref={threadRef}
-          style={styles.thread}
-          contentContainerStyle={styles.threadContent}
-          onContentSizeChange={() => {
-            threadRef.current?.scrollToEnd({ animated: false });
-          }}
-        >
-          {snapshot.feedItems.length === 0 ? (
-            <Text style={styles.empty}>
-              Ask what an unknown acronym means. RELAY recommends a search instead of inventing a
-              definition.
-            </Text>
-          ) : (
-            snapshot.feedItems.map((item) => <Bubble key={item.itemId} item={item} />)
-          )}
-        </ScrollView>
-
-        {snapshot.actions.length > 0 ? (
-          <View style={styles.actions}>
-            {snapshot.actions.map((action) => (
-              <Pressable
-                key={action.actionId}
-                accessibilityRole="button"
-                onPress={() => onAction?.(action)}
-                style={styles.actionPressable}
-              >
-                <Text style={styles.actionPressableLabel}>{action.label}</Text>
-              </Pressable>
-            ))}
-          </View>
         ) : null}
-
-        <Composer onSubmit={onSubmit} />
-
-        <Text style={styles.footer}>Private. Local. In your control.</Text>
       </View>
+
+      <ScrollView
+        ref={threadRef}
+        style={styles.thread}
+        contentContainerStyle={styles.threadContent}
+        onContentSizeChange={() => {
+          threadRef.current?.scrollToEnd({ animated: !reducedMotion });
+        }}
+      >
+        {snapshot.feedItems.length === 0 ? (
+          <Text style={styles.empty}>Ask RELAY anything. Listening stays quiet until something useful appears.</Text>
+        ) : (
+          snapshot.feedItems.map((item) => <Bubble key={item.itemId} item={item} />)
+        )}
+      </ScrollView>
+
+      {ambientActions.length > 0 ? (
+        <View style={styles.ambientStack}>
+          {ambientActions.map((action) => (
+            <AmbientRecommendationCard
+              key={action.actionId}
+              action={action}
+              onAccept={(id) => onAcceptAmbient?.(id)}
+              onDismiss={(id) => onDismissAmbient?.(id)}
+              onFeedback={(id, feedback) => onFeedbackAmbient?.(id, feedback)}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {otherActions.length > 0 ? (
+        <View style={styles.actions}>
+          {otherActions.map((action) => (
+            <Pressable
+              key={action.actionId}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
+              onPress={() => onAction?.(action)}
+              style={styles.actionPressable}
+            >
+              <Text style={styles.actionPressableLabel}>{action.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <Composer
+        onSubmit={onSubmit}
+        listening={snapshot.listening}
+        waitingLabel={waitingLabel}
+        {...(onCancelActive ? { onCancel: onCancelActive } : {})}
+      />
 
       <SettingsSheet
         visible={settingsOpen}
@@ -165,6 +244,37 @@ export function PhoneShell({
       />
     </View>
   );
+
+  if (!showBezel) {
+    return <View style={styles.fullBleed}>{screen}</View>;
+  }
+  return <View style={styles.bezel}>{screen}</View>;
+}
+
+function aggregateHealth(
+  status: readonly StatusChipState[],
+  providers: RelaySnapshot["providerHealth"],
+): { level: "ok" | "warn" | "bad"; label: string } {
+  const badStatus = status.find((s) => !s.ok);
+  const badProvider = providers.find((p) => !p.ok);
+  if (badStatus || badProvider) {
+    return {
+      level: "bad",
+      label: badStatus?.label ?? badProvider?.status ?? "degraded",
+    };
+  }
+  if (providers.length === 0 && status.length === 0) {
+    return { level: "warn", label: "unknown" };
+  }
+  return { level: "ok", label: "healthy" };
+}
+
+function formatElapsed(totalSec: number): string {
+  const m = Math.floor(totalSec / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = (totalSec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
@@ -181,7 +291,7 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
     return (
       <View style={styles.assistantBubble} testID={`relay-feed-task-${item.itemId}`}>
         <Text style={styles.assistantName}>RELAY</Text>
-        <Text style={styles.taskEyebrow}>Recommended task</Text>
+        <Text style={styles.taskEyebrow}>Note</Text>
         <Text style={styles.assistantText}>{item.summary}</Text>
       </View>
     );
@@ -206,11 +316,16 @@ function Bubble({ item }: { readonly item: FeedItemSnapshot }) {
 }
 
 const styles = StyleSheet.create({
+  fullBleed: {
+    flex: 1,
+    backgroundColor: colors.phone,
+  },
   bezel: {
     width: 390,
+    maxWidth: "100%",
     maxHeight: "100%",
     flex: 1,
-    borderRadius: 36,
+    borderRadius: radius.xl,
     padding: 10,
     backgroundColor: "#05080e",
     borderWidth: 1,
@@ -218,7 +333,7 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    borderRadius: 28,
+    borderRadius: radius.xl,
     backgroundColor: colors.phone,
     overflow: "hidden",
   },
@@ -226,73 +341,85 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingHorizontal: space.md,
+    paddingTop: space.md,
+    paddingBottom: space.xs,
+    minHeight: touchTarget,
   },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: space.xs,
   },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: space.xs,
   },
-  mark: {
-    width: 22,
-    height: 22,
-    justifyContent: "flex-end",
-    gap: 3,
-  },
-  bar: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.cyan,
-  },
-  barShort: { width: 10 },
-  barMid: { width: 16 },
-  barTall: { width: 22 },
-  brandText: { gap: 1 },
   brand: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: typeScale.md,
     fontWeight: "800",
     letterSpacing: 1.4,
   },
-  tagline: {
-    color: colors.textMuted,
-    fontSize: 11,
-  },
-  gear: {
-    color: colors.textMuted,
-    fontSize: 16,
-  },
-  listenBlock: {
+  healthHit: {
+    minWidth: touchTarget / 2,
+    minHeight: touchTarget / 2,
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    gap: 8,
+    justifyContent: "center",
+  },
+  healthDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  healthOk: { backgroundColor: colors.ok },
+  healthWarn: { backgroundColor: colors.warn },
+  healthBad: { backgroundColor: colors.danger },
+  stopwatch: {
+    color: colors.textMuted,
+    fontSize: typeScale.xs,
+    fontVariant: ["tabular-nums"],
+    minWidth: 40,
+  },
+  headerBtn: {
+    minHeight: touchTarget,
+    justifyContent: "center",
+    paddingHorizontal: space.xs,
+  },
+  headerBtnLabel: {
+    color: colors.textMuted,
+    fontSize: typeScale.sm,
+    fontWeight: "600",
+  },
+  listenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingBottom: space.sm,
   },
   wave: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    height: 32,
+    gap: 3,
+    height: 28,
   },
   waveBar: {
-    width: 4,
+    width: 3,
     borderRadius: 2,
-    backgroundColor: colors.cyan,
+    backgroundColor: colors.accent,
+    opacity: 0.7,
   },
   listenBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    gap: space.xs,
+    borderRadius: radius.lg,
+    minHeight: touchTarget,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.md,
   },
   listenOn: { backgroundColor: colors.listenOn },
   listenOff: { backgroundColor: colors.listenOff },
@@ -306,116 +433,81 @@ const styles = StyleSheet.create({
   listenLabel: {
     color: "#f4fff8",
     fontWeight: "700",
-    fontSize: 13,
-  },
-  listenHint: {
-    color: colors.textMuted,
-    fontSize: 13,
-    textAlign: "center",
+    fontSize: typeScale.sm,
   },
   thread: { flex: 1 },
   threadContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 8,
-    gap: 10,
+    paddingHorizontal: space.sm,
+    paddingBottom: space.xs,
+    gap: space.xs,
   },
   empty: {
-    color: colors.textDim,
-    fontSize: 13,
-    lineHeight: 18,
+    color: colors.textMuted,
+    fontSize: typeScale.sm,
+    lineHeight: 20,
     textAlign: "center",
-    marginTop: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: space.lg,
+    paddingTop: space.xl,
   },
-  userBubble: {
-    alignSelf: "flex-end",
-    maxWidth: "88%",
-    backgroundColor: colors.userBubble,
-    borderRadius: 16,
-    borderBottomRightRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  userText: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  assistantBubble: {
-    alignSelf: "flex-start",
-    maxWidth: "92%",
-    backgroundColor: colors.bgElevated,
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 4,
-  },
-  assistantName: {
-    color: colors.cyan,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-  taskEyebrow: {
-    color: colors.blue,
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  assistantText: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
+  ambientStack: {
+    paddingHorizontal: space.sm,
+    paddingBottom: space.xs,
+    gap: space.xs,
   },
   actions: {
-    paddingHorizontal: 14,
-    paddingBottom: 8,
-    gap: 8,
-  },
-  actionCard: {
-    backgroundColor: colors.task,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#2a4d86",
-    padding: 12,
-    gap: 4,
-  },
-  actionEyebrow: {
-    color: colors.blue,
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  actionTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "600",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: space.xs,
+    paddingHorizontal: space.sm,
+    paddingBottom: space.xs,
   },
   actionPressable: {
+    minHeight: touchTarget,
+    justifyContent: "center",
     backgroundColor: colors.bgElevated,
-    borderRadius: 12,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: space.md,
   },
   actionPressableLabel: {
     color: colors.text,
-    fontSize: 13,
     fontWeight: "600",
+    fontSize: typeScale.sm,
   },
-  footer: {
+  userBubble: {
+    alignSelf: "flex-end",
+    backgroundColor: colors.userBubble,
+    borderRadius: radius.md,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+    maxWidth: "85%",
+  },
+  userText: {
+    color: colors.text,
+    fontSize: typeScale.sm,
+  },
+  assistantBubble: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+    maxWidth: "90%",
+    gap: 2,
+  },
+  assistantName: {
+    color: colors.accent,
+    fontSize: typeScale.xs,
+    fontWeight: "700",
+  },
+  taskEyebrow: {
     color: colors.textDim,
-    fontSize: 10,
-    textAlign: "center",
-    paddingBottom: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    fontSize: typeScale.xs,
+  },
+  assistantText: {
+    color: colors.text,
+    fontSize: typeScale.sm,
+    lineHeight: 20,
   },
 });
