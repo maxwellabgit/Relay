@@ -4,6 +4,7 @@ import type {
   SourceSliceRef,
   TextModelPort,
 } from "@relay/contracts";
+import { generateTyped } from "../model/typed-repair.js";
 import { EXTRACT_CANDIDATE_PROMPT_V1 } from "../prompts/extract-candidate.v1.js";
 
 export const CANDIDATE_EXTRACTOR_VERSION = "candidate-extract@1";
@@ -49,24 +50,32 @@ export async function extractCandidate(input: {
   const heuristic = extractHeuristic(text);
   if (!input.model) return heuristic;
 
+  const signal = input.signal ?? new AbortController().signal;
   try {
-    const prompt = EXTRACT_CANDIDATE_PROMPT_V1.build(text);
-    const generated = await input.model.generate(
-      {
+    const generated = await generateTyped({
+      model: input.model,
+      signal,
+      request: {
         taskKind: EXTRACT_CANDIDATE_PROMPT_V1.taskKind,
         promptVersion: EXTRACT_CANDIDATE_PROMPT_V1.promptVersion,
-        prompt,
+        prompt: EXTRACT_CANDIDATE_PROMPT_V1.build(text),
         maxTokens: 120,
         temperature: 0,
       },
-      input.signal ?? new AbortController().signal,
-    );
-    if (!generated.ok || !generated.text.trim()) return heuristic;
-    const parsed = parseModelExtraction(generated.text, text);
-    if (parsed.invalid) {
-      return empty("none", true);
+      accept: (draft) => !parseModelExtraction(draft, text).invalid,
+      repairPrompt: (invalidText) =>
+        [
+          "The previous candidate kind was not allowed.",
+          "Return one line: kind: <allowed kind>.",
+          `Previous: ${invalidText}`,
+          `Text: ${text}`,
+        ].join("\n"),
+    });
+    if (!generated.ok) {
+      if (generated.reason === "invalid_response") return empty("none", true);
+      return heuristic;
     }
-    return parsed;
+    return parseModelExtraction(generated.text, text);
   } catch {
     return heuristic;
   }
