@@ -22,6 +22,7 @@ import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
   buildReflexFromTemplate,
   evaluateShadow,
+  isLearnedTemplateReflexId,
   templateIdForSignature,
 } from "./reflex-templates.js";
 
@@ -125,6 +126,24 @@ export class PatternService {
       return { ok: false, summary: "shadow_failed" };
     }
 
+    const meta: CandidateBuildMeta = {
+      reflexId: definition.id,
+      reflexVersion: definition.version,
+      templateId,
+      shadowPass: true,
+      shadowReportJson: JSON.stringify(shadow),
+      priorActivation: "inactive",
+    };
+    // Persist activation_ready + meta before authority state so restarts cannot bypass the gate.
+    await this.deps.store.learning.putCandidate({
+      ...current,
+      state: "activation_ready",
+      needed: "",
+      because: current.because,
+      updatedAt: this.deps.clock.now().toISOString(),
+      meta,
+    });
+
     if (this.deps.authority) {
       await this.deps.authority.setReflexState(
         {
@@ -137,22 +156,6 @@ export class PatternService {
       );
     }
 
-    const meta: CandidateBuildMeta = {
-      reflexId: definition.id,
-      reflexVersion: definition.version,
-      templateId,
-      shadowPass: true,
-      shadowReportJson: JSON.stringify(shadow),
-      priorActivation: "inactive",
-    };
-    await this.deps.store.learning.putCandidate({
-      ...current,
-      state: "activation_ready",
-      needed: "",
-      because: current.because,
-      updatedAt: this.deps.clock.now().toISOString(),
-      meta,
-    });
     await this.deps.trace.emit({
       type: "candidate.approved",
       stage: "proposal.create",
@@ -176,12 +179,17 @@ export class PatternService {
     const match = candidates.find(
       (c) => c.meta?.reflexId === reflexId && c.meta?.reflexVersion === reflexVersion,
     );
-    // Built-from-template reflexes require activation_ready (or already active/paused for re-activate).
-    if (!match) return { ok: true }; // production/builtin reflexes without candidate rows
-    if (match.state === "activation_ready" || match.state === "active" || match.state === "paused") {
-      return { ok: true };
+    if (match) {
+      if (match.state === "activation_ready" || match.state === "active" || match.state === "paused") {
+        return { ok: true };
+      }
+      return { ok: false, summary: "not_activation_ready" };
     }
-    return { ok: false, summary: "not_activation_ready" };
+    // Template-learned reflexes must never activate without an activation_ready candidate.
+    if (isLearnedTemplateReflexId(reflexId)) {
+      return { ok: false, summary: "not_activation_ready" };
+    }
+    return { ok: true }; // production/builtin reflexes without candidate rows
   }
 
   async markCandidateActivation(
@@ -354,18 +362,9 @@ export class PatternService {
     const existing = (await this.deps.store.learning.listCandidates()).find(
       (candidate) => candidate.candidateId === candidateId,
     );
-    // Exactly one reviewable proposal — never multiply proposals for the same signature.
-    if (
-      existing &&
-      (existing.state === "proposed" ||
-        existing.state === "approved" ||
-        existing.state === "approved_for_build" ||
-        existing.state === "built" ||
-        existing.state === "shadow" ||
-        existing.state === "activation_ready" ||
-        existing.state === "active" ||
-        existing.state === "paused")
-    ) {
+    // Exactly one reviewable proposal — never multiply or undo user decisions.
+    // Only `qualified` (benefit pending/failed) may be re-judged.
+    if (existing && existing.state !== "qualified") {
       return;
     }
     const kind = signature.split("|")[0] ?? "";

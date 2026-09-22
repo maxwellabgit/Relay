@@ -460,6 +460,11 @@ export class OperationService {
     const projection = await this.deps.authority.project();
     const key = `${reflex.id}@${reflex.version}`;
     const current = projection.reflexes.find((r) => `${r.reflex.id}@${r.reflex.version}` === key);
+    const prior = current?.activation ?? "inactive";
+    // Soft-disable only after an activated or paused reflex — never brick activation_ready.
+    if (prior !== "active" && prior !== "paused") {
+      return { ok: false, summary: "nothing_to_rollback", error: "nothing_to_rollback" };
+    }
     const stateVersion = current?.stateVersion ?? 0;
     const version = tryMutateReflex(stateVersion, expectedStateVersion);
     if (!version.ok) return { ok: false, summary: version.error, error: version.error };

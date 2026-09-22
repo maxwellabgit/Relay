@@ -15,6 +15,9 @@ export type RelayWorkbenchProps = {
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
   readonly onOpenLog?: () => void;
   readonly onApproveCandidate?: (candidateId: string) => void;
+  readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
@@ -37,6 +40,9 @@ export function RelayWorkbench({
   onReplayFixture,
   onOpenLog,
   onApproveCandidate,
+  onActivateReflex,
+  onPauseReflex,
+  onRollbackReflex,
   onRejectCandidate,
   onSnoozeCandidate,
   typeSafeKeyStatus,
@@ -56,6 +62,10 @@ export function RelayWorkbench({
           onListenChange={onListenChange}
           onSubmit={onSubmit}
           {...(onAction !== undefined ? { onAction } : {})}
+          {...(onApproveCandidate !== undefined ? { onApproveCandidate } : {})}
+          {...(onActivateReflex !== undefined ? { onActivateReflex } : {})}
+          {...(onPauseReflex !== undefined ? { onPauseReflex } : {})}
+          {...(onRollbackReflex !== undefined ? { onRollbackReflex } : {})}
           {...(typeSafeKeyStatus !== undefined ? { typeSafeKeyStatus } : {})}
           {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
           {...(onDeleteTypeSafeKey !== undefined ? { onDeleteTypeSafeKey } : {})}

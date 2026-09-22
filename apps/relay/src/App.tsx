@@ -138,6 +138,27 @@ export function App() {
         onApproveCandidate={(candidateId) => {
           void clientRef.current?.execute({ type: "ApproveCandidate", candidateId });
         }}
+        onActivateReflex={(reflexId, version, stateVersion) => {
+          void clientRef.current?.execute({
+            type: "ActivateReflex",
+            reflex: { id: reflexId, version },
+            expectedStateVersion: stateVersion,
+          });
+        }}
+        onPauseReflex={(reflexId, version, stateVersion) => {
+          void clientRef.current?.execute({
+            type: "PauseReflex",
+            reflex: { id: reflexId, version },
+            expectedStateVersion: stateVersion,
+          });
+        }}
+        onRollbackReflex={(reflexId, version, stateVersion) => {
+          void clientRef.current?.execute({
+            type: "RollbackReflex",
+            reflex: { id: reflexId, version },
+            expectedStateVersion: stateVersion,
+          });
+        }}
         onRejectCandidate={(candidateId) => {
           void clientRef.current?.execute({ type: "RejectCandidate", candidateId });
         }}

@@ -484,6 +484,8 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "list_patterns" => list_patterns(conn),
         "put_candidate" => put_candidate(conn, op),
         "list_candidates" => list_candidates(conn),
+        "put_pattern_evidence" => put_pattern_evidence(conn, op),
+        "list_pattern_evidence" => list_pattern_evidence(conn, op),
         "put_candidate_event" => put_candidate_event(conn, op),
         "get_candidate_event" => get_candidate_event(conn, op),
         "list_candidate_events" => list_candidate_events(conn, op),
@@ -1372,11 +1374,15 @@ fn list_patterns(conn: &Connection) -> Result<Value, String> {
 
 fn put_candidate(conn: &Connection, op: &Value) -> Result<Value, String> {
     let record = req_obj(op, "record")?;
+    let meta_json = record
+        .get("meta")
+        .map(|value| serde_json::to_string(value).map_err(|e| e.to_string()))
+        .transpose()?;
     conn.execute(
         "INSERT OR REPLACE INTO expansion_candidates(
            candidate_id, signature, state, because, needed, updated_at,
-           because_artifact_id, because_sha256
-         ) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7)",
+           because_artifact_id, because_sha256, meta_json
+         ) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7, ?8)",
         params![
             req_str(record, "candidateId")?,
             req_str(record, "signature")?,
@@ -1385,6 +1391,7 @@ fn put_candidate(conn: &Connection, op: &Value) -> Result<Value, String> {
             req_str(record, "updatedAt")?,
             opt_str(record, "becauseArtifactId"),
             opt_str(record, "becauseSha256"),
+            meta_json,
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -1397,6 +1404,51 @@ fn list_candidates(conn: &Connection) -> Result<Value, String> {
         "SELECT * FROM expansion_candidates",
         params![],
         map_candidate,
+    )
+}
+
+fn put_pattern_evidence(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let record = req_obj(op, "record")?;
+    conn.execute(
+        "INSERT OR IGNORE INTO pattern_evidence_events(
+          evidence_id, signature, source_class, route_or_tool, user_action, outcome_class,
+          duplicate_count, time_to_action_ms, feedback, case_id, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            req_str(record, "evidenceId")?,
+            req_str(record, "signature")?,
+            req_str(record, "sourceClass")?,
+            opt_str(record, "routeOrTool"),
+            req_str(record, "userAction")?,
+            req_str(record, "outcomeClass")?,
+            record
+                .get("duplicateCount")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0),
+            record.get("timeToActionMs").and_then(|v| v.as_i64()),
+            opt_str(record, "feedback"),
+            opt_str(record, "caseId"),
+            req_str(record, "createdAt")?,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn list_pattern_evidence(conn: &Connection, op: &Value) -> Result<Value, String> {
+    if let Some(signature) = op.get("signature").and_then(|v| v.as_str()) {
+        return query_values(
+            conn,
+            "SELECT * FROM pattern_evidence_events WHERE signature = ?1 ORDER BY created_at",
+            params![signature],
+            map_pattern_evidence,
+        );
+    }
+    query_values(
+        conn,
+        "SELECT * FROM pattern_evidence_events ORDER BY created_at",
+        params![],
+        map_pattern_evidence,
     )
 }
 
@@ -1714,7 +1766,28 @@ fn map_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     if let Some(sha) = row.get::<_, Option<String>>("because_sha256")? {
         value["becauseSha256"] = json!(sha);
     }
+    if let Ok(Some(meta_raw)) = row.get::<_, Option<String>>("meta_json") {
+        if let Ok(meta) = serde_json::from_str::<Value>(&meta_raw) {
+            value["meta"] = meta;
+        }
+    }
     Ok(value)
+}
+
+fn map_pattern_evidence(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "evidenceId": row.get::<_, String>("evidence_id")?,
+        "signature": row.get::<_, String>("signature")?,
+        "sourceClass": row.get::<_, String>("source_class")?,
+        "routeOrTool": row.get::<_, Option<String>>("route_or_tool")?,
+        "userAction": row.get::<_, String>("user_action")?,
+        "outcomeClass": row.get::<_, String>("outcome_class")?,
+        "duplicateCount": row.get::<_, i64>("duplicate_count")?,
+        "timeToActionMs": row.get::<_, Option<i64>>("time_to_action_ms")?,
+        "feedback": row.get::<_, Option<String>>("feedback")?,
+        "caseId": row.get::<_, Option<String>>("case_id")?,
+        "createdAt": row.get::<_, String>("created_at")?,
+    }))
 }
 
 fn map_review(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {

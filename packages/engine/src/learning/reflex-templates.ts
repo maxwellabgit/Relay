@@ -131,3 +131,8 @@ export function templateIdForSignature(signature: string): ReflexTemplateId | nu
   if (kind === "calendar.block") return "calendar.block";
   return null;
 }
+
+/** Reflex ids that are only ever produced by reviewed templates — never activate without a candidate gate. */
+export function isLearnedTemplateReflexId(reflexId: string): boolean {
+  return reflexId === "reflex.calendar-block";
+}

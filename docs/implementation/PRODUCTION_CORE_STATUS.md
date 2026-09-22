@@ -11,8 +11,8 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Named history | `9fce11241019321d3d326c5b37f7578efc8d5630`, `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7` |
 | Preservation tag | `relay-dotnet-a6bf987` (confirmed present) |
 | Pre-existing user changes | none |
-| Active phase | Phase 7 IN_PROGRESS (Bugbot pending) |
-| Last green gate | Phase 6 Bugbot pass + verify:v1 |
+| Active phase | Phase 8 NOT_STARTED |
+| Last green gate | Phase 7 Bugbot pass + verify:v1 |
 | Phase 0 commit | `bc3689eadc1e166475bc8c1009f81b3f3842eacc` |
 | Phase 1 commits | `1c3f666`, `af22805` |
 | Phase 2 commits | `f0ad739`, `a7e4208` |
@@ -20,6 +20,7 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Phase 4 commits | `641473d`, `c739032`, `87c2695` |
 | Phase 5 commits | `e23a1a8`, `1abde49` |
 | Phase 6 commits | `3063e57`, `796c109`, `536f8bb`, `057e358` |
+| Phase 7 commits | `b45573d` (+ follow-up fix commit pending) |
 
 ## Phase states
 
@@ -32,17 +33,19 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | 4 Tool and operation kernel | GREEN | Bugbot pass (`87c2695`); hosted gate + public-search connector |
 | 5 Ambient triage / recommendations | GREEN | Bugbot pass (`1abde49`); hosted resume, accept all primaries, deduped receipts |
 | 6 Claim verification + GitHub read | GREEN | Bugbot pass (`057e358`); claim.verify@1 + GitHub read; outage/auth blocked |
-| 7 Bounded Reflex creation | IN_PROGRESS | PatternEvidence + approve→build→shadow→activation_ready; Library sheet; RollbackReflex |
+| 7 Bounded Reflex creation | GREEN | Bugbot pass; PatternEvidence + Library wiring; activation gate; rollback safety |
 | 8 Professional UI + Windows hardening | NOT_STARTED | |
 
 ## Next exact action
 
-Independent Bugbot on Phase 7, then Phase 8.
+Phase 8: responsive product/workbench redesign, functional surfaces, a11y, headed E2E + NSIS smoke.
 
 ## Evidence log
 
 | When (UTC) | Command / event | Result |
 | --- | --- | --- |
+| 2026-09-22 | Phase 7 Bugbot PASS (Library wiring, rollback, activation gate) | PASS |
+| 2026-09-22 | Phase 7 verify:v1 after Bugbot fixes | PASS |
 | 2026-09-22 | Phase 7 bounded Reflex lifecycle; `npm run verify:v1` | PASS |
 | 2026-09-22 | Phase 6 Bugbot PASS (no_match, no re-route, auth blocked) | PASS on `057e358` |
 | 2026-09-22 | Phase 6 claim.verify + GitHub; `npm run verify:v1` | PASS |

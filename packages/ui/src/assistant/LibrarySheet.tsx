@@ -153,13 +153,15 @@ function ReflexRow({
             <Text style={styles.buttonLabel}>Pause</Text>
           </Pressable>
         )}
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => onRollback?.(reflex.reflex.id, reflex.reflex.version, reflex.stateVersion)}
-          style={styles.buttonSecondary}
-        >
-          <Text style={styles.buttonLabel}>Rollback</Text>
-        </Pressable>
+        {reflex.activation === "active" || reflex.activation === "paused" ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => onRollback?.(reflex.reflex.id, reflex.reflex.version, reflex.stateVersion)}
+            style={styles.buttonSecondary}
+          >
+            <Text style={styles.buttonLabel}>Rollback</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
