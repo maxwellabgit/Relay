@@ -7,6 +7,7 @@ import { createMobileClient } from "./createMobileClient";
 export type AppSecretControl = {
   status(): Promise<"present" | "disabled" | "unknown">;
   set(value: string): Promise<void>;
+  import?(): Promise<void>;
   delete(): Promise<void>;
 };
 

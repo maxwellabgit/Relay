@@ -52,7 +52,7 @@ Ledger introduction SHA: `13de8d77f0b6f7f849aa598398c6335330647535`.
 | Phase | Status | Note |
 | --- | --- | --- |
 | 1 Jev trust boundary | PASS for the automated slice below | Live canary is HUMAN_BLOCKED until the native key import in Phase 2 exists and the user imports a key. G1 is not green. |
-| 2 Jev secret provisioning | NOT_RUN | Not started. |
+| 2 Jev secret provisioning | Windows import PASS; iOS NOT_RUN | Native staging-file import, DPAPI replace, reread, delete, and malformed rejection passed. The key is not a Tauri command argument. iOS Keychain is not implemented. |
 | 3 Actions and tool execution | NOT_RUN | `recordedHarnessGrant` is still in `@relay/engine`. |
 | 4 Windows product and installer | NOT_RUN | |
 | 5 Native mobile runtime | NOT_RUN | Device tournament is DEVICE_BLOCKED until a development build is on the iPhone 15 Pro Max and Galaxy S23 Ultra. |
@@ -73,6 +73,7 @@ Host: Windows `win32 10.0.26200`, local workstation. Times are local (UTC-4) on 
 | `npx vitest run --project unit --project integration --reporter=dot` | 18:11:04 | 0 | PASS, 61 files, 254 tests | unit 177, integration 77 (includes SQLite grant restart) |
 | `npx vitest run --project replay --project privacy --project architecture --reporter=dot` | 18:11:43 | 1 | replay and privacy PASS; architecture FAIL | 28 passed, 1 failed |
 | `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --offline` | before `25d9e4d` | 0 | PASS, `Finished dev profile` in 42.62s | compiler output, not saved as a file |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --offline --lib secrets::tests -- --test-threads=1` | 18:16 | 0 | PASS, 4 tests | import, replace, reread, removal, malformed input, repository path rejection |
 
 Architecture failure:
 

@@ -19,9 +19,9 @@ export async function secretStatus(): Promise<string> {
   return invoke<string>("secret_status");
 }
 
-export async function secretSet(name: string, value: string): Promise<void> {
+export async function secretImportStagingFile(): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("secret_set", { request: { name, value } });
+  await invoke("secret_import_staging_file");
 }
 
 export async function secretDelete(name: string): Promise<void> {

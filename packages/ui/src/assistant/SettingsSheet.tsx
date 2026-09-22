@@ -18,6 +18,7 @@ export type SettingsSheetProps = {
   readonly typeSafeKeyStatus: "present" | "disabled" | "unknown";
   readonly onClose: () => void;
   readonly onSetTypeSafeKey: (value: string) => Promise<void>;
+  readonly onImportTypeSafeKey?: () => Promise<void>;
   readonly onDeleteTypeSafeKey: () => Promise<void>;
   readonly onSetHostedProcessing: (enabled: boolean) => void;
   readonly onGrantJevDisclosure?: () => void;
@@ -43,6 +44,7 @@ export function SettingsSheet({
   typeSafeKeyStatus,
   onClose,
   onSetTypeSafeKey,
+  onImportTypeSafeKey,
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
   onGrantJevDisclosure,
@@ -116,24 +118,52 @@ export function SettingsSheet({
             <Text style={styles.meta}>
               Status: {typeSafeKeyStatus === "present" ? "present" : typeSafeKeyStatus === "disabled" ? "not set" : "—"}
             </Text>
-            <TextInput
-              value={keyDraft}
-              onChangeText={setKeyDraft}
-              placeholder="Paste key to set or replace"
-              placeholderTextColor={colors.textDim}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
+            {onImportTypeSafeKey ? (
+              <Text style={styles.meta}>
+                Import a one-line key file from outside the repository. The key stays in native storage.
+              </Text>
+            ) : (
+              <TextInput
+                value={keyDraft}
+                onChangeText={setKeyDraft}
+                placeholder="Paste key to set or replace"
+                placeholderTextColor={colors.textDim}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+              />
+            )}
             <View style={styles.row}>
               <Pressable
                 accessibilityRole="button"
                 disabled={busy}
-                onPress={() => void saveKey()}
+                onPress={() => {
+                  if (onImportTypeSafeKey) {
+                    setBusy(true);
+                    setMessage(null);
+                    void onImportTypeSafeKey()
+                      .then(() => {
+                        setMessage("Key imported.");
+                        onRefreshHealth();
+                      })
+                      .catch(() => setMessage("Could not import key."))
+                      .finally(() => setBusy(false));
+                    return;
+                  }
+                  void saveKey();
+                }}
                 style={[styles.btn, styles.btnPrimary]}
               >
-                <Text style={styles.btnLabel}>{typeSafeKeyStatus === "present" ? "Replace" : "Set"}</Text>
+                <Text style={styles.btnLabel}>
+                  {onImportTypeSafeKey
+                    ? typeSafeKeyStatus === "present"
+                      ? "Replace"
+                      : "Import"
+                    : typeSafeKeyStatus === "present"
+                      ? "Replace"
+                      : "Set"}
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"

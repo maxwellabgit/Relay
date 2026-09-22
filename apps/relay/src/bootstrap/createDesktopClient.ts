@@ -52,6 +52,7 @@ export type DesktopClientHandle = {
   readonly secrets: {
     status(): Promise<"present" | "disabled" | "unknown">;
     set(value: string): Promise<void>;
+    import(): Promise<void>;
     delete(): Promise<void>;
   };
   onHostBackground(): Promise<void>;
@@ -397,8 +398,11 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
           return "unknown";
         }
       },
-      async set(value: string) {
-        await invoke("secret_set", { request: { name: "typesafe_api_key", value } });
+      async set(_value: string) {
+        throw new Error("secret_bridge_rejected");
+      },
+      async import() {
+        await invoke("secret_import_staging_file");
       },
       async delete() {
         await invoke("secret_delete", { request: { name: "typesafe_api_key" } });

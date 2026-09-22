@@ -222,18 +222,19 @@ export function App() {
             if (status) setTypeSafeKeyStatus(status);
           });
         }}
-        onSetTypeSafeKey={async (value) => {
+        onImportTypeSafeKey={async () => {
           const secrets = handleRef.current?.secrets;
-          if (!secrets) {
+          if (!secrets?.import) {
             setNotice("secrets_unavailable");
             return;
           }
           try {
-            await secrets.set(value);
+            await secrets.import();
             setTypeSafeKeyStatus(await secrets.status());
             await clientRef.current?.execute({ type: "RefreshProviderHealth" });
           } catch (error) {
-            setNotice(error instanceof Error ? error.message : "secret_set_failed");
+            const message = error instanceof Error ? error.message : "secret_import_failed";
+            if (message !== "secret_picker_cancelled") setNotice(message);
           }
         }}
         onDeleteTypeSafeKey={async () => {

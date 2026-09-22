@@ -46,6 +46,7 @@ type Props = {
   readonly onCancelActive?: () => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
   readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
+  readonly onImportTypeSafeKey?: () => Promise<void>;
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
   readonly onGrantJevDisclosure?: () => void;
@@ -85,6 +86,7 @@ export function PhoneShell({
   onCancelActive,
   typeSafeKeyStatus = "unknown",
   onSetTypeSafeKey,
+  onImportTypeSafeKey,
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
   onGrantJevDisclosure,
@@ -337,6 +339,7 @@ export function PhoneShell({
           if (!onSetTypeSafeKey) return;
           await onSetTypeSafeKey(value);
         }}
+        {...(onImportTypeSafeKey ? { onImportTypeSafeKey } : {})}
         onDeleteTypeSafeKey={async () => {
           if (!onDeleteTypeSafeKey) return;
           await onDeleteTypeSafeKey();

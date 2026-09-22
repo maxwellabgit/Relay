@@ -26,7 +26,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             secrets::secret_status,
-            secrets::secret_set,
+            secrets::secret_import_staging_file,
             secrets::secret_delete,
             artifacts::artifact_put,
             artifacts::artifact_get,
