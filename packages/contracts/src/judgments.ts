@@ -40,6 +40,28 @@ export type JudgmentSourceRef = {
   readonly classification?: string;
 };
 
+export type PhysicalAttemptBudget = {
+  beforeAttempt(
+    requestBytes: number,
+  ): Promise<{ ok: true; reservationId: string } | { ok: false; reason: string }>;
+  commit(reservationId: string): Promise<void>;
+  release(reservationId: string): Promise<void>;
+};
+
+/** Truthful account of one logical provider call. Receipts may store this; never a secret. */
+export type JudgmentTransportReport = {
+  readonly configured: boolean;
+  readonly networkAttempted: boolean;
+  readonly attempts: number;
+  readonly status: number | null;
+  readonly category: string;
+  readonly requestBytes: number;
+  readonly responseBytes: number;
+  readonly latencyMs: number;
+  readonly retryCount: number;
+  readonly degradedReason: string | null;
+};
+
 export type JudgmentRequest = {
   readonly questionSetId: string;
   readonly questionSetVersion: string;
@@ -57,6 +79,8 @@ export type JudgmentRequest = {
   }[];
   readonly requestHash?: string;
   readonly provider?: string;
+  /** Not serialized onto the provider wire. Transport charges one unit per physical attempt. */
+  readonly physicalBudget?: PhysicalAttemptBudget;
 };
 
 export type JudgmentFailureCategory =
@@ -79,6 +103,7 @@ export type JudgmentSuccess = {
   readonly outputTokens: number;
   readonly elapsedMs: number;
   readonly providerRequestId?: string;
+  readonly transport?: JudgmentTransportReport;
 };
 
 export type JudgmentFailure = {
@@ -86,6 +111,7 @@ export type JudgmentFailure = {
   readonly message: string;
   readonly httpStatus?: number;
   readonly providerRequestId?: string;
+  readonly transport?: JudgmentTransportReport;
 };
 
 export type JudgmentResponse =

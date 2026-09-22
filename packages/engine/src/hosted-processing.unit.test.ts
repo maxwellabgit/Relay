@@ -20,6 +20,9 @@ function memoryArtifacts(): ArtifactStorePort {
       if (!bytes) throw new Error("missing_artifact");
       return bytes;
     },
+    async provenance() {
+      return null;
+    },
   };
 }
 

@@ -25,6 +25,8 @@ const MIGRATION_10: &str =
     include_str!("../../../../packages/storage-schema/migrations/010_candidate_events.sql");
 const MIGRATION_11: &str =
     include_str!("../../../../packages/storage-schema/migrations/011_pattern_evidence_events.sql");
+const MIGRATION_12: &str =
+    include_str!("../../../../packages/storage-schema/migrations/012_hosted_grants.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -138,7 +140,9 @@ impl StateDb {
         apply_version(&tx, 9, MIGRATION_9)?;
         apply_version(&tx, 10, MIGRATION_10)?;
         apply_version(&tx, 11, MIGRATION_11)?;
+        apply_version(&tx, 12, MIGRATION_12)?;
         tx.commit().map_err(|error| error.to_string())?;
+        crate::grants::release_uncommitted_on_open(&self.conn)?;
         self.migrate_legacy_protected_content()?;
         Ok(())
     }
@@ -492,6 +496,12 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "update_candidate_event_status" => update_candidate_event_status(conn, op),
         "put_ambient_suppression" => put_ambient_suppression(conn, op),
         "is_ambient_suppressed" => is_ambient_suppressed(conn, op),
+        "save_hosted_grant" | "revoke_hosted_grant" | "find_hosted_grant" | "read_hosted_grant"
+        | "reserve_hosted_grant" | "commit_hosted_grant" | "release_hosted_grant"
+        | "release_uncommitted_hosted_grants" => {
+            crate::grants::dispatch(conn, op.get("op").and_then(|value| value.as_str()).unwrap_or(""), op)
+                .unwrap_or(Err("unknown_op".into()))
+        }
         "put_review" => put_review(conn, op),
         "list_reviews" => list_reviews(conn),
         "compact" => compact(conn, op),

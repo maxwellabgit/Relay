@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ArtifactStorePort, DataPolicy } from "@relay/contracts";
+import { localOnlyPolicy, type ArtifactStorePort, type DataPolicy } from "@relay/contracts";
 import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import type { EngineStore } from "../store.js";
 import { SESSION_JEV_GRANT_DEFAULTS } from "@relay/contracts";
+import { InMemoryGrantAccount } from "./grant-account.js";
 import {
   buildHostedJudgmentGrant,
   evaluateHostedDisclosure,
@@ -25,28 +26,17 @@ async function source(
   text: string,
   patch: Partial<DisclosureSource> = {},
 ): Promise<DisclosureSource & { sha256: string; bytes: number }> {
+  const hashed = await hashText(text);
   return {
     sourceClass: "ambient_transcript",
     field: "excerpt",
+    artifactId: "art_excerpt",
     text,
+    policy: { disclosure: "hosted_session", sensitivity: 0 },
+    derivedFrom: [],
     ...patch,
-    ...(await hashText(text)),
-  };
-}
-
-function memoryStore(): Pick<EngineStore, "appendDomainEvent" | "listDomainEvents"> & {
-  events: { sequence: number; type: string; at: string; payload: Record<string, unknown> }[];
-} {
-  const events: { sequence: number; type: string; at: string; payload: Record<string, unknown> }[] = [];
-  return {
-    events,
-    async appendDomainEvent(type, at, payload) {
-      events.push({ sequence: events.length + 1, type, at, payload });
-      return events.length;
-    },
-    async listDomainEvents(limit) {
-      return events.slice(-limit);
-    },
+    sha256: hashed.sha256,
+    bytes: hashed.bytes,
   };
 }
 
@@ -66,6 +56,9 @@ function artifacts(): ArtifactStorePort {
       const bytes = blobs.get(`${ref.artifactId}:${ref.sha256}`);
       if (!bytes) throw new Error("missing");
       return bytes;
+    },
+    async provenance() {
+      return null;
     },
   };
 }
@@ -125,10 +118,23 @@ describe("hosted disclosure grant", () => {
       }).ok,
     ).toBe(false);
     expect(
-      evaluateHostedDisclosure({ ...base, grant: grant(), sources: [{ ...excerpt, localOnly: true }] }).ok,
+      evaluateHostedDisclosure({
+        ...base,
+        grant: grant(),
+        sources: [{ ...excerpt, policy: localOnlyPolicy() }],
+      }).ok,
     ).toBe(false);
     expect(
-      evaluateHostedDisclosure({ ...base, grant: grant(), sources: [{ ...excerpt, revealsLocalOnly: true }] }).ok,
+      evaluateHostedDisclosure({
+        ...base,
+        grant: grant(),
+        sources: [
+          {
+            ...excerpt,
+            derivedFrom: [{ artifactId: "art_parent", sha256: excerpt.sha256, disclosure: "local_only" }],
+          },
+        ],
+      }).ok,
     ).toBe(false);
   });
 
@@ -136,7 +142,7 @@ describe("hosted disclosure grant", () => {
     const judge = vi.fn(async () => {
       throw new Error("network");
     });
-    const excerpt = await source("local secret transcript", { localOnly: true });
+    const excerpt = await source("local secret transcript", { policy: localOnlyPolicy() });
     const outcome = await runJudgmentLifecycle(
       {
         store: {
@@ -196,8 +202,7 @@ describe("hosted disclosure grant", () => {
       "grant_session",
     );
     expect(buildHostedJudgmentGrant({ ...built.grant, grantId: "x", now, ttlMs: 1, allowedSourceClasses: ["nope"], maxRequests: 1, maxBytes: 1, scopeKind: "session", scopeId: scope.id }).ok).toBe(false);
-    const store = memoryStore();
-    const ledger = new HostedGrantLedger(store);
+    const ledger = new HostedGrantLedger(new InMemoryGrantAccount());
     await ledger.save(built.grant, now);
     await ledger.revoke(built.grant.grantId, now);
     const found = await ledger.findById(built.grant.grantId);
@@ -206,8 +211,7 @@ describe("hosted disclosure grant", () => {
   });
 
   it("tracks revocation and request budget in the ledger", async () => {
-    const store = memoryStore();
-    const ledger = new HostedGrantLedger(store);
+    const ledger = new HostedGrantLedger(new InMemoryGrantAccount());
     const saved = grant({ grantId: "grant_budget", maxRequests: 1 });
     await ledger.save(saved, now);
     await ledger.consume(saved.grantId, 12, now);

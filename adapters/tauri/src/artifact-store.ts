@@ -1,4 +1,12 @@
-import type { ArtifactRef, ArtifactStorePort, DataPolicy } from "@relay/contracts";
+import {
+  combinePolicies,
+  localOnlyPolicy,
+  ProvenanceIndex,
+  type ArtifactProvenance,
+  type ArtifactRef,
+  type ArtifactStorePort,
+  type DataPolicy,
+} from "@relay/contracts";
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -7,23 +15,45 @@ type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<
  * Engine never sees the filesystem path (%LOCALAPPDATA%\RELAY\objects\).
  */
 export class TauriArtifactStore implements ArtifactStorePort {
+  private readonly seals = new ProvenanceIndex();
+
   constructor(private readonly invoke: TauriInvoke) {}
 
-  async put(value: Uint8Array, policy: DataPolicy): Promise<ArtifactRef> {
+  async put(value: Uint8Array, policy: DataPolicy, derivedFrom: readonly ArtifactRef[] = []): Promise<ArtifactRef> {
+    let effective = policy;
+    for (const ref of derivedFrom) {
+      const known = await this.provenance(ref.artifactId);
+      effective = combinePolicies(effective, known && known.sha256 === ref.sha256 ? known.policy : localOnlyPolicy());
+    }
     const result = (await this.invoke("artifact_put", {
       request: {
         bytes_b64: bytesToBase64(value),
-        policy,
+        policy: effective,
       },
-    })) as { artifact_id: string; sha256: string };
+    })) as { artifact_id: string; sha256: string; policy?: DataPolicy };
     if (!result?.artifact_id || !result?.sha256) {
       throw new Error("artifact_put_invalid");
     }
+    const stored = result.policy ?? effective;
+    const sealed = this.seals.seal(result.artifact_id, result.sha256, stored, derivedFrom);
     return {
       artifactId: result.artifact_id,
       sha256: result.sha256,
-      policy,
+      policy: sealed.policy,
     };
+  }
+
+  async provenance(artifactId: string): Promise<ArtifactProvenance | null> {
+    const cached = this.seals.get(artifactId);
+    if (cached) return cached;
+    const result = (await this.invoke("artifact_provenance", { request: { artifact_id: artifactId } })) as
+      | ArtifactProvenance
+      | null;
+    if (result?.artifactId && result.sha256 && result.policy) {
+      this.seals.load(result);
+      return this.seals.get(artifactId);
+    }
+    return null;
   }
 
   async get(ref: ArtifactRef): Promise<Uint8Array> {

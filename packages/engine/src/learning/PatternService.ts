@@ -387,6 +387,7 @@ export class PatternService {
     };
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
       [],

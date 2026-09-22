@@ -23,8 +23,8 @@ function micSegment(sessionId: string, segmentId: string, text: string, sequence
   };
 }
 
-function ambientJudgments(scores: Partial<AmbientTriageScores>): JudgmentPort {
-  return new RecordedJudgmentPort([
+function ambientJudgments(scores: Partial<AmbientTriageScores>, calls?: { count: number }): JudgmentPort {
+  const recorded = new RecordedJudgmentPort([
     {
       questionSetId: "judgment.ambient-triage",
       response: recordedSuccess({
@@ -38,6 +38,12 @@ function ambientJudgments(scores: Partial<AmbientTriageScores>): JudgmentPort {
       }),
     },
   ]);
+  return {
+    async judge(request, signal) {
+      if (calls) calls.count += 1;
+      return recorded.judge(request, signal);
+    },
+  };
 }
 
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 8000): Promise<void> {
@@ -89,9 +95,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("surfaces a quiet note recommendation for durable information", async () => {
+    const calls = { count: 0 };
     const harness = await startListeningHarness(
       "ambient_note",
-      ambientJudgments({ worth_remembering: 0.85 }),
+      ambientJudgments({ worth_remembering: 0.85 }, calls),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -123,6 +130,7 @@ describe("ambient candidate triage", () => {
       expect(accepted.ok).toBe(true);
       const after = await harness.store.learning.listMemories();
       expect(after.filter((memory) => memory.kind === "note")).toHaveLength(1);
+      expect(calls.count).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -130,9 +138,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("routes corrections toward a save recommendation", async () => {
+    const calls = { count: 0 };
     const harness = await startListeningHarness(
       "ambient_correction",
-      ambientJudgments({ possible_correction: 0.82, worth_remembering: 0.65 }),
+      ambientJudgments({ possible_correction: 0.82, worth_remembering: 0.65 }, calls),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -151,6 +160,7 @@ describe("ambient candidate triage", () => {
       const snap = await harness.client.getSnapshot();
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.reason).toMatch(/correction/i);
+      expect(calls.count).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -158,9 +168,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("suggests a task for commitments", async () => {
+    const calls = { count: 0 };
     const harness = await startListeningHarness(
       "ambient_commitment",
-      ambientJudgments({ possible_commitment: 0.82 }),
+      ambientJudgments({ possible_commitment: 0.82 }, calls),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -174,6 +185,7 @@ describe("ambient candidate triage", () => {
       const snap = await harness.client.getSnapshot();
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.primary).toBe("create_task");
+      expect(calls.count).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -181,9 +193,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("interrupts only with urgency and a high interrupt score", async () => {
+    const calls = { count: 0 };
     const harness = await startListeningHarness(
       "ambient_urgency",
-      ambientJudgments({ interrupt_worthy: 0.95, possible_commitment: 0.5 }),
+      ambientJudgments({ interrupt_worthy: 0.95, possible_commitment: 0.5 }, calls),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -203,6 +216,7 @@ describe("ambient candidate triage", () => {
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.quiet).toBe(false);
       expect(card?.primary).toBe("review");
+      expect(calls.count).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -211,9 +225,10 @@ describe("ambient candidate triage", () => {
 
   it("resumes ambient triage after hosted processing is enabled", async () => {
     const sessionId = "ambient_hosted_resume";
+    const calls = { count: 0 };
     const harness = await createNodeHarness({
       sessionId,
-      judgments: ambientJudgments({ worth_remembering: 0.85 }),
+      judgments: ambientJudgments({ worth_remembering: 0.85 }, calls),
     });
     try {
       await harness.client.start();
@@ -245,6 +260,7 @@ describe("ambient candidate triage", () => {
       const after = await harness.client.getSnapshot();
       expect(after.cases.every((c) => c.status === "completed")).toBe(true);
       expect(after.actions.some((a) => a.kind === "ambient_recommendation")).toBe(true);
+      expect(calls.count).toBe(0);
     } finally {
       await harness.client.stop();
       harness.close();

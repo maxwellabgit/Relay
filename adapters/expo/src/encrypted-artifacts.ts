@@ -1,4 +1,10 @@
-import type { ArtifactRef, ArtifactStorePort, DataPolicy } from "@relay/contracts";
+import {
+  ProvenanceIndex,
+  type ArtifactProvenance,
+  type ArtifactRef,
+  type ArtifactStorePort,
+  type DataPolicy,
+} from "@relay/contracts";
 
 export type SecretStore = {
   get(key: string): Promise<string | null>;
@@ -18,12 +24,14 @@ const KEY_ID = "artifact_data_key";
  * SQLite stores only artifact ids and hashes — never plaintext prose.
  */
 export class EncryptedArtifactStore implements ArtifactStorePort {
+  private readonly seals = new ProvenanceIndex();
+
   constructor(
     private readonly files: ByteFilePort,
     private readonly secrets: SecretStore,
   ) {}
 
-  async put(value: Uint8Array, policy: DataPolicy): Promise<ArtifactRef> {
+  async put(value: Uint8Array, policy: DataPolicy, derivedFrom: readonly ArtifactRef[] = []): Promise<ArtifactRef> {
     const sha256 = await sha256Hex(value);
     const artifactId = `artifact_${sha256.slice(0, 24)}`;
     const existing = await this.files.read(fileName(artifactId));
@@ -38,7 +46,23 @@ export class EncryptedArtifactStore implements ArtifactStorePort {
       packed.set(cipher, iv.length);
       await this.files.write(fileName(artifactId), packed);
     }
-    return { artifactId, sha256, policy };
+    await this.hydrate(artifactId);
+    const sealed = this.seals.seal(artifactId, sha256, policy, derivedFrom);
+    await this.files.write(provName(artifactId), new TextEncoder().encode(JSON.stringify(sealed)));
+    return { artifactId, sha256, policy: sealed.policy };
+  }
+
+  async provenance(artifactId: string): Promise<ArtifactProvenance | null> {
+    await this.hydrate(artifactId);
+    return this.seals.get(artifactId);
+  }
+
+  private async hydrate(artifactId: string): Promise<void> {
+    if (this.seals.get(artifactId)) return;
+    const raw = await this.files.read(provName(artifactId));
+    if (!raw) return;
+    const parsed = JSON.parse(new TextDecoder().decode(raw)) as ArtifactProvenance;
+    if (parsed?.artifactId && parsed.sha256 && parsed.policy) this.seals.load(parsed);
   }
 
   async get(ref: ArtifactRef): Promise<Uint8Array> {
@@ -99,6 +123,10 @@ export class MemorySecretStore implements SecretStore {
 
 function fileName(artifactId: string): string {
   return `${artifactId}.bin`;
+}
+
+function provName(artifactId: string): string {
+  return `${artifactId}.prov.json`;
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

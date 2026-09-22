@@ -11,7 +11,7 @@ import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { knownReason, structuralToolId } from "../runtime-events.js";
 import { draftSearchQuery } from "../model/search-query.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
+import { loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -484,13 +484,17 @@ export class ToolBroker {
       caseVersion,
     };
 
+    const askSource = await sealedDisclosureInput(this.deps.artifacts, {
+      text: text.slice(0, 400),
+      sourceClass: "conversation_excerpt",
+      field: "excerpt",
+    });
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
-      text.trim()
-        ? [{ sourceClass: "conversation_excerpt", field: "excerpt", text: text.slice(0, 400) }]
-        : [],
+      askSource ? [askSource] : [],
     );
     const started = Date.now();
     const outcome = await runJudgmentLifecycle(

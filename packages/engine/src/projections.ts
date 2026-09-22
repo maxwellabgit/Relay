@@ -5,7 +5,7 @@ import type {
   RelaySnapshot,
   StatusChipState,
 } from "@relay/contracts";
-import { HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
+import { grantAccountFor, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
 import type { EngineStore } from "./store.js";
 import { RETENTION_LABEL } from "./learning-store.js";
 
@@ -61,7 +61,7 @@ export async function projectSnapshot(
     ]);
   const feedItems = await hydrateFeedItems(records, artifacts);
   const disclosure = sessionDisclosureView(
-    await new HostedGrantLedger(store).read({ kind: "session", id: sessionId }),
+    await new HostedGrantLedger(grantAccountFor(store)).read({ kind: "session", id: sessionId }),
     now,
   );
 

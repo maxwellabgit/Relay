@@ -5,6 +5,7 @@ import type {
   JudgmentQuestion,
   JudgmentRequest,
   JudgmentResponse,
+  JudgmentTransportReport,
 } from "@relay/contracts";
 import { validateAnswerProbability } from "@relay/contracts";
 
@@ -27,6 +28,8 @@ export type TypeSafeJudgmentOptions = {
   readonly random?: () => number;
   readonly now?: () => number;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Per physical attempt. Cancellation and this deadline share one AbortController. */
+  readonly attemptTimeoutMs?: number;
 };
 
 export type TypeSafeAttempt =
@@ -69,7 +72,7 @@ export function wireTypeSafeBody(
 }
 
 export function isRetryableHttpStatus(status: number): boolean {
-  return status === 0 || status === 429 || status === 529;
+  return status === 0 || status === 429 || status === 500 || status === 529;
 }
 
 export function failureForHttpStatus(status: number): JudgmentFailure {
@@ -111,18 +114,21 @@ export function createTypeSafeJudgmentPort(options: TypeSafeJudgmentOptions): Ju
   const fetchImpl = options.fetchImpl ?? fetch;
   const endpoint = options.endpoint ?? TYPESAFE_ENDPOINT;
   const maxAttempts = clampAttempts(options.maxAttempts ?? 4);
+  const attemptTimeoutMs = Math.min(60_000, Math.max(1, options.attemptTimeoutMs ?? 20_000));
 
   return {
     async judge(request, signal): Promise<JudgmentResponse> {
       const key = (await options.getApiKey())?.trim() ?? "";
-      if (!key) {
-        return {
-          ok: false,
-          failure: { category: "missing_secret", message: "typesafe_key_missing" },
-        };
-      }
       const body = JSON.stringify(wireTypeSafeBody(request));
-      return runTypeSafeAttempts({
+      const requestBytes = new TextEncoder().encode(body).byteLength;
+      if (!key) {
+        return withTransport(
+          { ok: false, failure: { category: "missing_secret", message: "typesafe_key_missing" } },
+          emptyTransport(false, requestBytes),
+        );
+      }
+      const report = emptyTransport(true, requestBytes);
+      const response = await runTypeSafeAttempts({
         signal,
         questions: request.questions,
         maxAttempts,
@@ -130,7 +136,35 @@ export function createTypeSafeJudgmentPort(options: TypeSafeJudgmentOptions): Ju
         ...(options.now ? { now: options.now } : {}),
         ...(options.sleep ? { sleep: options.sleep } : {}),
         perform: async () => {
+          if (signal.aborted) return { kind: "transport", reason: "cancelled" };
+          const budget = request.physicalBudget;
+          let reservationId: string | null = null;
+          if (budget) {
+            const reserved = await budget.beforeAttempt(requestBytes);
+            if (!reserved.ok) {
+              return {
+                kind: "terminal",
+                failure: { category: "not_authorized", message: "grant_exhausted" },
+              };
+            }
+            reservationId = reserved.reservationId;
+          }
+          if (signal.aborted) {
+            if (reservationId && budget) await budget.release(reservationId);
+            return { kind: "transport", reason: "cancelled" };
+          }
+          if (reservationId && budget) await budget.commit(reservationId);
+          report.networkAttempted = true;
+          report.attempts += 1;
           const started = Date.now();
+          const attempt = new AbortController();
+          let timedOut = false;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            attempt.abort();
+          }, attemptTimeoutMs);
+          const onAbort = () => attempt.abort();
+          signal.addEventListener("abort", onAbort, { once: true });
           try {
             const response = await fetchImpl(endpoint, {
               method: "POST",
@@ -139,9 +173,12 @@ export function createTypeSafeJudgmentPort(options: TypeSafeJudgmentOptions): Ju
                 "Content-Type": "application/json",
               },
               body,
-              signal,
+              signal: attempt.signal,
             });
             const text = await response.text();
+            report.status = response.status;
+            report.responseBytes += new TextEncoder().encode(text).byteLength;
+            report.latencyMs += Math.max(0, Date.now() - started);
             return {
               kind: "http",
               status: response.status,
@@ -151,14 +188,56 @@ export function createTypeSafeJudgmentPort(options: TypeSafeJudgmentOptions): Ju
               elapsedMs: Math.max(0, Date.now() - started),
             };
           } catch (error) {
+            report.latencyMs += Math.max(0, Date.now() - started);
             if (signal.aborted) return { kind: "transport", reason: "cancelled" };
-            if (isTimeoutError(error)) return { kind: "transport", reason: "timeout" };
+            if (timedOut || isTimeoutError(error)) return { kind: "transport", reason: "timeout" };
+            if (attempt.signal.aborted) return { kind: "transport", reason: "cancelled" };
             return { kind: "transport", reason: "network" };
+          } finally {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", onAbort);
           }
         },
       });
+      return withTransport(response, report);
     },
   };
+}
+
+function emptyTransport(configured: boolean, requestBytes: number): JudgmentTransportReport & {
+  networkAttempted: boolean;
+  attempts: number;
+  status: number | null;
+  responseBytes: number;
+  latencyMs: number;
+} {
+  return {
+    configured,
+    networkAttempted: false,
+    attempts: 0,
+    status: null,
+    category: configured ? "ok" : "missing_secret",
+    requestBytes,
+    responseBytes: 0,
+    latencyMs: 0,
+    retryCount: 0,
+    degradedReason: configured ? null : "typesafe_key_missing",
+  };
+}
+
+function withTransport(
+  response: JudgmentResponse,
+  report: JudgmentTransportReport,
+): JudgmentResponse {
+  const transport: JudgmentTransportReport = {
+    ...report,
+    retryCount: Math.max(0, report.attempts - 1),
+    category: response.ok ? "ok" : response.failure.category,
+    degradedReason: response.ok ? null : response.failure.message,
+    status: response.ok ? report.status : (response.failure.httpStatus ?? report.status),
+  };
+  if (response.ok) return { ok: true, success: { ...response.success, transport } };
+  return { ok: false, failure: { ...response.failure, transport } };
 }
 
 export async function runTypeSafeAttempts(input: {
@@ -246,6 +325,9 @@ export function parseTypeSafeBody(
     return { ok: false, failure: { category: "invalid_response", message: "typesafe_invalid_json" } };
   }
   const record = root as Record<string, unknown>;
+  if (!exactKeys(record, ["model", "answers", "usage", "id", "request_id"])) {
+    return { ok: false, failure: { category: "invalid_response", message: "typesafe_extra_key" } };
+  }
   if (typeof record.model !== "string" || !record.model.trim()) {
     return { ok: false, failure: { category: "invalid_response", message: "typesafe_missing_model" } };
   }
@@ -277,6 +359,9 @@ export function parseTypeSafeBody(
     }
   }
 
+  if (record.usage != null && (typeof record.usage !== "object" || Array.isArray(record.usage) || !exactKeys(record.usage as Record<string, unknown>, ["input_tokens", "output_tokens"]))) {
+    return { ok: false, failure: { category: "invalid_response", message: "typesafe_extra_key" } };
+  }
   const usage =
     record.usage && typeof record.usage === "object"
       ? (record.usage as Record<string, unknown>)
@@ -331,6 +416,7 @@ function parseAnswer(
   const row = value as Record<string, unknown>;
   if (question && row.type !== question.type) return fail(`typesafe_wrong_kind_${id}`);
   if (row.type === "noul") {
+    if (!exactKeys(row, ["type", "noul", "confidence"])) return fail(`typesafe_extra_key_${id}`);
     const probabilityYes = typeof row.noul === "number" ? row.noul : Number.NaN;
     if (!validateAnswerProbability(probabilityYes)) return fail(`typesafe_bad_noul_${id}`);
     if (row.confidence != null && (typeof row.confidence !== "number" || !validateAnswerProbability(row.confidence))) {
@@ -339,6 +425,7 @@ function parseAnswer(
     return { ok: true, answer: { type: "noul", probabilityYes } };
   }
   if (row.type === "choice") {
+    if (!exactKeys(row, ["type", "choice", "probabilities", "confidence"])) return fail(`typesafe_extra_key_${id}`);
     if (typeof row.choice !== "string" || typeof row.confidence !== "number") {
       return fail(`typesafe_bad_choice_${id}`);
     }
@@ -365,8 +452,12 @@ function parseAnswer(
     };
   }
   if (row.type === "score") {
+    if (!exactKeys(row, ["type", "score", "legend", "probabilities", "confidence"])) {
+      return fail(`typesafe_extra_key_${id}`);
+    }
     if (
       typeof row.score !== "number" ||
+      !Number.isInteger(row.score) ||
       !Number.isFinite(row.score) ||
       typeof row.confidence !== "number" ||
       !row.legend ||
@@ -425,6 +516,11 @@ function readProbabilities(value: unknown): Record<string, number> | null {
 function probabilitySumOk(probabilities: Readonly<Record<string, number>>): boolean {
   const sum = Object.values(probabilities).reduce((total, value) => total + value, 0);
   return Math.abs(sum - 1) <= PROBABILITY_SUM_TOLERANCE;
+}
+
+function exactKeys(record: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const permit = new Set(allowed);
+  return Object.keys(record).every((key) => permit.has(key));
 }
 
 function fail(

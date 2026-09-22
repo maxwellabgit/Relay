@@ -130,7 +130,7 @@ describe("TypeSafe Jev client", () => {
         answers: {
           frustration: {
             type: "score",
-            score: 1.05,
+            score: 1,
             legend: { "0": "Calm", "1": "Frustrated", "2": "Very angry" },
             probabilities: { "0": 0, "1": 0.95, "2": 0.05 },
             confidence: 0.92,

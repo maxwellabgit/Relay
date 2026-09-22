@@ -93,6 +93,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       // Only JudgmentPort outcomes may create Jev provider evidence.
       if (response.ok) {
         jevTracker.noteSuccess();
+      } else if (response.failure.category === "network" || response.failure.category === "timeout") {
+        jevTracker.noteUnavailable();
       } else {
         jevTracker.noteFailure();
       }

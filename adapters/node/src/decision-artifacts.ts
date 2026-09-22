@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ArtifactRef, ArtifactStorePort, DataPolicy } from "@relay/contracts";
+import {
+  ProvenanceIndex,
+  type ArtifactProvenance,
+  type ArtifactRef,
+  type ArtifactStorePort,
+  type DataPolicy,
+} from "@relay/contracts";
 
 /**
  * Durable allowlisted judgment artifacts only (no verbatim user asks).
@@ -9,12 +15,13 @@ import type { ArtifactRef, ArtifactStorePort, DataPolicy } from "@relay/contract
  */
 export class DecisionArtifactStore implements ArtifactStorePort {
   private seq = 0;
+  private readonly seals = new ProvenanceIndex();
 
   constructor(private readonly rootDir: string) {
     mkdirSync(rootDir, { recursive: true });
   }
 
-  async put(value: Uint8Array, policy: DataPolicy): Promise<ArtifactRef> {
+  async put(value: Uint8Array, policy: DataPolicy, derivedFrom: readonly ArtifactRef[] = []): Promise<ArtifactRef> {
     const sha256 = hash(value);
     const artifactId = `artifact_${++this.seq}_${sha256.slice(0, 16)}`;
     const path = join(this.rootDir, `${artifactId}.bin`);
@@ -31,7 +38,12 @@ export class DecisionArtifactStore implements ArtifactStorePort {
         })}\n`,
       );
     }
-    return { artifactId, sha256, policy };
+    const sealed = this.seals.seal(artifactId, sha256, policy, derivedFrom);
+    return { artifactId, sha256, policy: sealed.policy };
+  }
+
+  async provenance(artifactId: string): Promise<ArtifactProvenance | null> {
+    return this.seals.get(artifactId);
   }
 
   async get(ref: ArtifactRef): Promise<Uint8Array> {

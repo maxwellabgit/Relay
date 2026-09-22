@@ -2,6 +2,7 @@ import type { JudgmentPort, GitHubReadPort, PublicSearchPort, TextModelPort } fr
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import {
   createRelayClientFromEngine,
+  grantAccountFor,
   HostedGrantLedger,
   recordedHarnessGrant,
   RelayEngine,
@@ -114,7 +115,7 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   // Production desktop defaults to OFF. The boolean alone does not authorize disclosure.
   await sqlite.setHostedProcessingEnabled(true);
   if (options.seedDisclosureGrant !== false) {
-    await new HostedGrantLedger(store).save(
+    await new HostedGrantLedger(grantAccountFor(store)).save(
       recordedHarnessGrant(options.sessionId ?? "session_test"),
       clock.now().toISOString(),
     );

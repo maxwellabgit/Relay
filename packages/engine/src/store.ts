@@ -14,6 +14,8 @@ import type {
 } from "@relay/contracts";
 import type { WorkItem } from "./queue.js";
 import type { LearningStore } from "./learning-store.js";
+import type { DisclosureScope, HostedJudgmentGrant } from "./disclosure/hosted-grant.js";
+import type { GrantReservation } from "./disclosure/grant-account.js";
 
 export type PersistedSourceEvent = {
   readonly sourceEventId: string;
@@ -110,4 +112,21 @@ export type EngineStore = {
   putAmbientSuppression(key: string, reason: string, createdAt: string): Promise<void>;
   isAmbientSuppressed(key: string): Promise<boolean>;
   readonly learning: LearningStore;
+  saveHostedGrant?(grant: HostedJudgmentGrant, at: string): Promise<void>;
+  revokeHostedGrant?(grantId: string, at: string): Promise<void>;
+  findHostedGrant?(grantId: string): Promise<HostedJudgmentGrant | null>;
+  readHostedGrant?(scope: DisclosureScope): Promise<{
+    grant: HostedJudgmentGrant | null;
+    requestsUsed: number;
+    bytesUsed: number;
+  }>;
+  reserveHostedGrant?(input: {
+    grantId: string;
+    bytes: number;
+    now: string;
+    reservationId: string;
+  }): Promise<GrantReservation>;
+  commitHostedGrant?(reservationId: string): Promise<void>;
+  releaseHostedGrant?(reservationId: string): Promise<void>;
+  releaseUncommittedHostedGrants?(): Promise<number>;
 };

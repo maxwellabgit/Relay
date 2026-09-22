@@ -10,6 +10,7 @@ import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { hostedSessionPolicy, isHostedEligible } from "@relay/contracts";
 import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import { parkHostedWait } from "./durable-wait.js";
 import { acronymProviderState } from "./acronym-state.js";
@@ -140,19 +141,29 @@ export class JudgmentService {
     };
     const contextExcerpt = String(item.payload.contextExcerpt ?? "");
     const started = Date.now();
+    const disclosureSources = [];
+    if (contextExcerpt) {
+      const sealed = await this.deps.artifacts.put(
+        new TextEncoder().encode(contextExcerpt),
+        hostedSessionPolicy(),
+      );
+      const provenance = await this.deps.artifacts.provenance(sealed.artifactId);
+      const revealing = provenance?.derivedFrom.some((row) => row.disclosure === "local_only") ?? false;
+      if (provenance && isHostedEligible(provenance.policy) && !revealing) {
+        disclosureSources.push({
+          sourceClass: "conversation_excerpt" as const,
+          field: "contextExcerpt" as const,
+          artifactId: sealed.artifactId,
+          sha256: sealed.sha256,
+        });
+      }
+    }
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
-      contextExcerpt
-        ? [
-            {
-              sourceClass: "conversation_excerpt",
-              field: "contextExcerpt",
-              text: contextExcerpt,
-            },
-          ]
-        : [],
+      disclosureSources,
     );
     const outcome = await runJudgmentLifecycle(
       {
@@ -176,7 +187,8 @@ export class JudgmentService {
         outcome.response.failure.message === "hosted_processing_disabled"
           ? knownReason("hosted_processing_disabled")
           : knownReason(category);
-      const retrying = isRetryableJudgmentFailure(category) && attempt < JUDGMENT_MAX_ATTEMPTS;
+      // Transport owns HTTP retries. The scheduler must not repeat the same logical call.
+      const retrying = false;
       const blocked =
         category === "missing_secret" ||
         category === "authentication" ||

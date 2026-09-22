@@ -10,7 +10,7 @@ import type {
 import { localOnlyPolicy } from "@relay/contracts";
 import type { EngineStore } from "./store.js";
 import type { Clock, IdFactory } from "./scheduler.js";
-import { evaluateHostedDisclosure, type DisclosureScope, type DisclosureSource, type DisclosedSource, type HostedJudgmentGrant } from "./disclosure/hosted-grant.js";
+import { evaluateHostedDisclosure, type DisclosureReceipt, type DisclosureScope, type DisclosureSource, type DisclosedSource, type HostedJudgmentGrant } from "./disclosure/hosted-grant.js";
 import { claimSemanticRound } from "./disclosure/semantic-rounds.js";
 
 export type JudgmentLifecycleDeps = {
@@ -32,6 +32,11 @@ export type JudgmentLifecycleDeps = {
     readonly bytesUsed: number;
     readonly sources: readonly (DisclosureSource & DisclosedSource)[];
     readonly commit: (bytes: number) => Promise<void>;
+    readonly attempt?: {
+      beforeAttempt(requestBytes: number): Promise<{ ok: true; reservationId: string } | { ok: false; reason: string }>;
+      commit(reservationId: string): Promise<void>;
+      release(reservationId: string): Promise<void>;
+    };
   };
 };
 
@@ -95,7 +100,7 @@ function safeRequestArtifact(request: JudgmentRequest, requestHash: string): Uin
   });
 }
 
-function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
+function safeResponseArtifact(response: JudgmentResponse, receipt?: DisclosureReceipt): Uint8Array {
   if (!response.ok) {
     return encode({
       ok: false,
@@ -104,6 +109,8 @@ function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
       ...(response.failure.providerRequestId
         ? { providerRequestId: response.failure.providerRequestId }
         : {}),
+      ...(receipt ? { disclosureReceipt: receipt } : {}),
+      ...(response.failure.transport ? { transport: response.failure.transport } : {}),
     });
   }
   const answers: Record<string, unknown> = {};
@@ -130,6 +137,8 @@ function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
     ...(response.success.providerRequestId
       ? { providerRequestId: response.success.providerRequestId }
       : {}),
+    ...(receipt ? { disclosureReceipt: receipt } : {}),
+    ...(response.success.transport ? { transport: response.success.transport } : {}),
   });
 }
 
@@ -154,22 +163,40 @@ function budgetEvidence(
   disclosure: JudgmentLifecycleDeps["disclosure"],
   disclosedSourceCount: number,
   disclosedBytes: number,
-  consumed: boolean,
+  attemptCount: number,
 ): JudgmentBudgetEvidence | null {
   const grant = disclosure?.grant;
   if (!disclosure || !grant) return null;
   if (grant.scopeKind !== "session" && grant.scopeKind !== "project") return null;
+  const attempts = Math.max(0, attemptCount);
   return {
     grantScopeKind: grant.scopeKind,
     grantExpiresAt: grant.expiresAt,
     grantRequestsBefore: disclosure.requestsUsed,
-    grantRequestsAfter: disclosure.requestsUsed + (consumed ? 1 : 0),
+    grantRequestsAfter: disclosure.requestsUsed + attempts,
     grantBytesBefore: disclosure.bytesUsed,
-    grantBytesAfter: disclosure.bytesUsed + (consumed ? disclosedBytes : 0),
+    grantBytesAfter: disclosure.bytesUsed + disclosedBytes * attempts,
     grantMaxRequests: grant.maxRequests,
     grantMaxBytes: grant.maxBytes,
     disclosedSourceCount,
-    disclosedBytes: consumed ? disclosedBytes : 0,
+    disclosedBytes: attempts > 0 ? disclosedBytes : 0,
+  };
+}
+
+function disclosureReceipt(
+  sources: readonly { artifactId: string }[],
+  decision: DisclosureReceipt["decision"],
+  redactedBytes: number,
+  grantId: string | null,
+  physicalAttempts: number,
+): DisclosureReceipt {
+  return {
+    artifactIds: sources.map((source) => source.artifactId),
+    decision,
+    redactedBytes,
+    tokenEstimate: Math.ceil(redactedBytes / 4),
+    grantId,
+    physicalAttempts,
   };
 }
 
@@ -215,7 +242,7 @@ export async function runJudgmentLifecycle(
     }
   }
   const disclosureGrantId = effectiveRequest.disclosureGrantId ?? null;
-  const untouchedBudget = () => budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, false);
+  const untouchedBudget = () => budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, 0);
   const requestHash = effectiveRequest.requestHash ?? (await canonicalizeRequestHash(effectiveRequest));
   const cached = disclosureFailure ? null : await deps.store.findCompletedJudgmentByHash(requestHash);
   if (cached?.responseArtifactId) {
@@ -338,10 +365,25 @@ export async function runJudgmentLifecycle(
     }
   }
 
-  if (deps.disclosure) await deps.disclosure.commit(disclosedBytes);
+  const selfAccounted = effectiveRequest.provider !== "recorded" && deps.disclosure?.attempt != null;
+  if (selfAccounted && deps.disclosure?.attempt) {
+    effectiveRequest = { ...effectiveRequest, physicalBudget: deps.disclosure.attempt };
+  } else if (deps.disclosure) {
+    await deps.disclosure.commit(disclosedBytes);
+  }
   const response = await deps.judgments.judge({ ...effectiveRequest, requestHash }, signal);
+  const physicalAttempts = response.ok
+    ? (response.success.transport?.attempts ?? (selfAccounted ? 0 : 1))
+    : (response.failure.transport?.attempts ?? (selfAccounted ? 0 : 1));
+  const receipt = disclosureReceipt(
+    deps.disclosure?.sources ?? [],
+    "allow",
+    disclosedBytes,
+    disclosureGrantId,
+    physicalAttempts,
+  );
 
-  const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
+  const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response, receipt), localOnlyPolicy());
   const completedAt = deps.clock.now().toISOString();
   const completed: JudgmentRecord = {
     ...requested,
@@ -361,8 +403,8 @@ export async function runJudgmentLifecycle(
   return {
     record: completed,
     response,
-    providerCalled: true,
+    providerCalled: (response.ok ? response.success.transport?.networkAttempted : response.failure.transport?.networkAttempted) ?? true,
     disclosureGrantId,
-    budget: budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, true),
+    budget: budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, physicalAttempts),
   };
 }

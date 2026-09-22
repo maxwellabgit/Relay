@@ -222,6 +222,31 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return null;
     case "is_ambient_suppressed":
       return store.isAmbientSuppressed(str(op, "key"));
+    case "save_hosted_grant":
+      await store.saveHostedGrant(op.grant as Parameters<SqliteEngineStore["saveHostedGrant"]>[0], str(op, "at"));
+      return null;
+    case "revoke_hosted_grant":
+      await store.revokeHostedGrant(str(op, "grantId"), str(op, "at"));
+      return null;
+    case "find_hosted_grant":
+      return store.findHostedGrant(str(op, "grantId"));
+    case "read_hosted_grant":
+      return store.readHostedGrant(op.scope as { kind: "session" | "project"; id: string });
+    case "reserve_hosted_grant":
+      return store.reserveHostedGrant({
+        grantId: str(op, "grantId"),
+        bytes: Number(op.bytes),
+        now: str(op, "now"),
+        reservationId: str(op, "reservationId"),
+      });
+    case "commit_hosted_grant":
+      await store.commitHostedGrant(str(op, "reservationId"));
+      return null;
+    case "release_hosted_grant":
+      await store.releaseHostedGrant(str(op, "reservationId"));
+      return null;
+    case "release_uncommitted_hosted_grants":
+      return store.releaseUncommittedHostedGrants();
     default:
       throw new Error(`unknown_op:${String(op.op)}`);
   }

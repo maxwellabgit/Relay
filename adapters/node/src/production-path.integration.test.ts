@@ -81,33 +81,26 @@ describe("production path", () => {
     }
   });
 
-  it("retryable_judgment_resumes", async () => {
+  it("retryable_judgment_parks_once_after_the_transport_returns", async () => {
     let calls = 0;
     const judgments: JudgmentPort = {
       async judge(): Promise<JudgmentResponse> {
         calls += 1;
-        if (calls === 1) return { ok: false, failure: { category: "rate_limited", message: "later" } };
-        return recordedSuccess({
-          expansion: {
-            type: "choice",
-            choice: "Battery Energy Storage",
-            probabilities: { "Battery Energy Storage": 0.9, no_match: 0.1 },
-            confidence: 0.9,
-          },
-        });
+        return { ok: false, failure: { category: "rate_limited", message: "later" } };
       },
     };
     const harness = await createNodeHarness({ judgments, reflexModules: [ambiguous()] });
     try {
       await harness.client.start();
-      await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
-      await waitFor(async () => (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"), 4000);
-      await waitFor(async () => (await harness.store.countWorkItems()) === 0, 4000);
-      const snap = await harness.client.getSnapshot();
-      expect(calls).toBe(2);
-      expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toBe("Battery Energy Storage");
-      expect(snap.cases.every((item) => item.status !== "waiting")).toBe(true);
-      expect(await harness.store.countWorkItems()).toBe(0);
+      const ask = await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
+      await waitFor(async () => {
+        const current = await harness.store.getCase(ask.caseId ?? "");
+        return current?.waitKind === "hosted_judgment" && (await harness.store.countWorkItems()) === 0;
+      });
+      expect(calls).toBe(1);
+      const current = await harness.store.getCase(ask.caseId ?? "");
+      expect(current?.status).toBe("waiting");
+      expect(current?.waitKind).toBe("hosted_judgment");
     } finally {
       await harness.client.stop();
       harness.close();

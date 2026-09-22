@@ -19,6 +19,12 @@ pub struct ArtifactPutRequest {
 pub struct ArtifactPutResult {
     pub artifact_id: String,
     pub sha256: String,
+    pub policy: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+pub struct ArtifactProvenanceRequest {
+    pub artifact_id: String,
 }
 
 #[derive(Deserialize)]
@@ -141,9 +147,60 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[tauri::command]
 pub fn artifact_put(request: ArtifactPutRequest) -> Result<ArtifactPutResult, String> {
-    let _ = request.policy;
     let plain = decode_b64(&request.bytes_b64)?;
-    put_plain_bytes(&plain)
+    let mut put = put_plain_bytes(&plain)?;
+    put.policy = seal_policy(&put.artifact_id, &put.sha256, request.policy)?;
+    Ok(put)
+}
+
+#[tauri::command]
+pub fn artifact_provenance(request: ArtifactProvenanceRequest) -> Result<serde_json::Value, String> {
+    let path = objects_dir()?.join(format!("{}.prov.json", request.artifact_id));
+    if !path.exists() {
+        return Ok(serde_json::Value::Null);
+    }
+    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&text).map_err(|error| error.to_string())
+}
+
+fn seal_policy(artifact_id: &str, sha256: &str, requested: serde_json::Value) -> Result<serde_json::Value, String> {
+    let path = objects_dir()?.join(format!("{artifact_id}.prov.json"));
+    let requested_disclosure = requested
+        .get("disclosure")
+        .and_then(|value| value.as_str())
+        .unwrap_or("local_only");
+    let requested_rank = disclosure_rank(requested_disclosure);
+    if path.exists() {
+        let existing: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        let stored = existing
+            .get("policy")
+            .and_then(|value| value.get("disclosure"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("local_only");
+        if disclosure_rank(stored) <= requested_rank {
+            return Ok(existing.get("policy").cloned().unwrap_or(requested));
+        }
+    }
+    let record = serde_json::json!({
+        "artifactId": artifact_id,
+        "sha256": sha256,
+        "policy": requested,
+        "derivedFrom": [],
+    });
+    atomic_write(&path, record.to_string().as_bytes())?;
+    Ok(requested)
+}
+
+fn disclosure_rank(disclosure: &str) -> i32 {
+    match disclosure {
+        "local_only" => 0,
+        "hosted_session" => 1,
+        "hosted_project" => 2,
+        "public" => 3,
+        _ => 0,
+    }
 }
 
 /// Content-addressed DPAPI put used by Tauri commands and StateDb legacy migration.
@@ -158,6 +215,7 @@ pub fn put_plain_bytes(plain: &[u8]) -> Result<ArtifactPutResult, String> {
     Ok(ArtifactPutResult {
         artifact_id,
         sha256: digest,
+        policy: serde_json::json!({ "disclosure": "local_only", "sensitivity": 0 }),
     })
 }
 

@@ -9,7 +9,7 @@ import type {
   SourceSliceRef,
   TextModelPort,
 } from "@relay/contracts";
-import { localOnlyPolicy } from "@relay/contracts";
+import { isHostedEligible, localOnlyPolicy } from "@relay/contracts";
 import { extractCandidate } from "../intake/CandidateExtractor.js";
 import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
@@ -221,7 +221,7 @@ export class AmbientTriage {
         ? await this.deps.store.isAmbientSuppressed(candidate.subjectKey)
         : false;
 
-    const scored = await this.scoreAmbient(caseId, caseVersion, text, sourceSlice);
+    const scored = await this.scoreAmbient(caseId, caseVersion, text, sourceSlice, candidate);
     if (!scored.ok) {
       if (scored.waitHosted) {
         await this.deps.store.updateCandidateEventStatus(candidate.candidateEventId, "new", at);
@@ -452,12 +452,27 @@ export class AmbientTriage {
     caseVersion: number,
     text: string,
     sourceSlice: SourceSliceRef,
+    candidate: CandidateEvent,
   ): Promise<
     | { ok: true; scores: AmbientTriageScores }
     | { ok: false; reasonCode: string; waitHosted?: boolean }
   > {
     const sourceBytes = encodeText(text);
     const sourceRef = await this.deps.artifacts.put(sourceBytes, localOnlyPolicy());
+    if (!(await this.deps.store.getHostedProcessingEnabled())) {
+      return { ok: false, reasonCode: "disabled", waitHosted: true };
+    }
+    const provenance = await this.deps.artifacts.provenance(sourceRef.artifactId);
+    const disclosable =
+      provenance != null &&
+      provenance.sha256 === sourceRef.sha256 &&
+      isHostedEligible(provenance.policy) &&
+      provenance.derivedFrom.every((row) => row.disclosure !== "local_only");
+    // Observed microphone text is sealed local-only. Route it on-device.
+    // A caller cannot reseal those bytes as hosted-eligible.
+    if (!disclosable) {
+      return { ok: true, scores: localAmbientScores(candidate, text) };
+    }
     const request: JudgmentRequest = {
       questionSetId: AMBIENT_QUESTION_SET_ID,
       questionSetVersion: AMBIENT_QUESTION_SET_VERSION,
@@ -501,15 +516,15 @@ export class AmbientTriage {
 
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
       [
         {
           sourceClass: "ambient_transcript",
           field: "excerpt",
-          text,
-          localOnly: false,
-          revealsLocalOnly: false,
+          artifactId: sourceRef.artifactId,
+          sha256: sourceRef.sha256,
         },
       ],
     );
@@ -528,11 +543,12 @@ export class AmbientTriage {
     );
 
     if (!response.ok) {
-      if (
-        response.failure.category === "disabled" ||
-        response.failure.category === "not_authorized"
-      ) {
+      const message = response.failure.message;
+      if (message === "hosted_processing_disabled" || response.failure.category === "disabled") {
         return { ok: false, reasonCode: response.failure.category, waitHosted: true };
+      }
+      if (message.startsWith("disclosure_")) {
+        return { ok: true, scores: localAmbientScores(candidate, text) };
       }
       return { ok: false, reasonCode: response.failure.category };
     }
@@ -661,6 +677,33 @@ export class AmbientTriage {
     const existing = await this.deps.store.learning.getMemory("note", subjectKey);
     if (!existing?.value.text) return false;
     return normalize(existing.value.text) === normalize(noteText);
+  }
+}
+
+/** On-device scores for a local-only observed candidate. These never leave the device. */
+function localAmbientScores(candidate: CandidateEvent, text: string): AmbientTriageScores {
+  const scores = zeroScores();
+  const immediate = /\b(asap|immediately|urgent|right now|emergency|blocking|cannot ship|can't ship)\b/i.test(
+    text,
+  );
+  switch (candidate.kind) {
+    case "correction":
+      return { ...scores, worth_remembering: 0.8, possible_correction: 0.86 };
+    case "commitment":
+      return {
+        ...scores,
+        possible_commitment: 0.86,
+        worth_remembering: 0.4,
+        interrupt_worthy: immediate ? 0.95 : 0.05,
+      };
+    case "durable_information":
+      return { ...scores, worth_remembering: 0.86 };
+    case "factual_claim":
+      return { ...scores, possible_fact_claim: 0.86, worth_remembering: 0.4 };
+    case "open_question":
+      return { ...scores, possible_open_question: 0.86 };
+    default:
+      return scores;
   }
 }
 

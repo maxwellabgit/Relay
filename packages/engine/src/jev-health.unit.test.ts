@@ -2,91 +2,96 @@ import { describe, expect, it } from "vitest";
 import { JevHealthTracker, projectJevHealth } from "./jev-health.js";
 
 describe("projectJevHealth", () => {
-  it("reports missing key", () => {
-    expect(projectJevHealth({ secretPresent: false, hostedEnabled: false, lastOutcome: "none" })).toEqual({
+  it("reports unconfigured without a key", () => {
+    expect(projectJevHealth({ secretPresent: false, hostedEnabled: false, liveCanary: "none" })).toEqual({
       ok: false,
+      state: "unconfigured",
       detail: "missing key",
     });
   });
 
-  it("reports hosted off when key present", () => {
-    expect(projectJevHealth({ secretPresent: true, hostedEnabled: false, lastOutcome: "none" })).toEqual({
+  it("reports disabled when hosted decisions are off", () => {
+    expect(projectJevHealth({ secretPresent: true, hostedEnabled: false, liveCanary: "none" })).toEqual({
       ok: false,
+      state: "disabled",
       detail: "hosted off",
     });
   });
 
-  it("reports configured before any request", () => {
-    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, lastOutcome: "none" })).toEqual({
-      ok: true,
+  it("stays configured_not_tested before a live canary", () => {
+    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, liveCanary: "none" })).toEqual({
+      ok: false,
+      state: "configured_not_tested",
       detail: "configured",
     });
   });
 
-  it("reports ready only after success", () => {
-    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, lastOutcome: "success" })).toEqual({
+  it("reports healthy_live only after a successful live canary", () => {
+    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, liveCanary: "success" })).toEqual({
       ok: true,
+      state: "healthy_live",
       detail: "ready",
     });
   });
 
-  it("reports degraded after failure", () => {
-    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, lastOutcome: "failure" })).toEqual({
+  it("reports degraded after a failed canary and unavailable when the provider cannot be reached", () => {
+    expect(projectJevHealth({ secretPresent: true, hostedEnabled: true, liveCanary: "failure" })).toEqual({
       ok: false,
+      state: "degraded",
       detail: "degraded",
     });
+    expect(
+      projectJevHealth({
+        secretPresent: true,
+        hostedEnabled: true,
+        liveCanary: "none",
+        availability: "unreachable",
+      }).state,
+    ).toBe("unavailable");
   });
 });
 
 describe("JevHealthTracker", () => {
-  it("does not invent ready on config refresh after failure; success restores ready", () => {
+  it("does not treat an ordinary success as healthy_live", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state.detail).toBe("configured");
-    tracker.noteFailure();
-    expect(tracker.state).toEqual({ ok: false, detail: "degraded" });
-    tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: false, detail: "degraded" });
+    expect(tracker.state.state).toBe("configured_not_tested");
     tracker.noteSuccess();
-    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
-    tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+    expect(tracker.state.state).toBe("configured_not_tested");
+    tracker.noteLiveCanary();
+    expect(tracker.state).toEqual({ ok: true, state: "healthy_live", detail: "ready" });
   });
 
-  it("keeps configured when only configuration apply runs (audio/model refresh path)", () => {
+  it("keeps configured_not_tested when only configuration apply runs", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: true, detail: "configured" });
-    // Simulates refreshConfiguredHealth after mic/model failure — apply only.
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: true, detail: "configured" });
+    expect(tracker.state.state).toBe("configured_not_tested");
   });
 
-  it("keeps ready when only configuration apply runs after prior success", () => {
+  it("keeps healthy_live when configuration is reapplied after a canary", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    tracker.noteSuccess();
-    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+    tracker.noteLiveCanary();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+    expect(tracker.state.state).toBe("healthy_live");
   });
 
   it("marks degraded only from noteFailure, not from apply", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state.detail).toBe("configured");
+    expect(tracker.state.state).toBe("configured_not_tested");
     tracker.noteFailure();
-    expect(tracker.state).toEqual({ ok: false, detail: "degraded" });
+    expect(tracker.state.state).toBe("degraded");
   });
 
-  it("drops to hosted off without clearing outcome memory for later re-enable", () => {
+  it("returns to disabled without forgetting a later re-enable", () => {
     const tracker = new JevHealthTracker();
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    tracker.noteSuccess();
+    tracker.noteLiveCanary();
     tracker.apply({ secretPresent: true, hostedEnabled: false });
-    expect(tracker.state).toEqual({ ok: false, detail: "hosted off" });
+    expect(tracker.state.state).toBe("disabled");
     tracker.apply({ secretPresent: true, hostedEnabled: true });
-    expect(tracker.state).toEqual({ ok: true, detail: "ready" });
+    expect(tracker.state.state).toBe("healthy_live");
   });
 });

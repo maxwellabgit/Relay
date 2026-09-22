@@ -14,7 +14,7 @@ import type {
   RelaySnapshot,
   SourceSliceRef,
 } from "@relay/contracts";
-import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
+import type { EngineStore, HostedJudgmentGrant, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
 import { migrateLegacyProtectedContent } from "./migrate-legacy-protected.js";
 import { SqliteLearning } from "./sqlite-learning.js";
 
@@ -26,6 +26,7 @@ export class SqliteEngineStore implements EngineStore {
   private constructor(db: SqlHandle, artifacts?: ArtifactStorePort) {
     this.db = db;
     this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA busy_timeout = 5000");
     applyMigrations(this.db);
     this.learning = new SqliteLearning(this.db, artifacts);
   }
@@ -44,6 +45,7 @@ export class SqliteEngineStore implements EngineStore {
     if (artifacts) {
       await store.migrateLegacyContent(artifacts);
     }
+    await store.releaseUncommittedHostedGrants();
     return store;
   }
 
@@ -604,6 +606,167 @@ export class SqliteEngineStore implements EngineStore {
       .get(key) as { ok: number } | undefined;
     return row != null;
   }
+
+  async saveHostedGrant(grant: HostedJudgmentGrant, at: string): Promise<void> {
+    void at;
+    const existing = this.db.prepare(`SELECT requests_committed, bytes_committed, revoked_at FROM hosted_grants WHERE grant_id = ?`).get(grant.grantId) as
+      | { requests_committed: number; bytes_committed: number; revoked_at: string | null }
+      | undefined;
+    this.db
+      .prepare(
+        `INSERT INTO hosted_grants(grant_id, scope_kind, scope_id, created_at, expires_at, allowed_json, max_requests, max_bytes, revoked_at, requests_committed, bytes_committed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(grant_id) DO UPDATE SET
+           scope_kind = excluded.scope_kind,
+           scope_id = excluded.scope_id,
+           expires_at = excluded.expires_at,
+           allowed_json = excluded.allowed_json,
+           max_requests = excluded.max_requests,
+           max_bytes = excluded.max_bytes,
+           revoked_at = COALESCE(hosted_grants.revoked_at, excluded.revoked_at)`,
+      )
+      .run(
+        grant.grantId,
+        grant.scopeKind,
+        grant.scopeId,
+        grant.createdAt,
+        grant.expiresAt,
+        JSON.stringify(grant.allowedSourceClasses),
+        grant.maxRequests,
+        grant.maxBytes,
+        existing?.revoked_at ?? grant.revokedAt ?? null,
+        existing?.requests_committed ?? 0,
+        existing?.bytes_committed ?? 0,
+      );
+  }
+
+  async revokeHostedGrant(grantId: string, at: string): Promise<void> {
+    this.db.prepare(`UPDATE hosted_grants SET revoked_at = ? WHERE grant_id = ?`).run(at, grantId);
+  }
+
+  async findHostedGrant(grantId: string) {
+    const row = this.db.prepare(`SELECT * FROM hosted_grants WHERE grant_id = ?`).get(grantId) as GrantRow | undefined;
+    return row ? mapGrant(row) : null;
+  }
+
+  async readHostedGrant(scope: { kind: "session" | "project"; id: string }) {
+    const row = this.db
+      .prepare(`SELECT * FROM hosted_grants WHERE scope_kind = ? AND scope_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(scope.kind, scope.id) as GrantRow | undefined;
+    if (!row) return { grant: null, requestsUsed: 0, bytesUsed: 0 };
+    const held = this.db
+      .prepare(
+        `SELECT COUNT(*) AS requests, COALESCE(SUM(bytes), 0) AS bytes FROM hosted_grant_reservations WHERE grant_id = ? AND state = 'reserved'`,
+      )
+      .get(row.grant_id) as { requests: number; bytes: number };
+    return {
+      grant: mapGrant(row),
+      requestsUsed: row.requests_committed + Number(held.requests),
+      bytesUsed: row.bytes_committed + Number(held.bytes),
+    };
+  }
+
+  async reserveHostedGrant(input: { grantId: string; bytes: number; now: string; reservationId: string }) {
+    const own = this.txnDepth === 0;
+    if (own) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare(`SELECT * FROM hosted_grants WHERE grant_id = ?`).get(input.grantId) as GrantRow | undefined;
+      if (!row) {
+        if (own) this.db.exec("COMMIT");
+        return { ok: false as const, reason: "missing" as const };
+      }
+      if (row.revoked_at) {
+        if (own) this.db.exec("COMMIT");
+        return { ok: false as const, reason: "revoked" as const };
+      }
+      if (Date.parse(input.now) >= Date.parse(row.expires_at)) {
+        if (own) this.db.exec("COMMIT");
+        return { ok: false as const, reason: "expired" as const };
+      }
+      const held = this.db
+        .prepare(
+          `SELECT COUNT(*) AS requests, COALESCE(SUM(bytes), 0) AS bytes FROM hosted_grant_reservations WHERE grant_id = ? AND state = 'reserved'`,
+        )
+        .get(input.grantId) as { requests: number; bytes: number };
+      if (row.requests_committed + Number(held.requests) + 1 > row.max_requests || row.bytes_committed + Number(held.bytes) + input.bytes > row.max_bytes) {
+        if (own) this.db.exec("COMMIT");
+        return { ok: false as const, reason: "exhausted" as const };
+      }
+      this.db
+        .prepare(
+          `INSERT INTO hosted_grant_reservations(reservation_id, grant_id, bytes, state, created_at) VALUES (?, ?, ?, 'reserved', ?)`,
+        )
+        .run(input.reservationId, input.grantId, input.bytes, input.now);
+      if (own) this.db.exec("COMMIT");
+      return { ok: true as const, reservationId: input.reservationId };
+    } catch (error) {
+      if (own) this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async commitHostedGrant(reservationId: string): Promise<void> {
+    const own = this.txnDepth === 0;
+    if (own) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const hold = this.db
+        .prepare(`SELECT grant_id, bytes, state FROM hosted_grant_reservations WHERE reservation_id = ?`)
+        .get(reservationId) as { grant_id: string; bytes: number; state: string } | undefined;
+      if (hold && hold.state === "reserved") {
+        this.db
+          .prepare(
+            `UPDATE hosted_grants SET requests_committed = requests_committed + 1, bytes_committed = bytes_committed + ? WHERE grant_id = ?`,
+          )
+          .run(hold.bytes, hold.grant_id);
+        this.db.prepare(`UPDATE hosted_grant_reservations SET state = 'committed' WHERE reservation_id = ?`).run(reservationId);
+      }
+      if (own) this.db.exec("COMMIT");
+    } catch (error) {
+      if (own) this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async releaseHostedGrant(reservationId: string): Promise<void> {
+    this.db
+      .prepare(`UPDATE hosted_grant_reservations SET state = 'released' WHERE reservation_id = ? AND state = 'reserved'`)
+      .run(reservationId);
+  }
+
+  async releaseUncommittedHostedGrants(): Promise<number> {
+    const result = this.db
+      .prepare(`UPDATE hosted_grant_reservations SET state = 'released' WHERE state = 'reserved'`)
+      .run();
+    return result.changes;
+  }
+}
+
+type GrantRow = {
+  grant_id: string;
+  scope_kind: "session" | "project";
+  scope_id: string;
+  created_at: string;
+  expires_at: string;
+  allowed_json: string;
+  max_requests: number;
+  max_bytes: number;
+  revoked_at: string | null;
+  requests_committed: number;
+  bytes_committed: number;
+};
+
+function mapGrant(row: GrantRow) {
+  return {
+    grantId: row.grant_id,
+    scopeKind: row.scope_kind,
+    scopeId: row.scope_id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    allowedSourceClasses: JSON.parse(row.allowed_json) as ("conversation_excerpt" | "ambient_transcript" | "claim_excerpt" | "pattern_count")[],
+    maxRequests: row.max_requests,
+    maxBytes: row.max_bytes,
+    ...(row.revoked_at ? { revokedAt: row.revoked_at } : {}),
+  };
 }
 
 type DbCase = {
@@ -731,7 +894,7 @@ function applyMigrations(db: SqlHandle): void {
     if (!first) throw new Error("missing_migration_1");
     db.exec(first);
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const sql = MIGRATION_SQL[version];

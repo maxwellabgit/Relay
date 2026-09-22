@@ -1,4 +1,4 @@
-import type { ArtifactRef, DataPolicy } from "./artifacts.js";
+import type { ArtifactProvenance, ArtifactRef, DataPolicy } from "./artifacts.js";
 import type { GlassesDisplayPort } from "./glasses.js";
 import type { JudgmentRequest, JudgmentResponse } from "./judgments.js";
 import type { GitHubReadPort, PublicSearchPort } from "./tools.js";
@@ -19,8 +19,14 @@ export type RelayStorePort = {
 };
 
 export type ArtifactStorePort = {
-  put(value: Uint8Array, policy: DataPolicy): Promise<ArtifactRef>;
+  put(
+    value: Uint8Array,
+    policy: DataPolicy,
+    derivedFrom?: readonly ArtifactRef[],
+  ): Promise<ArtifactRef>;
   get(ref: ArtifactRef): Promise<Uint8Array>;
+  /** Authoritative seal. Missing provenance fails closed as local-only. */
+  provenance(artifactId: string): Promise<ArtifactProvenance | null>;
 };
 
 export type JudgmentPort = {

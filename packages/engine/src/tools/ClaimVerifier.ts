@@ -16,7 +16,7 @@ import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
+import { loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 
@@ -271,11 +271,17 @@ export class ClaimVerifier {
       caseVersion,
     };
 
+    const claimSource = await sealedDisclosureInput(this.deps.artifacts, {
+      text: claim.slice(0, 400),
+      sourceClass: "claim_excerpt",
+      field: "excerpts",
+    });
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
-      [{ sourceClass: "claim_excerpt", field: "excerpts", text: claim.slice(0, 400) }],
+      claimSource ? [claimSource] : [],
     );
     const outcome = await runJudgmentLifecycle(
       {
@@ -373,18 +379,28 @@ export class ClaimVerifier {
       })),
     };
 
+    const claimSources = (
+      await Promise.all([
+        sealedDisclosureInput(this.deps.artifacts, {
+          text: claim.slice(0, 400),
+          sourceClass: "claim_excerpt",
+          field: "excerpts",
+        }),
+        ...excerpts.map((item) =>
+          sealedDisclosureInput(this.deps.artifacts, {
+            text: item.slice(0, 240),
+            sourceClass: "claim_excerpt",
+            field: "excerpts",
+          }),
+        ),
+      ])
+    ).filter((item): item is NonNullable<typeof item> => item != null);
     const disclosure = await loadDisclosureGate(
       this.deps.store,
+      this.deps.artifacts,
       this.deps.clock.now().toISOString(),
       { kind: "session", id: this.deps.sessionId },
-      [
-        { sourceClass: "claim_excerpt", field: "excerpts", text: claim.slice(0, 400) },
-        ...excerpts.map((item) => ({
-          sourceClass: "claim_excerpt" as const,
-          field: "excerpts" as const,
-          text: item.slice(0, 240),
-        })),
-      ],
+      claimSources,
     );
     const outcome = await runJudgmentLifecycle(
       {

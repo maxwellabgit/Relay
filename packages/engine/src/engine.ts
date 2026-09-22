@@ -17,7 +17,7 @@ import type { EpisodeDefinition } from "./episodes.js";
 import { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
 import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { AmbientTriage } from "./ambient/AmbientTriage.js";
-import { buildHostedJudgmentGrant, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
+import { buildHostedJudgmentGrant, grantAccountFor, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
 import { listHostedWaits, markHostedWaitResumed } from "./judgments/durable-wait.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
@@ -377,7 +377,7 @@ export class RelayEngine {
           maxBytes: command.maxBytes,
         });
         if (!built.ok) return { ok: false, summary: built.reason, error: built.reason };
-        await new HostedGrantLedger(this.deps.store).save(built.grant, now);
+        await new HostedGrantLedger(grantAccountFor(this.deps.store)).save(built.grant, now);
         const hostedOn = await this.deps.store.getHostedProcessingEnabled();
         const ambientResumed = hostedOn ? await this.ambient.resumeHostedWaitingCases() : 0;
         const judgmentResumed = hostedOn ? await this.resumeParkedJudgments() : 0;
@@ -389,7 +389,7 @@ export class RelayEngine {
         };
       }
       case "RevokeJevDisclosure": {
-        const ledger = new HostedGrantLedger(this.deps.store);
+        const ledger = new HostedGrantLedger(grantAccountFor(this.deps.store));
         const existing = await ledger.findById(command.grantId);
         if (!existing) return { ok: false, summary: "grant_missing", error: "grant_missing" };
         if (existing.revokedAt) return { ok: false, summary: "already_revoked", error: "already_revoked" };
@@ -475,7 +475,7 @@ export class RelayEngine {
     if (!(await this.deps.store.getHostedProcessingEnabled())) return 0;
     const now = this.deps.clock.now().toISOString();
     const grant = sessionDisclosureView(
-      await new HostedGrantLedger(this.deps.store).read({ kind: "session", id: this.deps.sessionId }),
+      await new HostedGrantLedger(grantAccountFor(this.deps.store)).read({ kind: "session", id: this.deps.sessionId }),
       now,
     );
     if (!grant) return 0;

@@ -11,6 +11,7 @@ export * from "./judgments.js";
 export * from "./model-delivery.js";
 export * from "./operations.js";
 export * from "./ports.js";
+export * from "./provenance-index.js";
 export * from "./reflexes.js";
 export * from "./tools.js";
 export * from "./trace.js";

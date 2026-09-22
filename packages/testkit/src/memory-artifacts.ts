@@ -1,15 +1,21 @@
-import type { ArtifactRef, ArtifactStorePort, DataPolicy } from "@relay/contracts";
+import { ProvenanceIndex, type ArtifactProvenance, type ArtifactRef, type ArtifactStorePort, type DataPolicy } from "@relay/contracts";
 
 export class MemoryArtifactStore implements ArtifactStorePort {
   private readonly blobs = new Map<string, Uint8Array>();
+  private readonly seals = new ProvenanceIndex();
 
-  async put(value: Uint8Array, policy: DataPolicy): Promise<ArtifactRef> {
+  async put(value: Uint8Array, policy: DataPolicy, derivedFrom: readonly ArtifactRef[] = []): Promise<ArtifactRef> {
     const sha256 = await hash(value);
     const artifactId = `artifact_${sha256.slice(0, 24)}`;
     if (!this.blobs.has(artifactId)) {
       this.blobs.set(artifactId, value);
     }
-    return { artifactId, sha256, policy };
+    const sealed = this.seals.seal(artifactId, sha256, policy, derivedFrom);
+    return { artifactId, sha256, policy: sealed.policy };
+  }
+
+  async provenance(artifactId: string): Promise<ArtifactProvenance | null> {
+    return this.seals.get(artifactId);
   }
 
   async get(ref: ArtifactRef): Promise<Uint8Array> {

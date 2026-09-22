@@ -1,4 +1,13 @@
+import {
+  hostedSessionPolicy,
+  isHostedEligible,
+  localOnlyPolicy,
+  type ArtifactProvenance,
+  type ArtifactStorePort,
+  type DataPolicy,
+} from "@relay/contracts";
 import type { EngineStore } from "../store.js";
+import type { GrantAccount } from "./grant-account.js";
 
 export const SOURCE_CLASSES = [
   "conversation_excerpt",
@@ -26,12 +35,26 @@ export type HostedJudgmentGrant = {
   readonly revokedAt?: string;
 };
 
-export type DisclosureSource = {
+export type UnresolvedDisclosureSource = {
   readonly sourceClass: SourceClass;
   readonly field: "excerpt" | "contextExcerpt" | "excerpts";
+  readonly artifactId: string;
+  readonly sha256: string;
+};
+
+export type DisclosureSource = UnresolvedDisclosureSource & {
   readonly text: string;
-  readonly localOnly?: boolean;
-  readonly revealsLocalOnly?: boolean;
+  readonly policy: DataPolicy;
+  readonly derivedFrom: ArtifactProvenance["derivedFrom"];
+};
+
+export type DisclosureReceipt = {
+  readonly artifactIds: readonly string[];
+  readonly decision: "allow" | DisclosureReason;
+  readonly redactedBytes: number;
+  readonly tokenEstimate: number;
+  readonly grantId: string | null;
+  readonly physicalAttempts: number;
 };
 
 export type DisclosedSource = {
@@ -59,10 +82,6 @@ export type DisclosureDecision =
       readonly disclosed: readonly DisclosedSource[];
     }
   | { readonly ok: false; readonly reason: DisclosureReason };
-
-const GRANTED = "jev.disclosure_granted";
-const REVOKED = "jev.disclosure_revoked";
-const CONSUMED = "jev.disclosure_consumed";
 
 export const JEV_GRANT_LIMITS = {
   minTtlMs: 60_000,
@@ -159,8 +178,12 @@ export function evaluateHostedDisclosure(input: {
     return { ok: false, reason: "exhausted" };
   }
   for (const source of input.sources) {
-    if (source.localOnly) return { ok: false, reason: "local_only" };
-    if (source.revealsLocalOnly) return { ok: false, reason: "revealing_derivative" };
+    if (source.policy.disclosure === "local_only" || !isHostedEligible(source.policy)) {
+      return { ok: false, reason: "local_only" };
+    }
+    if (source.derivedFrom.some((item) => item.disclosure === "local_only")) {
+      return { ok: false, reason: "revealing_derivative" };
+    }
     if (!grant.allowedSourceClasses.includes(source.sourceClass)) {
       return { ok: false, reason: "source_denied" };
     }
@@ -179,83 +202,140 @@ export function evaluateHostedDisclosure(input: {
 }
 
 export class HostedGrantLedger {
-  constructor(
-    private readonly store: Pick<EngineStore, "appendDomainEvent" | "listDomainEvents">,
-  ) {}
+  constructor(private readonly account: GrantAccount) {}
 
   async save(grant: HostedJudgmentGrant, at: string): Promise<void> {
-    await this.store.appendDomainEvent(GRANTED, at, { grant });
+    await this.account.save(grant, at);
   }
 
   async revoke(grantId: string, at: string): Promise<void> {
-    await this.store.appendDomainEvent(REVOKED, at, { grantId });
+    await this.account.revoke(grantId, at);
   }
 
   async consume(grantId: string, bytes: number, at: string): Promise<void> {
-    await this.store.appendDomainEvent(CONSUMED, at, { grantId, bytes });
+    const reservationId = `consume_${grantId}_${at}_${bytes}`;
+    const reserved = await this.account.reserve({ grantId, bytes, now: at, reservationId });
+    if (reserved.ok) await this.account.commit(reservationId);
   }
 
-  async findById(grantId: string): Promise<HostedJudgmentGrant | null> {
-    const events = await this.store.listDomainEvents(8000);
-    let saved: HostedJudgmentGrant | null = null;
-    let revokedAt: string | undefined;
-    for (const event of events) {
-      if (event.type === GRANTED) {
-        const parsed = parseGrant(event.payload.grant);
-        if (parsed?.grantId === grantId) {
-          saved = parsed;
-          revokedAt = undefined;
-        }
-      } else if (event.type === REVOKED && event.payload.grantId === grantId) {
-        revokedAt = event.at;
-      }
-    }
-    if (!saved) return null;
-    return revokedAt ? { ...saved, revokedAt } : saved;
+  findById(grantId: string): Promise<HostedJudgmentGrant | null> {
+    return this.account.findById(grantId);
   }
 
-  async read(scope: DisclosureScope): Promise<{
+  read(scope: DisclosureScope): Promise<{
     grant: HostedJudgmentGrant | null;
     requestsUsed: number;
     bytesUsed: number;
   }> {
-    const events = await this.store.listDomainEvents(8000);
-    const grants = new Map<string, HostedJudgmentGrant>();
-    const usage = new Map<string, { requests: number; bytes: number }>();
-    for (const event of events) {
-      if (event.type === GRANTED) {
-        const grant = parseGrant(event.payload.grant);
-        if (grant) grants.set(grant.grantId, grant);
-      } else if (event.type === REVOKED && typeof event.payload.grantId === "string") {
-        const current = grants.get(event.payload.grantId);
-        if (current) grants.set(current.grantId, { ...current, revokedAt: event.at });
-      } else if (event.type === CONSUMED && typeof event.payload.grantId === "string") {
-        const bytes = typeof event.payload.bytes === "number" ? event.payload.bytes : 0;
-        const current = usage.get(event.payload.grantId) ?? { requests: 0, bytes: 0 };
-        usage.set(event.payload.grantId, {
-          requests: current.requests + 1,
-          bytes: current.bytes + bytes,
-        });
-      }
-    }
-    const matching = [...grants.values()].filter(
-      (grant) => grant.scopeKind === scope.kind && grant.scopeId === scope.id,
-    );
-    const grant = matching.at(-1) ?? null;
-    const spent = grant ? usage.get(grant.grantId) : undefined;
-    return {
-      grant,
-      requestsUsed: spent?.requests ?? 0,
-      bytesUsed: spent?.bytes ?? 0,
-    };
+    return this.account.read(scope);
+  }
+
+  reserve(input: { grantId: string; bytes: number; now: string; reservationId: string }) {
+    return this.account.reserve(input);
+  }
+
+  commitReservation(reservationId: string): Promise<void> {
+    return this.account.commit(reservationId);
+  }
+
+  releaseReservation(reservationId: string): Promise<void> {
+    return this.account.release(reservationId);
   }
 }
 
+export function grantAccountFor(store: EngineStore): GrantAccount {
+  if (
+    store.saveHostedGrant &&
+    store.revokeHostedGrant &&
+    store.findHostedGrant &&
+    store.readHostedGrant &&
+    store.reserveHostedGrant &&
+    store.commitHostedGrant &&
+    store.releaseHostedGrant
+  ) {
+    return {
+      save: (grant, at) => store.saveHostedGrant!(grant, at),
+      revoke: (grantId, at) => store.revokeHostedGrant!(grantId, at),
+      findById: (grantId) => store.findHostedGrant!(grantId),
+      read: (scope) => store.readHostedGrant!(scope),
+      reserve: (input) => store.reserveHostedGrant!(input),
+      commit: (reservationId) => store.commitHostedGrant!(reservationId),
+      release: (reservationId) => store.releaseHostedGrant!(reservationId),
+      releaseUncommitted: () => store.releaseUncommittedHostedGrants?.() ?? Promise.resolve(0),
+    };
+  }
+  throw new Error("hosted_grant_account_missing");
+}
+
+export async function sealedDisclosureInput(
+  artifacts: ArtifactStorePort,
+  input: {
+    readonly text: string;
+    readonly sourceClass: SourceClass;
+    readonly field: DisclosureSource["field"];
+  },
+): Promise<UnresolvedDisclosureSource | null> {
+  if (!input.text.trim()) return null;
+  const ref = await artifacts.put(new TextEncoder().encode(input.text), hostedSessionPolicy());
+  const provenance = await artifacts.provenance(ref.artifactId);
+  if (!provenance || !isHostedEligible(provenance.policy)) return null;
+  if (provenance.derivedFrom.some((row) => row.disclosure === "local_only")) return null;
+  return {
+    sourceClass: input.sourceClass,
+    field: input.field,
+    artifactId: ref.artifactId,
+    sha256: ref.sha256,
+  };
+}
+
+export async function resolveSealedSource(
+  artifacts: ArtifactStorePort,
+  source: UnresolvedDisclosureSource,
+): Promise<DisclosureSource> {
+  const provenance = await artifacts.provenance(source.artifactId);
+  const sealed =
+    provenance && provenance.sha256 === source.sha256
+      ? provenance
+      : {
+          artifactId: source.artifactId,
+          sha256: source.sha256,
+          policy: localOnlyPolicy(),
+          derivedFrom: [],
+        };
+  let text = "";
+  try {
+    const bytes = await artifacts.get({
+      artifactId: source.artifactId,
+      sha256: source.sha256,
+      policy: sealed.policy,
+    });
+    const digest = await hashText(new TextDecoder().decode(bytes));
+    if (digest.sha256 !== source.sha256) {
+      return {
+        ...source,
+        text: "",
+        policy: localOnlyPolicy(),
+        derivedFrom: sealed.derivedFrom,
+      };
+    }
+    text = new TextDecoder().decode(bytes);
+  } catch {
+    return { ...source, text: "", policy: localOnlyPolicy(), derivedFrom: sealed.derivedFrom };
+  }
+  return {
+    ...source,
+    text,
+    policy: sealed.policy,
+    derivedFrom: sealed.derivedFrom,
+  };
+}
+
 export async function loadDisclosureGate(
-  store: Pick<EngineStore, "appendDomainEvent" | "listDomainEvents">,
+  store: EngineStore,
+  artifacts: ArtifactStorePort,
   now: string,
   scope: DisclosureScope,
-  sources: readonly DisclosureSource[],
+  sources: readonly UnresolvedDisclosureSource[],
 ): Promise<{
   grant: HostedJudgmentGrant | null;
   now: string;
@@ -264,13 +344,19 @@ export async function loadDisclosureGate(
   bytesUsed: number;
   sources: readonly (DisclosureSource & DisclosedSource)[];
   commit: (bytes: number) => Promise<void>;
+  attempt: {
+    beforeAttempt(requestBytes: number): Promise<{ ok: true; reservationId: string } | { ok: false; reason: string }>;
+    commit(reservationId: string): Promise<void>;
+    release(reservationId: string): Promise<void>;
+  };
 }> {
-  const ledger = new HostedGrantLedger(store);
+  const ledger = new HostedGrantLedger(grantAccountFor(store));
   const read = await ledger.read(scope);
   const prepared = [];
   for (const source of sources) {
-    const hashed = await hashText(source.text);
-    prepared.push({ ...source, ...hashed });
+    const resolved = await resolveSealedSource(artifacts, source);
+    const hashed = await hashText(resolved.text);
+    prepared.push({ ...resolved, ...hashed });
   }
   return {
     ...read,
@@ -279,6 +365,21 @@ export async function loadDisclosureGate(
     sources: prepared,
     commit: async (bytes: number) => {
       if (read.grant) await ledger.consume(read.grant.grantId, bytes, now);
+    },
+    attempt: {
+      async beforeAttempt(requestBytes: number) {
+        if (!read.grant) return { ok: false, reason: "missing" };
+        const reservationId = `jev_${read.grant.grantId}_${prepared.length}_${requestBytes}_${Math.random().toString(16).slice(2)}`;
+        const reserved = await ledger.reserve({
+          grantId: read.grant.grantId,
+          bytes: requestBytes,
+          now,
+          reservationId,
+        });
+        return reserved.ok ? { ok: true, reservationId } : { ok: false, reason: reserved.reason };
+      },
+      commit: (reservationId: string) => ledger.commitReservation(reservationId),
+      release: (reservationId: string) => ledger.releaseReservation(reservationId),
     },
   };
 }
@@ -341,35 +442,4 @@ function providerState(
   }
   if (excerpts.length > 0) state.excerpts = excerpts;
   return state;
-}
-
-function parseGrant(value: unknown): HostedJudgmentGrant | null {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Partial<HostedJudgmentGrant>;
-  if (
-    typeof row.grantId !== "string" ||
-    (row.scopeKind !== "session" && row.scopeKind !== "project") ||
-    typeof row.scopeId !== "string" ||
-    typeof row.createdAt !== "string" ||
-    typeof row.expiresAt !== "string" ||
-    !Array.isArray(row.allowedSourceClasses) ||
-    typeof row.maxRequests !== "number" ||
-    typeof row.maxBytes !== "number"
-  ) {
-    return null;
-  }
-  const allowed = row.allowedSourceClasses.filter((item): item is SourceClass =>
-    SOURCE_CLASSES.includes(item as SourceClass),
-  );
-  return {
-    grantId: row.grantId,
-    scopeKind: row.scopeKind,
-    scopeId: row.scopeId,
-    createdAt: row.createdAt,
-    expiresAt: row.expiresAt,
-    allowedSourceClasses: allowed,
-    maxRequests: row.maxRequests,
-    maxBytes: row.maxBytes,
-    ...(typeof row.revokedAt === "string" ? { revokedAt: row.revokedAt } : {}),
-  };
 }

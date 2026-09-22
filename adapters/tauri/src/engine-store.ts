@@ -274,6 +274,44 @@ export class TauriEngineStore implements EngineStore {
     return (await this.call({ op: "is_ambient_suppressed", key })) === true;
   }
 
+  saveHostedGrant(grant: import("@relay/engine").HostedJudgmentGrant, at: string): Promise<void> {
+    return this.voidOp({ op: "save_hosted_grant", grant, at });
+  }
+
+  revokeHostedGrant(grantId: string, at: string): Promise<void> {
+    return this.voidOp({ op: "revoke_hosted_grant", grantId, at });
+  }
+
+  async findHostedGrant(grantId: string) {
+    return (await this.call({ op: "find_hosted_grant", grantId })) as import("@relay/engine").HostedJudgmentGrant | null;
+  }
+
+  async readHostedGrant(scope: { kind: "session" | "project"; id: string }) {
+    return (await this.call({ op: "read_hosted_grant", scope })) as {
+      grant: import("@relay/engine").HostedJudgmentGrant | null;
+      requestsUsed: number;
+      bytesUsed: number;
+    };
+  }
+
+  async reserveHostedGrant(input: { grantId: string; bytes: number; now: string; reservationId: string }) {
+    return (await this.call({ op: "reserve_hosted_grant", ...input })) as
+      | { ok: true; reservationId: string }
+      | { ok: false; reason: "missing" | "expired" | "revoked" | "exhausted" };
+  }
+
+  commitHostedGrant(reservationId: string): Promise<void> {
+    return this.voidOp({ op: "commit_hosted_grant", reservationId });
+  }
+
+  releaseHostedGrant(reservationId: string): Promise<void> {
+    return this.voidOp({ op: "release_hosted_grant", reservationId });
+  }
+
+  async releaseUncommittedHostedGrants(): Promise<number> {
+    return Number(await this.call({ op: "release_uncommitted_hosted_grants" }));
+  }
+
   private async voidOp(op: Record<string, unknown>): Promise<void> {
     await this.call(op);
   }

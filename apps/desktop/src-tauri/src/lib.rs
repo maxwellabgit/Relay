@@ -1,4 +1,5 @@
 mod artifacts;
+mod grants;
 mod audio;
 mod commands;
 mod diagnostics;
@@ -29,6 +30,7 @@ pub fn run() {
             secrets::secret_delete,
             artifacts::artifact_put,
             artifacts::artifact_get,
+            artifacts::artifact_provenance,
             local_model::local_model_status,
             local_model::local_model_generate,
             audio::audio_start,

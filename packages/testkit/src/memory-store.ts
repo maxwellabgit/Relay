@@ -10,7 +10,7 @@ import type {
   RelaySnapshot,
 } from "@relay/contracts";
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
-import { InMemoryLearning } from "@relay/engine";
+import { InMemoryGrantAccount, InMemoryLearning } from "@relay/engine";
 
 type SessionRow = {
   createdAt: string;
@@ -55,6 +55,7 @@ export class MemoryEngineStore implements EngineStore {
   private readonly judgmentAttempts = new Map<string, unknown>();
   private readonly candidateEvents = new Map<string, CandidateEvent>();
   private readonly ambientSuppressions = new Map<string, { reason: string; createdAt: string }>();
+  private readonly grants = new InMemoryGrantAccount();
   private domainSeq = 0;
 
   close(): void {
@@ -387,5 +388,37 @@ export class MemoryEngineStore implements EngineStore {
 
   async isAmbientSuppressed(key: string): Promise<boolean> {
     return this.ambientSuppressions.has(key);
+  }
+
+  saveHostedGrant(grant: Parameters<InMemoryGrantAccount["save"]>[0], at: string): Promise<void> {
+    return this.grants.save(grant, at);
+  }
+
+  revokeHostedGrant(grantId: string, at: string): Promise<void> {
+    return this.grants.revoke(grantId, at);
+  }
+
+  findHostedGrant(grantId: string): ReturnType<InMemoryGrantAccount["findById"]> {
+    return this.grants.findById(grantId);
+  }
+
+  readHostedGrant(scope: Parameters<InMemoryGrantAccount["read"]>[0]): ReturnType<InMemoryGrantAccount["read"]> {
+    return this.grants.read(scope);
+  }
+
+  reserveHostedGrant(input: Parameters<InMemoryGrantAccount["reserve"]>[0]): ReturnType<InMemoryGrantAccount["reserve"]> {
+    return this.grants.reserve(input);
+  }
+
+  commitHostedGrant(reservationId: string): Promise<void> {
+    return this.grants.commit(reservationId);
+  }
+
+  releaseHostedGrant(reservationId: string): Promise<void> {
+    return this.grants.release(reservationId);
+  }
+
+  releaseUncommittedHostedGrants(): Promise<number> {
+    return this.grants.releaseUncommitted();
   }
 }

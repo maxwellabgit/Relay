@@ -42,6 +42,9 @@ function artifacts(): ArtifactStorePort {
       if (!bytes) throw new Error("missing");
       return bytes;
     },
+    async provenance() {
+      return null;
+    },
   };
 }
 

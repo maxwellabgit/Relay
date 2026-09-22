@@ -57,6 +57,26 @@ export function localOnlyPolicy(sensitivity: DataSensitivity = DataSensitivityFl
   return { disclosure: "local_only", sensitivity };
 }
 
+export function hostedSessionPolicy(sensitivity: DataSensitivity = DataSensitivityFlags.None): DataPolicy {
+  return { disclosure: "hosted_session", sensitivity };
+}
+
+/** Immutable record written when an artifact is sealed. Callers cannot loosen it later. */
+export type ArtifactProvenance = {
+  readonly artifactId: string;
+  readonly sha256: string;
+  readonly policy: DataPolicy;
+  readonly derivedFrom: readonly {
+    readonly artifactId: string;
+    readonly sha256: string;
+    readonly disclosure: DisclosureClass;
+  }[];
+};
+
+export function rankDisclosure(disclosure: DisclosureClass): number {
+  return disclosureRank[disclosure];
+}
+
 export function publicPolicy(): DataPolicy {
   return { disclosure: "public", sensitivity: DataSensitivityFlags.None };
 }

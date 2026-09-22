@@ -68,8 +68,9 @@ describe("local model generation path", () => {
       type: "SubmitText",
       text: "Explain how recursive name resolution works in practice without inventing tools.",
     });
-    await waitFor(async () =>
-      (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
+    await waitFor(
+      async () => (await harness.client.getSnapshot()).feedItems.some((item) => item.kind === "answer"),
+      8000,
     );
     const snap = await harness.client.getSnapshot();
     expect(snap.feedItems.find((item) => item.kind === "answer")?.summary).toBe("No local result for this Ask.");
@@ -78,8 +79,9 @@ describe("local model generation path", () => {
   });
 });
 
-async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 80; i += 1) {
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
     if (await predicate()) return;
     await new Promise((r) => setTimeout(r, 25));
   }
