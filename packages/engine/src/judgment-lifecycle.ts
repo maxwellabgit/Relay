@@ -11,6 +11,7 @@ import { localOnlyPolicy } from "@relay/contracts";
 import type { EngineStore } from "./store.js";
 import type { Clock, IdFactory } from "./scheduler.js";
 import { evaluateHostedDisclosure, type DisclosureScope, type DisclosureSource, type DisclosedSource, type HostedJudgmentGrant } from "./disclosure/hosted-grant.js";
+import { claimSemanticRound } from "./disclosure/semantic-rounds.js";
 
 export type JudgmentLifecycleDeps = {
   readonly store: EngineStore;
@@ -260,6 +261,33 @@ export async function runJudgmentLifecycle(
     };
     await deps.store.upsertJudgment(completed);
     return { record: completed, response, providerCalled: false };
+  }
+
+  if (effectiveRequest.caseId) {
+    const claimed = await claimSemanticRound(
+      deps.store,
+      effectiveRequest.caseId,
+      effectiveRequest.questionSetId,
+      deps.clock.now().toISOString(),
+    );
+    if (!claimed.ok) {
+      const response: JudgmentResponse = {
+        ok: false,
+        failure: { category: "not_authorized", message: claimed.reason },
+      };
+      const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
+      const completedAt = deps.clock.now().toISOString();
+      const completed: JudgmentRecord = {
+        ...requested,
+        status: "failed",
+        responseArtifactId: responseArtifact.artifactId,
+        responseHash: responseArtifact.sha256,
+        completedAt,
+        failureCategory: "not_authorized",
+      };
+      await deps.store.upsertJudgment(completed);
+      return { record: completed, response, providerCalled: false };
+    }
   }
 
   if (deps.disclosure) await deps.disclosure.commit(deps.disclosure.sources.reduce((total, source) => total + source.bytes, 0));

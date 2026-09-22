@@ -113,13 +113,21 @@ describe("bounded expansion through RelayClient", () => {
     try {
       await harness.client.start();
       await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
-      await waitFor(async () => (await harness.store.listDeadLetters()).length === 1);
+      await waitFor(async () => {
+        const snap = await harness.client.getSnapshot();
+        return (
+          snap.feedItems.some((item) => item.kind === "wait") &&
+          snap.gate?.reasonCode === "missing_secret" &&
+          (await harness.store.countWorkItems()) === 0
+        );
+      });
       const snap = await harness.client.getSnapshot();
-      const blocked = await harness.store.getCase(snap.cases[0]?.caseId ?? "");
-      expect(snap.feedItems.some((item) => item.kind === "task")).toBe(false);
-      expect(blocked?.status).toBe("blocked");
+      const waiting = await harness.store.getCase(snap.cases[0]?.caseId ?? "");
+      expect(snap.feedItems.some((item) => item.kind === "task" || item.kind === "answer")).toBe(false);
+      expect(waiting?.status).toBe("waiting");
+      expect(waiting?.waitKind).toBe("hosted_judgment");
       expect(snap.gate?.reasonCode).toBe("missing_secret");
-      expect(await harness.store.listDeadLetters()).toHaveLength(1);
+      expect(await harness.store.listDeadLetters()).toHaveLength(0);
       expect(await harness.store.countWorkItems()).toBe(0);
     } finally {
       await harness.client.stop();

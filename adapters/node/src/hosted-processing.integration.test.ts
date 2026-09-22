@@ -122,6 +122,9 @@ describe("hosted processing authority", () => {
       expect(judge).not.toHaveBeenCalled();
       expect((await harness.client.getSnapshot()).jevDisclosure).toBeNull();
 
+      const waiting = await harness.store.listActiveCases();
+      expect(waiting.some((item) => item.status === "waiting" && item.waitKind === "hosted_judgment")).toBe(true);
+
       const granted = await harness.client.execute({
         type: "GrantJevDisclosure",
         ...SESSION_JEV_GRANT_DEFAULTS,
@@ -131,8 +134,10 @@ describe("hosted processing authority", () => {
       expect(active.jevDisclosure?.maxRequests).toBe(SESSION_JEV_GRANT_DEFAULTS.maxRequests);
       const grantId = active.jevDisclosure?.grantId ?? "";
 
-      await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
       await waitFor(async () => judge.mock.calls.length === 1);
+      expect(judge).toHaveBeenCalledTimes(1);
+      await harness.client.execute({ type: "SetHostedProcessing", enabled: true });
+      await new Promise((resolve) => setTimeout(resolve, 100));
       expect(judge).toHaveBeenCalledTimes(1);
 
       const revoked = await harness.client.execute({ type: "RevokeJevDisclosure", grantId });

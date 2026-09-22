@@ -17,7 +17,8 @@ import type { EpisodeDefinition } from "./episodes.js";
 import { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
 import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { AmbientTriage } from "./ambient/AmbientTriage.js";
-import { buildHostedJudgmentGrant, HostedGrantLedger } from "./disclosure/hosted-grant.js";
+import { buildHostedJudgmentGrant, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
+import { listHostedWaits, markHostedWaitResumed } from "./judgments/durable-wait.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
@@ -336,7 +337,9 @@ export class RelayEngine {
       }
       case "SetHostedProcessing": {
         await this.deps.store.setHostedProcessingEnabled(command.enabled);
-        const resumed = command.enabled ? await this.ambient.resumeHostedWaitingCases() : 0;
+        const ambientResumed = command.enabled ? await this.ambient.resumeHostedWaitingCases() : 0;
+        const judgmentResumed = command.enabled ? await this.resumeParkedJudgments() : 0;
+        const resumed = ambientResumed + judgmentResumed;
         await this.projector.emitSnapshot();
         return {
           ok: true,
@@ -367,9 +370,10 @@ export class RelayEngine {
         });
         if (!built.ok) return { ok: false, summary: built.reason, error: built.reason };
         await new HostedGrantLedger(this.deps.store).save(built.grant, now);
-        const resumed = (await this.deps.store.getHostedProcessingEnabled())
-          ? await this.ambient.resumeHostedWaitingCases()
-          : 0;
+        const hostedOn = await this.deps.store.getHostedProcessingEnabled();
+        const ambientResumed = hostedOn ? await this.ambient.resumeHostedWaitingCases() : 0;
+        const judgmentResumed = hostedOn ? await this.resumeParkedJudgments() : 0;
+        const resumed = ambientResumed + judgmentResumed;
         await this.projector.emitSnapshot();
         return {
           ok: true,
@@ -457,6 +461,40 @@ export class RelayEngine {
         return { ok: false, summary: "unsupported_command", error: command.type };
       }
     }
+  }
+
+  private async resumeParkedJudgments(): Promise<number> {
+    if (!(await this.deps.store.getHostedProcessingEnabled())) return 0;
+    const now = this.deps.clock.now().toISOString();
+    const grant = sessionDisclosureView(
+      await new HostedGrantLedger(this.deps.store).read({ kind: "session", id: this.deps.sessionId }),
+      now,
+    );
+    if (!grant) return 0;
+    const waiting = await listHostedWaits(this.deps.store);
+    let resumed = 0;
+    for (const item of waiting) {
+      const current = await this.deps.store.getCase(item.caseId);
+      if (!current || current.status !== "waiting" || current.waitKind !== "hosted_judgment") continue;
+      const updated = await this.deps.store.updateCase(item.caseId, current.version, {
+        status: "active",
+        phase: "judge",
+        waitKind: null,
+        at: now,
+      });
+      if (!updated) continue;
+      await markHostedWaitResumed(this.deps.store, item.caseId, now);
+      await this.scheduler.enqueue(
+        "judgment.requested",
+        { ...item.payload, resumedOnce: true },
+        PRIORITY_DIRECT,
+        this.deps.ids,
+        0,
+        { correlationId: item.caseId },
+      );
+      resumed += 1;
+    }
+    return resumed;
   }
 
   /** Live/mic observation final — requires Listening ON unless this is a direct Ask. */

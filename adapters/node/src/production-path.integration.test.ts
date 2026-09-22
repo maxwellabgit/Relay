@@ -114,7 +114,7 @@ describe("production path", () => {
     }
   });
 
-  it("nonretryable_judgment_terminates", async () => {
+  it("missing_secret_becomes_one_durable_wait", async () => {
     const harness = await createNodeHarness({
       reflexModules: [ambiguous()],
       judgments: {
@@ -126,9 +126,14 @@ describe("production path", () => {
     try {
       await harness.client.start();
       const ask = await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
-      await waitFor(async () => (await harness.store.listDeadLetters()).length === 1);
+      await waitFor(async () => {
+        const current = await harness.store.getCase(ask.caseId ?? "");
+        return current?.waitKind === "hosted_judgment" && (await harness.store.countWorkItems()) === 0;
+      });
       const current = await harness.store.getCase(ask.caseId ?? "");
-      expect(current?.status).toBe("blocked");
+      expect(current?.status).toBe("waiting");
+      expect(current?.waitKind).toBe("hosted_judgment");
+      expect(await harness.store.listDeadLetters()).toHaveLength(0);
       expect(await harness.store.countWorkItems()).toBe(0);
     } finally {
       await harness.client.stop();

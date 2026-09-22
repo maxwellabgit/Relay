@@ -11,6 +11,7 @@ import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
 import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
+import { parkHostedWait } from "./durable-wait.js";
 import { acronymProviderState } from "./acronym-state.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
@@ -159,6 +160,11 @@ export class JudgmentService {
         category === "authentication" ||
         category === "disabled" ||
         category === "not_authorized";
+      const parkable =
+        !retrying &&
+        item.payload.resumedOnce !== true &&
+        outcome.response.failure.message !== "max_semantic_rounds" &&
+        (blocked || isRetryableJudgmentFailure(category));
       await this.deps.outcomes.putReceipt({
         caseId,
         gateId: reflexId,
@@ -172,13 +178,44 @@ export class JudgmentService {
         optionLabels: labelById,
         reflexId,
         judgmentId: outcome.record.judgmentId,
-        result: retrying ? "wait" : blocked ? "blocked" : "fail",
+        result: retrying || parkable ? "wait" : blocked ? "blocked" : "fail",
         reasonCode,
         latencyMs: durationMs,
         retries: attempt - 1,
         requestedAt,
-        completedAt: retrying ? null : completedAt,
+        completedAt: retrying || parkable ? null : completedAt,
       });
+      if (parkable) {
+        const at = this.deps.clock.now().toISOString();
+        const parked = await parkHostedWait(this.deps.store, at, caseId, item.payload);
+        await this.deps.store.updateCase(caseId, current.version, {
+          phase: "judge",
+          status: "waiting",
+          waitKind: "hosted_judgment",
+          at,
+        });
+        if (parked === "parked") {
+          await this.deps.outcomes.publishFeedItem({
+            itemId: feedItemId(caseId, "wait"),
+            kind: "wait",
+            summary: `Jev choice unavailable · ${reasonCode}`,
+            createdAt: at,
+            caseId,
+          });
+        }
+        await this.deps.trace.emit({
+          type: "judgment.failed",
+          stage: "judgment.response",
+          status: "waiting",
+          caseId,
+          reflexId,
+          judgmentId: outcome.record.judgmentId,
+          reasonCode,
+          attempt,
+          durationMs,
+        });
+        return { kind: "complete" };
+      }
       if (retrying) {
         const nextAttemptAt = new Date(this.deps.clock.now().getTime() + backoffMs(attempt)).toISOString();
         await this.deps.store.upsertJudgmentAttempt({

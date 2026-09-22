@@ -39,7 +39,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | Gate | State | What blocks GREEN |
 | --- | --- | --- |
 | G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
-| G1 Live Jev | OPEN | Session grant command landed. Still open: two-round limit, resume-once, live canary |
+| G1 Live Jev | OPEN | Rounds and one-time resume landed. Still open: live canary |
 | G2 Core semantics | OPEN | `App.tsx` testkit import; note/fact/recommendation distinction; bundle purity |
 | G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
 | G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
@@ -83,10 +83,11 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | G1 protocol slice `8a5746b` | Unit 119 and architecture 18 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G1 grant slice `b9e3247` | Unit 123, architecture 18, integration 69 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G1 grant command `33251e5` | Unit 124, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
+| 2026-09-22 | G1 rounds and resume | Unit 126, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
 
 ## Next exact action
 
-Continue G1. A session disclosure grant can be created and revoked from Settings. Do not mark G1 GREEN. Next code is the two-round limit and one-time resume. The live canary stays blocked until those automated tests pass and a human imports the key outside this agent.
+Continue G1 only for the live canary, which stays blocked until a human imports the key outside this agent. Do not mark G1 GREEN. Next code is G2: remove the production testkit import, separate note/fact/recommendation, and prove bundle purity.
 
 ## GREEN rule
 
