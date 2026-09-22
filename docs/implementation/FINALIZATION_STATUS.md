@@ -14,7 +14,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | Historical foundation tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Exact-tip CI (reviewed baseline) | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (`head_sha` = `1862daa…`, verify:v1 only) |
 | Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
-| Active gate | G3 mobile model, speech, diagnostics |
+| Active gate | G4 UI and developer console |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
@@ -26,7 +26,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | F1 V1 contracts + matrix | GREEN | `3473b83195376ce5515efce4947f58355451ea2e` | https://github.com/maxwellabgit/Relay/actions/runs/35737611615 PASS | See `evidence/F1/` |
 | F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Not GREEN: physical relaunch plus G3 stubs |
 | F3 Tiny model + Reflexes | IN PROGRESS | — | Four reviewed modules registered; model tournament not run | Not GREEN: G1 context and G3 device tournament |
-| F4 UI lifecycle quality | CODE LANDED | — | Dev drawer opt-in; safe area, keyboard, list, errors, cancel | Not GREEN: G4 flavor, boot states, device a11y |
+| F4 UI lifecycle quality | CODE LANDED | — | Boot surfaces and internal-channel console gate at `5f83b2f` | Not GREEN: visual, keyboard, screen-reader, device a11y |
 | F5 Observability | CODE LANDED | — | Live summary derived from events; `diagnose:latest --explain`; redacted export | Not GREEN: grant, budget, request id, and retry fields still missing. verify:v1 on `1862daa` does not close this |
 | F6 Product proof tests | BLOCKED | — | — | Not GREEN: twelve headed journeys are not implemented |
 | F7 Privacy / store | BLOCKED | — | — | Awaits F6; human Apple metadata |
@@ -42,7 +42,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | G1 Live Jev | OPEN | Rounds and one-time resume landed. Still open: live canary |
 | G2 Core semantics | OPEN | Semantics and export purity landed at `589598a`. Still open: Windows installer and headed product proof |
 | G3 Mobile model, speech, diagnostics | OPEN | Trace file, share export, and listening fail-closed landed at `80f741b`. Still open: model tournament, real speech, both phones |
-| G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
+| G4 UI and developer console | OPEN | Boot surfaces and internal-channel console gate landed at `5f83b2f`. Still open: visual matrix, keyboard-only Windows, screen reader, screenshot diffs |
 | G5 Production CI lanes | OPEN | Rust, headed, speech, model, and purity lanes are not all green at one SHA |
 | G6 Headed Windows journeys | OPEN | One deterministic journey only; eleven product journeys missing |
 | G7 Windows release rehearsal | OPEN | Human script after G6; not started |
@@ -86,10 +86,11 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | G1 rounds and resume `ba54708` | Unit 126, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G2 semantics and bundle `589598a` | `tsc -b` exit 0. Unit 128, architecture 21, integration 74, replay 2, privacy 5 PASS. Web/iOS/Android exports omit the fixture. Gate remains OPEN |
 | 2026-09-22 | G3 mobile diagnostics `80f741b` | `tsc -b` exit 0. Unit 130, architecture 21, integration 75, replay 2, privacy 5 PASS. Gate remains OPEN |
+| 2026-09-22 | G4 boot and console `5f83b2f` | `tsc -b` exit 0. Unit 136, architecture 21, integration 75, replay 2, privacy 5 PASS. Gate remains OPEN |
 
 ## Next exact action
 
-Do not mark G1 GREEN. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. The Windows installer and headed journeys are still open. Do not mark G3 GREEN. Trace, share export, and listening fail-closed landed at `80f741b`. The on-device model tournament and real speech still need an iPhone 15 Pro Max and a Galaxy S23 Ultra. Next code that can run here is G4 boot and error surfaces, and hiding the developer console by build flavor.
+Do not mark G1 GREEN. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. The Windows installer and headed journeys are still open. Do not mark G3 GREEN. Trace, share export, and listening fail-closed landed at `80f741b`. The on-device model tournament and real speech still need an iPhone 15 Pro Max and a Galaxy S23 Ultra. Do not mark G4 GREEN. Boot surfaces and the internal-channel console gate landed at `5f83b2f`. Visual, keyboard-only, screen-reader, and device proof are still open. Next code that can run here is developer-console filters by run, case, provider, and severity, plus copy-id and export-selection.
 
 ## GREEN rule
 
