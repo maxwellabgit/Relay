@@ -1,6 +1,6 @@
-import type { RelaySnapshot } from "@relay/contracts";
+import { SESSION_JEV_GRANT_DEFAULTS, type RelaySnapshot } from "@relay/contracts";
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme/colors.js";
 
 export type SettingsSheetProps = {
@@ -11,6 +11,8 @@ export type SettingsSheetProps = {
   readonly onSetTypeSafeKey: (value: string) => Promise<void>;
   readonly onDeleteTypeSafeKey: () => Promise<void>;
   readonly onSetHostedProcessing: (enabled: boolean) => void;
+  readonly onGrantJevDisclosure?: () => void;
+  readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth: () => void;
 };
 
@@ -27,6 +29,8 @@ export function SettingsSheet({
   onSetTypeSafeKey,
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
+  onGrantJevDisclosure,
+  onRevokeJevDisclosure,
   onRefreshHealth,
 }: SettingsSheetProps) {
   const [keyDraft, setKeyDraft] = useState("");
@@ -80,6 +84,7 @@ export function SettingsSheet({
               <Text style={styles.closeLabel}>Close</Text>
             </Pressable>
           </View>
+          <ScrollView contentContainerStyle={styles.scroll}>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>TypeSafe key</Text>
@@ -137,6 +142,43 @@ export function SettingsSheet({
           </View>
 
           <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Session disclosure grant</Text>
+            <Text style={styles.meta}>
+              Required before an excerpt is sent. {SESSION_JEV_GRANT_DEFAULTS.maxRequests} requests,{" "}
+              {SESSION_JEV_GRANT_DEFAULTS.maxBytes} bytes, 12 hours.
+            </Text>
+            {snapshot.jevDisclosure ? (
+              <Text style={styles.meta}>
+                Active {snapshot.jevDisclosure.grantId} · {snapshot.jevDisclosure.requestsUsed}/
+                {snapshot.jevDisclosure.maxRequests} requests · {snapshot.jevDisclosure.bytesUsed}/
+                {snapshot.jevDisclosure.maxBytes} bytes · until {snapshot.jevDisclosure.expiresAt}
+              </Text>
+            ) : (
+              <Text style={styles.meta}>No active session grant.</Text>
+            )}
+            <View style={styles.row}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={!onGrantJevDisclosure}
+                onPress={() => onGrantJevDisclosure?.()}
+                style={[styles.btn, styles.btnPrimary]}
+              >
+                <Text style={styles.btnLabel}>Grant this session</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={!snapshot.jevDisclosure || !onRevokeJevDisclosure}
+                onPress={() => {
+                  if (snapshot.jevDisclosure) onRevokeJevDisclosure?.(snapshot.jevDisclosure.grantId);
+                }}
+                style={[styles.btn, styles.btnDanger]}
+              >
+                <Text style={styles.btnLabel}>Revoke</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Local model</Text>
             <Text style={styles.meta}>
               {model.ok ? "Ready" : "Unavailable"} · {model.detail}
@@ -169,6 +211,7 @@ export function SettingsSheet({
           </View>
 
           {message ? <Text style={styles.message}>{message}</Text> : null}
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -192,6 +235,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: 16,
+    gap: 14,
+  },
+  scroll: {
     gap: 14,
   },
   header: {

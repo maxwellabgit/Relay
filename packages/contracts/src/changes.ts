@@ -85,10 +85,24 @@ export type StatusChipState = {
   readonly detail: string;
 };
 
+export type JevDisclosureView = {
+  readonly grantId: string;
+  readonly scopeKind: "session" | "project";
+  readonly scopeId: string;
+  readonly expiresAt: string;
+  readonly requestsUsed: number;
+  readonly maxRequests: number;
+  readonly bytesUsed: number;
+  readonly maxBytes: number;
+  readonly allowedSourceClasses: readonly string[];
+};
+
 export type RelaySnapshot = {
   readonly listening: boolean;
-  /** Application grant for hosted Jev disclosure. Default false. Independent of Listening. */
+  /** Master off switch for hosted Jev. On is not a disclosure grant. */
   readonly hostedProcessingEnabled: boolean;
+  /** Active session grant. Absent when missing, revoked, or expired. */
+  readonly jevDisclosure?: JevDisclosureView | null;
   readonly activeCaseId?: string;
   readonly feedItems: readonly FeedItemSnapshot[];
   readonly approvals: readonly ApprovalSnapshot[];

@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { ArtifactStorePort, DataPolicy } from "@relay/contracts";
 import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import type { EngineStore } from "../store.js";
+import { SESSION_JEV_GRANT_DEFAULTS } from "@relay/contracts";
 import {
+  buildHostedJudgmentGrant,
   evaluateHostedDisclosure,
   hashText,
   HostedGrantLedger,
   recordedHarnessGrant,
+  sessionDisclosureView,
   type DisclosureSource,
   type HostedJudgmentGrant,
 } from "./hosted-grant.js";
@@ -174,6 +177,32 @@ describe("hosted disclosure grant", () => {
     expect(outcome.providerCalled).toBe(false);
     expect(outcome.response.ok).toBe(false);
     if (!outcome.response.ok) expect(outcome.response.failure.message).toBe("disclosure_local_only");
+  });
+
+  it("builds a bounded session grant and hides a revoked one", async () => {
+    const built = buildHostedJudgmentGrant({
+      grantId: "grant_session",
+      scopeKind: "session",
+      scopeId: scope.id,
+      now,
+      ttlMs: SESSION_JEV_GRANT_DEFAULTS.ttlMs,
+      allowedSourceClasses: SESSION_JEV_GRANT_DEFAULTS.allowedSourceClasses,
+      maxRequests: SESSION_JEV_GRANT_DEFAULTS.maxRequests,
+      maxBytes: SESSION_JEV_GRANT_DEFAULTS.maxBytes,
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(sessionDisclosureView({ grant: built.grant, requestsUsed: 0, bytesUsed: 0 }, now)?.grantId).toBe(
+      "grant_session",
+    );
+    expect(buildHostedJudgmentGrant({ ...built.grant, grantId: "x", now, ttlMs: 1, allowedSourceClasses: ["nope"], maxRequests: 1, maxBytes: 1, scopeKind: "session", scopeId: scope.id }).ok).toBe(false);
+    const store = memoryStore();
+    const ledger = new HostedGrantLedger(store);
+    await ledger.save(built.grant, now);
+    await ledger.revoke(built.grant.grantId, now);
+    const found = await ledger.findById(built.grant.grantId);
+    expect(found?.revokedAt).toBe(now);
+    expect(sessionDisclosureView({ grant: found, requestsUsed: 0, bytesUsed: 0 }, now)).toBeNull();
   });
 
   it("tracks revocation and request budget in the ledger", async () => {

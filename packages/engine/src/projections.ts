@@ -5,6 +5,7 @@ import type {
   RelaySnapshot,
   StatusChipState,
 } from "@relay/contracts";
+import { HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
 import type { EngineStore } from "./store.js";
 import { RETENTION_LABEL } from "./learning-store.js";
 
@@ -46,6 +47,7 @@ export async function projectSnapshot(
   sessionId: string,
   status: readonly StatusChipState[],
   artifacts: ArtifactStorePort,
+  now = new Date().toISOString(),
 ): Promise<RelaySnapshot> {
   const [listening, hostedProcessingEnabled, cases, records, sourceSegments, queueDepth, events] =
     await Promise.all([
@@ -58,10 +60,15 @@ export async function projectSnapshot(
       store.listDomainEvents(80),
     ]);
   const feedItems = await hydrateFeedItems(records, artifacts);
+  const disclosure = sessionDisclosureView(
+    await new HostedGrantLedger(store).read({ kind: "session", id: sessionId }),
+    now,
+  );
 
   return {
     listening,
     hostedProcessingEnabled,
+    jevDisclosure: disclosure,
     feedItems,
     approvals: [],
     connections: [],

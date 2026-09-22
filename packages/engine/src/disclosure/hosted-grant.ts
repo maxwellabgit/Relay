@@ -64,6 +64,67 @@ const GRANTED = "jev.disclosure_granted";
 const REVOKED = "jev.disclosure_revoked";
 const CONSUMED = "jev.disclosure_consumed";
 
+export const JEV_GRANT_LIMITS = {
+  minTtlMs: 60_000,
+  maxTtlMs: 24 * 60 * 60 * 1000,
+  minRequests: 1,
+  maxRequests: 50,
+  minBytes: 1,
+  maxBytes: 200_000,
+} as const;
+
+export function buildHostedJudgmentGrant(input: {
+  readonly grantId: string;
+  readonly scopeKind: DisclosureScope["kind"];
+  readonly scopeId: string;
+  readonly now: string;
+  readonly ttlMs: number;
+  readonly allowedSourceClasses: readonly string[];
+  readonly maxRequests: number;
+  readonly maxBytes: number;
+}): { ok: true; grant: HostedJudgmentGrant } | { ok: false; reason: string } {
+  if (!input.scopeId) return { ok: false, reason: "scope_required" };
+  if (!Number.isFinite(Date.parse(input.now))) return { ok: false, reason: "ttl_out_of_range" };
+  if (
+    !Number.isFinite(input.ttlMs) ||
+    input.ttlMs < JEV_GRANT_LIMITS.minTtlMs ||
+    input.ttlMs > JEV_GRANT_LIMITS.maxTtlMs
+  ) {
+    return { ok: false, reason: "ttl_out_of_range" };
+  }
+  if (
+    !Number.isInteger(input.maxRequests) ||
+    input.maxRequests < JEV_GRANT_LIMITS.minRequests ||
+    input.maxRequests > JEV_GRANT_LIMITS.maxRequests ||
+    !Number.isInteger(input.maxBytes) ||
+    input.maxBytes < JEV_GRANT_LIMITS.minBytes ||
+    input.maxBytes > JEV_GRANT_LIMITS.maxBytes
+  ) {
+    return { ok: false, reason: "budget_out_of_range" };
+  }
+  if (input.allowedSourceClasses.length === 0) return { ok: false, reason: "source_class_invalid" };
+  const allowed: SourceClass[] = [];
+  for (const item of input.allowedSourceClasses) {
+    if (!SOURCE_CLASSES.includes(item as SourceClass) || allowed.includes(item as SourceClass)) {
+      return { ok: false, reason: "source_class_invalid" };
+    }
+    allowed.push(item as SourceClass);
+  }
+  return {
+    ok: true,
+    grant: {
+      grantId: input.grantId,
+      scopeKind: input.scopeKind,
+      scopeId: input.scopeId,
+      createdAt: input.now,
+      expiresAt: new Date(Date.parse(input.now) + input.ttlMs).toISOString(),
+      allowedSourceClasses: allowed,
+      maxRequests: input.maxRequests,
+      maxBytes: input.maxBytes,
+    },
+  };
+}
+
 export function recordedHarnessGrant(scopeId: string): HostedJudgmentGrant {
   return {
     grantId: "grant_recorded_harness",
@@ -134,6 +195,25 @@ export class HostedGrantLedger {
     await this.store.appendDomainEvent(CONSUMED, at, { grantId, bytes });
   }
 
+  async findById(grantId: string): Promise<HostedJudgmentGrant | null> {
+    const events = await this.store.listDomainEvents(8000);
+    let saved: HostedJudgmentGrant | null = null;
+    let revokedAt: string | undefined;
+    for (const event of events) {
+      if (event.type === GRANTED) {
+        const parsed = parseGrant(event.payload.grant);
+        if (parsed?.grantId === grantId) {
+          saved = parsed;
+          revokedAt = undefined;
+        }
+      } else if (event.type === REVOKED && event.payload.grantId === grantId) {
+        revokedAt = event.at;
+      }
+    }
+    if (!saved) return null;
+    return revokedAt ? { ...saved, revokedAt } : saved;
+  }
+
   async read(scope: DisclosureScope): Promise<{
     grant: HostedJudgmentGrant | null;
     requestsUsed: number;
@@ -200,6 +280,36 @@ export async function loadDisclosureGate(
     commit: async (bytes: number) => {
       if (read.grant) await ledger.consume(read.grant.grantId, bytes, now);
     },
+  };
+}
+
+export function sessionDisclosureView(
+  read: { grant: HostedJudgmentGrant | null; requestsUsed: number; bytesUsed: number },
+  now: string,
+): {
+  readonly grantId: string;
+  readonly scopeKind: DisclosureScope["kind"];
+  readonly scopeId: string;
+  readonly expiresAt: string;
+  readonly requestsUsed: number;
+  readonly maxRequests: number;
+  readonly bytesUsed: number;
+  readonly maxBytes: number;
+  readonly allowedSourceClasses: readonly SourceClass[];
+} | null {
+  const grant = read.grant;
+  if (!grant || grant.revokedAt) return null;
+  if (Date.parse(now) >= Date.parse(grant.expiresAt)) return null;
+  return {
+    grantId: grant.grantId,
+    scopeKind: grant.scopeKind,
+    scopeId: grant.scopeId,
+    expiresAt: grant.expiresAt,
+    requestsUsed: read.requestsUsed,
+    maxRequests: grant.maxRequests,
+    bytesUsed: read.bytesUsed,
+    maxBytes: grant.maxBytes,
+    allowedSourceClasses: grant.allowedSourceClasses,
   };
 }
 

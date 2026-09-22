@@ -28,6 +28,7 @@ export type SnapshotProjectorDeps = {
   readonly getActiveEpisodeId: () => string | null;
   readonly runId: () => string;
   readonly emit: (change: RelayChange) => void;
+  readonly now?: () => string;
 };
 
 export class SnapshotProjector {
@@ -62,6 +63,7 @@ export class SnapshotProjector {
       this.deps.sessionId,
       this.statusChips(),
       this.deps.artifacts,
+      this.deps.now?.() ?? new Date().toISOString(),
     );
     const deadLetters = (await this.deps.store.listDeadLetters()).length;
     const caseStatusById = new Map(

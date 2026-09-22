@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { AppState } from "react-native";
-import type { ActionCard, RelayClient, RelayCommand, RelaySnapshot } from "@relay/contracts";
+import {
+  SESSION_JEV_GRANT_DEFAULTS,
+  type ActionCard,
+  type RelayClient,
+  type RelayCommand,
+  type RelaySnapshot,
+} from "@relay/contracts";
 import { ACRONYM_BASIC_EVENTS } from "@relay/testkit/browser";
 import { RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
@@ -158,6 +164,12 @@ export function App() {
         }}
         onSetHostedProcessing={(enabled) => {
           void runCommand({ type: "SetHostedProcessing", enabled });
+        }}
+        onGrantJevDisclosure={() => {
+          void runCommand({ type: "GrantJevDisclosure", ...SESSION_JEV_GRANT_DEFAULTS });
+        }}
+        onRevokeJevDisclosure={(grantId) => {
+          void runCommand({ type: "RevokeJevDisclosure", grantId });
         }}
         onRefreshHealth={() => {
           void runCommand({ type: "RefreshProviderHealth" }).then(async () => {

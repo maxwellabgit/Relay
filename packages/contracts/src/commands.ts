@@ -16,6 +16,35 @@ export type SetHostedProcessingCommand = {
   readonly enabled: boolean;
 };
 
+/** Defaults for the settings control that grants the current session. */
+export const SESSION_JEV_GRANT_DEFAULTS = {
+  scopeKind: "session",
+  ttlMs: 12 * 60 * 60 * 1000,
+  allowedSourceClasses: [
+    "conversation_excerpt",
+    "ambient_transcript",
+    "claim_excerpt",
+    "pattern_count",
+  ],
+  maxRequests: 20,
+  maxBytes: 80_000,
+} as const;
+
+export type GrantJevDisclosureCommand = {
+  readonly type: "GrantJevDisclosure";
+  readonly scopeKind: "session" | "project";
+  readonly scopeId?: string;
+  readonly ttlMs: number;
+  readonly allowedSourceClasses: readonly string[];
+  readonly maxRequests: number;
+  readonly maxBytes: number;
+};
+
+export type RevokeJevDisclosureCommand = {
+  readonly type: "RevokeJevDisclosure";
+  readonly grantId: string;
+};
+
 export type RefreshProviderHealthCommand = {
   readonly type: "RefreshProviderHealth";
 };
@@ -215,6 +244,8 @@ export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
   | SetHostedProcessingCommand
+  | GrantJevDisclosureCommand
+  | RevokeJevDisclosureCommand
   | RefreshProviderHealthCommand
   | UpsertGlossaryEntryCommand
   | CaptureBirthdayCommand

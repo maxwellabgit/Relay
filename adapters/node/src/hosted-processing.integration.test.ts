@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { JudgmentPort } from "@relay/contracts";
+import { SESSION_JEV_GRANT_DEFAULTS, type JudgmentPort } from "@relay/contracts";
 import { createResolveAcronymModule } from "@relay/reflexes";
 import { recordedSuccess } from "@relay/testkit";
 import { createNodeHarness } from "./create-client.js";
@@ -88,6 +88,63 @@ describe("hosted processing authority", () => {
       const snap = await harness.client.getSnapshot();
       expect(snap.hostedProcessingEnabled).toBe(true);
       expect(snap.listening).toBe(false);
+    } finally {
+      await harness.client.stop();
+      harness.close();
+    }
+  });
+
+  it("refuses Jev until a session disclosure grant exists, then stops after revoke", async () => {
+    const judge = vi.fn(async () =>
+      recordedSuccess({
+        expansion: {
+          type: "choice",
+          choice: "Battery Energy Storage",
+          probabilities: { "Battery Energy Storage": 0.9, Bessemer: 0.05, no_match: 0.05 },
+          confidence: 0.9,
+        },
+        useful: { type: "noul", probabilityYes: 0.8 },
+      }),
+    );
+    const harness = await createNodeHarness({
+      judgments: { judge },
+      reflexModules: [ambiguous()],
+      seedDisclosureGrant: false,
+    });
+    await harness.client.start();
+    try {
+      await harness.client.execute({ type: "SetHostedProcessing", enabled: true });
+      await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
+      await waitFor(async () => {
+        const snap = await harness.client.getSnapshot();
+        return snap.feedItems.some((item) => item.kind === "wait");
+      });
+      expect(judge).not.toHaveBeenCalled();
+      expect((await harness.client.getSnapshot()).jevDisclosure).toBeNull();
+
+      const granted = await harness.client.execute({
+        type: "GrantJevDisclosure",
+        ...SESSION_JEV_GRANT_DEFAULTS,
+      });
+      expect(granted.ok).toBe(true);
+      const active = await harness.client.getSnapshot();
+      expect(active.jevDisclosure?.maxRequests).toBe(SESSION_JEV_GRANT_DEFAULTS.maxRequests);
+      const grantId = active.jevDisclosure?.grantId ?? "";
+
+      await harness.client.execute({ type: "SubmitText", text: "What does BESS mean?" });
+      await waitFor(async () => judge.mock.calls.length === 1);
+      expect(judge).toHaveBeenCalledTimes(1);
+
+      const revoked = await harness.client.execute({ type: "RevokeJevDisclosure", grantId });
+      expect(revoked.ok).toBe(true);
+      expect((await harness.client.getSnapshot()).jevDisclosure).toBeNull();
+
+      await harness.client.execute({ type: "SubmitText", text: "What does BESS mean in this project?" });
+      await waitFor(async () => {
+        const snap = await harness.client.getSnapshot();
+        return snap.feedItems.filter((item) => item.kind === "wait").length >= 2;
+      });
+      expect(judge).toHaveBeenCalledTimes(1);
     } finally {
       await harness.client.stop();
       harness.close();

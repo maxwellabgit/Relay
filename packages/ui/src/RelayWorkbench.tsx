@@ -32,6 +32,8 @@ export type RelayWorkbenchProps = {
   readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
+  readonly onGrantJevDisclosure?: () => void;
+  readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
   readonly busy?: boolean;
   readonly notice?: string | null;
@@ -66,6 +68,8 @@ export function RelayWorkbench({
   onSetTypeSafeKey,
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
+  onGrantJevDisclosure,
+  onRevokeJevDisclosure,
   onRefreshHealth,
   busy = false,
   notice = null,
@@ -99,6 +103,8 @@ export function RelayWorkbench({
       {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
       {...(onDeleteTypeSafeKey !== undefined ? { onDeleteTypeSafeKey } : {})}
       {...(onSetHostedProcessing !== undefined ? { onSetHostedProcessing } : {})}
+      {...(onGrantJevDisclosure !== undefined ? { onGrantJevDisclosure } : {})}
+      {...(onRevokeJevDisclosure !== undefined ? { onRevokeJevDisclosure } : {})}
       {...(onRefreshHealth !== undefined ? { onRefreshHealth } : {})}
       busy={busy}
       notice={notice}

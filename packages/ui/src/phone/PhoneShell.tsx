@@ -34,6 +34,8 @@ type Props = {
   readonly onSetTypeSafeKey?: (value: string) => Promise<void>;
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
+  readonly onGrantJevDisclosure?: () => void;
+  readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
   readonly busy?: boolean;
   readonly notice?: string | null;
@@ -58,6 +60,8 @@ export function PhoneShell({
   onSetTypeSafeKey,
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
+  onGrantJevDisclosure,
+  onRevokeJevDisclosure,
   onRefreshHealth,
   busy = false,
   notice = null,
@@ -267,6 +271,8 @@ export function PhoneShell({
           await onDeleteTypeSafeKey();
         }}
         onSetHostedProcessing={(enabled) => onSetHostedProcessing?.(enabled)}
+        {...(onGrantJevDisclosure ? { onGrantJevDisclosure } : {})}
+        {...(onRevokeJevDisclosure ? { onRevokeJevDisclosure } : {})}
         onRefreshHealth={() => onRefreshHealth?.()}
       />
       <LibrarySheet

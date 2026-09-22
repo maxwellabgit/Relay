@@ -17,6 +17,7 @@ import type { EpisodeDefinition } from "./episodes.js";
 import { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
 import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { AmbientTriage } from "./ambient/AmbientTriage.js";
+import { buildHostedJudgmentGrant, HostedGrantLedger } from "./disclosure/hosted-grant.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
@@ -277,6 +278,7 @@ export class RelayEngine {
       ...(deps.audioStatus ? { audioStatus: deps.audioStatus } : {}),
       ...(deps.mode ? { mode: deps.mode } : {}),
       ...(deps.gitCommit ? { gitCommit: deps.gitCommit } : {}),
+      now: () => deps.clock.now().toISOString(),
       getRunning: () => this.running,
       getActiveCaseId: () => this.activeCaseId,
       getActiveEpisodeId: () => this.activeEpisodeId,
@@ -344,6 +346,45 @@ export class RelayEngine {
               : "hosted_processing_on"
             : "hosted_processing_off",
         };
+      }
+      case "GrantJevDisclosure": {
+        if (command.scopeKind === "project" && !command.scopeId) {
+          return { ok: false, summary: "scope_required", error: "scope_required" };
+        }
+        if (command.scopeKind === "session" && command.scopeId && command.scopeId !== this.deps.sessionId) {
+          return { ok: false, summary: "wrong_scope", error: "wrong_scope" };
+        }
+        const now = this.deps.clock.now().toISOString();
+        const built = buildHostedJudgmentGrant({
+          grantId: this.deps.ids.next("grant"),
+          scopeKind: command.scopeKind,
+          scopeId: command.scopeKind === "session" ? this.deps.sessionId : command.scopeId ?? "",
+          now,
+          ttlMs: command.ttlMs,
+          allowedSourceClasses: command.allowedSourceClasses,
+          maxRequests: command.maxRequests,
+          maxBytes: command.maxBytes,
+        });
+        if (!built.ok) return { ok: false, summary: built.reason, error: built.reason };
+        await new HostedGrantLedger(this.deps.store).save(built.grant, now);
+        const resumed = (await this.deps.store.getHostedProcessingEnabled())
+          ? await this.ambient.resumeHostedWaitingCases()
+          : 0;
+        await this.projector.emitSnapshot();
+        return {
+          ok: true,
+          summary: resumed > 0 ? `jev_disclosure_granted_resumed_${resumed}` : "jev_disclosure_granted",
+        };
+      }
+      case "RevokeJevDisclosure": {
+        const ledger = new HostedGrantLedger(this.deps.store);
+        const existing = await ledger.findById(command.grantId);
+        if (!existing) return { ok: false, summary: "grant_missing", error: "grant_missing" };
+        if (existing.revokedAt) return { ok: false, summary: "already_revoked", error: "already_revoked" };
+        const now = this.deps.clock.now().toISOString();
+        await ledger.revoke(command.grantId, now);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: "jev_disclosure_revoked" };
       }
       case "RefreshProviderHealth": {
         await this.projector.emitSnapshot();

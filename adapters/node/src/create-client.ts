@@ -31,6 +31,8 @@ export type NodeHarnessOptions = {
   readonly reflexModules?: EngineDeps["reflexModules"];
   readonly episodeDefinitions?: EngineDeps["episodeDefinitions"];
   readonly durableDecisionArtifacts?: boolean;
+  /** Recorded harnesses seed a session grant. Production callers leave this unset. */
+  readonly seedDisclosureGrant?: boolean;
 };
 
 export async function createNodeHarness(options: NodeHarnessOptions = {}) {
@@ -109,10 +111,12 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   // Recorded harnesses exercise Jev paths with an explicit session grant.
   // Production desktop defaults to OFF. The boolean alone does not authorize disclosure.
   await sqlite.setHostedProcessingEnabled(true);
-  await new HostedGrantLedger(store).save(
-    recordedHarnessGrant(options.sessionId ?? "session_test"),
-    clock.now().toISOString(),
-  );
+  if (options.seedDisclosureGrant !== false) {
+    await new HostedGrantLedger(store).save(
+      recordedHarnessGrant(options.sessionId ?? "session_test"),
+      clock.now().toISOString(),
+    );
+  }
 
   // Bind sqlite transaction boundary onto the invoke-backed store facade.
   store.runInTransaction = <T>(work: () => Promise<T>) => sqlite.runInTransaction(work);
