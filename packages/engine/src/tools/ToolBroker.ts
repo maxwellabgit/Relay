@@ -538,6 +538,7 @@ export class ToolBroker {
         caseId,
         judgmentId: outcome.record.judgmentId,
         ...(outcome.disclosureGrantId ? { disclosureGrantId: outcome.disclosureGrantId } : {}),
+        ...(outcome.budget ?? {}),
         ...(outcome.response.failure.providerRequestId
           ? { providerRequestId: outcome.response.failure.providerRequestId }
           : {}),
@@ -595,6 +596,7 @@ export class ToolBroker {
       caseId,
       judgmentId: outcome.record.judgmentId,
       ...(outcome.disclosureGrantId ? { disclosureGrantId: outcome.disclosureGrantId } : {}),
+      ...(outcome.budget ?? {}),
       ...(outcome.response.success.providerRequestId
         ? { providerRequestId: outcome.response.success.providerRequestId }
         : {}),

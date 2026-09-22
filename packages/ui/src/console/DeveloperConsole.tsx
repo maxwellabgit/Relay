@@ -475,6 +475,16 @@ function formatJudgmentAttempt(attempt: DecisionAttemptView): string {
     attempt.retryDelayMs != null ? `retry ${Math.round(attempt.retryDelayMs)} ms` : null,
     attempt.providerRequestId ? `request ${attempt.providerRequestId}` : "request omitted",
     attempt.disclosureGrantId ? `grant ${attempt.disclosureGrantId}` : null,
+    attempt.grantScopeKind ? `scope ${attempt.grantScopeKind}` : null,
+    attempt.grantExpiresAt ? `until ${attempt.grantExpiresAt}` : null,
+    attempt.grantRequestsBefore != null && attempt.grantRequestsAfter != null
+      ? `requests ${attempt.grantRequestsBefore} to ${attempt.grantRequestsAfter} of ${attempt.grantMaxRequests ?? "—"}`
+      : null,
+    attempt.grantBytesBefore != null && attempt.grantBytesAfter != null
+      ? `bytes ${attempt.grantBytesBefore} to ${attempt.grantBytesAfter} of ${attempt.grantMaxBytes ?? "—"}`
+      : null,
+    attempt.disclosedSourceCount != null ? `sources ${attempt.disclosedSourceCount}` : null,
+    attempt.disclosedBytes != null ? `disclosed ${attempt.disclosedBytes} bytes` : null,
   ];
   return parts.filter((part) => part != null).join(" · ");
 }

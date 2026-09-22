@@ -1,6 +1,6 @@
 import type { JudgmentRequest } from "@relay/contracts";
 import { isRetryableJudgmentFailure } from "@relay/contracts";
-import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
+import { runJudgmentLifecycle, type JudgmentBudgetEvidence } from "../judgment-lifecycle.js";
 import { workSignature } from "../learning-store.js";
 import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import { JUDGMENT_MAX_ATTEMPTS, backoffMs, knownReason } from "../runtime-events.js";
@@ -48,13 +48,14 @@ function providerRequestIdFrom(response: JudgmentResponse): string | null {
 function judgmentEvidence(
   response: JudgmentResponse,
   disclosureGrantId: string | null | undefined,
+  budget: JudgmentBudgetEvidence | null | undefined,
   retryDelayMs?: number,
 ): {
   providerRequestId?: string;
   httpStatus?: number;
   disclosureGrantId?: string;
   retryDelayMs?: number;
-} {
+} & Partial<JudgmentBudgetEvidence> {
   const providerRequestId = providerRequestIdFrom(response);
   const httpStatus = response.ok ? undefined : response.failure.httpStatus;
   return {
@@ -62,6 +63,7 @@ function judgmentEvidence(
     ...(httpStatus != null ? { httpStatus } : {}),
     ...(disclosureGrantId ? { disclosureGrantId } : {}),
     ...(retryDelayMs != null ? { retryDelayMs } : {}),
+    ...(budget ?? {}),
   };
 }
 
@@ -233,7 +235,7 @@ export class JudgmentService {
           reasonCode,
           attempt,
           durationMs,
-          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
+          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, outcome.budget),
         });
         return { kind: "complete" };
       }
@@ -260,7 +262,7 @@ export class JudgmentService {
           reasonCode,
           attempt,
           durationMs,
-          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, backoffMs(attempt)),
+          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, outcome.budget, backoffMs(attempt)),
         });
         return {
           kind: "retry",
@@ -288,7 +290,7 @@ export class JudgmentService {
         reasonCode,
         attempt,
         durationMs,
-        ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
+        ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, outcome.budget),
       });
       return { kind: "dead", reasonCode };
     }
@@ -361,7 +363,7 @@ export class JudgmentService {
       reasonCode,
       durationMs,
       attempt,
-      ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
+      ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, outcome.budget),
     });
     if (pass && label) {
       const token = String(item.payload.token ?? "");

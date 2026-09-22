@@ -232,6 +232,16 @@ function buildAttempts(events: readonly RuntimeEventV2[]): DecisionAttemptView[]
       httpStatus: event.httpStatus ?? null,
       disclosureGrantId: event.disclosureGrantId ?? null,
       retryDelayMs: event.retryDelayMs ?? null,
+      grantScopeKind: event.grantScopeKind ?? null,
+      grantExpiresAt: event.grantExpiresAt ?? null,
+      grantRequestsBefore: event.grantRequestsBefore ?? null,
+      grantRequestsAfter: event.grantRequestsAfter ?? null,
+      grantBytesBefore: event.grantBytesBefore ?? null,
+      grantBytesAfter: event.grantBytesAfter ?? null,
+      grantMaxRequests: event.grantMaxRequests ?? null,
+      grantMaxBytes: event.grantMaxBytes ?? null,
+      disclosedSourceCount: event.disclosedSourceCount ?? null,
+      disclosedBytes: event.disclosedBytes ?? null,
     });
   }
   return attempts;

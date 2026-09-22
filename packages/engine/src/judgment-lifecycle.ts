@@ -137,6 +137,42 @@ function safeResponseArtifact(response: JudgmentResponse): Uint8Array {
  * Persist request → dispatch → persist response → return.
  * Artifacts store only allowlisted fields (no instruction prose).
  */
+export type JudgmentBudgetEvidence = {
+  readonly grantScopeKind: "session" | "project";
+  readonly grantExpiresAt: string;
+  readonly grantRequestsBefore: number;
+  readonly grantRequestsAfter: number;
+  readonly grantBytesBefore: number;
+  readonly grantBytesAfter: number;
+  readonly grantMaxRequests: number;
+  readonly grantMaxBytes: number;
+  readonly disclosedSourceCount: number;
+  readonly disclosedBytes: number;
+};
+
+function budgetEvidence(
+  disclosure: JudgmentLifecycleDeps["disclosure"],
+  disclosedSourceCount: number,
+  disclosedBytes: number,
+  consumed: boolean,
+): JudgmentBudgetEvidence | null {
+  const grant = disclosure?.grant;
+  if (!disclosure || !grant) return null;
+  if (grant.scopeKind !== "session" && grant.scopeKind !== "project") return null;
+  return {
+    grantScopeKind: grant.scopeKind,
+    grantExpiresAt: grant.expiresAt,
+    grantRequestsBefore: disclosure.requestsUsed,
+    grantRequestsAfter: disclosure.requestsUsed + (consumed ? 1 : 0),
+    grantBytesBefore: disclosure.bytesUsed,
+    grantBytesAfter: disclosure.bytesUsed + (consumed ? disclosedBytes : 0),
+    grantMaxRequests: grant.maxRequests,
+    grantMaxBytes: grant.maxBytes,
+    disclosedSourceCount,
+    disclosedBytes: consumed ? disclosedBytes : 0,
+  };
+}
+
 export async function runJudgmentLifecycle(
   deps: JudgmentLifecycleDeps,
   request: JudgmentRequest,
@@ -146,9 +182,12 @@ export async function runJudgmentLifecycle(
   response: JudgmentResponse;
   providerCalled: boolean;
   disclosureGrantId: string | null;
+  budget: JudgmentBudgetEvidence | null;
 }> {
   let effectiveRequest = request;
   let disclosureFailure: JudgmentFailure | null = null;
+  let disclosedSourceCount = 0;
+  let disclosedBytes = 0;
   if (deps.disclosure) {
     const decision = evaluateHostedDisclosure({
       grant: deps.disclosure.grant,
@@ -165,6 +204,8 @@ export async function runJudgmentLifecycle(
         message: `disclosure_${decision.reason}`,
       };
     } else {
+      disclosedSourceCount = decision.disclosed.length;
+      disclosedBytes = decision.bytes;
       effectiveRequest = {
         ...request,
         state: decision.state,
@@ -174,6 +215,7 @@ export async function runJudgmentLifecycle(
     }
   }
   const disclosureGrantId = effectiveRequest.disclosureGrantId ?? null;
+  const untouchedBudget = () => budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, false);
   const requestHash = effectiveRequest.requestHash ?? (await canonicalizeRequestHash(effectiveRequest));
   const cached = disclosureFailure ? null : await deps.store.findCompletedJudgmentByHash(requestHash);
   if (cached?.responseArtifactId) {
@@ -203,7 +245,7 @@ export async function runJudgmentLifecycle(
             elapsedMs: Number(stored.elapsedMs ?? 0),
           },
         };
-        return { record: cached, response, providerCalled: false, disclosureGrantId };
+        return { record: cached, response, providerCalled: false, disclosureGrantId, budget: untouchedBudget() };
       }
     } catch {
       // Fall through to a fresh provider call when the safe artifact cannot be read.
@@ -266,7 +308,7 @@ export async function runJudgmentLifecycle(
         gateFailure.category === "not_authorized" ? "not_authorized" : "hosted_processing_disabled",
     };
     await deps.store.upsertJudgment(completed);
-    return { record: completed, response, providerCalled: false, disclosureGrantId };
+    return { record: completed, response, providerCalled: false, disclosureGrantId, budget: untouchedBudget() };
   }
 
   if (effectiveRequest.caseId) {
@@ -292,11 +334,11 @@ export async function runJudgmentLifecycle(
         failureCategory: "not_authorized",
       };
       await deps.store.upsertJudgment(completed);
-      return { record: completed, response, providerCalled: false, disclosureGrantId };
+      return { record: completed, response, providerCalled: false, disclosureGrantId, budget: untouchedBudget() };
     }
   }
 
-  if (deps.disclosure) await deps.disclosure.commit(deps.disclosure.sources.reduce((total, source) => total + source.bytes, 0));
+  if (deps.disclosure) await deps.disclosure.commit(disclosedBytes);
   const response = await deps.judgments.judge({ ...effectiveRequest, requestHash }, signal);
 
   const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
@@ -316,5 +358,11 @@ export async function runJudgmentLifecycle(
       : { failureCategory: response.failure.category }),
   };
   await deps.store.upsertJudgment(completed);
-  return { record: completed, response, providerCalled: true, disclosureGrantId };
+  return {
+    record: completed,
+    response,
+    providerCalled: true,
+    disclosureGrantId,
+    budget: budgetEvidence(deps.disclosure, disclosedSourceCount, disclosedBytes, true),
+  };
 }

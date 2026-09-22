@@ -167,6 +167,16 @@ export type RuntimeEventV2 = {
   readonly httpStatus?: number;
   readonly disclosureGrantId?: string;
   readonly retryDelayMs?: number;
+  readonly grantScopeKind?: "session" | "project";
+  readonly grantExpiresAt?: string;
+  readonly grantRequestsBefore?: number;
+  readonly grantRequestsAfter?: number;
+  readonly grantBytesBefore?: number;
+  readonly grantBytesAfter?: number;
+  readonly grantMaxRequests?: number;
+  readonly grantMaxBytes?: number;
+  readonly disclosedSourceCount?: number;
+  readonly disclosedBytes?: number;
 };
 
 const ALLOWED = new Set([
@@ -196,6 +206,16 @@ const ALLOWED = new Set([
   "httpStatus",
   "disclosureGrantId",
   "retryDelayMs",
+  "grantScopeKind",
+  "grantExpiresAt",
+  "grantRequestsBefore",
+  "grantRequestsAfter",
+  "grantBytesBefore",
+  "grantBytesAfter",
+  "grantMaxRequests",
+  "grantMaxBytes",
+  "disclosedSourceCount",
+  "disclosedBytes",
 ]);
 
 export function isRuntimeEvent(value: unknown): value is RuntimeEventV2 {
@@ -229,6 +249,20 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEventV2 {
     return false;
   }
   if (row.retryDelayMs != null && !isCount(row.retryDelayMs)) return false;
+  if (row.grantScopeKind != null && row.grantScopeKind !== "session" && row.grantScopeKind !== "project") return false;
+  if (row.grantExpiresAt != null && !isIso(row.grantExpiresAt)) return false;
+  for (const field of [
+    "grantRequestsBefore",
+    "grantRequestsAfter",
+    "grantBytesBefore",
+    "grantBytesAfter",
+    "grantMaxRequests",
+    "grantMaxBytes",
+    "disclosedSourceCount",
+    "disclosedBytes",
+  ]) {
+    if (row[field] != null && !isCount(row[field])) return false;
+  }
   return true;
 }
 
@@ -237,6 +271,14 @@ function isIso(value: unknown): value is string {
 }
 
 /** Provider ids are shown as returned. Prose and secrets are rejected. */
+export function boundedCount(value: number | null | undefined): number | null {
+  return value != null && isCount(value) ? value : null;
+}
+
+export function boundedGrantScope(value: string | null | undefined): "session" | "project" | null {
+  return value === "session" || value === "project" ? value : null;
+}
+
 export function boundedProviderRequestId(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();

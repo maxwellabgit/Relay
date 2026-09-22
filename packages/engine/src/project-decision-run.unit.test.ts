@@ -148,6 +148,16 @@ describe("projectDecisionRun", () => {
           retryDelayMs: 400,
           providerRequestId: "req_429",
           disclosureGrantId: "grant_session",
+          grantScopeKind: "session",
+          grantExpiresAt: "2099-01-01T00:00:00.000Z",
+          grantRequestsBefore: 1,
+          grantRequestsAfter: 2,
+          grantBytesBefore: 40,
+          grantBytesAfter: 80,
+          grantMaxRequests: 20,
+          grantMaxBytes: 80000,
+          disclosedSourceCount: 1,
+          disclosedBytes: 40,
         }),
       ],
       activeCaseId: "case_evidence",
@@ -164,6 +174,16 @@ describe("projectDecisionRun", () => {
         httpStatus: 429,
         disclosureGrantId: "grant_session",
         retryDelayMs: 400,
+        grantScopeKind: "session",
+        grantExpiresAt: "2099-01-01T00:00:00.000Z",
+        grantRequestsBefore: 1,
+        grantRequestsAfter: 2,
+        grantBytesBefore: 40,
+        grantBytesAfter: 80,
+        grantMaxRequests: 20,
+        grantMaxBytes: 80000,
+        disclosedSourceCount: 1,
+        disclosedBytes: 40,
       },
     ]);
     expect(boundedProviderRequestId("req_ok")).toBe("req_ok");
@@ -181,8 +201,23 @@ describe("projectDecisionRun", () => {
         httpStatus: 429,
         disclosureGrantId: "grant_session",
         retryDelayMs: 250,
+        grantScopeKind: "session",
+        grantExpiresAt: "2099-01-01T00:00:00.000Z",
+        grantRequestsBefore: 0,
+        grantRequestsAfter: 1,
       }),
     ).toBe(true);
+    const badScope: unknown = {
+      schemaVersion: 2,
+      sequence: 1,
+      runId: "run_test",
+      at: "2024-01-01T00:00:00.000Z",
+      eventType: "judgment.failed",
+      stage: "judgment.response",
+      status: "waiting",
+      grantScopeKind: "workspace",
+    };
+    expect(isRuntimeEvent(badScope)).toBe(false);
   });
 
   it("reports elapsedMs from requested/completed only", () => {

@@ -1,7 +1,30 @@
 import type { RuntimeEventV2 } from "./runtime-events.js";
-import { boundedProviderRequestId, knownReason } from "./runtime-events.js";
+import { boundedCount, boundedGrantScope, boundedProviderRequestId, knownReason } from "./runtime-events.js";
 import type { EngineStore } from "./store.js";
 import type { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
+
+function budgetEmit(partial: TraceEmitInput): Partial<RuntimeEventV2> {
+  const scope = boundedGrantScope(partial.grantScopeKind);
+  const counts = {
+    grantRequestsBefore: boundedCount(partial.grantRequestsBefore),
+    grantRequestsAfter: boundedCount(partial.grantRequestsAfter),
+    grantBytesBefore: boundedCount(partial.grantBytesBefore),
+    grantBytesAfter: boundedCount(partial.grantBytesAfter),
+    grantMaxRequests: boundedCount(partial.grantMaxRequests),
+    grantMaxBytes: boundedCount(partial.grantMaxBytes),
+    disclosedSourceCount: boundedCount(partial.disclosedSourceCount),
+    disclosedBytes: boundedCount(partial.disclosedBytes),
+  };
+  const expiry =
+    partial.grantExpiresAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(partial.grantExpiresAt)
+      ? partial.grantExpiresAt
+      : null;
+  return {
+    ...(scope ? { grantScopeKind: scope } : {}),
+    ...(expiry ? { grantExpiresAt: expiry } : {}),
+    ...Object.fromEntries(Object.entries(counts).filter((entry) => entry[1] != null)),
+  };
+}
 
 export function encodeText(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -70,6 +93,16 @@ export type TraceEmitInput = {
   httpStatus?: number;
   disclosureGrantId?: string;
   retryDelayMs?: number;
+  grantScopeKind?: "session" | "project";
+  grantExpiresAt?: string;
+  grantRequestsBefore?: number;
+  grantRequestsAfter?: number;
+  grantBytesBefore?: number;
+  grantBytesAfter?: number;
+  grantMaxRequests?: number;
+  grantMaxBytes?: number;
+  disclosedSourceCount?: number;
+  disclosedBytes?: number;
 };
 
 /** Engine-facing trace API backed by RuntimeRecorder. */
@@ -113,6 +146,7 @@ export class EngineTrace {
       ...(httpStatus != null ? { httpStatus } : {}),
       ...(partial.disclosureGrantId ? { disclosureGrantId: partial.disclosureGrantId } : {}),
       ...(partial.retryDelayMs != null ? { retryDelayMs: partial.retryDelayMs } : {}),
+      ...budgetEmit(partial),
       queueDepth: await this.store.countWorkItems(),
     });
   }

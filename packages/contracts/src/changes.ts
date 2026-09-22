@@ -202,6 +202,16 @@ export type DecisionAttemptView = {
   readonly httpStatus?: number | null;
   readonly disclosureGrantId?: string | null;
   readonly retryDelayMs?: number | null;
+  readonly grantScopeKind?: "session" | "project" | null;
+  readonly grantExpiresAt?: string | null;
+  readonly grantRequestsBefore?: number | null;
+  readonly grantRequestsAfter?: number | null;
+  readonly grantBytesBefore?: number | null;
+  readonly grantBytesAfter?: number | null;
+  readonly grantMaxRequests?: number | null;
+  readonly grantMaxBytes?: number | null;
+  readonly disclosedSourceCount?: number | null;
+  readonly disclosedBytes?: number | null;
 };
 
 export type DecisionRunView = {
@@ -319,6 +329,16 @@ export type TraceRow = {
   readonly httpStatus?: number | null;
   readonly disclosureGrantId?: string | null;
   readonly retryDelayMs?: number | null;
+  readonly grantScopeKind?: "session" | "project" | null;
+  readonly grantExpiresAt?: string | null;
+  readonly grantRequestsBefore?: number | null;
+  readonly grantRequestsAfter?: number | null;
+  readonly grantBytesBefore?: number | null;
+  readonly grantBytesAfter?: number | null;
+  readonly grantMaxRequests?: number | null;
+  readonly grantMaxBytes?: number | null;
+  readonly disclosedSourceCount?: number | null;
+  readonly disclosedBytes?: number | null;
 };
 
 export type ActionCard = {

@@ -58,6 +58,16 @@ export class RuntimeRecorder {
     httpStatus?: number;
     disclosureGrantId?: string;
     retryDelayMs?: number;
+    grantScopeKind?: "session" | "project";
+    grantExpiresAt?: string;
+    grantRequestsBefore?: number;
+    grantRequestsAfter?: number;
+    grantBytesBefore?: number;
+    grantBytesAfter?: number;
+    grantMaxRequests?: number;
+    grantMaxBytes?: number;
+    disclosedSourceCount?: number;
+    disclosedBytes?: number;
   }): Promise<RuntimeEventV2> {
     const event: RuntimeEventV2 = {
       schemaVersion: 2,
@@ -83,6 +93,16 @@ export class RuntimeRecorder {
       ...(partial.httpStatus != null ? { httpStatus: partial.httpStatus } : {}),
       ...(partial.disclosureGrantId ? { disclosureGrantId: partial.disclosureGrantId } : {}),
       ...(partial.retryDelayMs != null ? { retryDelayMs: partial.retryDelayMs } : {}),
+      ...(partial.grantScopeKind ? { grantScopeKind: partial.grantScopeKind } : {}),
+      ...(partial.grantExpiresAt ? { grantExpiresAt: partial.grantExpiresAt } : {}),
+      ...(partial.grantRequestsBefore != null ? { grantRequestsBefore: partial.grantRequestsBefore } : {}),
+      ...(partial.grantRequestsAfter != null ? { grantRequestsAfter: partial.grantRequestsAfter } : {}),
+      ...(partial.grantBytesBefore != null ? { grantBytesBefore: partial.grantBytesBefore } : {}),
+      ...(partial.grantBytesAfter != null ? { grantBytesAfter: partial.grantBytesAfter } : {}),
+      ...(partial.grantMaxRequests != null ? { grantMaxRequests: partial.grantMaxRequests } : {}),
+      ...(partial.grantMaxBytes != null ? { grantMaxBytes: partial.grantMaxBytes } : {}),
+      ...(partial.disclosedSourceCount != null ? { disclosedSourceCount: partial.disclosedSourceCount } : {}),
+      ...(partial.disclosedBytes != null ? { disclosedBytes: partial.disclosedBytes } : {}),
     };
     if (!isRuntimeEvent(event)) {
       this.logError = "trace_rejected";
