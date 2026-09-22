@@ -322,10 +322,15 @@ export class RelayEngine {
       }
       case "SetHostedProcessing": {
         await this.deps.store.setHostedProcessingEnabled(command.enabled);
+        const resumed = command.enabled ? await this.ambient.resumeHostedWaitingCases() : 0;
         await this.projector.emitSnapshot();
         return {
           ok: true,
-          summary: command.enabled ? "hosted_processing_on" : "hosted_processing_off",
+          summary: command.enabled
+            ? resumed > 0
+              ? `hosted_processing_on_resumed_${resumed}`
+              : "hosted_processing_on"
+            : "hosted_processing_off",
         };
       }
       case "RefreshProviderHealth": {

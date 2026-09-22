@@ -122,16 +122,104 @@ export class AmbientTriage {
       });
     }
 
+    return this.completeTriageForCandidate({
+      caseId: input.caseId,
+      caseVersion: input.caseVersion,
+      candidate,
+      text: input.text,
+      noteText: extracted.noteText ?? input.text,
+      sourceSlice,
+    });
+  }
+
+  /** Resume observed cases that were waiting on hosted ambient scoring. */
+  async resumeHostedWaitingCases(): Promise<number> {
+    if (!(await this.deps.store.getHostedProcessingEnabled())) return 0;
+
+    const waitingCases = (await this.deps.store.listActiveCases()).filter(
+      (record) => record.status === "waiting" && record.waitKind === "hosted_judgment",
+    );
+    let resumed = 0;
+
+    for (const caseRecord of waitingCases) {
+      const pending = (await this.deps.store.listCandidateEvents(caseRecord.caseId)).filter(
+        (event) => event.status === "new",
+      );
+      for (const candidate of pending) {
+        const slice = candidate.sourceSliceRefs[0];
+        if (!slice) continue;
+
+        const raw = await this.deps.artifacts.get({
+          artifactId: slice.artifactId,
+          sha256: slice.sha256,
+          policy: localOnlyPolicy(),
+        });
+        const text = new TextDecoder().decode(raw);
+        const extracted = await extractCandidate({
+          text,
+          isAsk: false,
+          sourceSlice: slice,
+          model: this.deps.model,
+          signal: this.deps.getAbortSignal(),
+        });
+        const at = this.deps.clock.now().toISOString();
+
+        const reactivated = await this.deps.store.updateCase(caseRecord.caseId, caseRecord.version, {
+          phase: "judge",
+          status: "active",
+          waitKind: null,
+          at,
+        });
+        const activeCase = reactivated ?? (await this.deps.store.getCase(caseRecord.caseId));
+        if (!activeCase) continue;
+
+        await this.completeTriageForCandidate({
+          caseId: activeCase.caseId,
+          caseVersion: activeCase.version,
+          candidate,
+          text,
+          noteText: extracted.noteText ?? text,
+          sourceSlice: slice,
+        });
+
+        const after = await this.deps.store.getCase(activeCase.caseId);
+        if (after?.status !== "waiting" || after.waitKind !== "hosted_judgment") {
+          await this.deps.outcomes.finishCase(
+            activeCase.caseId,
+            after?.version ?? activeCase.version,
+            "completed",
+            this.deps.getActiveCaseId(),
+          );
+        }
+        resumed += 1;
+      }
+    }
+
+    if (resumed > 0) await this.deps.emitSnapshot();
+    return resumed;
+  }
+
+  private async completeTriageForCandidate(input: {
+    readonly caseId: string;
+    readonly caseVersion: number;
+    readonly candidate: CandidateEvent;
+    readonly text: string;
+    readonly noteText: string;
+    readonly sourceSlice: SourceSliceRef;
+  }): Promise<AmbientTriageResult> {
+    const at = this.deps.clock.now().toISOString();
+    const { candidate, caseId, caseVersion, text, noteText, sourceSlice } = input;
+
     const suppressed =
       candidate.subjectKey != null
         ? await this.deps.store.isAmbientSuppressed(candidate.subjectKey)
         : false;
 
-    const scored = await this.scoreAmbient(input.caseId, input.caseVersion, input.text, sourceSlice);
+    const scored = await this.scoreAmbient(caseId, caseVersion, text, sourceSlice);
     if (!scored.ok) {
       if (scored.waitHosted) {
-        await this.deps.store.updateCandidateEventStatus(candidateEventId, "new", at);
-        await this.deps.store.updateCase(input.caseId, input.caseVersion, {
+        await this.deps.store.updateCandidateEventStatus(candidate.candidateEventId, "new", at);
+        await this.deps.store.updateCase(caseId, caseVersion, {
           phase: "judge",
           status: "waiting",
           waitKind: "hosted_judgment",
@@ -141,7 +229,7 @@ export class AmbientTriage {
           type: "judgment.requested",
           stage: "judgment.request",
           status: "waiting",
-          caseId: input.caseId,
+          caseId,
           reasonCode: "hosted_processing_disabled",
         });
         return {
@@ -167,7 +255,7 @@ export class AmbientTriage {
 
     const activeCases = await this.deps.store.listActiveCases();
     const hasActiveRelatedCase = activeCases.some(
-      (c) => c.caseId !== input.caseId && (c.status === "active" || c.status === "waiting"),
+      (record) => record.caseId !== caseId && (record.status === "active" || record.status === "waiting"),
     );
 
     const decision = decideAmbientRoute({
@@ -178,29 +266,12 @@ export class AmbientTriage {
       hasActiveRelatedCase,
     });
 
-    await this.deps.outcomes.putReceipt({
-      caseId: input.caseId,
-      gateId: "ambient.triage",
-      policyVersion: AMBIENT_QUESTION_SET_VERSION,
-      questionType: "noul",
-      provider: "typesafe",
-      probabilities: decision.probabilities,
-      thresholds: decision.thresholds,
-      selectedOption: decision.route,
-      selectedOptionId: decision.route,
-      optionLabels: Object.fromEntries(
-        (Object.keys(decision.probabilities) as (keyof AmbientTriageScores)[]).map((k) => [k, k]),
-      ),
-      result: decision.route === "ignore" ? "pass" : "pass",
-      reasonCode: decision.reasonCode,
-      latencyMs: null,
-    });
-
     if (decision.route === "ignore") {
       return this.finishIgnore(candidate, decision);
     }
 
-    return this.surface(candidate, decision, extracted.noteText ?? input.text, input.caseId);
+    await this.putTriageReceipt(caseId, decision);
+    return this.surface(candidate, decision, noteText, caseId);
   }
 
   async acceptRecommendation(recommendationId: string): Promise<{ ok: boolean; summary: string }> {
@@ -214,47 +285,53 @@ export class AmbientTriage {
     const noteText = card.noteText ?? card.title ?? card.label;
     const primary = card.primary ?? "save";
 
-    if (primary === "save" || primary === "review") {
-      const existing = await this.deps.store.learning.getMemory("note", noteKey);
-      if (existing && existing.value.text && existing.value.text !== noteText) {
-        // Correction / conflict: show replace rather than overwrite.
-        await this.deps.overlays.stageAction({
-          actionId: this.deps.ids.next("act"),
-          kind: "replace_memory",
-          label: `Replace saved note?`,
-          token: noteKey,
-          expansion: noteText,
-        });
-        await this.deps.overlays.clearActions(
-          (c) => c.kind === "ambient_recommendation" && c.recommendationId === recommendationId,
-        );
-        await this.deps.emitSnapshot();
-        return { ok: true, summary: "conflict_staged" };
-      }
+    const noteStatus =
+      primary === "create_task"
+        ? "task"
+        : primary === "verify"
+          ? "verify_pending"
+          : primary === "review"
+            ? "reviewed"
+            : "confirmed";
+
+    const existing = await this.deps.store.learning.getMemory("note", noteKey);
+    if (primary === "save" || primary === "review" || primary === "verify" || primary === "create_task") {
       await this.deps.store.learning.putMemory({
         memoryId: existing?.memoryId ?? this.deps.ids.next("mem"),
         kind: "note",
         key: noteKey,
         value: {
           text: noteText,
-          status: "confirmed",
+          status: noteStatus,
           ...(card.candidateEventId ? { candidateEventId: card.candidateEventId } : {}),
         },
         source: "explicit_user",
         createdAt: existing?.createdAt ?? at,
       });
-      if (card.candidateEventId) {
-        await this.deps.store.updateCandidateEventStatus(card.candidateEventId, "resolved", at);
-      }
+    }
+
+    if (card.candidateEventId) {
+      await this.deps.store.updateCandidateEventStatus(card.candidateEventId, "resolved", at);
     }
 
     await this.deps.overlays.clearActions(
       (c) => c.kind === "ambient_recommendation" && c.recommendationId === recommendationId,
     );
+
+    const feedSummary =
+      primary === "create_task"
+        ? `Task noted: ${noteText}`
+        : primary === "verify"
+          ? `Verify: ${noteText}`
+          : primary === "review"
+            ? `Reviewed: ${noteText}`
+            : `Saved: ${noteText}`;
+    const feedKind = primary === "create_task" || primary === "review" ? "task" : "memory";
+
     await this.deps.outcomes.publishFeedItem({
       itemId: this.deps.ids.next("feed"),
-      kind: "memory",
-      summary: primary === "create_task" ? `Task noted: ${noteText}` : `Saved: ${noteText}`,
+      kind: feedKind,
+      summary: feedSummary,
       createdAt: at,
       ...(card.caseId ? { caseId: card.caseId } : {}),
     });
@@ -404,26 +481,33 @@ export class AmbientTriage {
     return { ok: true, scores };
   }
 
-  private async finishIgnore(
-    candidate: CandidateEvent,
-    decision: AmbientRouteDecision,
-  ): Promise<AmbientTriageResult> {
-    const at = this.deps.clock.now().toISOString();
-    await this.deps.store.updateCandidateEventStatus(candidate.candidateEventId, "ignored", at);
+  private async putTriageReceipt(caseId: string, decision: AmbientRouteDecision): Promise<void> {
     await this.deps.outcomes.putReceipt({
-      caseId: candidate.caseId,
+      caseId,
       gateId: "ambient.triage",
       policyVersion: AMBIENT_QUESTION_SET_VERSION,
       questionType: "noul",
       provider: "typesafe",
       probabilities: decision.probabilities,
       thresholds: decision.thresholds,
-      selectedOption: "ignore",
-      selectedOptionId: "ignore",
+      selectedOption: decision.route,
+      selectedOptionId: decision.route,
+      optionLabels: Object.fromEntries(
+        (Object.keys(decision.probabilities) as (keyof AmbientTriageScores)[]).map((k) => [k, k]),
+      ),
       result: "pass",
       reasonCode: decision.reasonCode,
       latencyMs: null,
     });
+  }
+
+  private async finishIgnore(
+    candidate: CandidateEvent,
+    decision: AmbientRouteDecision,
+  ): Promise<AmbientTriageResult> {
+    const at = this.deps.clock.now().toISOString();
+    await this.deps.store.updateCandidateEventStatus(candidate.candidateEventId, "ignored", at);
+    await this.putTriageReceipt(candidate.caseId, decision);
     await this.deps.trace.emit({
       type: "outcome.recorded",
       stage: "episode.complete",

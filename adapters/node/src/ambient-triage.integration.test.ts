@@ -197,6 +197,48 @@ describe("ambient candidate triage", () => {
     }
   });
 
+  it("resumes ambient triage after hosted processing is enabled", async () => {
+    const sessionId = "ambient_hosted_resume";
+    const harness = await createNodeHarness({
+      sessionId,
+      judgments: ambientJudgments({ worth_remembering: 0.85 }),
+    });
+    try {
+      await harness.client.start();
+      await harness.store.setHostedProcessingEnabled(false);
+      await harness.client.execute({ type: "SetHostedProcessing", enabled: false });
+      await harness.client.execute({ type: "SetListening", enabled: true });
+
+      await harness.engine.ingestFinalSegment(
+        micSegment(sessionId, "seg_hosted_wait", "Remember, staging deploys on Tuesdays", 1),
+        false,
+      );
+
+      await waitFor(async () => {
+        const active = await harness.store.listActiveCases();
+        return active.some((c) => c.status === "waiting" && c.waitKind === "hosted_judgment");
+      });
+
+      const waiting = await harness.client.getSnapshot();
+      expect(waiting.actions.some((a) => a.kind === "ambient_recommendation")).toBe(false);
+
+      const enableResult = await harness.client.execute({ type: "SetHostedProcessing", enabled: true });
+      expect(enableResult.summary).toMatch(/hosted_processing_on_resumed_1/);
+
+      await waitFor(async () => {
+        const snap = await harness.client.getSnapshot();
+        return snap.actions.some((a) => a.kind === "ambient_recommendation");
+      });
+
+      const after = await harness.client.getSnapshot();
+      expect(after.cases.every((c) => c.status === "completed")).toBe(true);
+      expect(after.actions.some((a) => a.kind === "ambient_recommendation")).toBe(true);
+    } finally {
+      await harness.client.stop();
+      harness.close();
+    }
+  });
+
   it("keeps Ask working in parallel while listening", async () => {
     const harness = await startListeningHarness(
       "ambient_parallel_ask",
