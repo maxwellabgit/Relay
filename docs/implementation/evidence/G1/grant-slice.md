@@ -1,5 +1,6 @@
 # G1 disclosure grant slice — not a green gate
 
+Grant slice SHA: `b9e3247017a449ec1116b3961ea0757a12403367`.  
 Parent protocol slice: `8a5746b5143b0fff5f170d2079501b6117ea5002`.
 
 This slice does not green G1. Still open: a production command that creates a session or project grant, two semantic rounds, resume-exactly-once, and the live canary.

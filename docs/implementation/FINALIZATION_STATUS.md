@@ -81,7 +81,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | Review verdict against `1862daa` | NO-GO. Remaining work is code plus device, not human-only |
 | 2026-09-22 | G0 commit `e281f2c` | Local capability unit test PASS (12). Status docs agree. G1–G8 remain open |
 | 2026-09-22 | G1 protocol slice `8a5746b` | Unit 119 and architecture 18 PASS. `tsc -b` exit 0. Gate remains OPEN |
-| 2026-09-22 | G1 grant slice | Unit 123, architecture 18, integration 69 PASS. `tsc -b` exit 0. Gate remains OPEN |
+| 2026-09-22 | G1 grant slice `b9e3247` | Unit 123, architecture 18, integration 69 PASS. `tsc -b` exit 0. Gate remains OPEN |
 
 ## Next exact action
 
