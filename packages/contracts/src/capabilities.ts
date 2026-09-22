@@ -75,7 +75,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Desktop path exists; boot/error surfaces and headed journeys 02-12 are open. Mobile local model is still mobile_model_pending.",
+    notes: "Desktop path exists; boot/error surfaces and headed journeys 02-12 are open. The app holds the composer draft, the in-flight send, and the thread offset across a view remount. Mobile local model is still mobile_model_pending.",
   },
   {
     id: "listen.foreground",

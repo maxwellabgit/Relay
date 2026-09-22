@@ -28,6 +28,7 @@ import {
 import { colors } from "../theme/colors.js";
 import { usePrefersReducedMotion } from "../theme/reducedMotion.js";
 import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
+import { nextThreadScroll, threadRestoreTarget, type ThreadScrollHandle } from "./thread-scroll.js";
 
 type Props = {
   readonly snapshot: RelaySnapshot;
@@ -35,6 +36,9 @@ type Props = {
   readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
   readonly composerText?: string;
   readonly onComposerText?: (text: string) => void;
+  readonly composerSending?: boolean;
+  readonly onComposerSending?: (sending: boolean) => void;
+  readonly threadScroll?: ThreadScrollHandle;
   readonly onAction?: (action: ActionCard) => void;
   readonly onAcceptAmbient?: (recommendationId: string) => void;
   readonly onDismissAmbient?: (recommendationId: string) => void;
@@ -71,6 +75,9 @@ export function PhoneShell({
   onSubmit,
   composerText,
   onComposerText,
+  composerSending,
+  onComposerSending,
+  threadScroll,
   onAction,
   onAcceptAmbient,
   onDismissAmbient,
@@ -104,7 +111,8 @@ export function PhoneShell({
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
   const threadRef = useRef<FlatList<FeedItemSnapshot>>(null);
-  const stickToEnd = useRef(true);
+  const stickToEnd = useRef(threadScroll?.current.pinned ?? true);
+  const restoredThread = useRef(false);
   const reducedMotion = usePrefersReducedMotion();
   const insets = useSafeAreaInsets();
 
@@ -244,10 +252,28 @@ export function PhoneShell({
         scrollEventThrottle={32}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
-          stickToEnd.current = distance < 80;
+          const next = nextThreadScroll({
+            contentHeight: contentSize.height,
+            viewportHeight: layoutMeasurement.height,
+            offsetY: contentOffset.y,
+          });
+          stickToEnd.current = next.pinned;
+          if (threadScroll) threadScroll.current = next;
         }}
         onContentSizeChange={() => {
+          if (!restoredThread.current) {
+            restoredThread.current = true;
+            const saved = threadScroll?.current ?? { pinned: stickToEnd.current, offset: 0 };
+            const target = threadRestoreTarget(saved);
+            if (target.kind === "end") {
+              threadRef.current?.scrollToEnd({ animated: false });
+              return;
+            }
+            if (target.offset > 0) {
+              threadRef.current?.scrollToOffset({ offset: target.offset, animated: false });
+            }
+            return;
+          }
           if (stickToEnd.current) {
             threadRef.current?.scrollToEnd({ animated: !reducedMotion });
           }
@@ -297,6 +323,8 @@ export function PhoneShell({
         busy={working}
         {...(composerText !== undefined ? { value: composerText } : {})}
         {...(onComposerText ? { onChangeText: onComposerText } : {})}
+        {...(composerSending !== undefined ? { sending: composerSending } : {})}
+        {...(onComposerSending ? { onSendingChange: onComposerSending } : {})}
         {...(onCancelActive ? { onCancel: onCancelActive } : {})}
       />
 

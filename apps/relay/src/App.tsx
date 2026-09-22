@@ -11,7 +11,7 @@ import {
   type RelaySnapshot,
 } from "@relay/contracts";
 import { ModelDelivery, buildRedactedDiagnostics } from "@relay/engine";
-import { isRetrying, productSurface, RelayWorkbench } from "@relay/ui";
+import { isRetrying, productSurface, RelayWorkbench, type ThreadScroll } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
 import { developerConsoleAllowed, readProcessEnv } from "./bootstrap/dev-console";
 import { ProductErrorBoundary } from "./ProductErrorBoundary";
@@ -81,6 +81,8 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [phase, setPhase] = useState<"booting" | "failed" | "live">("booting");
   const [composerText, setComposerText] = useState("");
+  const [composerSending, setComposerSending] = useState(false);
+  const threadScroll = useRef<ThreadScroll>({ pinned: true, offset: 0 });
   const modelDeliveryRef = useRef(new ModelDelivery(null));
   const modelAbort = useRef<AbortController | null>(null);
   const [modelDelivery, setModelDelivery] = useState<ModelDeliveryView>(() => unselectedModelDelivery());
@@ -194,6 +196,9 @@ export function App() {
         onSubmit={(text) => runCommand({ type: "SubmitText", text })}
         composerText={composerText}
         onComposerText={setComposerText}
+        composerSending={composerSending}
+        onComposerSending={setComposerSending}
+        threadScroll={threadScroll}
         onCancelActive={() => {
           void runCommand({ type: "CancelActive" });
         }}

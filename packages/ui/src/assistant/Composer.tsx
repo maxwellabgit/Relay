@@ -13,6 +13,8 @@ type Props = {
   readonly waitingLabel?: string | null;
   readonly value?: string;
   readonly onChangeText?: (text: string) => void;
+  readonly sending?: boolean;
+  readonly onSendingChange?: (sending: boolean) => void;
 };
 
 export function Composer({
@@ -24,6 +26,8 @@ export function Composer({
   waitingLabel = null,
   value,
   onChangeText,
+  sending: sendingProp,
+  onSendingChange,
 }: Props) {
   const [internal, setInternal] = useState("");
   const text = value ?? internal;
@@ -32,14 +36,20 @@ export function Composer({
     onChangeText?.(resolved);
     if (value === undefined) setInternal(resolved);
   };
-  const [sending, setSending] = useState(false);
-  const sendingRef = useRef(false);
+  const [internalSending, setInternalSending] = useState(false);
+  const sending = sendingProp ?? internalSending;
+  const sendingRef = useRef(sending);
+  if (sending) sendingRef.current = true;
+  const publishSending = (next: boolean) => {
+    sendingRef.current = next;
+    onSendingChange?.(next);
+    if (sendingProp === undefined) setInternalSending(next);
+  };
 
   const send = () => {
     const submitted = text.trim();
     if (!canSendComposer({ text: submitted, disabled, busy, sending: sendingRef.current })) return;
-    sendingRef.current = true;
-    setSending(true);
+    publishSending(true);
     void Promise.resolve(onSubmit(submitted))
       .then((accepted) => {
         if (accepted === false) return;
@@ -47,8 +57,7 @@ export function Composer({
       })
       .catch(() => undefined)
       .finally(() => {
-        sendingRef.current = false;
-        setSending(false);
+        publishSending(false);
       });
   };
 

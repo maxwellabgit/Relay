@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { AmbientFeedback } from "./assistant/AmbientRecommendationCard.js";
 import { DeveloperConsole } from "./console/DeveloperConsole.js";
 import { PhoneShell } from "./phone/PhoneShell.js";
+import type { ThreadScrollHandle } from "./phone/thread-scroll.js";
 import { colors } from "./theme/colors.js";
 import { radius, space, touchTarget, typeScale } from "./theme/tokens.js";
 
@@ -15,6 +16,9 @@ export type RelayWorkbenchProps = {
   readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
   readonly composerText?: string;
   readonly onComposerText?: (text: string) => void;
+  readonly composerSending?: boolean;
+  readonly onComposerSending?: (sending: boolean) => void;
+  readonly threadScroll?: ThreadScrollHandle;
   readonly onAction?: (action: ActionCard) => void;
   readonly onAcceptAmbient?: (recommendationId: string) => void;
   readonly onDismissAmbient?: (recommendationId: string) => void;
@@ -61,6 +65,9 @@ export function RelayWorkbench({
   onSubmit,
   composerText,
   onComposerText,
+  composerSending,
+  onComposerSending,
+  threadScroll,
   onAction,
   onAcceptAmbient,
   onDismissAmbient,
@@ -112,6 +119,9 @@ export function RelayWorkbench({
       onSubmit={onSubmit}
       {...(composerText !== undefined ? { composerText } : {})}
       {...(onComposerText !== undefined ? { onComposerText } : {})}
+      {...(composerSending !== undefined ? { composerSending } : {})}
+      {...(onComposerSending !== undefined ? { onComposerSending } : {})}
+      {...(threadScroll !== undefined ? { threadScroll } : {})}
       showBezel={showBezel && layout !== "narrow"}
       {...(onAction !== undefined ? { onAction } : {})}
       {...(onAcceptAmbient !== undefined ? { onAcceptAmbient } : {})}
