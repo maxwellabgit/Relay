@@ -10,7 +10,7 @@ import {
 } from "../policies.js";
 import { workSignature } from "../learning-store.js";
 import { PRIORITY_DIRECT, type WorkItem } from "../queue.js";
-import { DIRECT_ANSWER_PROMPT_V1 } from "../prompts/direct-answer.v1.js";
+import { draftDirectAnswer } from "../model/direct-answer.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort } from "@relay/contracts";
@@ -675,7 +675,6 @@ export class CaseRuntime {
     caseId: string,
   ): Promise<{ ok: true; text: string } | { ok: false; failureReason: string }> {
     const signal = this.deps.getAbortSignal();
-    const prompt = DIRECT_ANSWER_PROMPT_V1.build(text);
     await this.deps.trace.emit({
       type: "model.requested",
       stage: "model.request",
@@ -685,15 +684,12 @@ export class CaseRuntime {
     });
     const started = this.deps.clock.now().getTime();
     try {
-      const generated = await this.deps.model.generate(
-        {
-          taskKind: DIRECT_ANSWER_PROMPT_V1.taskKind,
-          promptVersion: DIRECT_ANSWER_PROMPT_V1.promptVersion,
-          prompt,
-          caseId,
-        },
+      const generated = await draftDirectAnswer({
+        model: this.deps.model,
+        ask: text,
         signal,
-      );
+        caseId,
+      });
       if (signal.aborted) {
         const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
         await this.deps.trace.emit({
@@ -716,17 +712,20 @@ export class CaseRuntime {
           reasonCode: "completed",
           durationMs,
         });
-        return generated;
+        return { ok: true, text: generated.text };
       }
       await this.deps.trace.emit({
         type: "model.failed",
         stage: "model.response",
         status: "failed",
         caseId,
-        reasonCode: "model_unavailable",
+        reasonCode: generated.reason === "cancelled" ? "cancelled" : "model_unavailable",
         durationMs,
       });
-      return generated;
+      return {
+        ok: false,
+        failureReason: generated.reason === "cancelled" ? "cancelled" : "model_unavailable",
+      };
     } catch {
       const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
       await this.deps.trace.emit({

@@ -9,7 +9,7 @@ import type {
   ToolResultEnvelope,
 } from "@relay/contracts";
 import { localOnlyPolicy, publicPolicy } from "@relay/contracts";
-import { DIRECT_ANSWER_PROMPT_V1 } from "../prompts/direct-answer.v1.js";
+import { draftDirectAnswer } from "../model/direct-answer.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
 import type { RegisteredTool, ToolRegistry } from "./ToolRegistry.js";
@@ -71,24 +71,14 @@ function respondTool(deps: {
     definition,
     async execute(args, signal) {
       const text = String(args.text ?? "");
-      const generated = await deps.model.generate(
-        {
-          taskKind: "direct_answer",
-          promptVersion: DIRECT_ANSWER_PROMPT_V1.promptVersion,
-          prompt: DIRECT_ANSWER_PROMPT_V1.build(text),
-          maxTokens: 220,
-          temperature: 0.2,
-        },
-        signal,
-      );
-      if (signal?.aborted) {
-        return envelope(definition.id, "failed", "No local result for this Ask.", [], [], {
-          reasonCode: "cancelled",
-        });
-      }
+      const generated = await draftDirectAnswer({
+        model: deps.model,
+        ask: text,
+        signal: signal ?? new AbortController().signal,
+      });
       if (!generated.ok) {
         return envelope(definition.id, "failed", "No local result for this Ask.", [], [], {
-          reasonCode: generated.failureReason,
+          reasonCode: generated.reason === "cancelled" ? "cancelled" : "model_unavailable",
         });
       }
       return envelope(definition.id, "ok", generated.text, [], [], {
