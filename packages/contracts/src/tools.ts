@@ -92,3 +92,31 @@ export type MemorySearchHit = {
   readonly summary: string;
   readonly memoryId: string;
 };
+
+/** Terminal claim-verification outcomes — always citation-backed or honest insufficiency. */
+export type ClaimVerdict = "supported" | "contradicted" | "insufficient";
+
+export type ClaimSourceId = "local_memory" | "public_search" | "github";
+
+export type ClaimVerifyOutput = {
+  readonly verdict: ClaimVerdict;
+  readonly claim: string;
+  readonly sourcesAttempted: readonly ClaimSourceId[];
+  readonly judgmentRounds: number;
+};
+
+export type GitHubSearchHit = {
+  readonly title: string;
+  readonly url: string;
+  readonly snippet: string;
+  readonly kind: "issue" | "pull_request" | "code" | "content" | "comment";
+  readonly retrievedAt: string;
+};
+
+/**
+ * Closed GitHub read adapter — engine never invents OAuth or arbitrary HTTP.
+ * Adapter searches only within previously selected resources / granted read scopes.
+ */
+export type GitHubReadPort = {
+  search(query: string, signal: AbortSignal): Promise<readonly GitHubSearchHit[]>;
+};

@@ -19,7 +19,9 @@ import {
   validateToolArgs,
   type ToolRegistry,
 } from "./ToolRegistry.js";
-import { TOOL_MEMORY_SEARCH, TOOL_PUBLIC_SEARCH, TOOL_RESPOND } from "./builtins.js";
+import { TOOL_CLAIM_VERIFY, TOOL_GITHUB_SEARCH, TOOL_MEMORY_SEARCH, TOOL_PUBLIC_SEARCH, TOOL_RESPOND } from "./builtins.js";
+import { ClaimVerifier, type ClaimEligibleSources } from "./ClaimVerifier.js";
+import type { GitHubReadPort, PublicSearchPort } from "@relay/contracts";
 
 export type ToolBrokerDeps = {
   readonly registry: ToolRegistry;
@@ -37,6 +39,8 @@ export type ToolBrokerDeps = {
   readonly getActiveCaseId: () => string | null;
   readonly emitSnapshot: () => Promise<void>;
   readonly mode?: "live" | "recorded" | "replay";
+  readonly publicSearch?: PublicSearchPort;
+  readonly github?: GitHubReadPort;
 };
 
 type BudgetUsage = {
@@ -50,7 +54,21 @@ type BudgetUsage = {
  * Control options and unapproved tools never appear in Choice criteria.
  */
 export class ToolBroker {
-  constructor(private readonly deps: ToolBrokerDeps) {}
+  private readonly claimVerifier: ClaimVerifier;
+
+  constructor(private readonly deps: ToolBrokerDeps) {
+    this.claimVerifier = new ClaimVerifier({
+      store: deps.store,
+      artifacts: deps.artifacts,
+      judgments: deps.judgments,
+      learning: deps.store.learning,
+      clock: deps.clock,
+      ids: deps.ids,
+      ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
+      ...(deps.github ? { github: deps.github } : {}),
+      ...(deps.mode ? { mode: deps.mode } : {}),
+    });
+  }
 
   async onToolRoute(item: WorkItem): Promise<WorkDisposition> {
     const caseId = String(item.payload.caseId ?? "");
@@ -71,10 +89,34 @@ export class ToolBroker {
     }
 
     const eligible = await this.eligibleDefinitions(remaining);
+    const preferToolId = String(item.payload.preferToolId ?? "");
+    const claimWanted =
+      preferToolId === TOOL_CLAIM_VERIFY ||
+      /\b(verify|is it true|check (this |the )?claim|how many .+ (sites|operate)|factual)\b/i.test(text);
     const toolOptions = eligible
       .map((tool) => tool.id)
-      .filter((id) => id !== TOOL_RESPOND);
+      .filter((id) => id !== TOOL_RESPOND)
+      .filter((id) => id !== TOOL_CLAIM_VERIFY || claimWanted);
     const uniqueOptions = unique([...toolOptions, "respond", "no_match"]);
+
+    if (preferToolId && uniqueOptions.includes(preferToolId)) {
+      await this.deps.outcomes.putReceipt({
+        caseId,
+        gateId: "tool.route",
+        policyVersion: "tool-route@1",
+        questionType: "deterministic",
+        provider: "not_applicable",
+        probabilities: {},
+        thresholds: {},
+        selectedOption: preferToolId,
+        selectedOptionId: preferToolId,
+        optionLabels: Object.fromEntries(uniqueOptions.map((id) => [id, id])),
+        result: "pass",
+        reasonCode: "policy_pass",
+        latencyMs: null,
+      });
+      return this.enqueueExecute(item, caseId, current.version, preferToolId, text, usage, "prefer");
+    }
 
     const deterministic = pickDeterministic(text, uniqueOptions);
     if (deterministic) {
@@ -200,7 +242,16 @@ export class ToolBroker {
         reasonCode: "direct_answer",
       });
     }
-    const result = await tool.execute(validated.value, this.deps.getAbortSignal());
+    const result =
+      resolvedId === TOOL_CLAIM_VERIFY
+        ? await this.claimVerifier.verify({
+            claim: String(validated.value.claim ?? text),
+            caseId,
+            caseVersion: current.version,
+            eligible: await this.claimEligibleSources(),
+            signal: this.deps.getAbortSignal(),
+          })
+        : await tool.execute(validated.value, this.deps.getAbortSignal());
     const durationMs = Date.now() - started;
     if (resolvedId === TOOL_RESPOND) {
       await this.deps.trace.emit({
@@ -223,7 +274,14 @@ export class ToolBroker {
     const nextUsage: BudgetUsage = {
       toolSteps: usage.toolSteps + 1,
       judgmentRounds: usage.judgmentRounds,
-      sourceAttempts: usage.sourceAttempts + (resolvedId === TOOL_PUBLIC_SEARCH || resolvedId === TOOL_MEMORY_SEARCH ? 1 : 0),
+      sourceAttempts:
+        usage.sourceAttempts +
+        (resolvedId === TOOL_PUBLIC_SEARCH ||
+        resolvedId === TOOL_MEMORY_SEARCH ||
+        resolvedId === TOOL_GITHUB_SEARCH ||
+        resolvedId === TOOL_CLAIM_VERIFY
+          ? 1
+          : 0),
     };
 
       if (result.status === "ok" || result.status === "empty") {
@@ -254,6 +312,31 @@ export class ToolBroker {
         caseId,
       });
       await this.deps.outcomes.finishCase(caseId, current.version, "blocked", this.deps.getActiveCaseId());
+      return { kind: "complete" };
+    }
+
+    // Claim verify outages are recoverably blocked — do not silently re-route to respond.
+    if (
+      resolvedId === TOOL_CLAIM_VERIFY &&
+      result.status === "failed" &&
+      (result.reasonCode === "network" || result.reasonCode === "not_authorized")
+    ) {
+      await this.deps.outcomes.publishFeedItem({
+        itemId: feedItemId(caseId, "wait"),
+        kind: "wait",
+        summary: result.summary,
+        createdAt: this.deps.clock.now().toISOString(),
+        caseId,
+      });
+      const waiting = await this.deps.store.updateCase(caseId, current.version, {
+        phase: "decide",
+        status: "waiting",
+        waitKind: "tool",
+        at: this.deps.clock.now().toISOString(),
+      });
+      if (!waiting) {
+        await this.deps.outcomes.finishCase(caseId, current.version, "blocked", this.deps.getActiveCaseId());
+      }
       return { kind: "complete" };
     }
 
@@ -315,6 +398,12 @@ export class ToolBroker {
       this.deps.registry.get(TOOL_PUBLIC_SEARCH) != null &&
       publicSearchConnected &&
       hasPublicDisclosure;
+    const githubAvailable =
+      this.deps.registry.get(TOOL_GITHUB_SEARCH) != null &&
+      this.deps.github != null &&
+      connected.has("github");
+    // Claim verify always has local memory; hosted needed only when choosing among multiple sources via Jev.
+    const claimVerifyAvailable = this.deps.registry.get(TOOL_CLAIM_VERIFY) != null;
     return filterEligibleTools(this.deps.registry.definitions(), {
       caseOrigin: "direct",
       remaining,
@@ -322,7 +411,31 @@ export class ToolBroker {
       grantedScopes: scopes,
       hasPublicDisclosure,
       publicSearchAvailable,
+      githubAvailable,
+      claimVerifyAvailable,
     });
+  }
+
+  private async claimEligibleSources(): Promise<ClaimEligibleSources> {
+    const projection = await this.deps.authority.project();
+    const connected = new Set(
+      projection.connections.filter((c) => c.connected).map((c) => c.connector.id),
+    );
+    const hasPublicDisclosure = projection.disclosures.some((grant) => {
+      if (grant.disclosure !== "public") return false;
+      const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
+      return connection?.connector.id === "public-search" && connection.connected;
+    });
+    const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();
+    return {
+      localMemory: true,
+      publicSearch:
+        hostedEnabled &&
+        this.deps.publicSearch != null &&
+        connected.has("public-search") &&
+        hasPublicDisclosure,
+      github: this.deps.github != null && connected.has("github"),
+    };
   }
 
   private async chooseRoute(
@@ -467,6 +580,10 @@ export class ToolBroker {
 
   private async draftArgs(toolId: string, text: string): Promise<Record<string, unknown>> {
     if (toolId === TOOL_RESPOND) return { text };
+    if (toolId === TOOL_CLAIM_VERIFY) {
+      const stripped = text.replace(/^(verify|check|is it true that)\s+/i, "").trim();
+      return { claim: stripped || text.trim() };
+    }
     if (toolId === TOOL_MEMORY_SEARCH) {
       const token = /\b([A-Z0-9]{2,12})\b/.exec(text)?.[1];
       if (token) return { query: token };
@@ -601,10 +718,15 @@ function pickDeterministic(text: string, options: readonly string[]): string | n
   const memoryHint =
     /\b(remember|birthday|glossary|what did i save|my notes|search (my )?memory)\b/i.test(lower);
   const searchHint = /\b(search online|look up|public search|web search)\b/i.test(lower);
+  const verifyHint =
+    /\b(verify|is it true|check (this |the )?claim|how many .+ (sites|operate)|factual)\b/i.test(lower);
+  const githubHint = /\b(github|pull request|\bpr\b|issue #)\b/i.test(lower);
+  if (githubHint && options.includes(TOOL_GITHUB_SEARCH)) return TOOL_GITHUB_SEARCH;
+  if (verifyHint && options.includes(TOOL_CLAIM_VERIFY)) return TOOL_CLAIM_VERIFY;
   if (memoryHint && options.includes(TOOL_MEMORY_SEARCH)) return TOOL_MEMORY_SEARCH;
   if (searchHint && options.includes(TOOL_PUBLIC_SEARCH)) return TOOL_PUBLIC_SEARCH;
-  // When public-search is eligible, Jev chooses among respond / memory / public-search.
-  if (options.includes(TOOL_PUBLIC_SEARCH)) return null;
+  // When public-search or github is eligible, Jev chooses among respond / memory / tools.
+  if (options.includes(TOOL_PUBLIC_SEARCH) || options.includes(TOOL_GITHUB_SEARCH)) return null;
   if (options.includes("respond")) return "respond";
   return null;
 }

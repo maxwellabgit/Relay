@@ -42,6 +42,8 @@ export type EligibilityContext = {
   readonly grantedScopes: ReadonlySet<string>;
   readonly hasPublicDisclosure: boolean;
   readonly publicSearchAvailable: boolean;
+  readonly githubAvailable?: boolean;
+  readonly claimVerifyAvailable?: boolean;
 };
 
 /** Code owns eligibility — Jev never sees unapproved tools. */
@@ -63,6 +65,8 @@ export function filterEligibleTools(
         return false;
       }
     }
+    if (tool.id === "github.search@1" && !context.githubAvailable) return false;
+    if (tool.id === "claim.verify@1" && !context.claimVerifyAvailable) return false;
     if (tool.id.startsWith("memory.") && context.caseOrigin === "observed") {
       // Ambient memory reads are Phase 5; Phase 4 keeps them on direct Asks.
       return false;
@@ -76,6 +80,10 @@ function scopeSatisfiedByConnection(scope: string, context: EligibilityContext):
   if (scope === "public-search.read") {
     return context.connectedConnectorIds.has("public-search") && context.hasPublicDisclosure;
   }
+  if (scope === "github.read") {
+    return context.connectedConnectorIds.has("github") && Boolean(context.githubAvailable);
+  }
+  if (scope === "claim.verify") return Boolean(context.claimVerifyAvailable);
   if (scope === "assistant.respond") return true;
   return context.grantedScopes.has(scope);
 }

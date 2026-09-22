@@ -6,7 +6,7 @@ import {
   remainingBudgets,
   validateToolArgs,
 } from "./ToolRegistry.js";
-import { TOOL_MEMORY_SEARCH, TOOL_PUBLIC_SEARCH, TOOL_RESPOND } from "./builtins.js";
+import { TOOL_CLAIM_VERIFY, TOOL_GITHUB_SEARCH, TOOL_MEMORY_SEARCH, TOOL_PUBLIC_SEARCH, TOOL_RESPOND } from "./builtins.js";
 
 const defs = [
   {
@@ -70,6 +70,46 @@ const defs = [
     retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
   },
   {
+    id: TOOL_CLAIM_VERIFY,
+    description: "claim",
+    inputSchema: {
+      type: "object" as const,
+      properties: { claim: { type: "string" as const } },
+      required: ["claim"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object" as const,
+      properties: { verdict: { type: "string" as const } },
+      required: ["verdict"],
+    },
+    effect: "read" as const,
+    disclosure: "hosted_allowed" as const,
+    requiredScopes: ["claim.verify"],
+    timeoutMs: 1,
+    retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
+  },
+  {
+    id: TOOL_GITHUB_SEARCH,
+    description: "github",
+    inputSchema: {
+      type: "object" as const,
+      properties: { query: { type: "string" as const } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object" as const,
+      properties: { hitCount: { type: "number" as const } },
+      required: ["hitCount"],
+    },
+    effect: "read" as const,
+    disclosure: "local_only" as const,
+    requiredScopes: ["github.read"],
+    timeoutMs: 1,
+    retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
+  },
+  {
     id: "shell.exec@1",
     description: "forbidden",
     inputSchema: {
@@ -129,6 +169,33 @@ describe("tool eligibility", () => {
       publicSearchAvailable: false,
     });
     expect(eligible.map((tool) => tool.id)).not.toContain(TOOL_PUBLIC_SEARCH);
+  });
+
+  it("includes claim.verify when available and github.search only when connected", () => {
+    const without = filterEligibleTools(defs, {
+      caseOrigin: "direct",
+      remaining: DEFAULT_TOOL_BUDGETS,
+      connectedConnectorIds: new Set(),
+      grantedScopes: new Set(),
+      hasPublicDisclosure: false,
+      publicSearchAvailable: false,
+      claimVerifyAvailable: true,
+      githubAvailable: false,
+    });
+    expect(without.map((t) => t.id)).toContain(TOOL_CLAIM_VERIFY);
+    expect(without.map((t) => t.id)).not.toContain(TOOL_GITHUB_SEARCH);
+
+    const withGithub = filterEligibleTools(defs, {
+      caseOrigin: "direct",
+      remaining: DEFAULT_TOOL_BUDGETS,
+      connectedConnectorIds: new Set(["github"]),
+      grantedScopes: new Set(["github.read"]),
+      hasPublicDisclosure: false,
+      publicSearchAvailable: false,
+      claimVerifyAvailable: true,
+      githubAvailable: true,
+    });
+    expect(withGithub.map((t) => t.id)).toContain(TOOL_GITHUB_SEARCH);
   });
 });
 

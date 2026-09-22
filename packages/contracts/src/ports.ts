@@ -1,7 +1,7 @@
 import type { ArtifactRef, DataPolicy } from "./artifacts.js";
 import type { GlassesDisplayPort } from "./glasses.js";
 import type { JudgmentRequest, JudgmentResponse } from "./judgments.js";
-import type { PublicSearchPort } from "./tools.js";
+import type { GitHubReadPort, PublicSearchPort } from "./tools.js";
 import type { TranscriptEvent } from "./transcript.js";
 
 export type TranscriptSourcePort = {
@@ -62,4 +62,5 @@ export type RelayPorts = {
   readonly model: TextModelPort;
   readonly glasses: GlassesDisplayPort;
   readonly publicSearch?: PublicSearchPort;
+  readonly github?: GitHubReadPort;
 };

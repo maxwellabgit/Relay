@@ -1,6 +1,7 @@
 ﻿import type {
   ArtifactStorePort,
   GlassesDisplayPort,
+  GitHubReadPort,
   JudgmentPort,
   PublicSearchPort,
   ReflexModule,
@@ -46,6 +47,7 @@ export type EngineDeps = {
   readonly episodeDefinitions?: readonly EpisodeDefinition[];
   readonly glasses?: GlassesDisplayPort;
   readonly publicSearch?: PublicSearchPort;
+  readonly github?: GitHubReadPort;
   readonly storageDetail?: string;
   readonly jevStatus?: { ok: boolean; detail: string };
   readonly modelStatus?: { ok: boolean; detail: string; model?: string | null };
@@ -155,6 +157,7 @@ export class RelayEngine {
       ids: deps.ids,
       outcomes: this.outcomes,
       overlays: this.overlays,
+      scheduler: this.scheduler,
       trace: this.trace,
       getAbortSignal,
       getActiveCaseId: () => this.activeCaseId,
@@ -213,6 +216,7 @@ export class RelayEngine {
       model: deps.model,
       clock: deps.clock,
       ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
+      ...(deps.github ? { github: deps.github } : {}),
     });
     this.tools = new ToolBroker({
       registry,
@@ -230,6 +234,8 @@ export class RelayEngine {
       getActiveCaseId: () => this.activeCaseId,
       emitSnapshot,
       ...(deps.mode ? { mode: deps.mode } : {}),
+      ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
+      ...(deps.github ? { github: deps.github } : {}),
     });
 
     this.dispatcher = new WorkDispatcher({

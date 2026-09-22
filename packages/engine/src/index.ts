@@ -26,5 +26,6 @@ export * from "./typesafe-judgment.js";
 export * from "./prompts/index.js";
 export * from "./tools/ToolRegistry.js";
 export * from "./tools/builtins.js";
+export * from "./tools/ClaimVerifier.js";
 export type { WorkCorrelation } from "./queue.js";
 

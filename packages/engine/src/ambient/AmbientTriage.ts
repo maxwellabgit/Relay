@@ -14,7 +14,8 @@ import { extractCandidate } from "../intake/CandidateExtractor.js";
 import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
-import type { Clock, IdFactory } from "../scheduler.js";
+import { PRIORITY_DIRECT } from "../queue.js";
+import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { encodeText, type EngineTrace } from "../engine-helpers.js";
 import { decideAmbientRoute, type AmbientRouteDecision } from "./route-policy.js";
@@ -31,6 +32,7 @@ export type AmbientTriageDeps = {
   readonly ids: IdFactory;
   readonly outcomes: OutcomeRecorder;
   readonly overlays: OverlayState;
+  readonly scheduler: Scheduler;
   readonly trace: EngineTrace;
   readonly getAbortSignal: () => AbortSignal;
   readonly getActiveCaseId: () => string | null;
@@ -335,6 +337,55 @@ export class AmbientTriage {
       createdAt: at,
       ...(card.caseId ? { caseId: card.caseId } : {}),
     });
+
+    if (primary === "verify") {
+      const verifyCaseId = this.deps.ids.next("case");
+      const created = await this.deps.store.createCase({
+        caseId: verifyCaseId,
+        origin: "direct",
+        kind: "check",
+        priority: PRIORITY_DIRECT,
+        ...(card.caseId ? { parentCaseId: card.caseId } : {}),
+        at,
+      });
+      await this.deps.store.updateCase(created.caseId, created.version, {
+        phase: "decide",
+        status: "waiting",
+        waitKind: "tool",
+        at,
+      });
+      const waiting = await this.deps.store.getCase(created.caseId);
+      await this.deps.scheduler.enqueue(
+        "tool.route",
+        {
+          caseId: created.caseId,
+          caseVersion: waiting?.version ?? created.version,
+          text: noteText,
+          toolSteps: 0,
+          judgmentRounds: 0,
+          sourceAttempts: 0,
+          preferToolId: "claim.verify@1",
+        },
+        PRIORITY_DIRECT,
+        this.deps.ids,
+        0,
+        { correlationId: created.caseId },
+      );
+      await this.deps.store.learning.putMemory({
+        memoryId: existing?.memoryId ?? this.deps.ids.next("mem"),
+        kind: "note",
+        key: noteKey,
+        value: {
+          text: noteText,
+          status: "verify_pending",
+          verifyCaseId: created.caseId,
+          ...(card.candidateEventId ? { candidateEventId: card.candidateEventId } : {}),
+        },
+        source: "explicit_user",
+        createdAt: existing?.createdAt ?? at,
+      });
+    }
+
     await this.deps.emitSnapshot();
     return { ok: true, summary: "accepted" };
   }
