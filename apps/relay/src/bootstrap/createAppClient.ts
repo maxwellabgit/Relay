@@ -1,5 +1,6 @@
 import type { RelayClient } from "@relay/contracts";
 import type { RelayEngine } from "@relay/engine";
+import { Platform } from "react-native";
 import { createBrowserDemoClient } from "./createBrowserDemoClient";
 import { createDesktopClient } from "./createDesktopClient";
 
@@ -14,11 +15,42 @@ type TauriHost = {
   __TAURI_INTERNALS__?: { invoke?: unknown };
 };
 
+/**
+ * Selects the production client for the current host.
+ * - Tauri → desktop production composition
+ * - Native iOS/Android → fail closed until createMobileClient (F2); demo only with explicit flag
+ * - Web / other → in-memory demo only when EXPO_PUBLIC_RELAY_ALLOW_DEMO=1
+ */
 export async function createAppClient(): Promise<AppClientHandle> {
   if (isTauri()) return createDesktopClient();
-  return createBrowserDemoClient();
+
+  if (isExplicitDemoAllowed()) {
+    return createBrowserDemoClient();
+  }
+
+  if (isNativeMobile()) {
+    throw new Error(
+      "RELAY mobile production composition is not ready (finalization F2). " +
+        "Set EXPO_PUBLIC_RELAY_ALLOW_DEMO=1 only for an explicit in-memory demo — never as product proof.",
+    );
+  }
+
+  throw new Error(
+    "RELAY browser demo requires EXPO_PUBLIC_RELAY_ALLOW_DEMO=1. " +
+      "Production paths use Tauri desktop or createMobileClient().",
+  );
+}
+
+export function isExplicitDemoAllowed(): boolean {
+  const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env?.EXPO_PUBLIC_RELAY_ALLOW_DEMO;
+  return value === "1" || value === "true";
 }
 
 function isTauri(): boolean {
   return Boolean((globalThis as TauriHost).__TAURI_INTERNALS__?.invoke);
+}
+
+function isNativeMobile(): boolean {
+  return Platform.OS === "ios" || Platform.OS === "android";
 }

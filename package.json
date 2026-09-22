@@ -13,10 +13,11 @@
     "tools/*"
   ],
   "scripts": {
-    "dev:web": "npm run start --workspace @relay/app",
+    "dev:web": "node tools/with-demo-flag.mjs npm run start --workspace @relay/app",
     "dev:desktop": "npm run tauri:dev --workspace @relay/desktop",
     "build:web": "npm run export:web --workspace @relay/app",
     "build:desktop": "npm run tauri:build --workspace @relay/desktop",
+    "demo:web": "node tools/with-demo-flag.mjs npm run start --workspace @relay/app",
     "check": "npm run lint && npm run typecheck && npm run test:unit && npm run test:architecture",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

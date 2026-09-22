@@ -1,6 +1,6 @@
 [package]
 name = "relay-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "RELAY Windows workbench (Tauri 2)"
 authors = ["RELAY"]
 edition = "2021"

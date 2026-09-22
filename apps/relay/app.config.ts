@@ -9,7 +9,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "RELAY",
   slug: "relay-assistant",
-  version: "0.1.0",
+  version: "1.0.0",
   orientation: "portrait",
   scheme: "relay",
   userInterfaceStyle: "automatic",
@@ -21,7 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     bundleIdentifier: "app.relay.assistant",
     infoPlist: {
-      UIBackgroundModes: ["audio"],
+      // Foreground listening only for V1; background audio mode removed until F7 policy proof.
       NSMicrophoneUsageDescription: "RELAY listens only while you enable Listen.",
       NSBluetoothAlwaysUsageDescription: "RELAY connects to Brilliant Halo glasses.",
       NSBluetoothPeripheralUsageDescription: "RELAY connects to Brilliant Halo glasses.",
@@ -39,6 +39,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     relay: {
       protocolVersion: "1",
       requiresDevClient: true,
+      marketingVersion: "1.0.0",
+      applicationId: "app.relay.assistant",
     },
   },
 });

@@ -1,5 +1,6 @@
 export * from "./artifacts.js";
 export * from "./candidates.js";
+export * from "./capabilities.js";
 export * from "./cases.js";
 export * from "./changes.js";
 export * from "./client.js";

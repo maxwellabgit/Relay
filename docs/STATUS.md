@@ -4,7 +4,12 @@ What has been verified on the TypeScript/Tauri Windows path, and what has not.
 
 ## Current decision
 
-**V1 / TestFlight is NO-GO.** Production-core on `main` (`4b64928`) is **foundation complete only**. Release authority: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md` and live ledger `docs/implementation/FINALIZATION_STATUS.md`.
+**V1 / TestFlight is NO-GO.** Production-core on `main` is foundation complete only. Finalization F0 is GREEN on branch `cursor/v1-testflight-finalization-45e9`; F1+ remain open.
+
+Release authority: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md`  
+Live ledger: `docs/implementation/FINALIZATION_STATUS.md`  
+Product contract: `docs/V1_PRODUCT_CONTRACT.md`  
+Capability matrix: `packages/contracts/src/capabilities.ts`
 
 Architecture authority remains:
 

@@ -30,6 +30,7 @@ export default tseslint.config(
       "dev/**",
       "tools/verify-v1.mjs",
       "tools/with-git-sha.mjs",
+      "tools/with-demo-flag.mjs",
       "tools/verification/**/*.mjs",
       "tools/e2e/**/*.mjs",
       "apps/relay/babel.config.js",
