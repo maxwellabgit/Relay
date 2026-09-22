@@ -35,6 +35,7 @@ export type RelayWorkbenchProps = {
   readonly onGrantJevDisclosure?: () => void;
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
+  readonly onExportDiagnostics?: () => string;
   readonly busy?: boolean;
   readonly notice?: string | null;
   /** When false, product surface is full-bleed (mobile). Default true. */
@@ -71,6 +72,7 @@ export function RelayWorkbench({
   onGrantJevDisclosure,
   onRevokeJevDisclosure,
   onRefreshHealth,
+  onExportDiagnostics,
   busy = false,
   notice = null,
   showBezel = true,
@@ -106,6 +108,7 @@ export function RelayWorkbench({
       {...(onGrantJevDisclosure !== undefined ? { onGrantJevDisclosure } : {})}
       {...(onRevokeJevDisclosure !== undefined ? { onRevokeJevDisclosure } : {})}
       {...(onRefreshHealth !== undefined ? { onRefreshHealth } : {})}
+      {...(onExportDiagnostics !== undefined ? { onExportDiagnostics } : {})}
       busy={busy}
       notice={notice}
     />

@@ -103,6 +103,9 @@ describe("production composition purity", () => {
     expect(text).not.toContain("MemoryEngineStore");
     expect(text).not.toContain("MemoryArtifactStore");
     expect(text).toContain("createTypeSafeJudgmentPort");
+    expect(text).toContain("createMobileTraceSink");
+    expect(text).not.toContain("createBrowserTraceSink");
+    expect(text).not.toContain("/__relay/trace");
   });
 
   it("Expo app config freezes permanent mobile id and marketing 1.0.0", () => {

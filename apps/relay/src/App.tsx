@@ -8,6 +8,7 @@ import {
   type RelayCommand,
   type RelaySnapshot,
 } from "@relay/contracts";
+import { buildRedactedDiagnostics } from "@relay/engine";
 import { RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
 import { ProductErrorBoundary } from "./ProductErrorBoundary";
@@ -253,9 +254,8 @@ export function App() {
         onSnoozeCandidate={(candidateId) => {
           void runCommand({ type: "SnoozeCandidate", candidateId });
         }}
-        onOpenLog={() => {
-          void openRunFolder();
-        }}
+        onExportDiagnostics={() => JSON.stringify(buildRedactedDiagnostics(snapshot), null, 2)}
+        {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
         onReplayFixture={async (fixture, speed) => {
           const enabled =
             process.env.EXPO_PUBLIC_RELAY_DEV_CONSOLE === "1" ||
@@ -272,6 +272,12 @@ export function App() {
       />
       <StatusBar style="light" />
     </ProductErrorBoundary>
+  );
+}
+
+function isTauriHost(): boolean {
+  return Boolean(
+    (globalThis as { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__?.invoke,
   );
 }
 

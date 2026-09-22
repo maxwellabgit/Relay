@@ -83,7 +83,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Windows Listen fails closed without local ASR. Mobile speech is an unavailable stub. No physical-device proof.",
+    notes: "Windows Listen fails closed without local ASR. Mobile listening stays off while speech is unavailable. No measured audio level is shown. No physical-device proof.",
   },
   {
     id: "model.local",
@@ -219,7 +219,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Event-derived summary includes grant and attempt fields when a judgment runs. Mobile trace sink is still the dev route. No headed export proof.",
+    notes: "Event-derived summary includes grant and attempt fields when a judgment runs. Mobile trace is a bounded device file. Share diagnostics omits source transcripts. No physical-device export proof.",
   },
   {
     id: "dev.console",

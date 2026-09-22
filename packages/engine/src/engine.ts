@@ -330,6 +330,13 @@ export class RelayEngine {
   async execute(command: RelayCommand): Promise<RelayCommandResult> {
     switch (command.type) {
       case "SetListening": {
+        if (command.enabled && this.deps.audioStatus && !this.deps.audioStatus.ok) {
+          return {
+            ok: false,
+            summary: "audio_unavailable",
+            error: this.deps.audioStatus.detail || "audio_unavailable",
+          };
+        }
         await this.deps.store.setListening(this.deps.sessionId, command.enabled);
         this.emit({ type: "ListeningChanged", listening: command.enabled });
         await this.projector.emitSnapshot();

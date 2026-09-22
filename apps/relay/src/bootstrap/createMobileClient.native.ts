@@ -15,7 +15,7 @@ import {
   type EngineDeps,
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
-import { createBrowserTraceSink } from "./trace-log";
+import { createMobileTraceSink } from "./mobile-trace";
 
 export type MobileClientOptions = {
   readonly backend?: MobileBackend;
@@ -90,7 +90,7 @@ export async function createMobileClient(
     audioStatus,
     mode: "live",
     gitCommit: resolveBuildSha(),
-    trace: createBrowserTraceSink(runId, "mobile-diagnostics"),
+    trace: createMobileTraceSink(files, runId),
   };
 
   const engine = new RelayEngine(deps);

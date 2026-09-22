@@ -109,6 +109,22 @@ describe("listen intake gate", () => {
     harness.close();
   });
 
+  it("keeps listening off when audio is unavailable", async () => {
+    const harness = await createNodeHarness({
+      sessionId: "session_no_audio",
+      audioStatus: { ok: false, detail: "speech_unavailable" },
+    });
+    await harness.client.start();
+    const refused = await harness.client.execute({ type: "SetListening", enabled: true });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toBe("speech_unavailable");
+    expect((await harness.client.getSnapshot()).listening).toBe(false);
+    const allowedOff = await harness.client.execute({ type: "SetListening", enabled: false });
+    expect(allowedOff.ok).toBe(true);
+    await harness.client.stop();
+    harness.close();
+  });
+
   it("deduplicates identical final segment revisions", async () => {
     const harness = await createNodeHarness({ sessionId: "session_dedupe" });
     await harness.client.start();

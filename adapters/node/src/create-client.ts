@@ -33,6 +33,7 @@ export type NodeHarnessOptions = {
   readonly durableDecisionArtifacts?: boolean;
   /** Recorded harnesses seed a session grant. Production callers leave this unset. */
   readonly seedDisclosureGrant?: boolean;
+  readonly audioStatus?: EngineDeps["audioStatus"];
 };
 
 export async function createNodeHarness(options: NodeHarnessOptions = {}) {
@@ -100,6 +101,7 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
     modelStatus: options.model
       ? { ok: true, detail: "ready" }
       : { ok: false, detail: "disabled" },
+    ...(options.audioStatus ? { audioStatus: options.audioStatus } : {}),
     mode: "recorded",
     gitCommit: "test",
     trace: createFileTraceSink(runsRoot, runId),

@@ -220,9 +220,11 @@ function OverviewPane({
           : `log error ${runtime.logError ?? "unavailable"}`}
       </Text>
       <View style={styles.row}>
-        <Pressable onPress={onOpenLog} style={styles.button}>
-          <Text style={styles.buttonText}>Open run folder</Text>
-        </Pressable>
+        {onOpenLog ? (
+          <Pressable onPress={onOpenLog} style={styles.button}>
+            <Text style={styles.buttonText}>Open run folder</Text>
+          </Pressable>
+        ) : null}
         <Pressable onPress={onStartSession} style={styles.button}>
           <Text style={styles.buttonText}>Start session</Text>
         </Pressable>

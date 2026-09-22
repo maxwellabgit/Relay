@@ -1,6 +1,6 @@
 import { SESSION_JEV_GRANT_DEFAULTS, type RelaySnapshot } from "@relay/contracts";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme/colors.js";
 
 export type SettingsSheetProps = {
@@ -14,6 +14,7 @@ export type SettingsSheetProps = {
   readonly onGrantJevDisclosure?: () => void;
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth: () => void;
+  readonly onExportDiagnostics?: () => string;
 };
 
 function chipDetail(snapshot: RelaySnapshot, id: string): { ok: boolean; detail: string } {
@@ -32,12 +33,15 @@ export function SettingsSheet({
   onGrantJevDisclosure,
   onRevokeJevDisclosure,
   onRefreshHealth,
+  onExportDiagnostics,
 }: SettingsSheetProps) {
   const [keyDraft, setKeyDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const model = chipDetail(snapshot, "model");
   const audio = chipDetail(snapshot, "audio");
+  const [exportText, setExportText] = useState<string | null>(null);
+  const nativeMobile = Platform.OS === "ios" || Platform.OS === "android";
 
   const saveKey = async () => {
     const value = keyDraft.trim();
@@ -184,8 +188,9 @@ export function SettingsSheet({
               {model.ok ? "Ready" : "Unavailable"} · {model.detail}
             </Text>
             <Text style={styles.hint}>
-              External llama.cpp-compatible server on 127.0.0.1:8080 (or RELAY_LOCAL_MODEL_PORT).
-              Start with: ./dev/start-model.ps1 -StartHint
+              {nativeMobile
+                ? "An on-device model is not installed. Download stays off until a tested model is selected."
+                : "External llama.cpp-compatible server on 127.0.0.1:8080 (or RELAY_LOCAL_MODEL_PORT). Start with: ./dev/start-model.ps1 -StartHint"}
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -209,6 +214,28 @@ export function SettingsSheet({
               <Text style={styles.btnLabel}>Retry health check</Text>
             </Pressable>
           </View>
+
+          {onExportDiagnostics ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Diagnostics</Text>
+              <Text style={styles.hint}>
+                Share a redacted run summary. It leaves out source transcripts and saved memory text.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Share diagnostics"
+                onPress={() => setExportText(onExportDiagnostics())}
+                style={[styles.btn, styles.btnSecondary]}
+              >
+                <Text style={styles.btnLabel}>Share diagnostics</Text>
+              </Pressable>
+              {exportText ? (
+                <Text selectable style={styles.exportText}>
+                  {exportText}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
           {message ? <Text style={styles.message}>{message}</Text> : null}
           </ScrollView>
@@ -274,6 +301,11 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  exportText: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 16,
   },
   hint: {
     color: colors.textDim,

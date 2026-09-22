@@ -37,6 +37,7 @@ type Props = {
   readonly onGrantJevDisclosure?: () => void;
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
+  readonly onExportDiagnostics?: () => string;
   readonly busy?: boolean;
   readonly notice?: string | null;
   readonly onApproveCandidate?: (candidateId: string) => void;
@@ -63,6 +64,7 @@ export function PhoneShell({
   onGrantJevDisclosure,
   onRevokeJevDisclosure,
   onRefreshHealth,
+  onExportDiagnostics,
   busy = false,
   notice = null,
   onApproveCandidate,
@@ -98,6 +100,8 @@ export function PhoneShell({
   }, [snapshot.listening, reducedMotion]);
 
   const health = aggregateHealth(snapshot.status, snapshot.providerHealth);
+  const audioChip = snapshot.status.find((chip) => chip.id === "audio");
+  const audioUnavailable = audioChip && !audioChip.ok ? audioChip.detail : null;
   const ambientActions = snapshot.actions.filter((a) => a.kind === "ambient_recommendation");
   const otherActions = snapshot.actions.filter((a) => a.kind !== "ambient_recommendation");
   const waitingLabel =
@@ -189,14 +193,10 @@ export function PhoneShell({
           <View style={[styles.dot, snapshot.listening ? styles.dotOn : styles.dotOff]} />
           <Text style={styles.listenLabel}>{snapshot.listening ? "Listening" : "Listen"}</Text>
         </Pressable>
-        {snapshot.listening && !reducedMotion ? (
-          <View style={styles.wave} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            {[10, 18, 28, 16, 24].map((height, index) => (
-              <View key={index} style={[styles.waveBar, { height }]} />
-            ))}
-          </View>
-        ) : null}
       </View>
+      {audioUnavailable ? (
+        <Text style={styles.notice}>{`Listening stays off. ${audioUnavailable}`}</Text>
+      ) : null}
 
       <FlatList
         ref={threadRef}
@@ -274,6 +274,7 @@ export function PhoneShell({
         {...(onGrantJevDisclosure ? { onGrantJevDisclosure } : {})}
         {...(onRevokeJevDisclosure ? { onRevokeJevDisclosure } : {})}
         onRefreshHealth={() => onRefreshHealth?.()}
+        {...(onExportDiagnostics ? { onExportDiagnostics } : {})}
       />
       <LibrarySheet
         open={libraryOpen}
