@@ -159,7 +159,7 @@ describe("claim verification and GitHub read", () => {
     }
   });
 
-  it("public-search outage leaves claim Case recoverably waiting", async () => {
+  it("public-search outage leaves claim Case recoverably blocked", async () => {
     const publicSearch: PublicSearchPort = {
       async search() {
         throw new Error("provider_outage");
@@ -214,11 +214,17 @@ describe("claim verification and GitHub read", () => {
         const row = await harness.store.getCase(caseId);
         return (
           snap.feedItems.some((i) => i.kind === "wait" && /outage|Source/i.test(i.summary)) &&
-          row?.status === "waiting"
+          row?.status === "blocked"
         );
       });
-      expect((await harness.store.getCase(caseId))?.status).toBe("waiting");
-      expect((await harness.store.getCase(caseId))?.waitKind).toBe("tool");
+      expect((await harness.store.getCase(caseId))?.status).toBe("blocked");
+      // Re-submit starts a new Case — outage does not leave a stuck waiting Case.
+      const retry = await harness.client.execute({
+        type: "SubmitText",
+        text: "Verify: Lightshift operates 20 battery energy storage sites.",
+      });
+      expect(retry.caseId).toBeTruthy();
+      expect(retry.caseId).not.toBe(caseId);
     } finally {
       await harness.client.stop();
       harness.close();

@@ -315,11 +315,15 @@ export class ToolBroker {
       return { kind: "complete" };
     }
 
-    // Claim verify outages are recoverably blocked — do not silently re-route to respond.
+    // Claim verify outages / auth failures are recoverably blocked — user can re-submit after recovery.
     if (
       resolvedId === TOOL_CLAIM_VERIFY &&
       result.status === "failed" &&
-      (result.reasonCode === "network" || result.reasonCode === "not_authorized")
+      (result.reasonCode === "network" ||
+        result.reasonCode === "not_authorized" ||
+        result.reasonCode === "timeout" ||
+        result.reasonCode === "rate_limited" ||
+        result.reasonCode === "overloaded")
     ) {
       await this.deps.outcomes.publishFeedItem({
         itemId: feedItemId(caseId, "wait"),
@@ -328,15 +332,7 @@ export class ToolBroker {
         createdAt: this.deps.clock.now().toISOString(),
         caseId,
       });
-      const waiting = await this.deps.store.updateCase(caseId, current.version, {
-        phase: "decide",
-        status: "waiting",
-        waitKind: "tool",
-        at: this.deps.clock.now().toISOString(),
-      });
-      if (!waiting) {
-        await this.deps.outcomes.finishCase(caseId, current.version, "blocked", this.deps.getActiveCaseId());
-      }
+      await this.deps.outcomes.finishCase(caseId, current.version, "blocked", this.deps.getActiveCaseId());
       return { kind: "complete" };
     }
 

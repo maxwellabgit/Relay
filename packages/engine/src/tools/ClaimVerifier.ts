@@ -104,7 +104,15 @@ export class ClaimVerifier {
             } satisfies ClaimVerifyOutput,
           });
         }
-        break;
+        return envelope("failed", source.message, allCitations, allSlices, {
+          reasonCode: source.reasonCode,
+          output: {
+            verdict: "insufficient",
+            claim,
+            sourcesAttempted,
+            judgmentRounds,
+          } satisfies ClaimVerifyOutput,
+        });
       }
 
       const idx = pool.indexOf(source.source);
@@ -178,7 +186,15 @@ export class ClaimVerifier {
             } satisfies ClaimVerifyOutput,
           });
         }
-        break;
+        return envelope("failed", support.message, allCitations, allSlices, {
+          reasonCode: support.reasonCode,
+          output: {
+            verdict: "insufficient",
+            claim,
+            sourcesAttempted,
+            judgmentRounds,
+          } satisfies ClaimVerifyOutput,
+        });
       }
 
       if (support.verdict === "supported" || support.verdict === "contradicted") {
