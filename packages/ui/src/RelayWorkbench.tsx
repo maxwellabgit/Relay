@@ -1,4 +1,5 @@
 import type { ActionCard, RelaySnapshot } from "@relay/contracts";
+import type { ProductSurface } from "./assistant/product-surface.js";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -38,6 +39,7 @@ export type RelayWorkbenchProps = {
   readonly onExportDiagnostics?: () => string;
   readonly busy?: boolean;
   readonly notice?: string | null;
+  readonly surface?: ProductSurface;
   /** When false, product surface is full-bleed (mobile). Default true. */
   readonly showBezel?: boolean;
 };
@@ -75,6 +77,7 @@ export function RelayWorkbench({
   onExportDiagnostics,
   busy = false,
   notice = null,
+  surface = "ready",
   showBezel = true,
 }: RelayWorkbenchProps) {
   const { width } = useWindowDimensions();
@@ -111,6 +114,7 @@ export function RelayWorkbench({
       {...(onExportDiagnostics !== undefined ? { onExportDiagnostics } : {})}
       busy={busy}
       notice={notice}
+      surface={surface}
     />
   );
 

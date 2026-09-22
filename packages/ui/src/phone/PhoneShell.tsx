@@ -1,4 +1,4 @@
-import type { ActionCard, FeedItemSnapshot, RelaySnapshot, StatusChipState } from "@relay/contracts";
+import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
@@ -17,6 +17,7 @@ import {
 import { Composer } from "../assistant/Composer.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
+import { coreHealth, humanNotice, humanWait, surfaceCopy, type ProductSurface } from "../assistant/product-surface.js";
 import { colors } from "../theme/colors.js";
 import { usePrefersReducedMotion } from "../theme/reducedMotion.js";
 import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
@@ -40,6 +41,7 @@ type Props = {
   readonly onExportDiagnostics?: () => string;
   readonly busy?: boolean;
   readonly notice?: string | null;
+  readonly surface?: ProductSurface;
   readonly onApproveCandidate?: (candidateId: string) => void;
   readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
@@ -67,6 +69,7 @@ export function PhoneShell({
   onExportDiagnostics,
   busy = false,
   notice = null,
+  surface = "ready",
   onApproveCandidate,
   onActivateReflex,
   onPauseReflex,
@@ -78,6 +81,7 @@ export function PhoneShell({
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
   const threadRef = useRef<FlatList<FeedItemSnapshot>>(null);
+  const stickToEnd = useRef(true);
   const reducedMotion = usePrefersReducedMotion();
   const insets = useSafeAreaInsets();
 
@@ -99,16 +103,17 @@ export function PhoneShell({
     return () => clearInterval(timer);
   }, [snapshot.listening, reducedMotion]);
 
-  const health = aggregateHealth(snapshot.status, snapshot.providerHealth);
+  const health = coreHealth(snapshot.status, snapshot.providerHealth);
+  const surfaceText = surfaceCopy(surface);
   const audioChip = snapshot.status.find((chip) => chip.id === "audio");
   const audioUnavailable = audioChip && !audioChip.ok ? audioChip.detail : null;
   const ambientActions = snapshot.actions.filter((a) => a.kind === "ambient_recommendation");
   const otherActions = snapshot.actions.filter((a) => a.kind !== "ambient_recommendation");
   const waitingLabel =
     snapshot.waits.length > 0
-      ? `Waiting · ${snapshot.waits[0]?.waitKind ?? "work"}`
+      ? humanWait(snapshot.waits[0]?.waitKind ?? "work")
       : snapshot.queueDepth > 0
-        ? `Working · ${snapshot.queueDepth} queued`
+        ? `Working. ${snapshot.queueDepth} queued.`
         : null;
 
   const working =
@@ -194,8 +199,13 @@ export function PhoneShell({
           <Text style={styles.listenLabel}>{snapshot.listening ? "Listening" : "Listen"}</Text>
         </Pressable>
       </View>
+      {surfaceText ? (
+        <Text accessibilityLiveRegion="polite" style={styles.notice}>
+          {surfaceText}
+        </Text>
+      ) : null}
       {audioUnavailable ? (
-        <Text style={styles.notice}>{`Listening stays off. ${audioUnavailable}`}</Text>
+        <Text style={styles.notice}>{`Listening stays off. ${humanNotice(audioUnavailable)}`}</Text>
       ) : null}
 
       <FlatList
@@ -206,10 +216,20 @@ export function PhoneShell({
         style={styles.thread}
         contentContainerStyle={styles.threadContent}
         ListEmptyComponent={
-          <Text style={styles.empty}>Ask RELAY anything. Listening stays quiet until something useful appears.</Text>
+          <Text style={styles.empty}>
+            {surfaceText ?? "Ask RELAY anything. Listening stays quiet until something useful appears."}
+          </Text>
         }
+        scrollEventThrottle={32}
+        onScroll={(event) => {
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
+          stickToEnd.current = distance < 80;
+        }}
         onContentSizeChange={() => {
-          threadRef.current?.scrollToEnd({ animated: !reducedMotion });
+          if (stickToEnd.current) {
+            threadRef.current?.scrollToEnd({ animated: !reducedMotion });
+          }
         }}
       />
 
@@ -245,7 +265,7 @@ export function PhoneShell({
 
       {notice ? (
         <Text style={styles.notice} accessibilityLiveRegion="polite">
-          {notice}
+          {humanNotice(notice)}
         </Text>
       ) : null}
 
@@ -293,24 +313,6 @@ export function PhoneShell({
     return <View style={styles.fullBleed}>{screen}</View>;
   }
   return <View style={styles.bezel}>{screen}</View>;
-}
-
-function aggregateHealth(
-  status: readonly StatusChipState[],
-  providers: RelaySnapshot["providerHealth"],
-): { level: "ok" | "warn" | "bad"; label: string } {
-  const badStatus = status.find((s) => !s.ok);
-  const badProvider = providers.find((p) => !p.ok);
-  if (badStatus || badProvider) {
-    return {
-      level: "bad",
-      label: badStatus?.label ?? badProvider?.status ?? "degraded",
-    };
-  }
-  if (providers.length === 0 && status.length === 0) {
-    return { level: "warn", label: "unknown" };
-  }
-  return { level: "ok", label: "healthy" };
 }
 
 function formatElapsed(totalSec: number): string {
@@ -407,8 +409,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
   },
   healthHit: {
-    minWidth: touchTarget / 2,
-    minHeight: touchTarget / 2,
+    minWidth: touchTarget,
+    minHeight: touchTarget,
     alignItems: "center",
     justifyContent: "center",
   },

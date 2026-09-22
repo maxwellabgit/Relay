@@ -227,7 +227,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Hidden only by a runtime environment flag. Production must hide it by signed build flavor.",
+    notes: "Shown only when the build channel is internal and the console flag is set. A production channel stays hidden. Visual and device proof is still open.",
   },
   {
     id: "storage.sqlite",

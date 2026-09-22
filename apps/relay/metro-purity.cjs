@@ -8,6 +8,11 @@ function flagOn(env, name) {
   return value === "1" || value === "true";
 }
 
+function allowOptional(env, name) {
+  if (!env || env.EXPO_PUBLIC_RELAY_CHANNEL !== "internal") return false;
+  return flagOn(env, name);
+}
+
 function redirectProductionModule(moduleName, env) {
   if (
     typeof moduleName !== "string" ||
@@ -18,13 +23,13 @@ function redirectProductionModule(moduleName, env) {
   }
   const base = moduleName.split("?")[0] ?? moduleName;
   if (
-    !flagOn(env, "EXPO_PUBLIC_RELAY_ALLOW_DEMO") &&
+    !allowOptional(env, "EXPO_PUBLIC_RELAY_ALLOW_DEMO") &&
     /(?:^|\/)createBrowserDemoClient(?:\.js|\.ts)?$/.test(base)
   ) {
     return base.replace(/createBrowserDemoClient(?:\.js|\.ts)?$/, "demo-blocked");
   }
   if (
-    !flagOn(env, "EXPO_PUBLIC_RELAY_DEV_CONSOLE") &&
+    !allowOptional(env, "EXPO_PUBLIC_RELAY_DEV_CONSOLE") &&
     /(?:^|\/)replay-acronym-fixture(?:\.js|\.ts)?$/.test(base)
   ) {
     return base.replace(/replay-acronym-fixture(?:\.js|\.ts)?$/, "fixture-replay-blocked");

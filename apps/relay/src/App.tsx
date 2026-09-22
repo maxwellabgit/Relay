@@ -9,8 +9,9 @@ import {
   type RelaySnapshot,
 } from "@relay/contracts";
 import { buildRedactedDiagnostics } from "@relay/engine";
-import { RelayWorkbench } from "@relay/ui";
+import { isRetrying, productSurface, RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
+import { developerConsoleAllowed, readProcessEnv } from "./bootstrap/dev-console";
 import { ProductErrorBoundary } from "./ProductErrorBoundary";
 
 const EMPTY_SNAPSHOT: RelaySnapshot = {
@@ -76,6 +77,7 @@ export function App() {
   );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"booting" | "failed" | "live">("booting");
 
   const runCommand = async (command: RelayCommand): Promise<void> => {
     const client = clientRef.current;
@@ -112,17 +114,26 @@ export function App() {
         handleRef.current = created;
         clientRef.current = created.client;
         unsubscribe = created.client.subscribe((change) => {
-          if (change.type === "SnapshotReplaced") setSnapshot(change.snapshot);
+          if (change.type === "SnapshotReplaced") {
+            setSnapshot(change.snapshot);
+            setPhase("live");
+          }
         });
         void created.start().catch((error: unknown) => {
-          if (!cancelled) setNotice(error instanceof Error ? error.message : "start_failed");
+          if (!cancelled) {
+            setPhase("failed");
+            setNotice(error instanceof Error ? error.message : "start_failed");
+          }
         });
         void created.secrets.status().then((status) => {
           if (!cancelled) setTypeSafeKeyStatus(status);
         });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setNotice(error instanceof Error ? error.message : "client_failed");
+        if (!cancelled) {
+          setPhase("failed");
+          setNotice(error instanceof Error ? error.message : "client_failed");
+        }
       });
 
     const appState = AppState.addEventListener("change", (next) => {
@@ -140,14 +151,26 @@ export function App() {
     };
   }, []);
 
+  const engineChip = snapshot.status.find((chip) => chip.id === "engine");
+  const surface = productSurface({
+    phase,
+    busy,
+    queueDepth: snapshot.queueDepth,
+    waitCount: snapshot.waits.length,
+    engineOk: engineChip ? engineChip.ok : null,
+    retrying: isRetrying(snapshot.trace),
+  });
+  const devConsole = developerConsoleAllowed(readProcessEnv());
+
   return (
     <ProductErrorBoundary>
       <RelayWorkbench
         snapshot={snapshot}
         typeSafeKeyStatus={typeSafeKeyStatus}
-        showDeveloperPanel={isDevConsoleEnabled()}
+        showDeveloperPanel={devConsole}
         busy={busy}
         notice={notice}
+        surface={surface}
         onListenChange={(enabled) => {
           void runCommand({ type: "SetListening", enabled });
         }}
@@ -257,11 +280,8 @@ export function App() {
         onExportDiagnostics={() => JSON.stringify(buildRedactedDiagnostics(snapshot), null, 2)}
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
         onReplayFixture={async (fixture, speed) => {
-          const enabled =
-            process.env.EXPO_PUBLIC_RELAY_DEV_CONSOLE === "1" ||
-            process.env.EXPO_PUBLIC_RELAY_DEV_CONSOLE === "true";
           const handle = handleRef.current;
-          if (!enabled || !handle || fixture !== "acronym-basic") return;
+          if (!developerConsoleAllowed(readProcessEnv()) || !handle || fixture !== "acronym-basic") return;
           try {
             const { replayAcronymFixture } = await import("./dev/replay-acronym-fixture.js");
             await replayAcronymFixture(handle.engine, snapshot.runtime.sessionId ?? "session_web", speed);
@@ -279,12 +299,6 @@ function isTauriHost(): boolean {
   return Boolean(
     (globalThis as { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__?.invoke,
   );
-}
-
-function isDevConsoleEnabled(): boolean {
-  const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-    ?.EXPO_PUBLIC_RELAY_DEV_CONSOLE;
-  return value === "1" || value === "true";
 }
 
 async function handleAction(client: RelayClient | null, action: ActionCard): Promise<void> {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs a child command with EXPO_PUBLIC_RELAY_ALLOW_DEMO=1 for intentional browser demos.
+ * Runs a child command on the internal channel with EXPO_PUBLIC_RELAY_ALLOW_DEMO=1.
  * Usage: node tools/with-demo-flag.mjs <command> [...args]
  */
 import { spawn } from "node:child_process";
@@ -17,6 +17,7 @@ const child = spawn(command, rest, {
   shell: process.platform === "win32",
   env: {
     ...process.env,
+    EXPO_PUBLIC_RELAY_CHANNEL: "internal",
     EXPO_PUBLIC_RELAY_ALLOW_DEMO: "1",
   },
 });

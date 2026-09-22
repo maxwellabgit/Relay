@@ -35,6 +35,7 @@ export default tseslint.config(
       "tools/e2e/**/*.mjs",
       "apps/relay/babel.config.js",
       "apps/relay/metro.config.js",
+      "apps/relay/metro-purity.cjs",
       "apps/relay/index.js",
     ],
   },

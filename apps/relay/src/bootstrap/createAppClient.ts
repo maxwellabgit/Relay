@@ -27,7 +27,7 @@ type TauriHost = {
  * Selects the production client for the current host.
  * - Tauri → desktop production composition
  * - Native iOS/Android → fail closed until createMobileClient (F2); demo only with explicit flag
- * - Web / other → in-memory demo only when EXPO_PUBLIC_RELAY_ALLOW_DEMO=1
+ * - Web / other → in-memory demo only on the internal channel with EXPO_PUBLIC_RELAY_ALLOW_DEMO=1
  */
 export async function createAppClient(): Promise<AppClientHandle> {
   if (isTauri()) return createDesktopClient();
@@ -46,8 +46,9 @@ export async function createAppClient(): Promise<AppClientHandle> {
 }
 
 export function isExplicitDemoAllowed(): boolean {
-  const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env?.EXPO_PUBLIC_RELAY_ALLOW_DEMO;
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  if (env?.EXPO_PUBLIC_RELAY_CHANNEL !== "internal") return false;
+  const value = env.EXPO_PUBLIC_RELAY_ALLOW_DEMO;
   return value === "1" || value === "true";
 }
 

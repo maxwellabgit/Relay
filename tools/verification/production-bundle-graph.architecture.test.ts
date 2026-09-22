@@ -154,19 +154,41 @@ function productionGraph(): { files: string[]; unresolved: string[] } {
 }
 
 describe("production metro redirects", () => {
-  it("swaps the demo client and fixture unless the build flags are on", () => {
+  it("loads optional modules only on the internal channel with the matching flag", () => {
     const off = {};
     expect(redirectProductionModule("./createBrowserDemoClient.js", off)).toBe("./demo-blocked");
     expect(redirectProductionModule("./dev/replay-acronym-fixture.js", off)).toBe(
       "./dev/fixture-replay-blocked",
     );
     expect(redirectProductionModule("./demo-blocked", off)).toBeNull();
-    const on = {
+    const flagged = {
       EXPO_PUBLIC_RELAY_ALLOW_DEMO: "1",
       EXPO_PUBLIC_RELAY_DEV_CONSOLE: "true",
     };
-    expect(redirectProductionModule("./createBrowserDemoClient.js", on)).toBeNull();
-    expect(redirectProductionModule("./dev/replay-acronym-fixture.js", on)).toBeNull();
+    expect(redirectProductionModule("./createBrowserDemoClient.js", flagged)).toBe(
+      "./demo-blocked",
+    );
+    expect(redirectProductionModule("./dev/replay-acronym-fixture.js", flagged)).toBe(
+      "./dev/fixture-replay-blocked",
+    );
+    const production = {
+      EXPO_PUBLIC_RELAY_CHANNEL: "production",
+      EXPO_PUBLIC_RELAY_ALLOW_DEMO: "1",
+      EXPO_PUBLIC_RELAY_DEV_CONSOLE: "true",
+    };
+    expect(redirectProductionModule("./createBrowserDemoClient.js", production)).toBe(
+      "./demo-blocked",
+    );
+    expect(redirectProductionModule("./dev/replay-acronym-fixture.js", production)).toBe(
+      "./dev/fixture-replay-blocked",
+    );
+    const internal = {
+      EXPO_PUBLIC_RELAY_CHANNEL: "internal",
+      EXPO_PUBLIC_RELAY_ALLOW_DEMO: "1",
+      EXPO_PUBLIC_RELAY_DEV_CONSOLE: "true",
+    };
+    expect(redirectProductionModule("./createBrowserDemoClient.js", internal)).toBeNull();
+    expect(redirectProductionModule("./dev/replay-acronym-fixture.js", internal)).toBeNull();
   });
 });
 
@@ -174,8 +196,11 @@ describe("production static import graph", () => {
   it("keeps testkit, fixtures, and the demo client off production entries", () => {
     const app = readFileSync(resolve(root, "apps/relay/src/App.tsx"), "utf8");
     expect(app).not.toContain("@relay/testkit");
-    expect(app).toContain("EXPO_PUBLIC_RELAY_DEV_CONSOLE");
+    expect(app).toContain("developerConsoleAllowed");
     expect(app).toContain('import("./dev/replay-acronym-fixture.js")');
+    const gate = readFileSync(resolve(root, "apps/relay/src/bootstrap/dev-console.ts"), "utf8");
+    expect(gate).toContain("EXPO_PUBLIC_RELAY_CHANNEL");
+    expect(gate).toContain("EXPO_PUBLIC_RELAY_DEV_CONSOLE");
 
     const client = readFileSync(
       resolve(root, "apps/relay/src/bootstrap/createAppClient.ts"),
@@ -254,6 +279,7 @@ describe("production export purity", () => {
     const env = { ...process.env };
     delete env.EXPO_PUBLIC_RELAY_ALLOW_DEMO;
     delete env.EXPO_PUBLIC_RELAY_DEV_CONSOLE;
+    env.EXPO_PUBLIC_RELAY_CHANNEL = "production";
     for (const platform of ["web", "ios", "android"] as const) {
       const dir = await mkdtemp(join(tmpdir(), `relay-${platform}-`));
       try {

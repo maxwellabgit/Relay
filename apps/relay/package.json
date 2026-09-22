@@ -8,9 +8,9 @@
     "web": "expo start --web",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "export:web": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform web",
-    "export:ios": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform ios",
-    "export:android": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform android",
+    "export:web": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE EXPO_PUBLIC_RELAY_CHANNEL=production expo export --platform web",
+    "export:ios": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE EXPO_PUBLIC_RELAY_CHANNEL=production expo export --platform ios",
+    "export:android": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE EXPO_PUBLIC_RELAY_CHANNEL=production expo export --platform android",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
