@@ -91,7 +91,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "External loopback llama.cpp-compatible server; fails closed when absent. An invalid typed draft, search query, and direct answer are each repaired once. Not verified on a headed Windows release profile.",
+    notes: "External loopback llama.cpp-compatible server; fails closed when absent. An invalid typed draft, search query, direct answer, and explicit short summary are each repaired once. Not verified on a headed Windows release profile.",
   },
   {
     id: "model.mobile-tiny",

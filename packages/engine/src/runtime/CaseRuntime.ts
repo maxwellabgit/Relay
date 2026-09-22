@@ -10,7 +10,7 @@ import {
 } from "../policies.js";
 import { workSignature } from "../learning-store.js";
 import { PRIORITY_DIRECT, type WorkItem } from "../queue.js";
-import { draftDirectAnswer } from "../model/direct-answer.js";
+import { draftAskProse, explicitSummarySource } from "../model/summarize.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort } from "@relay/contracts";
@@ -680,11 +680,11 @@ export class CaseRuntime {
       stage: "model.request",
       status: "started",
       caseId,
-      reasonCode: "direct_answer",
+      reasonCode: explicitSummarySource(text) ? "summarize" : "direct_answer",
     });
     const started = this.deps.clock.now().getTime();
     try {
-      const generated = await draftDirectAnswer({
+      const generated = await draftAskProse({
         model: this.deps.model,
         ask: text,
         signal,

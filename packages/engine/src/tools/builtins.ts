@@ -9,7 +9,7 @@ import type {
   ToolResultEnvelope,
 } from "@relay/contracts";
 import { localOnlyPolicy, publicPolicy } from "@relay/contracts";
-import { draftDirectAnswer } from "../model/direct-answer.js";
+import { draftAskProse } from "../model/summarize.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
 import type { RegisteredTool, ToolRegistry } from "./ToolRegistry.js";
@@ -71,7 +71,7 @@ function respondTool(deps: {
     definition,
     async execute(args, signal) {
       const text = String(args.text ?? "");
-      const generated = await draftDirectAnswer({
+      const generated = await draftAskProse({
         model: deps.model,
         ask: text,
         signal: signal ?? new AbortController().signal,
