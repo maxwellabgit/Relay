@@ -25,6 +25,7 @@ import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
 import type { PatternService } from "../learning/PatternService.js";
 import type { WorkDisposition } from "../judgments/JudgmentService.js";
+import type { AmbientTriage } from "../ambient/AmbientTriage.js";
 import { runInTransaction } from "../transactions.js";
 
 export type CaseRuntimeDeps = {
@@ -39,6 +40,7 @@ export type CaseRuntimeDeps = {
   readonly outcomes: OutcomeRecorder;
   readonly overlays: OverlayState;
   readonly patterns: PatternService;
+  readonly ambient: AmbientTriage;
   readonly trace: EngineTrace;
   readonly getAbortSignal: () => AbortSignal;
   readonly getActiveCaseId: () => string | null;
@@ -180,8 +182,7 @@ export class CaseRuntime {
         caseId,
         reasonCode: signature ? "episode_recorded" : "no_episode",
       });
-      await this.deps.outcomes.finishCase(caseId, latest.version, "completed", this.deps.getActiveCaseId());
-      return { kind: "complete" };
+      return this.finishObservedCase(caseId, latest.version, item, text, current.origin);
     }
 
     if (current.origin === "direct") {
@@ -288,8 +289,7 @@ export class CaseRuntime {
       caseId,
       reasonCode: "no_episode",
     });
-    await this.deps.outcomes.finishCase(caseId, latest.version, "completed", this.deps.getActiveCaseId());
-    return { kind: "complete" };
+    return this.finishObservedCase(caseId, latest.version, item, text, current.origin);
   }
 
   async onModelRequested(item: WorkItem): Promise<WorkDisposition> {
@@ -685,6 +685,41 @@ export class CaseRuntime {
     const normal = displayName.normalize("NFKC").trim().toLocaleLowerCase();
     const digest = await sha256Hex(encodeText(normal));
     return `person_${digest.slice(0, 16)}`;
+  }
+
+  private async finishObservedCase(
+    caseId: string,
+    caseVersion: number,
+    item: WorkItem,
+    text: string,
+    origin: string,
+  ): Promise<WorkDisposition> {
+    if (origin !== "observed") {
+      await this.deps.outcomes.finishCase(caseId, caseVersion, "completed", this.deps.getActiveCaseId());
+      return { kind: "complete" };
+    }
+
+    await this.deps.ambient.triageObserved({
+      caseId,
+      caseVersion,
+      sourceEventId: String(item.payload.sourceEventId ?? ""),
+      text,
+      textArtifactId: String(item.payload.textArtifactId ?? ""),
+      textSha256: String(item.payload.textSha256 ?? ""),
+    });
+
+    const after = await this.deps.store.getCase(caseId);
+    if (after?.status === "waiting" && after.waitKind === "hosted_judgment") {
+      return { kind: "complete" };
+    }
+
+    await this.deps.outcomes.finishCase(
+      caseId,
+      after?.version ?? caseVersion,
+      "completed",
+      this.deps.getActiveCaseId(),
+    );
+    return { kind: "complete" };
   }
 }
 

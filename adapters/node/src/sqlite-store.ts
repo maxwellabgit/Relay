@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type {
   ArtifactStorePort,
+  CandidateEvent,
+  CandidateEventStatus,
   CaseKind,
   CaseOrigin,
   CasePhase,
@@ -12,6 +14,7 @@ import type {
   FeedItemRecord,
   JudgmentRecord,
   RelaySnapshot,
+  SourceSliceRef,
 } from "@relay/contracts";
 import type { EngineStore, PersistedSourceEvent, WorkItem, WorkItemType } from "@relay/engine";
 import { migrateLegacyProtectedContent } from "./migrate-legacy-protected.js";
@@ -536,6 +539,71 @@ export class SqliteEngineStore implements EngineStore {
         record.createdAt,
       );
   }
+
+  async putCandidateEvent(event: CandidateEvent): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO candidate_events(
+          candidate_event_id, source_event_id, case_id, kind, subject_refs_json, source_slice_refs_json,
+          extractor_version, status, urgency_reason, subject_key, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.candidateEventId,
+        event.sourceEventId,
+        event.caseId,
+        event.kind,
+        JSON.stringify(event.subjectRefs),
+        JSON.stringify(event.sourceSliceRefs),
+        event.extractorVersion,
+        event.status,
+        event.urgencyReason ?? null,
+        event.subjectKey ?? null,
+        event.createdAt,
+        event.updatedAt,
+      );
+  }
+
+  async getCandidateEvent(candidateEventId: string): Promise<CandidateEvent | null> {
+    const row = this.db
+      .prepare(`SELECT * FROM candidate_events WHERE candidate_event_id = ?`)
+      .get(candidateEventId) as DbCandidateEvent | undefined;
+    return row ? mapCandidateEvent(row) : null;
+  }
+
+  async listCandidateEvents(caseId?: string): Promise<readonly CandidateEvent[]> {
+    const rows = (
+      caseId
+        ? (this.db.prepare(`SELECT * FROM candidate_events WHERE case_id = ?`).all(caseId) as DbCandidateEvent[])
+        : (this.db.prepare(`SELECT * FROM candidate_events`).all() as DbCandidateEvent[])
+    );
+    return rows.map(mapCandidateEvent);
+  }
+
+  async updateCandidateEventStatus(
+    candidateEventId: string,
+    status: CandidateEvent["status"],
+    updatedAt: string,
+  ): Promise<void> {
+    this.db
+      .prepare(`UPDATE candidate_events SET status = ?, updated_at = ? WHERE candidate_event_id = ?`)
+      .run(status, updatedAt, candidateEventId);
+  }
+
+  async putAmbientSuppression(key: string, reason: string, createdAt: string): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO ambient_suppressions(suppression_key, reason, created_at) VALUES (?, ?, ?)`,
+      )
+      .run(key, reason, createdAt);
+  }
+
+  async isAmbientSuppressed(key: string): Promise<boolean> {
+    const row = this.db
+      .prepare(`SELECT 1 AS ok FROM ambient_suppressions WHERE suppression_key = ?`)
+      .get(key) as { ok: number } | undefined;
+    return row != null;
+  }
 }
 
 type DbCase = {
@@ -600,6 +668,38 @@ function mapCase(row: DbCase): CaseRecord {
   };
 }
 
+type DbCandidateEvent = {
+  candidate_event_id: string;
+  source_event_id: string;
+  case_id: string;
+  kind: string;
+  subject_refs_json: string;
+  source_slice_refs_json: string;
+  extractor_version: string;
+  status: string;
+  urgency_reason: string | null;
+  subject_key: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function mapCandidateEvent(row: DbCandidateEvent): CandidateEvent {
+  return {
+    candidateEventId: row.candidate_event_id,
+    sourceEventId: row.source_event_id,
+    caseId: row.case_id,
+    kind: row.kind as CandidateEvent["kind"],
+    subjectRefs: JSON.parse(row.subject_refs_json) as string[],
+    sourceSliceRefs: JSON.parse(row.source_slice_refs_json) as SourceSliceRef[],
+    extractorVersion: row.extractor_version,
+    status: row.status as CandidateEventStatus,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.urgency_reason ? { urgencyReason: row.urgency_reason as NonNullable<CandidateEvent["urgencyReason"]> } : {}),
+    ...(row.subject_key ? { subjectKey: row.subject_key } : {}),
+  };
+}
+
 function mapJudgment(row: DbJudgment): JudgmentRecord {
   return {
     judgmentId: row.judgment_id,
@@ -635,12 +735,13 @@ function applyMigrations(db: DatabaseSync): void {
     7: "007_runtime_settings.sql",
     8: "008_protect_legacy_content.sql",
     9: "009_work_correlation.sql",
+    10: "010_candidate_events.sql",
   };
   db.exec("BEGIN");
   try {
     db.exec(readFileSync(resolve(migrationDir, files[1]!), "utf8"));
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7, 8, 9]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10]) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const file = files[version];

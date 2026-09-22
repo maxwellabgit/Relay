@@ -1,4 +1,7 @@
 export * from "./jev-health.js";
+export * from "./ambient/AmbientTriage.js";
+export * from "./ambient/route-policy.js";
+export * from "./intake/CandidateExtractor.js";
 export * from "./engine.js";
 export * from "./host.js";
 export * from "./judgment-lifecycle.js";

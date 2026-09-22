@@ -1,4 +1,16 @@
-import type { ArtifactStorePort, CaseKind, CaseOrigin, CasePhase, CaseRecord, CaseStatus, FeedItemRecord, JudgmentRecord, RelaySnapshot } from "@relay/contracts";
+import type {
+  ArtifactStorePort,
+  CandidateEvent,
+  CandidateEventStatus,
+  CaseKind,
+  CaseOrigin,
+  CasePhase,
+  CaseRecord,
+  CaseStatus,
+  FeedItemRecord,
+  JudgmentRecord,
+  RelaySnapshot,
+} from "@relay/contracts";
 import { localOnlyPolicy } from "@relay/contracts";
 import type {
   CandidateRecord,
@@ -228,6 +240,37 @@ export class TauriEngineStore implements EngineStore {
     readonly createdAt: string;
   }): Promise<void> {
     return this.voidOp({ op: "upsert_judgment_attempt", record });
+  }
+
+  putCandidateEvent(event: CandidateEvent): Promise<void> {
+    return this.voidOp({ op: "put_candidate_event", event });
+  }
+
+  async getCandidateEvent(candidateEventId: string): Promise<CandidateEvent | null> {
+    return (await this.call({ op: "get_candidate_event", candidateEventId })) as CandidateEvent | null;
+  }
+
+  async listCandidateEvents(caseId?: string): Promise<readonly CandidateEvent[]> {
+    return (await this.call({
+      op: "list_candidate_events",
+      ...(caseId ? { caseId } : {}),
+    })) as CandidateEvent[];
+  }
+
+  updateCandidateEventStatus(
+    candidateEventId: string,
+    status: CandidateEventStatus,
+    updatedAt: string,
+  ): Promise<void> {
+    return this.voidOp({ op: "update_candidate_event_status", candidateEventId, status, updatedAt });
+  }
+
+  putAmbientSuppression(key: string, reason: string, createdAt: string): Promise<void> {
+    return this.voidOp({ op: "put_ambient_suppression", key, reason, createdAt });
+  }
+
+  async isAmbientSuppressed(key: string): Promise<boolean> {
+    return (await this.call({ op: "is_ambient_suppressed", key })) === true;
   }
 
   private async voidOp(op: Record<string, unknown>): Promise<void> {

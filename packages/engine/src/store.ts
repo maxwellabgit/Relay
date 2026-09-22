@@ -1,4 +1,6 @@
 import type {
+  CandidateEvent,
+  CandidateEventStatus,
   CaseKind,
   CaseOrigin,
   CasePhase,
@@ -97,5 +99,15 @@ export type EngineStore = {
    * {@link runInTransaction} which falls through to the callback.
    */
   runInTransaction?<T>(work: () => Promise<T>): Promise<T>;
+  putCandidateEvent(event: CandidateEvent): Promise<void>;
+  getCandidateEvent(candidateEventId: string): Promise<CandidateEvent | null>;
+  listCandidateEvents(caseId?: string): Promise<readonly CandidateEvent[]>;
+  updateCandidateEventStatus(
+    candidateEventId: string,
+    status: CandidateEventStatus,
+    updatedAt: string,
+  ): Promise<void>;
+  putAmbientSuppression(key: string, reason: string, createdAt: string): Promise<void>;
+  isAmbientSuppressed(key: string): Promise<boolean>;
   readonly learning: LearningStore;
 };

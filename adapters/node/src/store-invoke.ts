@@ -1,4 +1,13 @@
-import type { CaseKind, CaseOrigin, CasePhase, CaseStatus, FeedItemRecord, JudgmentRecord } from "@relay/contracts";
+import type {
+  CandidateEvent,
+  CandidateEventStatus,
+  CaseKind,
+  CaseOrigin,
+  CasePhase,
+  CaseStatus,
+  FeedItemRecord,
+  JudgmentRecord,
+} from "@relay/contracts";
 import type {
   CandidateRecord,
   EpisodeRecord,
@@ -186,6 +195,25 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
     case "rollback_transaction":
       await store.rollbackTransaction();
       return null;
+    case "put_candidate_event":
+      await store.putCandidateEvent(op.event as CandidateEvent);
+      return null;
+    case "get_candidate_event":
+      return store.getCandidateEvent(str(op, "candidateEventId"));
+    case "list_candidate_events":
+      return store.listCandidateEvents(typeof op.caseId === "string" ? op.caseId : undefined);
+    case "update_candidate_event_status":
+      await store.updateCandidateEventStatus(
+        str(op, "candidateEventId"),
+        str(op, "status") as CandidateEventStatus,
+        str(op, "updatedAt"),
+      );
+      return null;
+    case "put_ambient_suppression":
+      await store.putAmbientSuppression(str(op, "key"), str(op, "reason"), str(op, "createdAt"));
+      return null;
+    case "is_ambient_suppressed":
+      return store.isAmbientSuppressed(str(op, "key"));
     default:
       throw new Error(`unknown_op:${String(op.op)}`);
   }

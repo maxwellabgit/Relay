@@ -15,6 +15,7 @@ import { localOnlyPolicy } from "@relay/contracts";
 import type { EpisodeDefinition } from "./episodes.js";
 import { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
 import { EngineTrace, resolveRunId } from "./engine-helpers.js";
+import { AmbientTriage } from "./ambient/AmbientTriage.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
@@ -74,6 +75,7 @@ export class RelayEngine {
   private readonly patterns: PatternService;
   private readonly intake: SourceIntake;
   private readonly cases: CaseRuntime;
+  private readonly ambient: AmbientTriage;
   private readonly judgments: JudgmentService;
   private readonly authority: AuthorityState;
   private readonly operations: OperationService;
@@ -144,6 +146,22 @@ export class RelayEngine {
       emitSnapshot,
     });
 
+    this.ambient = new AmbientTriage({
+      store: deps.store,
+      artifacts: deps.artifacts,
+      judgments: deps.judgments,
+      model: deps.model,
+      clock: deps.clock,
+      ids: deps.ids,
+      outcomes: this.outcomes,
+      overlays: this.overlays,
+      trace: this.trace,
+      getAbortSignal,
+      getActiveCaseId: () => this.activeCaseId,
+      emitSnapshot,
+      ...(deps.mode ? { mode: deps.mode } : {}),
+    });
+
     this.cases = new CaseRuntime({
       store: deps.store,
       artifacts: deps.artifacts,
@@ -156,6 +174,7 @@ export class RelayEngine {
       outcomes: this.outcomes,
       overlays: this.overlays,
       patterns: this.patterns,
+      ambient: this.ambient,
       trace: this.trace,
       getAbortSignal,
       getActiveCaseId: () => this.activeCaseId,
@@ -338,6 +357,12 @@ export class RelayEngine {
         return this.patterns.startWorkSession();
       case "EndWorkSession":
         return this.patterns.endWorkSession();
+      case "AcceptAmbientRecommendation":
+        return this.ambient.acceptRecommendation(command.recommendationId);
+      case "DismissAmbientRecommendation":
+        return this.ambient.dismissRecommendation(command.recommendationId);
+      case "FeedbackAmbientRecommendation":
+        return this.ambient.feedbackRecommendation(command.recommendationId, command.feedback);
       default: {
         const handled = await this.operations.execute(command);
         if (handled) return handled;

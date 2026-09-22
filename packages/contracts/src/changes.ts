@@ -299,17 +299,32 @@ export type TraceRow = {
 
 export type ActionCard = {
   readonly actionId: string;
-  readonly kind: "confirm_birthday" | "save_definition" | "replace_memory";
+  readonly kind:
+    | "confirm_birthday"
+    | "save_definition"
+    | "replace_memory"
+    | "ambient_recommendation";
   readonly label: string;
   readonly token?: string;
   readonly expansion?: string;
   readonly personId?: string;
   readonly displayName?: string;
   readonly date?: string;
+  /** Ambient recommendation fields (kind === ambient_recommendation). */
+  readonly recommendationId?: string;
+  readonly candidateEventId?: string;
+  readonly caseId?: string;
+  readonly title?: string;
+  readonly reason?: string;
+  readonly evidenceCount?: number;
+  readonly primary?: "save" | "verify" | "create_task" | "review";
+  readonly quiet?: boolean;
+  readonly noteKey?: string;
+  readonly noteText?: string;
 };
 
 export type MemoryView = {
-  readonly kind: "glossary" | "birthday";
+  readonly kind: "glossary" | "birthday" | "note";
   readonly key: string;
   readonly fields: Readonly<Record<string, string>>;
 };

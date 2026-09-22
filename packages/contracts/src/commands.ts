@@ -38,8 +38,24 @@ export type CaptureBirthdayCommand = {
 
 export type DeleteMemoryCommand = {
   readonly type: "DeleteMemory";
-  readonly kind: "glossary" | "birthday";
+  readonly kind: "glossary" | "birthday" | "note";
   readonly key: string;
+};
+
+export type AcceptAmbientRecommendationCommand = {
+  readonly type: "AcceptAmbientRecommendation";
+  readonly recommendationId: string;
+};
+
+export type DismissAmbientRecommendationCommand = {
+  readonly type: "DismissAmbientRecommendation";
+  readonly recommendationId: string;
+};
+
+export type FeedbackAmbientRecommendationCommand = {
+  readonly type: "FeedbackAmbientRecommendation";
+  readonly recommendationId: string;
+  readonly feedback: "not_useful" | "never_for_project" | "why";
 };
 
 export type ApproveCandidateCommand = {
@@ -193,6 +209,9 @@ export type RelayCommand =
   | UpsertGlossaryEntryCommand
   | CaptureBirthdayCommand
   | DeleteMemoryCommand
+  | AcceptAmbientRecommendationCommand
+  | DismissAmbientRecommendationCommand
+  | FeedbackAmbientRecommendationCommand
   | ApproveCandidateCommand
   | RejectCandidateCommand
   | SnoozeCandidateCommand

@@ -21,6 +21,8 @@ const MIGRATION_8: &str =
     include_str!("../../../../packages/storage-schema/migrations/008_protect_legacy_content.sql");
 const MIGRATION_9: &str =
     include_str!("../../../../packages/storage-schema/migrations/009_work_correlation.sql");
+const MIGRATION_10: &str =
+    include_str!("../../../../packages/storage-schema/migrations/010_candidate_events.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
@@ -132,6 +134,7 @@ impl StateDb {
         apply_version(&tx, 7, MIGRATION_7)?;
         apply_version(&tx, 8, MIGRATION_8)?;
         apply_version(&tx, 9, MIGRATION_9)?;
+        apply_version(&tx, 10, MIGRATION_10)?;
         tx.commit().map_err(|error| error.to_string())?;
         self.migrate_legacy_protected_content()?;
         Ok(())
@@ -478,6 +481,12 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "list_patterns" => list_patterns(conn),
         "put_candidate" => put_candidate(conn, op),
         "list_candidates" => list_candidates(conn),
+        "put_candidate_event" => put_candidate_event(conn, op),
+        "get_candidate_event" => get_candidate_event(conn, op),
+        "list_candidate_events" => list_candidate_events(conn, op),
+        "update_candidate_event_status" => update_candidate_event_status(conn, op),
+        "put_ambient_suppression" => put_ambient_suppression(conn, op),
+        "is_ambient_suppressed" => is_ambient_suppressed(conn, op),
         "put_review" => put_review(conn, op),
         "list_reviews" => list_reviews(conn),
         "compact" => compact(conn, op),
@@ -1386,6 +1395,125 @@ fn list_candidates(conn: &Connection) -> Result<Value, String> {
         params![],
         map_candidate,
     )
+}
+
+fn put_candidate_event(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let event = req_obj(op, "event")?;
+    conn.execute(
+        "INSERT OR REPLACE INTO candidate_events(
+          candidate_event_id, source_event_id, case_id, kind, subject_refs_json, source_slice_refs_json,
+          extractor_version, status, urgency_reason, subject_key, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            req_str(event, "candidateEventId")?,
+            req_str(event, "sourceEventId")?,
+            req_str(event, "caseId")?,
+            req_str(event, "kind")?,
+            json_text(event.get("subjectRefs").unwrap_or(&json!([])))?,
+            json_text(event.get("sourceSliceRefs").unwrap_or(&json!([])))?,
+            req_str(event, "extractorVersion")?,
+            req_str(event, "status")?,
+            opt_str(event, "urgencyReason"),
+            opt_str(event, "subjectKey"),
+            req_str(event, "createdAt")?,
+            req_str(event, "updatedAt")?,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn get_candidate_event(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let candidate_event_id = req_str(op, "candidateEventId")?;
+    let row = conn
+        .query_row(
+            "SELECT * FROM candidate_events WHERE candidate_event_id = ?1",
+            params![candidate_event_id],
+            map_candidate_event,
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(row.unwrap_or(Value::Null))
+}
+
+fn list_candidate_events(conn: &Connection, op: &Value) -> Result<Value, String> {
+    if let Some(case_id) = opt_str(op, "caseId") {
+        return query_values(
+            conn,
+            "SELECT * FROM candidate_events WHERE case_id = ?1",
+            params![case_id],
+            map_candidate_event,
+        );
+    }
+    query_values(
+        conn,
+        "SELECT * FROM candidate_events",
+        params![],
+        map_candidate_event,
+    )
+}
+
+fn update_candidate_event_status(conn: &Connection, op: &Value) -> Result<Value, String> {
+    conn.execute(
+        "UPDATE candidate_events SET status = ?1, updated_at = ?2 WHERE candidate_event_id = ?3",
+        params![
+            req_str(op, "status")?,
+            req_str(op, "updatedAt")?,
+            req_str(op, "candidateEventId")?,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn put_ambient_suppression(conn: &Connection, op: &Value) -> Result<Value, String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO ambient_suppressions(suppression_key, reason, created_at) VALUES (?1, ?2, ?3)",
+        params![
+            req_str(op, "key")?,
+            req_str(op, "reason")?,
+            req_str(op, "createdAt")?,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn is_ambient_suppressed(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let key = req_str(op, "key")?;
+    let exists: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM ambient_suppressions WHERE suppression_key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Bool(exists.is_some()))
+}
+
+fn map_candidate_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let subject_refs_json = row.get::<_, String>("subject_refs_json")?;
+    let source_slice_refs_json = row.get::<_, String>("source_slice_refs_json")?;
+    let mut value = json!({
+        "candidateEventId": row.get::<_, String>("candidate_event_id")?,
+        "sourceEventId": row.get::<_, String>("source_event_id")?,
+        "caseId": row.get::<_, String>("case_id")?,
+        "kind": row.get::<_, String>("kind")?,
+        "subjectRefs": parse_json(&subject_refs_json).unwrap_or(json!([])),
+        "sourceSliceRefs": parse_json(&source_slice_refs_json).unwrap_or(json!([])),
+        "extractorVersion": row.get::<_, String>("extractor_version")?,
+        "status": row.get::<_, String>("status")?,
+        "createdAt": row.get::<_, String>("created_at")?,
+        "updatedAt": row.get::<_, String>("updated_at")?,
+    });
+    if let Some(reason) = row.get::<_, Option<String>>("urgency_reason")? {
+        value["urgencyReason"] = json!(reason);
+    }
+    if let Some(key) = row.get::<_, Option<String>>("subject_key")? {
+        value["subjectKey"] = json!(key);
+    }
+    Ok(value)
 }
 
 fn put_review(conn: &Connection, op: &Value) -> Result<Value, String> {

@@ -31,6 +31,27 @@ type StagedActionRef =
       readonly actionId: string;
       readonly kind: "replace_memory";
       readonly label: string;
+      readonly token?: string;
+      readonly expansionArtifactId?: string;
+      readonly expansionSha256?: string;
+    }
+  | {
+      readonly actionId: string;
+      readonly kind: "ambient_recommendation";
+      readonly label: string;
+      readonly recommendationId: string;
+      readonly candidateEventId: string;
+      readonly caseId: string;
+      readonly titleArtifactId: string;
+      readonly titleSha256: string;
+      readonly reasonArtifactId: string;
+      readonly reasonSha256: string;
+      readonly noteKey: string;
+      readonly noteArtifactId: string;
+      readonly noteSha256: string;
+      readonly evidenceCount: number;
+      readonly primary: "save" | "verify" | "create_task" | "review";
+      readonly quiet: boolean;
     };
 
 /**
@@ -169,6 +190,40 @@ export class OverlayState {
         date: card.date ?? "",
       };
     }
+    if (card.kind === "ambient_recommendation") {
+      const title = await this.putExpansion(card.title ?? card.label);
+      const reason = await this.putExpansion(card.reason ?? "");
+      const note = await this.putExpansion(card.noteText ?? "");
+      return {
+        actionId: card.actionId,
+        kind: "ambient_recommendation",
+        label: card.label,
+        recommendationId: card.recommendationId ?? card.actionId,
+        candidateEventId: card.candidateEventId ?? "",
+        caseId: card.caseId ?? "",
+        titleArtifactId: title.artifactId,
+        titleSha256: title.sha256,
+        reasonArtifactId: reason.artifactId,
+        reasonSha256: reason.sha256,
+        noteKey: card.noteKey ?? "",
+        noteArtifactId: note.artifactId,
+        noteSha256: note.sha256,
+        evidenceCount: card.evidenceCount ?? 0,
+        primary: card.primary ?? "save",
+        quiet: card.quiet !== false,
+      };
+    }
+    if (card.kind === "replace_memory" && (card.expansion || card.token)) {
+      const packed = await this.putExpansion(card.expansion ?? "");
+      return {
+        actionId: card.actionId,
+        kind: "replace_memory",
+        label: card.label,
+        ...(card.token ? { token: card.token } : {}),
+        expansionArtifactId: packed.artifactId,
+        expansionSha256: packed.sha256,
+      };
+    }
     return {
       actionId: card.actionId,
       kind: "replace_memory",
@@ -202,11 +257,59 @@ export class OverlayState {
         date: ref.date,
       };
     }
-    return {
-      actionId: ref.actionId,
-      kind: "replace_memory",
-      label: ref.label,
-    };
+    if (ref.kind === "ambient_recommendation") {
+      let title = "";
+      let reason = "";
+      let noteText = "";
+      try {
+        title = await this.getExpansion(ref.titleArtifactId, ref.titleSha256);
+      } catch {
+        title = ref.label;
+      }
+      try {
+        reason = await this.getExpansion(ref.reasonArtifactId, ref.reasonSha256);
+      } catch {
+        reason = "";
+      }
+      try {
+        noteText = await this.getExpansion(ref.noteArtifactId, ref.noteSha256);
+      } catch {
+        noteText = "";
+      }
+      return {
+        actionId: ref.actionId,
+        kind: "ambient_recommendation",
+        label: ref.label,
+        recommendationId: ref.recommendationId,
+        candidateEventId: ref.candidateEventId,
+        caseId: ref.caseId,
+        title,
+        reason,
+        evidenceCount: ref.evidenceCount,
+        primary: ref.primary,
+        quiet: ref.quiet,
+        noteKey: ref.noteKey,
+        noteText,
+      };
+    }
+    if (ref.kind === "replace_memory") {
+      let expansion = "";
+      if (ref.expansionArtifactId && ref.expansionSha256) {
+        try {
+          expansion = await this.getExpansion(ref.expansionArtifactId, ref.expansionSha256);
+        } catch {
+          expansion = "";
+        }
+      }
+      return {
+        actionId: ref.actionId,
+        kind: "replace_memory",
+        label: ref.label,
+        ...(ref.token ? { token: ref.token } : {}),
+        ...(expansion ? { expansion } : {}),
+      };
+    }
+    throw new Error(`unknown_staged_ref:${String((ref as StagedActionRef).kind)}`);
   }
 }
 

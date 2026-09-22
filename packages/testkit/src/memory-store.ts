@@ -1,4 +1,5 @@
 import type {
+  CandidateEvent,
   CaseKind,
   CaseOrigin,
   CasePhase,
@@ -52,6 +53,8 @@ export class MemoryEngineStore implements EngineStore {
   private readonly judgments = new Map<string, JudgmentRecord>();
   private readonly deadLetters: { workId: string; reasonCode: string; at: string }[] = [];
   private readonly judgmentAttempts = new Map<string, unknown>();
+  private readonly candidateEvents = new Map<string, CandidateEvent>();
+  private readonly ambientSuppressions = new Map<string, { reason: string; createdAt: string }>();
   private domainSeq = 0;
 
   close(): void {
@@ -353,5 +356,36 @@ export class MemoryEngineStore implements EngineStore {
     readonly createdAt: string;
   }): Promise<void> {
     this.judgmentAttempts.set(record.attemptId, record);
+  }
+
+  async putCandidateEvent(event: CandidateEvent): Promise<void> {
+    this.candidateEvents.set(event.candidateEventId, event);
+  }
+
+  async getCandidateEvent(candidateEventId: string): Promise<CandidateEvent | null> {
+    return this.candidateEvents.get(candidateEventId) ?? null;
+  }
+
+  async listCandidateEvents(caseId?: string): Promise<readonly CandidateEvent[]> {
+    const all = [...this.candidateEvents.values()];
+    return caseId ? all.filter((e) => e.caseId === caseId) : all;
+  }
+
+  async updateCandidateEventStatus(
+    candidateEventId: string,
+    status: CandidateEvent["status"],
+    updatedAt: string,
+  ): Promise<void> {
+    const current = this.candidateEvents.get(candidateEventId);
+    if (!current) return;
+    this.candidateEvents.set(candidateEventId, { ...current, status, updatedAt });
+  }
+
+  async putAmbientSuppression(key: string, reason: string, createdAt: string): Promise<void> {
+    this.ambientSuppressions.set(key, { reason, createdAt });
+  }
+
+  async isAmbientSuppressed(key: string): Promise<boolean> {
+    return this.ambientSuppressions.has(key);
   }
 }

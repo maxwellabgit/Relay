@@ -18,6 +18,13 @@ export function packMemoryValue(kind: MemoryKind, value: Readonly<Record<string,
     if (status) metadata.status = status;
     return { prose: expansion ? { expansion } : {}, metadata };
   }
+  if (kind === "note") {
+    const { text = "", status = "", candidateEventId = "", ...rest } = value;
+    const metadata: Record<string, string> = { ...rest };
+    if (status) metadata.status = status;
+    if (candidateEventId) metadata.candidateEventId = candidateEventId;
+    return { prose: text ? { text } : {}, metadata };
+  }
   const { displayName = "", month = "", day = "", year = "", ...rest } = value;
   const metadata: Record<string, string> = { ...rest };
   if (month) metadata.month = month;
@@ -35,6 +42,12 @@ export function unpackMemoryValue(
     return {
       ...metadata,
       ...(prose.expansion ? { expansion: prose.expansion } : {}),
+    };
+  }
+  if (kind === "note") {
+    return {
+      ...metadata,
+      ...(prose.text ? { text: prose.text } : {}),
     };
   }
   return {
