@@ -1,5 +1,4 @@
 import type {
-  DetectionContext,
   ReflexContext,
   ReflexDefinition,
   ReflexModule,
@@ -79,7 +78,7 @@ export function phraseModule(
 ): ReflexModule {
   return {
     definition,
-    detect(event: SourceEvent, _context: DetectionContext) {
+    detect(event: SourceEvent) {
       return detectPhrase(definition, pattern, event);
     },
     async evaluate(context: ReflexContext) {
