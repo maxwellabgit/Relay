@@ -83,12 +83,13 @@ impl StateDb {
     }
 
     fn begin_transaction(&mut self) -> Result<Value, String> {
-        if self.txn_depth == 0 {
-            self.conn
-                .execute_batch("BEGIN IMMEDIATE")
-                .map_err(|error| error.to_string())?;
+        if self.txn_depth > 0 {
+            return Err("transaction_busy".into());
         }
-        self.txn_depth = self.txn_depth.saturating_add(1);
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|error| error.to_string())?;
+        self.txn_depth = 1;
         Ok(Value::Null)
     }
 
@@ -96,12 +97,10 @@ impl StateDb {
         if self.txn_depth == 0 {
             return Err("no_transaction".into());
         }
-        self.txn_depth -= 1;
-        if self.txn_depth == 0 {
-            self.conn
-                .execute_batch("COMMIT")
-                .map_err(|error| error.to_string())?;
-        }
+        self.conn
+            .execute_batch("COMMIT")
+            .map_err(|error| error.to_string())?;
+        self.txn_depth = 0;
         Ok(Value::Null)
     }
 

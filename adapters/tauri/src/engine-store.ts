@@ -28,48 +28,46 @@ type Call = (op: Record<string, unknown>) => Promise<unknown>;
 
 export class TauriEngineStore implements EngineStore {
   readonly learning: LearningStore;
-  /** Serializes all store IPC so multi-op transactions cannot interleave. */
-  private gate: Promise<void> = Promise.resolve();
-  private lockDepth = 0;
+  /** Promise chain mutex — never reenter based on a depth flag across awaits. */
+  private mutex: Promise<void> = Promise.resolve();
+  private executeOp: Call;
 
   constructor(
     private readonly invoke: StoreInvoke,
     artifacts?: ArtifactStorePort,
   ) {
-    const call: Call = (op) => this.withStoreLock(() => this.invoke("store_execute", { op }));
-    this.learning = new TauriLearning(call, artifacts);
-    this.call = call;
+    this.executeOp = (op) => this.lockedInvoke(op);
+    this.learning = new TauriLearning((op) => this.executeOp(op), artifacts);
   }
 
-  private readonly call: Call;
+  private get call(): Call {
+    return (op) => this.executeOp(op);
+  }
 
-  private async withStoreLock<T>(work: () => Promise<T>): Promise<T> {
-    if (this.lockDepth > 0) {
-      this.lockDepth += 1;
-      try {
-        return await work();
-      } finally {
-        this.lockDepth -= 1;
-      }
-    }
+  private async lockedInvoke(op: Record<string, unknown>): Promise<unknown> {
+    return this.withExclusive(() => this.invoke("store_execute", { op }));
+  }
+
+  private async withExclusive<T>(work: () => Promise<T>): Promise<T> {
     let release!: () => void;
-    const prev = this.gate;
-    this.gate = new Promise<void>((resolve) => {
+    const prev = this.mutex;
+    this.mutex = new Promise<void>((resolve) => {
       release = resolve;
     });
     await prev;
-    this.lockDepth = 1;
     try {
       return await work();
     } finally {
-      this.lockDepth = 0;
       release();
     }
   }
 
   async runInTransaction<T>(work: () => Promise<T>): Promise<T> {
-    return this.withStoreLock(async () => {
+    return this.withExclusive(async () => {
       await this.invoke("store_execute", { op: { op: "begin_transaction" } });
+      const previous = this.executeOp;
+      // While exclusive, store methods must not try to re-acquire the mutex.
+      this.executeOp = (op) => this.invoke("store_execute", { op });
       try {
         const result = await work();
         await this.invoke("store_execute", { op: { op: "commit_transaction" } });
@@ -81,6 +79,8 @@ export class TauriEngineStore implements EngineStore {
           // ignore rollback failures after a failed begin/commit
         }
         throw error;
+      } finally {
+        this.executeOp = previous;
       }
     });
   }
