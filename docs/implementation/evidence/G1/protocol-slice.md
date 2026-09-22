@@ -1,5 +1,6 @@
 # G1 protocol slice — not a green gate
 
+Protocol slice SHA: `8a5746b5143b0fff5f170d2079501b6117ea5002`.  
 Parent truth freeze: `e281f2ce4bbbad17c4be0720dc6bd92839f12107`.
 
 This slice does not green G1. The live canary, scoped disclosure grant, budget, two-round limit, and resume-once behavior are still open.
