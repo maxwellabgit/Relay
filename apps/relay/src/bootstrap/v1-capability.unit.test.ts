@@ -27,18 +27,20 @@ describe("V1 capability matrix", () => {
     expect(V1_APPLICATION_IDS.marketingVersion).toBe("1.0.0");
   });
 
-  it("hides test-only search/github from production windows visibility", () => {
-    expect(capabilityStatus("tool.public-search", "windows")).toBe("test-only");
-    expect(capabilityStatus("tool.github-read", "windows")).toBe("test-only");
+  it("hides search and github until a production adapter exists", () => {
+    expect(capabilityStatus("tool.public-search", "windows")).toBe("not-shipped");
+    expect(capabilityStatus("tool.github-read", "windows")).toBe("not-shipped");
     expect(hiddenCapabilities("windows")).toContain("tool.public-search");
     expect(hiddenCapabilities("windows")).toContain("tool.github-read");
     expect(visibleCapabilities("windows")).not.toContain("tool.public-search");
   });
 
-  it("marks mobile core composition capabilities as not-shipped until F2/F3", () => {
-    expect(capabilityStatus("storage.sqlite", "ios")).toBe("not-shipped");
+  it("records mobile storage as present but unverified, and stubs as not shipped", () => {
+    expect(capabilityStatus("storage.sqlite", "ios")).toBe("unverified-on-device");
+    expect(capabilityStatus("secrets.platform", "android")).toBe("unverified-on-device");
     expect(capabilityStatus("model.mobile-tiny", "ios")).toBe("not-shipped");
     expect(capabilityStatus("ask.typed", "android")).toBe("not-shipped");
+    expect(capabilityStatus("jev.hosted", "ios")).toBe("degraded");
   });
 });
 

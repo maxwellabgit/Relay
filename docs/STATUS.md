@@ -4,12 +4,15 @@ What has been verified on the TypeScript/Tauri Windows path, and what has not.
 
 ## Current decision
 
-**V1 / TestFlight is NO-GO.** Production-core on `main` is foundation complete only. Finalization F0 is GREEN on branch `cursor/v1-testflight-finalization-45e9`; F1+ remain open.
+**V1 / TestFlight is NO-GO.** Reviewed baseline `1862daacc8d06c6bc367c85b4cd523779d99b8fa` is on `main`. Exact-tip verify:v1 Actions `35742750378` passed. That run does not prove live Jev, headed Windows journeys, or physical devices.
 
-Release authority: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md`  
-Live ledger: `docs/implementation/FINALIZATION_STATUS.md`  
-Product contract: `docs/V1_PRODUCT_CONTRACT.md`  
-Capability matrix: `packages/contracts/src/capabilities.ts`
+Active workflow: `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md` (gates G0–G8).  
+Historical finalization review: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md`.  
+Live ledger: `docs/implementation/FINALIZATION_STATUS.md`.  
+Product contract: `docs/V1_PRODUCT_CONTRACT.md`.  
+Capability matrix: `packages/contracts/src/capabilities.ts`.
+
+F0 and F1 remain historical GREEN. F2–F8 stay non-green. G0 is the active truth freeze. G1–G8 are open code and device gates, not human-only leftovers.
 
 Architecture authority remains:
 
@@ -44,7 +47,7 @@ Models never gain execution authority. The developer console projects runtime ev
 | Jev status chip | Evidence-based: `missing key` → `hosted off` → `configured` → `ready` / `degraded`. Only JudgmentPort success/failure updates provider evidence; audio/model refresh does not. |
 | Listen | Tauri `audio_*` commands + `relay_audio.live` NDJSON source; mic finals require Listening ON. Listen fails closed and remains OFF when the local ASR source does not report `source.ready`. |
 | Replay | Developer fixture replay uses `ingestReplayFinalSegment` — independent of Listen and audio health; does not set Listening or start audio |
-| Reflex | **One** production Reflex complete: `resolve-acronym@1` (bundled dictionary + memory + bounded Jev Choice) |
+| Reflex | Four reviewed modules are registered. None is `shipped`. Acronym resolution still lacks authorized conversational context and a centralized `jev-latest` model |
 | Restart / timing | Durable SQLite + artifacts; canonical stages include `case.created`, `model.*`, `answer.committed`; run `manifest.json` + `events.jsonl` |
 | Acceptance test | `windows-v1-production-path.acceptance.integration.test.ts` |
 
@@ -53,18 +56,34 @@ Models never gain execution authority. The developer console projects runtime ev
 - Google Calendar / Gmail / Sheets / GitHub / Plaid connectors wired end-to-end
 - Working iPhone / TestFlight build
 - Physical Halo hardware
-- Four production Reflexes (only `resolve-acronym@1` is complete)
+- Any capability marked `shipped` (none are, at `1862daa`)
+- Live Jev receiving authorized transcript/context (ambient requests still send `{ origin: "observed" }`)
+- Scoped disclosure grants, budgets, and Retry-After backoff
+- On-device mobile model or mobile speech (`mobile_model_pending`, unavailable speech)
+- Production bundle purity (`App.tsx` still imports `@relay/testkit/browser`)
+- Twelve headed Windows journeys
+- EAS project linkage (all-zero project id and `REPLACE_WITH_*` submission values)
 - Automatic Reflex code generation
 - Hosted transcription or silent failover from local model to a cloud model
 - Manual Windows dogfood or installed-NSIS Listen smoke on this machine
 
 ## Remaining limitations
 
+Code blockers at `1862daa`, in workflow order:
+
+- G1: Jev protocol, disclosure grants, ambient/acronym context, retries, and diagnostics are incomplete.
+- G2: `App.tsx` imports browser testkit data; note/fact/recommendation semantics need headed proof.
+- G3: mobile model, speech, and native diagnostics are stubs or dev-only routes.
+- G4: consumer boot/error states, fake waveform, and developer-console flavor enforcement.
+- G5–G6: full CI lanes and twelve headed Windows journeys are not green at this SHA.
+- G7–G8: Windows rehearsal, EAS/Apple setup, and TestFlight device acceptance are not started.
+
+Operator limits that remain after those code gates:
+
 - Live mic ASR depends on optional local packages (`sounddevice`, `faster-whisper`) and a locally present Whisper model. Listen fails closed (stays OFF) when the ASR source does not report `source.ready`.
 - Replay remains available when audio is unavailable.
-- Local model answers only when an external loopback server is available on the configured port (`RELAY_LOCAL_MODEL_PORT`, default 8080). RELAY reports `external:unavailable` when absent and never claims Ask is ready without a capability check (`./dev/start-model.ps1 -StartHint`).
-- Hosted Jev disclosure requires **Allow hosted processing** (default OFF) in addition to a TypeSafe key
-- Manual Windows dogfood checklist should still be exercised on a machine with model + ASR before calling the gate “shipped” (`npm run readiness:dogfood`)
+- Local model answers only when an external loopback server is available on the configured port (`RELAY_LOCAL_MODEL_PORT`, default 8080). RELAY reports `external:unavailable` when absent.
+- A global hosted-processing boolean is not a scoped grant. Do not treat it as release authorization.
 
 ## Verification
 

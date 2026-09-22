@@ -17,10 +17,10 @@ RELAY is a helpful local-first assistant and RELAY0 testing ground — not an al
 
 - Typed chat with responsive progress states and conversational continuity from local memory.
 - Explicit **foreground** listening with visible timer, microphone indicator, stop control, interruption recovery, and text fallback.
-- On-device small-model interpretation where the platform status is `real` or `degraded`: classify intent, extract entities, draft bounded tool arguments, summarize grounded results, phrase concise answers.
+- On-device small-model interpretation where the platform status is `shipped`, `degraded`, or `unverified-on-device`: classify intent, extract entities, draft bounded tool arguments, summarize grounded results, phrase concise answers.
 - Jev for bounded semantic decisions only, behind explicit hosted-processing consent and narrow disclosure.
-- Deterministic execution of local memory search, note capture, task/next-action capture, glossary/birthday memory, claim verification, and approved Reflex transitions — when the capability matrix marks them `real` or `degraded` on that platform.
-- Production public-search and GitHub read **only if** adapters, authorization, disclosures, citations, revocation, and receipts pass the same release gates. Otherwise they stay `test-only` / `not-shipped` and must be hidden from the app.
+- Deterministic execution of local memory search, note capture, task/next-action capture, glossary/birthday memory, claim verification, and approved Reflex transitions — when the capability matrix marks them `shipped`, `degraded`, or `unverified-on-device` on that platform.
+- Production public-search and GitHub read **only if** adapters, authorization, disclosures, citations, revocation, and receipts pass the same release gates. Otherwise they stay `not-shipped` and must be hidden from the app.
 - Ambient triage that ignores noise and presents at most one useful recommendation at a time.
 - Four reviewed Reflex modules (acronym, note, fact, next-action); no generated executable code.
 - Calm consumer surface; separate developer surface derived from the same canonical events (desktop). Mobile production builds must not expose the developer drawer.
@@ -33,7 +33,7 @@ RELAY is a helpful local-first assistant and RELAY0 testing ground — not an al
 - Automatic Reflex code generation.
 - Calendar, email, financial, or other external writes without a real provider adapter and receipt.
 - Claims of physical Halo support without device evidence.
-- Ambiguous “wired” status language — use only `real` | `degraded` | `test-only` | `not-shipped`.
+- Ambiguous “wired” or “complete” status language — use only `shipped` | `degraded` | `unverified-on-device` | `not-shipped`.
 
 ## Authority split (immutable)
 
@@ -49,8 +49,8 @@ Models advise. Code authorizes and executes.
 
 ## Platform matrix rule
 
-A feature may appear in production UI on a platform only when `capabilityStatus(id, platform)` is `real` or `degraded`.  
-`test-only` and `not-shipped` capabilities must be hidden. Demo / testkit / recorded providers are never production proof.
+A feature may appear in production UI on a platform only when `capabilityStatus(id, platform)` is `shipped`, `degraded`, or `unverified-on-device`.  
+`not-shipped` capabilities must be hidden. `unverified-on-device` means the code path exists and is not physical-device proof. Demo / testkit / recorded providers are never production proof.
 
 ## Composition rule
 

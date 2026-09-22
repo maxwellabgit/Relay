@@ -1,19 +1,22 @@
 # V1 TestFlight Finalization Status
 
-Release authority: `RELAY_V1_TestFlight_Finalization_Review_4b64928.md`.  
-Update only this file for finalization phase state. Exact-SHA evidence is mandatory for GREEN.
+Release authority: `RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md`.  
+Historical review: `RELAY_V1_TestFlight_Finalization_Review_4b64928.md`.  
+Update this file for gate state. Exact-SHA evidence is mandatory for GREEN.  
+Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-on-device`.
 
 ## Identity
 
 | Field | Value |
 | --- | --- |
-| Branch | `cursor/v1-testflight-finalization-45e9` |
-| Reviewed tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
-| Implementation parent | `4a4529d1529adf6d6460e17e2797e02b16135182` |
-| Exact-tip CI (reviewed foundation) | https://github.com/maxwellabgit/Relay/actions/runs/35727102376 PASS (`head_sha` = `4b64928…`) |
-| Active phase | Code closeout landed; device, model tournament, and store gates still open |
+| Branch | `cursor/live-jev-g0-truth-45e9` |
+| Reviewed baseline | `1862daacc8d06c6bc367c85b4cd523779d99b8fa` (`main`) |
+| Historical foundation tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
+| Exact-tip CI (reviewed baseline) | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (`head_sha` = `1862daa…`, verify:v1 only) |
+| Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
+| Active gate | G0 truth freeze; G1 is next |
 | Release decision | **NO-GO / V1 BLOCKED** |
-| Foundation | production-core Phases 0–8 are **FOUNDATION COMPLETE** only (not V1 complete) |
+| Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
 ## Phase states
 
@@ -21,13 +24,29 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | --- | --- | --- | --- | --- |
 | F0 Reopen + release truth | GREEN | `a80e8cc9f2b66e62e845e7efff1ac20d83a272fd` | https://github.com/maxwellabgit/Relay/actions/runs/35734873042 PASS | See `evidence/F0/` |
 | F1 V1 contracts + matrix | GREEN | `3473b83195376ce5515efce4947f58355451ea2e` | https://github.com/maxwellabgit/Relay/actions/runs/35737611615 PASS | See `evidence/F1/` |
-| F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Physical iPhone/Android relaunch still required before GREEN |
-| F3 Tiny model + Reflexes | IN PROGRESS | — | Four reviewed modules registered; model tournament not run | Device benchmark and provider receipts still open |
-| F4 UI lifecycle quality | CODE LANDED | — | Dev drawer opt-in; safe area, keyboard, list, errors, cancel | Not GREEN: no device a11y matrix |
-| F5 Observability | CODE LANDED | — | Live summary derived from events; `diagnose:latest --explain`; redacted export | Not GREEN until exact-tip CI |
-| F6 Product proof tests | BLOCKED | — | — | Awaits F5 |
+| F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Not GREEN: physical relaunch plus G3 stubs |
+| F3 Tiny model + Reflexes | IN PROGRESS | — | Four reviewed modules registered; model tournament not run | Not GREEN: G1 context and G3 device tournament |
+| F4 UI lifecycle quality | CODE LANDED | — | Dev drawer opt-in; safe area, keyboard, list, errors, cancel | Not GREEN: G4 flavor, boot states, device a11y |
+| F5 Observability | CODE LANDED | — | Live summary derived from events; `diagnose:latest --explain`; redacted export | Not GREEN: grant, budget, request id, and retry fields still missing. verify:v1 on `1862daa` does not close this |
+| F6 Product proof tests | BLOCKED | — | — | Not GREEN: twelve headed journeys are not implemented |
 | F7 Privacy / store | BLOCKED | — | — | Awaits F6; human Apple metadata |
-| F8 TestFlight RC | BLOCKED | — | — | Awaits F7; human credentials / devices |
+| F8 TestFlight RC | BLOCKED | — | — | Awaits the G8 exit, not a human-only leftover |
+
+F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `1862daa` does not close F5.
+
+## Active gates (G0–G8)
+
+| Gate | State | What blocks GREEN |
+| --- | --- | --- |
+| G0 Freeze the truth | GREEN | Evidence in `evidence/G0/`. Parent baseline `1862daa`. G0 SHA is the commit that adds that evidence |
+| G1 Live Jev | OPEN | Ambient content, `jev-latest`, scoped grants, Retry-After, diagnostics, live canary |
+| G2 Core semantics | OPEN | `App.tsx` testkit import; note/fact/recommendation distinction; bundle purity |
+| G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
+| G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
+| G5 Production CI lanes | OPEN | Rust, headed, speech, model, and purity lanes are not all green at one SHA |
+| G6 Headed Windows journeys | OPEN | One deterministic journey only; eleven product journeys missing |
+| G7 Windows release rehearsal | OPEN | Human script after G6; not started |
+| G8 TestFlight | OPEN | Zero EAS project id, `REPLACE_WITH_*`, Apple/EAS login, device acceptance |
 
 ## Honest proof inventory (at F0 start)
 
@@ -58,10 +77,12 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | Exact-tip Actions `35734873042` on `a80e8cc` | PASS — F0 GREEN |
 | 2026-09-22 | Exact-tip Actions `35737611615` on `3473b83` | PASS — F1 GREEN |
 | 2026-09-22 | F2 mobile composition | Shared sqlite-core + encrypted artifacts + createMobileClient.native; device proof outstanding |
+| 2026-09-22 | Exact-tip Actions `35742750378` on `1862daa` | PASS — verify:v1 only. Does not green G1–G8 or F2–F8 |
+| 2026-09-22 | Review verdict against `1862daa` | NO-GO. Remaining work is code plus device, not human-only |
 
 ## Next exact action
 
-Code closeouts for diagnostics, production Dev hiding, composer input events, command errors/cancel, and mobile secure-store/document files are in the tree. Do not mark F2–F8 GREEN. Remaining stops are human-only: physical Expo relaunch on iPhone and Android, mobile-tiny benchmark tournament, Apple/EAS credentials, privacy/legal answers, and TestFlight.
+Execute G1 in `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md`: centralize `jev-latest`, send authorized ambient and acronym context, replace the global hosted-processing boolean with a scoped grant, and add Retry-After backoff. Do not mark G1 GREEN until the automated suite and the human live canary both have evidence. Do not request, read, or commit a Jev key.
 
 ## GREEN rule
 

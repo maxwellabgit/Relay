@@ -2,7 +2,7 @@
 
 ## Current decision
 
-**V1 blocked.** Foundation tip `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` has exact-tip verify:v1 PASS (Actions `35727102376`). That is not product or TestFlight completion. See `docs/implementation/FINALIZATION_STATUS.md`.
+**V1 blocked.** Reviewed tip `1862daacc8d06c6bc367c85b4cd523779d99b8fa` has exact-tip verify:v1 PASS on `main` (Actions `35742750378`). That is a source gate only. Headed journeys 02–12, live Jev, the Windows installer, and physical devices are unverified. Active authority is `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md`. Historical foundation tip `4b64928` (Actions `35727102376`) stays in the record below and is not the release SHA.
 
 ## Current production-core baseline
 
@@ -64,11 +64,24 @@ Status: historical foundation PASS (process survival) — not an installed funct
 
 Status: journey **01** headed PASS historically. Journeys **02–12** are not headed product proofs; **06** has no harness.
 
+## Reviewed SHA `1862daa`
+
+| Check | Result |
+| --- | --- |
+| GitHub Actions `35742750378` on `main` | PASS (`head_sha` = `1862daacc8d06c6bc367c85b4cd523779d99b8fa`) |
+| GitHub Actions `35742747165` on the finalization branch | PASS (same SHA) |
+| Meaning | verify:v1 source gate only. Not G1 live Jev, not twelve headed journeys, not TestFlight |
+
+Toolchain recorded with G0 evidence: Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0`.
+
 ## Known remaining limitations
 
-- See finalization review findings (mobile demo, connectors, model, soak depth, diagnostics, store).
-- Live model/audio/Jev dogfood remains a manual operator gate.
+- Jev ambient disclosure, model id, scoped grants, and retries are code blockers (G1).
+- Production still imports browser testkit data (G2).
+- Mobile model, speech, diagnostics, and EAS placeholders are code blockers (G3, G8).
+- Headed product proof is journey 01 only. Golden lower-layer tests are not headed journeys.
+- Live model/audio/Jev dogfood remains unverified on Windows.
 
 ## Stop point
 
-Finalization proceeds F0→F8 on `cursor/v1-testflight-finalization-45e9`. Do not claim V1 or TestFlight until FINALIZATION_STATUS marks those phases GREEN with exact-SHA evidence.
+Execute G0–G8 in `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md`. Do not claim V1 or TestFlight until those gates are green at one exact SHA with recorded artifacts. F2–F8 stay non-green until their exits in that workflow are met.

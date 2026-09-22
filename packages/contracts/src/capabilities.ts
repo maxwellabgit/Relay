@@ -2,16 +2,16 @@
  * V1 capability manifest — single source of truth for product claims,
  * UI visibility, tests, and adapter honesty.
  *
- * Status vocabulary (never use ambiguous "wired"):
- * - real: production path exists with durable side effects / receipts
+ * Status vocabulary (never use ambiguous "wired" or "complete"):
+ * - shipped: exact-SHA headed or physical-device evidence exists for this platform
  * - degraded: feature present but limited vs contract (honest UX required)
- * - test-only: harness / demo / recorded providers only — never claim as product
- * - not-shipped: hidden from production UI; post-V1 or blocked
+ * - unverified-on-device: implementation exists; no headed or physical-device evidence yet
+ * - not-shipped: hidden from production UI; stub, placeholder, or out of V1
  */
 export const CAPABILITY_STATUSES = Object.freeze([
-  "real",
+  "shipped",
   "degraded",
-  "test-only",
+  "unverified-on-device",
   "not-shipped",
 ] as const);
 
@@ -64,17 +64,18 @@ export type CapabilityRow = {
 };
 
 /**
- * Honest V1 matrix at finalization F1 freeze.
- * Update rows only when exact-SHA evidence changes the status.
+ * Honest V1 matrix at reviewed SHA 1862daacc8d06c6bc367c85b4cd523779d99b8fa.
+ * Nothing is `shipped`: no capability has headed-Windows or physical-device
+ * evidence at this SHA. Update a row only when exact-SHA evidence changes it.
  */
 export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
   {
     id: "ask.typed",
     title: "Typed Ask / chat",
-    windows: "real",
+    windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Desktop production path; mobile awaits createMobileClient (F2).",
+    notes: "Desktop path exists; boot/error surfaces and headed journeys 02-12 are open. Mobile local model is still mobile_model_pending.",
   },
   {
     id: "listen.foreground",
@@ -82,7 +83,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Windows Listen exists when local ASR ready; journey 06 harness missing; iOS background audio not V1.",
+    notes: "Windows Listen fails closed without local ASR. Mobile speech is an unavailable stub. No physical-device proof.",
   },
   {
     id: "model.local",
@@ -90,7 +91,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "External loopback llama.cpp-compatible server; fails closed when absent.",
+    notes: "External loopback llama.cpp-compatible server; fails closed when absent. Not verified on a headed Windows release profile.",
   },
   {
     id: "model.mobile-tiny",
@@ -98,23 +99,23 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "F3 benchmark tournament required before selection.",
+    notes: "Explicit mobile_model_pending stub. Device tournament has not selected a runtime.",
   },
   {
     id: "jev.hosted",
     title: "Hosted Jev judgments",
-    windows: "real",
-    ios: "not-shipped",
-    android: "not-shipped",
-    notes: "Desktop TypeSafe + hosted_processing grant; mobile native transport is F2.",
+    windows: "degraded",
+    ios: "degraded",
+    android: "degraded",
+    notes: "Transport exists. Ambient state omits transcript content, one path uses model typesafe, and the hosted grant is still a global boolean.",
   },
   {
     id: "memory.local",
     title: "Local memory search / recall",
-    windows: "real",
+    windows: "unverified-on-device",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Durable on desktop SQLite + artifacts.",
+    notes: "Desktop SQLite plus artifacts pass lower-layer tests. No headed relaunch proof at this SHA.",
   },
   {
     id: "note.capture",
@@ -122,7 +123,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Ambient/local note paths exist; dedicated capture-note Reflex is F3.",
+    notes: "Note writes exist. Distinct note versus fact versus recommendation semantics are not yet proven in a headed journey.",
   },
   {
     id: "fact.capture",
@@ -130,7 +131,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Memory writes exist; remember-fact Reflex is F3.",
+    notes: "Memory writes exist. A typed accepted fact is not yet distinct from a generic note in headed proof.",
   },
   {
     id: "task.next-action",
@@ -138,7 +139,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Ambient triage can recommend; Reflex module is F3.",
+    notes: "Recommendation paths exist. Headed accept/reject proof is open.",
   },
   {
     id: "claim.verify",
@@ -146,15 +147,15 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Engine + Node proofs exist; production GitHub adapter must be real or hidden (F3).",
+    notes: "Engine proofs exist. Production GitHub adapter stays hidden until receipts exist.",
   },
   {
     id: "reflex.resolve-acronym",
     title: "Reflex: resolve-acronym@1",
-    windows: "real",
+    windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "One of four reviewed production Reflexes.",
+    notes: "Module is registered. Jev still lacks minimum authorized conversational context and a centralized jev-latest model.",
   },
   {
     id: "reflex.capture-note",
@@ -162,7 +163,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Reviewed capture-note module writes a local note from an explicit phrase.",
+    notes: "Explicit-phrase module exists. Headed persistence proof is open.",
   },
   {
     id: "reflex.remember-fact",
@@ -170,7 +171,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Reviewed remember-fact module writes local memory only.",
+    notes: "Explicit-phrase module exists. Headed fact-versus-note proof is open.",
   },
   {
     id: "reflex.recommend-next-action",
@@ -178,23 +179,23 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Reviewed next-action module accepts an explicit phrase only.",
+    notes: "Explicit-phrase module exists. Reviewable recommendation proof is open.",
   },
   {
     id: "tool.public-search",
     title: "Public search tool",
-    windows: "test-only",
+    windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Hide from production UI until real adapter + receipts (F3).",
+    notes: "Hidden. No production adapter or receipts.",
   },
   {
     id: "tool.github-read",
     title: "GitHub read tool",
-    windows: "test-only",
+    windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Hide from production UI until real adapter + receipts (F3).",
+    notes: "Hidden. No production adapter or receipts.",
   },
   {
     id: "connector.external-write",
@@ -202,15 +203,15 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Never present success without provider receipt.",
+    notes: "Never present success without a provider receipt.",
   },
   {
     id: "ambient.triage",
     title: "Ambient triage / one recommendation",
-    windows: "real",
+    windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Desktop engine + UI cards; mobile composition F2.",
+    notes: "Cards exist, but the Jev request currently sends only origin observed and cannot judge the transcript.",
   },
   {
     id: "diagnostics.live",
@@ -218,39 +219,39 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Correlation exists; live-summary unknowns and explain/export are F5.",
+    notes: "Event-derived summary exists. Grant, budget, source hashes, request id, and retry category are still incomplete. Mobile trace sink is a dev route.",
   },
   {
     id: "dev.console",
     title: "Developer console",
-    windows: "real",
+    windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Desktop only in production; mobile production must hide Dev (F4).",
+    notes: "Hidden only by a runtime environment flag. Production must hide it by signed build flavor.",
   },
   {
     id: "storage.sqlite",
     title: "SQLite engine store",
-    windows: "real",
-    ios: "not-shipped",
-    android: "not-shipped",
-    notes: "Mobile expo-sqlite is F2.",
+    windows: "unverified-on-device",
+    ios: "unverified-on-device",
+    android: "unverified-on-device",
+    notes: "Desktop and mobile composition code exist. Physical relaunch evidence does not.",
   },
   {
     id: "storage.protected-artifacts",
     title: "Protected content artifacts",
-    windows: "real",
-    ios: "not-shipped",
-    android: "not-shipped",
-    notes: "Desktop DPAPI; mobile Keychain/Keystore encryption is F2.",
+    windows: "unverified-on-device",
+    ios: "unverified-on-device",
+    android: "unverified-on-device",
+    notes: "Desktop DPAPI and mobile document-file code exist. Device encrypt/relaunch/decrypt evidence does not.",
   },
   {
     id: "secrets.platform",
     title: "Platform secret store",
-    windows: "real",
-    ios: "not-shipped",
-    android: "not-shipped",
-    notes: "Desktop DPAPI; mobile SecureStore + native Jev transport is F2.",
+    windows: "degraded",
+    ios: "unverified-on-device",
+    android: "unverified-on-device",
+    notes: "Desktop DPAPI and mobile SecureStore code exist. Windows file import and physical SecureStore proof are open.",
   },
 ]);
 
@@ -267,16 +268,15 @@ export function capabilityStatus(
 
 /** Capabilities that may be shown in production UI for a platform. */
 export function visibleCapabilities(platform: PlatformId): readonly CapabilityId[] {
-  return V1_CAPABILITY_MATRIX.filter(
-    (row) => row[platform] === "real" || row[platform] === "degraded",
-  ).map((row) => row.id);
+  return V1_CAPABILITY_MATRIX.filter((row) => {
+    const status = row[platform];
+    return status === "shipped" || status === "degraded" || status === "unverified-on-device";
+  }).map((row) => row.id);
 }
 
-/** Capabilities that must stay hidden on a platform (test-only or not-shipped). */
+/** Capabilities that must stay hidden on a platform. */
 export function hiddenCapabilities(platform: PlatformId): readonly CapabilityId[] {
-  return V1_CAPABILITY_MATRIX.filter(
-    (row) => row[platform] === "test-only" || row[platform] === "not-shipped",
-  ).map((row) => row.id);
+  return V1_CAPABILITY_MATRIX.filter((row) => row[platform] === "not-shipped").map((row) => row.id);
 }
 
 export function assertCapabilityMatrixIntegrity(
@@ -293,8 +293,8 @@ export function assertCapabilityMatrixIntegrity(
         errors.push(`${row.id}.${platform} has invalid status ${String(status)}`);
       }
     }
-    if (/\bwired\b/i.test(row.notes)) {
-      errors.push(`${row.id} notes must not use ambiguous "wired"`);
+    if (/\bwired\b/i.test(row.notes) || /\bcomplete\b/i.test(row.notes)) {
+      errors.push(`${row.id} notes must not use ambiguous "wired" or "complete"`);
     }
   }
   return { ok: errors.length === 0, errors };
