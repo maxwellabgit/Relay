@@ -9,7 +9,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@relay/app": "0.1.0",
+    "@relay/app": "1.0.0",
     "@tauri-apps/api": "^2.8.0"
   },
   "devDependencies": {

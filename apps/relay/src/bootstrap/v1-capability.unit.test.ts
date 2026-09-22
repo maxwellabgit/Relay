@@ -88,6 +88,18 @@ describe("production composition purity", () => {
     expect(conf.version).toBe(V1_APPLICATION_IDS.marketingVersion);
   });
 
+  it("desktop package depends on matching @relay/app marketing version (workspace)", () => {
+    const desktop = JSON.parse(
+      readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"),
+    ) as { version: string; dependencies: Record<string, string> };
+    const app = JSON.parse(readFileSync(resolve(root, "apps/relay/package.json"), "utf8")) as {
+      version: string;
+    };
+    expect(app.version).toBe(V1_APPLICATION_IDS.marketingVersion);
+    expect(desktop.version).toBe(V1_APPLICATION_IDS.marketingVersion);
+    expect(desktop.dependencies["@relay/app"]).toBe(app.version);
+  });
+
   it("product contract document exists and references the capability module", () => {
     const text = readFileSync(resolve(root, "docs/V1_PRODUCT_CONTRACT.md"), "utf8");
     expect(text).toContain("V1_CAPABILITY_MATRIX");

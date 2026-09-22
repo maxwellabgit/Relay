@@ -20,3 +20,8 @@ Recorded at commit time.
 ## Exact-tip CI
 
 Record after push — GREEN requires Actions `head_sha` equal to F1 tip.
+
+## CI fix
+
+- `npm ci` failed because `@relay/desktop` still depended on `@relay/app@0.1.0` after the marketing bump.
+- Aligned workspace dependency to `1.0.0` and refreshed `package-lock.json`.
