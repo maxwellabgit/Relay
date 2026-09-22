@@ -262,7 +262,11 @@ describe("ambient candidate triage", () => {
       await harness.client.execute({ type: "SubmitText", text: "What is DNS?" });
       await waitFor(async () => {
         const snap = await harness.client.getSnapshot();
-        return snap.feedItems.some((item) => item.kind === "ask");
+        return (
+          snap.feedItems.some((item) => item.kind === "ask") &&
+          snap.cases.some((c) => c.origin === "direct") &&
+          snap.cases.some((c) => c.origin === "observed")
+        );
       });
       expect(await observed).toMatch(/^case_/);
       const snap = await harness.client.getSnapshot();
