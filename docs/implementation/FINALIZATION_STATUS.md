@@ -83,7 +83,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | G1 protocol slice `8a5746b` | Unit 119 and architecture 18 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G1 grant slice `b9e3247` | Unit 123, architecture 18, integration 69 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G1 grant command `33251e5` | Unit 124, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
-| 2026-09-22 | G1 rounds and resume | Unit 126, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
+| 2026-09-22 | G1 rounds and resume `ba54708` | Unit 126, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
 
 ## Next exact action
 

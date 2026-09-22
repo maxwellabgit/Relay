@@ -1,5 +1,6 @@
 # G1 semantic rounds and one-time resume — not a green gate
 
+Rounds and resume SHA: `ba54708e3590518621502fd028b597f9e845294e`.  
 Parent grant command: `33251e563c09bf20d4a8b5173e2ca740cc92200b`.
 
 This slice does not green G1. The live canary is still open.
