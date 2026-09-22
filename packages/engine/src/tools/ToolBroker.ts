@@ -315,26 +315,29 @@ export class ToolBroker {
       return { kind: "complete" };
     }
 
-    // Claim verify outages / auth failures are recoverably blocked — user can re-submit after recovery.
-    if (
-      resolvedId === TOOL_CLAIM_VERIFY &&
-      result.status === "failed" &&
-      (result.reasonCode === "network" ||
+    // Claim verify failures never re-route to another tool — finish blocked or failed.
+    if (resolvedId === TOOL_CLAIM_VERIFY && result.status === "failed") {
+      const recoverable =
+        result.reasonCode === "network" ||
         result.reasonCode === "not_authorized" ||
         result.reasonCode === "authentication" ||
         result.reasonCode === "missing_secret" ||
         result.reasonCode === "timeout" ||
         result.reasonCode === "rate_limited" ||
-        result.reasonCode === "overloaded")
-    ) {
+        result.reasonCode === "overloaded";
       await this.deps.outcomes.publishFeedItem({
-        itemId: feedItemId(caseId, "wait"),
-        kind: "wait",
+        itemId: feedItemId(caseId, recoverable ? "wait" : "answer"),
+        kind: recoverable ? "wait" : "answer",
         summary: result.summary,
         createdAt: this.deps.clock.now().toISOString(),
         caseId,
       });
-      await this.deps.outcomes.finishCase(caseId, current.version, "blocked", this.deps.getActiveCaseId());
+      await this.deps.outcomes.finishCase(
+        caseId,
+        current.version,
+        recoverable ? "blocked" : "failed",
+        this.deps.getActiveCaseId(),
+      );
       return { kind: "complete" };
     }
 

@@ -104,6 +104,16 @@ export class ClaimVerifier {
             } satisfies ClaimVerifyOutput,
           });
         }
+        if (source.reasonCode === "no_match") {
+          return envelope("ok", `Insufficient evidence: ${claim}`, allCitations, allSlices, {
+            output: {
+              verdict: "insufficient",
+              claim,
+              sourcesAttempted,
+              judgmentRounds,
+            } satisfies ClaimVerifyOutput,
+          });
+        }
         return envelope("failed", source.message, allCitations, allSlices, {
           reasonCode: source.reasonCode,
           output: {
@@ -301,6 +311,10 @@ export class ClaimVerifier {
       marginMinimum: 0.1,
     });
     if (!gate.pass || gate.selected === "no_match" || !pool.includes(gate.selected as ClaimSourceId)) {
+      if (gate.selected === "no_match" && gate.pass) {
+        return { ok: false, message: "No eligible source matched the claim.", reasonCode: "no_match" };
+      }
+      // Soft gate failure: try the first remaining source as a deterministic fallback.
       return { ok: true, source: pool[0]! };
     }
     return { ok: true, source: gate.selected as ClaimSourceId };
