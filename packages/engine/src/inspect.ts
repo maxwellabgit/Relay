@@ -161,6 +161,10 @@ export async function inspectRuntime(
       result: event.status,
       toolId: event.toolId ?? null,
       queueDepth: event.queueDepth ?? null,
+      providerRequestId: event.providerRequestId ?? null,
+      httpStatus: event.httpStatus ?? null,
+      disclosureGrantId: event.disclosureGrantId ?? null,
+      retryDelayMs: event.retryDelayMs ?? null,
     })),
     memories: memories.map((memory) => ({
       kind: memory.kind,

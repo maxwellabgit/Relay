@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loopTest } from "@relay/testkit";
 import type { ReceiptRecord } from "./learning-store.js";
 import { projectDecisionRun, selectReceiptForDecision } from "./project-decision-run.js";
-import type { RuntimeEventV2 } from "./runtime-events.js";
+import { boundedProviderRequestId, isRuntimeEvent, type RuntimeEventV2 } from "./runtime-events.js";
 
 function receipt(partial: Partial<ReceiptRecord> & Pick<ReceiptRecord, "receiptId" | "caseId">): ReceiptRecord {
   return {
@@ -129,6 +129,60 @@ describe("projectDecisionRun", () => {
     expect(view!.stages.find((stage) => stage.stage === "judgment.request")?.state).toBe("skipped");
     expect(view!.stages.find((stage) => stage.stage === "judgment.response")?.state).toBe("skipped");
     expect(view!.elapsedMs).toBe(100);
+  });
+
+  it("keeps grant, HTTP status, retry delay, and provider request id on the attempt", () => {
+    const view = projectDecisionRun({
+      receipt: receipt({ receiptId: "receipt_evidence", caseId: "case_evidence" }),
+      events: [
+        event({
+          sequence: 1,
+          eventType: "judgment.failed",
+          stage: "judgment.response",
+          status: "waiting",
+          caseId: "case_evidence",
+          attempt: 1,
+          durationMs: 40,
+          reasonCode: "rate_limited",
+          httpStatus: 429,
+          retryDelayMs: 400,
+          providerRequestId: "req_429",
+          disclosureGrantId: "grant_session",
+        }),
+      ],
+      activeCaseId: "case_evidence",
+      historical: false,
+    });
+    expect(view?.attempts).toEqual([
+      {
+        attempt: 1,
+        status: "waiting",
+        reasonCode: "rate_limited",
+        durationMs: 40,
+        at: "2024-01-01T00:00:00.001Z",
+        providerRequestId: "req_429",
+        httpStatus: 429,
+        disclosureGrantId: "grant_session",
+        retryDelayMs: 400,
+      },
+    ]);
+    expect(boundedProviderRequestId("req_ok")).toBe("req_ok");
+    expect(boundedProviderRequestId("has a space")).toBeNull();
+    expect(
+      isRuntimeEvent({
+        schemaVersion: 2,
+        sequence: 1,
+        runId: "run_test",
+        at: "2024-01-01T00:00:00.000Z",
+        eventType: "judgment.failed",
+        stage: "judgment.response",
+        status: "waiting",
+        providerRequestId: "req_ok",
+        httpStatus: 429,
+        disclosureGrantId: "grant_session",
+        retryDelayMs: 250,
+      }),
+    ).toBe(true);
   });
 
   it("reports elapsedMs from requested/completed only", () => {

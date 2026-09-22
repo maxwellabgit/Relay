@@ -54,6 +54,10 @@ export class RuntimeRecorder {
     attempt?: number;
     queueDepth?: number;
     toolId?: string;
+    providerRequestId?: string;
+    httpStatus?: number;
+    disclosureGrantId?: string;
+    retryDelayMs?: number;
   }): Promise<RuntimeEventV2> {
     const event: RuntimeEventV2 = {
       schemaVersion: 2,
@@ -75,6 +79,10 @@ export class RuntimeRecorder {
       ...(partial.attempt != null ? { attempt: partial.attempt } : {}),
       ...(partial.queueDepth != null ? { queueDepth: partial.queueDepth } : {}),
       ...(partial.toolId ? { toolId: partial.toolId } : {}),
+      ...(partial.providerRequestId ? { providerRequestId: partial.providerRequestId } : {}),
+      ...(partial.httpStatus != null ? { httpStatus: partial.httpStatus } : {}),
+      ...(partial.disclosureGrantId ? { disclosureGrantId: partial.disclosureGrantId } : {}),
+      ...(partial.retryDelayMs != null ? { retryDelayMs: partial.retryDelayMs } : {}),
     };
     if (!isRuntimeEvent(event)) {
       this.logError = "trace_rejected";

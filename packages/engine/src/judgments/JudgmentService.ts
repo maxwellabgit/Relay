@@ -45,6 +45,26 @@ function providerRequestIdFrom(response: JudgmentResponse): string | null {
   return response.failure.providerRequestId ?? null;
 }
 
+function judgmentEvidence(
+  response: JudgmentResponse,
+  disclosureGrantId: string | null | undefined,
+  retryDelayMs?: number,
+): {
+  providerRequestId?: string;
+  httpStatus?: number;
+  disclosureGrantId?: string;
+  retryDelayMs?: number;
+} {
+  const providerRequestId = providerRequestIdFrom(response);
+  const httpStatus = response.ok ? undefined : response.failure.httpStatus;
+  return {
+    ...(providerRequestId ? { providerRequestId } : {}),
+    ...(httpStatus != null ? { httpStatus } : {}),
+    ...(disclosureGrantId ? { disclosureGrantId } : {}),
+    ...(retryDelayMs != null ? { retryDelayMs } : {}),
+  };
+}
+
 export class JudgmentService {
   constructor(private readonly deps: JudgmentServiceDeps) {}
 
@@ -213,6 +233,7 @@ export class JudgmentService {
           reasonCode,
           attempt,
           durationMs,
+          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
         });
         return { kind: "complete" };
       }
@@ -239,6 +260,7 @@ export class JudgmentService {
           reasonCode,
           attempt,
           durationMs,
+          ...judgmentEvidence(outcome.response, outcome.disclosureGrantId, backoffMs(attempt)),
         });
         return {
           kind: "retry",
@@ -266,6 +288,7 @@ export class JudgmentService {
         reasonCode,
         attempt,
         durationMs,
+        ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
       });
       return { kind: "dead", reasonCode };
     }
@@ -338,6 +361,7 @@ export class JudgmentService {
       reasonCode,
       durationMs,
       attempt,
+      ...judgmentEvidence(outcome.response, outcome.disclosureGrantId),
     });
     if (pass && label) {
       const token = String(item.payload.token ?? "");

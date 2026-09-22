@@ -231,7 +231,7 @@ describe("production path", () => {
       status: "started",
     };
     expect(isRuntimeEvent(base)).toBe(true);
-    for (const field of ["runId", "at", "eventType", "stage", "status", "reasonCode", "caseId"]) {
+    for (const field of ["runId", "at", "eventType", "stage", "status", "reasonCode", "caseId", "providerRequestId"]) {
       expect(isRuntimeEvent({ ...base, [field]: SENTINEL })).toBe(false);
     }
   });

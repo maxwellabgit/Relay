@@ -1,6 +1,7 @@
 import type {
   CaseExecutionStepView,
   CaseExecutionView,
+  DecisionAttemptView,
   DecisionReceiptView,
   PatternView,
   RelaySnapshot,
@@ -134,6 +135,7 @@ export function DeveloperConsole({
                 </Text>
               </SideCard>
               <GateDetails gate={snapshot.gate} />
+              <JudgmentEvidence attempts={snapshot.decision?.attempts ?? []} />
             </View>
           </View>
         </View>
@@ -143,6 +145,7 @@ export function DeveloperConsole({
         <View style={styles.jevSide}>
           {hasJudgmentEvidence(snapshot) ? (
             <>
+              <JudgmentEvidence attempts={snapshot.decision?.attempts ?? []} />
               <SideCard title="Jev output">
                 <Text style={styles.code}>{formatJson(tree.output)}</Text>
               </SideCard>
@@ -447,6 +450,33 @@ function LogsPane({
       </View>
     </View>
   );
+}
+
+function JudgmentEvidence({ attempts }: { readonly attempts: readonly DecisionAttemptView[] }) {
+  if (attempts.length === 0) return null;
+  return (
+    <SideCard title="Judgment evidence">
+      {attempts.map((attempt) => (
+        <Text key={`${attempt.attempt}:${attempt.at}`} selectable style={styles.sideMeta}>
+          {formatJudgmentAttempt(attempt)}
+        </Text>
+      ))}
+    </SideCard>
+  );
+}
+
+function formatJudgmentAttempt(attempt: DecisionAttemptView): string {
+  const parts = [
+    `#${attempt.attempt}`,
+    attempt.status,
+    attempt.reasonCode ?? "none",
+    attempt.durationMs != null ? `${Math.round(attempt.durationMs)} ms` : null,
+    attempt.httpStatus != null ? `http ${attempt.httpStatus}` : null,
+    attempt.retryDelayMs != null ? `retry ${Math.round(attempt.retryDelayMs)} ms` : null,
+    attempt.providerRequestId ? `request ${attempt.providerRequestId}` : "request omitted",
+    attempt.disclosureGrantId ? `grant ${attempt.disclosureGrantId}` : null,
+  ];
+  return parts.filter((part) => part != null).join(" · ");
 }
 
 function GateDetails({ gate }: { readonly gate: DecisionReceiptView | null }) {

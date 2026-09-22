@@ -107,7 +107,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "degraded",
     android: "degraded",
-    notes: "Transport, jev-latest, a scoped disclosure grant, a two-round cap, and one durable resume exist in code. Live canary has not run.",
+    notes: "Transport, jev-latest, a scoped disclosure grant, a two-round cap, and one durable resume exist in code. Judgment events keep the grant id, HTTP status, retry delay, and provider request id when one is returned. Live canary has not run.",
   },
   {
     id: "memory.local",

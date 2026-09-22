@@ -537,6 +537,13 @@ export class ToolBroker {
         status: "failed",
         caseId,
         judgmentId: outcome.record.judgmentId,
+        ...(outcome.disclosureGrantId ? { disclosureGrantId: outcome.disclosureGrantId } : {}),
+        ...(outcome.response.failure.providerRequestId
+          ? { providerRequestId: outcome.response.failure.providerRequestId }
+          : {}),
+        ...(outcome.response.failure.httpStatus != null
+          ? { httpStatus: outcome.response.failure.httpStatus }
+          : {}),
         reasonCode,
         durationMs,
       });
@@ -587,6 +594,10 @@ export class ToolBroker {
       status: "completed",
       caseId,
       judgmentId: outcome.record.judgmentId,
+      ...(outcome.disclosureGrantId ? { disclosureGrantId: outcome.disclosureGrantId } : {}),
+      ...(outcome.response.success.providerRequestId
+        ? { providerRequestId: outcome.response.success.providerRequestId }
+        : {}),
       reasonCode: pass ? (control ? "no_match" : "policy_pass") : gate.reasonCode,
       durationMs,
     });

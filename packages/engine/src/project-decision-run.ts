@@ -228,6 +228,10 @@ function buildAttempts(events: readonly RuntimeEventV2[]): DecisionAttemptView[]
       reasonCode: event.reasonCode ?? null,
       durationMs: event.durationMs ?? null,
       at: event.at,
+      providerRequestId: event.providerRequestId ?? null,
+      httpStatus: event.httpStatus ?? null,
+      disclosureGrantId: event.disclosureGrantId ?? null,
+      retryDelayMs: event.retryDelayMs ?? null,
     });
   }
   return attempts;

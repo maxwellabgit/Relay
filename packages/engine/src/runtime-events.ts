@@ -163,6 +163,10 @@ export type RuntimeEventV2 = {
   readonly attempt?: number;
   readonly queueDepth?: number;
   readonly toolId?: string;
+  readonly providerRequestId?: string;
+  readonly httpStatus?: number;
+  readonly disclosureGrantId?: string;
+  readonly retryDelayMs?: number;
 };
 
 const ALLOWED = new Set([
@@ -188,6 +192,10 @@ const ALLOWED = new Set([
   "attempt",
   "queueDepth",
   "toolId",
+  "providerRequestId",
+  "httpStatus",
+  "disclosureGrantId",
+  "retryDelayMs",
 ]);
 
 export function isRuntimeEvent(value: unknown): value is RuntimeEventV2 {
@@ -215,11 +223,32 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEventV2 {
   if (row.durationMs != null && !isCount(row.durationMs)) return false;
   if (row.attempt != null && !isCount(row.attempt)) return false;
   if (row.queueDepth != null && !isCount(row.queueDepth)) return false;
+  if (row.providerRequestId != null && !isProviderRequestId(row.providerRequestId)) return false;
+  if (row.httpStatus != null && !isHttpStatus(row.httpStatus)) return false;
+  if (row.disclosureGrantId != null && (typeof row.disclosureGrantId !== "string" || !isSafeId(row.disclosureGrantId))) {
+    return false;
+  }
+  if (row.retryDelayMs != null && !isCount(row.retryDelayMs)) return false;
   return true;
 }
 
 function isIso(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value);
+}
+
+/** Provider ids are shown as returned. Prose and secrets are rejected. */
+export function boundedProviderRequestId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return isProviderRequestId(trimmed) ? trimmed : null;
+}
+
+function isProviderRequestId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 80 && /^[A-Za-z0-9._:-]+$/.test(value) && !/sentinel/i.test(value);
+}
+
+function isHttpStatus(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 599;
 }
 
 function isSafeId(value: string): boolean {

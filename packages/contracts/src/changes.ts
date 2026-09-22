@@ -198,6 +198,10 @@ export type DecisionAttemptView = {
   readonly reasonCode: string | null;
   readonly durationMs: number | null;
   readonly at: string;
+  readonly providerRequestId?: string | null;
+  readonly httpStatus?: number | null;
+  readonly disclosureGrantId?: string | null;
+  readonly retryDelayMs?: number | null;
 };
 
 export type DecisionRunView = {
@@ -311,6 +315,10 @@ export type TraceRow = {
   readonly result: string | null;
   readonly toolId: string | null;
   readonly queueDepth: number | null;
+  readonly providerRequestId?: string | null;
+  readonly httpStatus?: number | null;
+  readonly disclosureGrantId?: string | null;
+  readonly retryDelayMs?: number | null;
 };
 
 export type ActionCard = {

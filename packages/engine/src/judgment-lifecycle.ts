@@ -141,7 +141,12 @@ export async function runJudgmentLifecycle(
   deps: JudgmentLifecycleDeps,
   request: JudgmentRequest,
   signal: AbortSignal,
-): Promise<{ record: JudgmentRecord; response: JudgmentResponse; providerCalled: boolean }> {
+): Promise<{
+  record: JudgmentRecord;
+  response: JudgmentResponse;
+  providerCalled: boolean;
+  disclosureGrantId: string | null;
+}> {
   let effectiveRequest = request;
   let disclosureFailure: JudgmentFailure | null = null;
   if (deps.disclosure) {
@@ -168,6 +173,7 @@ export async function runJudgmentLifecycle(
       };
     }
   }
+  const disclosureGrantId = effectiveRequest.disclosureGrantId ?? null;
   const requestHash = effectiveRequest.requestHash ?? (await canonicalizeRequestHash(effectiveRequest));
   const cached = disclosureFailure ? null : await deps.store.findCompletedJudgmentByHash(requestHash);
   if (cached?.responseArtifactId) {
@@ -197,7 +203,7 @@ export async function runJudgmentLifecycle(
             elapsedMs: Number(stored.elapsedMs ?? 0),
           },
         };
-        return { record: cached, response, providerCalled: false };
+        return { record: cached, response, providerCalled: false, disclosureGrantId };
       }
     } catch {
       // Fall through to a fresh provider call when the safe artifact cannot be read.
@@ -260,7 +266,7 @@ export async function runJudgmentLifecycle(
         gateFailure.category === "not_authorized" ? "not_authorized" : "hosted_processing_disabled",
     };
     await deps.store.upsertJudgment(completed);
-    return { record: completed, response, providerCalled: false };
+    return { record: completed, response, providerCalled: false, disclosureGrantId };
   }
 
   if (effectiveRequest.caseId) {
@@ -286,7 +292,7 @@ export async function runJudgmentLifecycle(
         failureCategory: "not_authorized",
       };
       await deps.store.upsertJudgment(completed);
-      return { record: completed, response, providerCalled: false };
+      return { record: completed, response, providerCalled: false, disclosureGrantId };
     }
   }
 
@@ -310,5 +316,5 @@ export async function runJudgmentLifecycle(
       : { failureCategory: response.failure.category }),
   };
   await deps.store.upsertJudgment(completed);
-  return { record: completed, response, providerCalled: true };
+  return { record: completed, response, providerCalled: true, disclosureGrantId };
 }

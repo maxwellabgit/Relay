@@ -1,5 +1,5 @@
 import type { RuntimeEventV2 } from "./runtime-events.js";
-import { knownReason } from "./runtime-events.js";
+import { boundedProviderRequestId, knownReason } from "./runtime-events.js";
 import type { EngineStore } from "./store.js";
 import type { RuntimeRecorder } from "./diagnostics/RuntimeRecorder.js";
 
@@ -66,6 +66,10 @@ export type TraceEmitInput = {
   attempt?: number;
   selectedOutcome?: string;
   toolId?: string;
+  providerRequestId?: string;
+  httpStatus?: number;
+  disclosureGrantId?: string;
+  retryDelayMs?: number;
 };
 
 /** Engine-facing trace API backed by RuntimeRecorder. */
@@ -85,6 +89,14 @@ export class EngineTrace {
 
   async emit(partial: TraceEmitInput): Promise<void> {
     const stage = partial.stage ?? STAGE_FOR[partial.type] ?? "work";
+    const providerRequestId = boundedProviderRequestId(partial.providerRequestId);
+    const httpStatus =
+      partial.httpStatus != null &&
+      Number.isInteger(partial.httpStatus) &&
+      partial.httpStatus >= 0 &&
+      partial.httpStatus <= 599
+        ? partial.httpStatus
+        : null;
     await this.recorder.emit({
       eventType: partial.type,
       stage,
@@ -97,6 +109,10 @@ export class EngineTrace {
       ...(partial.durationMs != null ? { durationMs: partial.durationMs } : {}),
       ...(partial.attempt != null ? { attempt: partial.attempt } : {}),
       ...(partial.toolId ? { toolId: partial.toolId } : {}),
+      ...(providerRequestId ? { providerRequestId } : {}),
+      ...(httpStatus != null ? { httpStatus } : {}),
+      ...(partial.disclosureGrantId ? { disclosureGrantId: partial.disclosureGrantId } : {}),
+      ...(partial.retryDelayMs != null ? { retryDelayMs: partial.retryDelayMs } : {}),
       queueDepth: await this.store.countWorkItems(),
     });
   }
