@@ -294,6 +294,7 @@ export class RelayEngine {
     this.abort = new AbortController();
     const at = this.deps.clock.now().toISOString();
     await this.deps.store.ensureSession(this.deps.sessionId, at);
+    await this.deps.store.setListening(this.deps.sessionId, false);
     await this.deps.store.learning.compact(at);
     if (this.deps.trace) {
       this.recorder.hydrate([...(await this.deps.trace.read())]);

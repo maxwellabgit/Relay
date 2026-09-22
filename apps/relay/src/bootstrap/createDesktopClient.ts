@@ -15,9 +15,11 @@ import { startLiveTranscriptPump, TauriAudioPort, type AudioStatus } from "@rela
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
 import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
+  applySpeechSuspend,
   createProductionIds,
   createRelayClientFromEngine,
   JevHealthTracker,
+  reduceSpeechSession,
   observeDiagnostics,
   RelayEngine,
   runTypeSafeAttempts,
@@ -266,10 +268,20 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
             try {
               acceptIntake = false;
               const listening = await store.getListening(sessionId).catch(() => false);
-              if (listening) {
-                await inner.execute({ type: "SetListening", enabled: false });
-              }
+              const event = status.detail === "route_change" ? "route_change" : "interruption";
+              const decision = await applySpeechSuspend({
+                event,
+                wasListening: listening,
+                stopCapture: async () => {
+                  await audio.stop().catch(() => undefined);
+                },
+                turnListeningOff: async () => {
+                  await inner.execute({ type: "SetListening", enabled: false });
+                },
+              });
               await refreshConfiguredHealthImpl();
+              audioHealth.detail = decision.detail;
+              await engine.refreshSnapshot().catch(() => undefined);
             } catch {
               await engine.refreshSnapshot().catch(() => undefined);
             } finally {
@@ -391,12 +403,23 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       },
     },
     async onHostBackground() {
-      try {
-        await audio.stop();
-      } catch {
-        audioHealth.ok = false;
-        audioHealth.detail = "unavailable";
-      }
+      const wasListening = await store.getListening(sessionId).catch(() => false);
+      const decision = await applySpeechSuspend({
+        event: "background",
+        wasListening,
+        stopCapture: async () => {
+          try {
+            await audio.stop();
+          } catch {
+            audioHealth.ok = false;
+          }
+        },
+        turnListeningOff: async () => {
+          await inner.execute({ type: "SetListening", enabled: false });
+        },
+      }).catch(() => reduceSpeechSession("capturing", "background"));
+      audioHealth.detail = decision.detail;
+      if (!decision.listening) await engine.refreshSnapshot().catch(() => undefined);
     },
     start: () => client.start(),
     stop: () => client.stop(),

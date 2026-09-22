@@ -83,7 +83,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Windows Listen fails closed without local ASR. Mobile listening stays off while speech is unavailable. No measured audio level is shown. No physical-device proof.",
+    notes: "Windows Listen fails closed without local ASR. Mobile listening stays off while speech is unavailable. Background, interruption, route change, cancel, and relaunch leave listening off. No measured audio level is shown. No physical-device proof.",
   },
   {
     id: "model.local",

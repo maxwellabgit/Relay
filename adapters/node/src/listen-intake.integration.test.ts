@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { applySpeechSuspend } from "@relay/engine";
 import { createNodeHarness } from "./create-client.js";
 
 function micSegment(sessionId: string, segmentId: string, text: string, sequence: number) {
@@ -121,6 +122,31 @@ describe("listen intake gate", () => {
     expect((await harness.client.getSnapshot()).listening).toBe(false);
     const allowedOff = await harness.client.execute({ type: "SetListening", enabled: false });
     expect(allowedOff.ok).toBe(true);
+    await harness.client.stop();
+    harness.close();
+  });
+
+  it("clears listening on relaunch and on an interruption", async () => {
+    const harness = await createNodeHarness({ sessionId: "session_relaunch" });
+    await harness.store.ensureSession("session_relaunch", "2026-09-22T00:00:00.000Z");
+    await harness.store.setListening("session_relaunch", true);
+    await harness.client.start();
+    expect((await harness.client.getSnapshot()).listening).toBe(false);
+    await harness.client.execute({ type: "SetListening", enabled: true });
+    let stopped = false;
+    const decision = await applySpeechSuspend({
+      event: "interruption",
+      wasListening: true,
+      stopCapture: async () => {
+        stopped = true;
+      },
+      turnListeningOff: async () => {
+        await harness.client.execute({ type: "SetListening", enabled: false });
+      },
+    });
+    expect(stopped).toBe(true);
+    expect(decision.detail).toBe("interruption");
+    expect((await harness.client.getSnapshot()).listening).toBe(false);
     await harness.client.stop();
     harness.close();
   });

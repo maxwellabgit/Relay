@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { coreHealth, humanNotice, humanWait, isRetrying, productSurface, surfaceCopy } from "./product-surface.js";
+import {
+  coreHealth,
+  humanNotice,
+  humanWait,
+  isRetrying,
+  productSurface,
+  speechHoldCopy,
+  surfaceCopy,
+} from "./product-surface.js";
 
 describe("product surface", () => {
   it("shows starting before the client is live, then ready when the engine is up", () => {
@@ -78,5 +86,8 @@ describe("product surface", () => {
     );
     expect(humanWait("hosted_judgment")).toBe("Waiting for a judgment.");
     expect(humanWait("queue_pause")).toBe("Waiting.");
+    expect(speechHoldCopy(true, "background")).toBe("Listening stays off in the background.");
+    expect(speechHoldCopy(true, "idle")).toBeNull();
+    expect(speechHoldCopy(false, "permission_denied")).toBe("Microphone permission is off.");
   });
 });

@@ -17,7 +17,14 @@ import {
 import { Composer } from "../assistant/Composer.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
-import { coreHealth, humanNotice, humanWait, surfaceCopy, type ProductSurface } from "../assistant/product-surface.js";
+import {
+  coreHealth,
+  humanNotice,
+  humanWait,
+  speechHoldCopy,
+  surfaceCopy,
+  type ProductSurface,
+} from "../assistant/product-surface.js";
 import { colors } from "../theme/colors.js";
 import { usePrefersReducedMotion } from "../theme/reducedMotion.js";
 import { radius, space, touchTarget, typeScale } from "../theme/tokens.js";
@@ -106,7 +113,7 @@ export function PhoneShell({
   const health = coreHealth(snapshot.status, snapshot.providerHealth);
   const surfaceText = surfaceCopy(surface);
   const audioChip = snapshot.status.find((chip) => chip.id === "audio");
-  const audioUnavailable = audioChip && !audioChip.ok ? audioChip.detail : null;
+  const audioCopy = audioChip ? speechHoldCopy(audioChip.ok, audioChip.detail) : null;
   const ambientActions = snapshot.actions.filter((a) => a.kind === "ambient_recommendation");
   const otherActions = snapshot.actions.filter((a) => a.kind !== "ambient_recommendation");
   const waitingLabel =
@@ -204,9 +211,7 @@ export function PhoneShell({
           {surfaceText}
         </Text>
       ) : null}
-      {audioUnavailable ? (
-        <Text style={styles.notice}>{`Listening stays off. ${humanNotice(audioUnavailable)}`}</Text>
-      ) : null}
+      {audioCopy ? <Text style={styles.notice}>{`Listening stays off. ${audioCopy}`}</Text> : null}
 
       <FlatList
         ref={threadRef}

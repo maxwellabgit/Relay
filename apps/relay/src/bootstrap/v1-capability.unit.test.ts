@@ -104,6 +104,8 @@ describe("production composition purity", () => {
     expect(text).not.toContain("MemoryArtifactStore");
     expect(text).toContain("createTypeSafeJudgmentPort");
     expect(text).toContain("createMobileTraceSink");
+    expect(text).toContain("applySpeechSuspend");
+    expect(text).toContain("speechOnRelaunch");
     expect(text).not.toContain("createBrowserTraceSink");
     expect(text).not.toContain("/__relay/trace");
   });

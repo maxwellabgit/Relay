@@ -11,7 +11,9 @@ import {
   createRelayClientFromEngine,
   createTypeSafeJudgmentPort,
   JevHealthTracker,
+  applySpeechSuspend,
   RelayEngine,
+  speechOnRelaunch,
   type EngineDeps,
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
@@ -112,11 +114,24 @@ export async function createMobileClient(
         await secrets.delete("typesafe_api_key");
       },
     },
-    onHostBackground: () => backend.lifecycle.background(),
+    onHostBackground: async () => {
+      const wasListening = await backend.store.getListening(sessionId).catch(() => false);
+      const decision = await applySpeechSuspend({
+        event: "background",
+        wasListening,
+        stopCapture: () => backend.lifecycle.background(),
+        turnListeningOff: async () => {
+          await client.execute({ type: "SetListening", enabled: false });
+        },
+      });
+      audioStatus.detail = decision.detail;
+      if (!wasListening) await engine.refreshSnapshot();
+    },
     async start() {
       const speech = await backend.speech.status();
+      const relaunch = speechOnRelaunch(speech);
       audioStatus.ok = speech.ok;
-      audioStatus.detail = speech.detail;
+      audioStatus.detail = relaunch.detail;
       const key = await secrets.get("typesafe_api_key");
       const hosted = await backend.store.getHostedProcessingEnabled().catch(() => false);
       jev.apply({ secretPresent: Boolean(key), hostedEnabled: hosted });

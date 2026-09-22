@@ -58,6 +58,11 @@ const NOTICES: Record<string, string> = {
   replay_failed: "Replay is unavailable.",
   audio_unavailable: "Listening is unavailable.",
   speech_unavailable: "Speech is not available on this device.",
+  permission_denied: "Microphone permission is off.",
+  interruption: "Listening stopped because audio was interrupted.",
+  route_change: "Listening stopped because the audio route changed.",
+  background: "Listening stays off in the background.",
+  cancel: "Listening stopped.",
   max_semantic_rounds: "RELAY stopped after two judgment rounds.",
   missing_secret: "Hosted judgment needs a key in Settings.",
   not_running: "RELAY is not running yet.",
@@ -77,6 +82,14 @@ export function humanNotice(value: string): string {
   if (known) return known;
   if (/^[a-z0-9_]+$/.test(value)) return "Something went wrong. Details are in diagnostics.";
   return value;
+}
+
+const SPEECH_HOLD = new Set(["permission_denied", "interruption", "route_change", "background", "cancel"]);
+
+/** Copy for a down audio chip, or for a suspend reason while the chip is still capable. */
+export function speechHoldCopy(ok: boolean, detail: string): string | null {
+  if (!ok || SPEECH_HOLD.has(detail)) return humanNotice(detail);
+  return null;
 }
 
 export function humanWait(waitKind: string): string {
