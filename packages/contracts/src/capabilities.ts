@@ -107,7 +107,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "degraded",
     android: "degraded",
-    notes: "Transport exists. Ambient state omits transcript content, one path uses model typesafe, and the hosted grant is still a global boolean.",
+    notes: "Transport, jev-latest, a scoped disclosure grant, a two-round cap, and one durable resume exist in code. Live canary has not run.",
   },
   {
     id: "memory.local",
@@ -123,7 +123,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Note writes exist. Distinct note versus fact versus recommendation semantics are not yet proven in a headed journey.",
+    notes: "Explicit note phrases store kind note. Headed persistence proof is open.",
   },
   {
     id: "fact.capture",
@@ -131,7 +131,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Memory writes exist. A typed accepted fact is not yet distinct from a generic note in headed proof.",
+    notes: "Explicit fact phrases store kind fact, separate from notes. Headed proof is open.",
   },
   {
     id: "task.next-action",
@@ -139,7 +139,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Recommendation paths exist. Headed accept/reject proof is open.",
+    notes: "Explicit next-action phrases store kind recommendation. Ambient cards stay reviewable until accept. Headed proof is open.",
   },
   {
     id: "claim.verify",
@@ -155,7 +155,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Module is registered. Jev still lacks minimum authorized conversational context and a centralized jev-latest model.",
+    notes: "Module is registered and the choice request includes an authorized excerpt. Live canary has not run.",
   },
   {
     id: "reflex.capture-note",
@@ -211,7 +211,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Cards exist, but the Jev request currently sends only origin observed and cannot judge the transcript.",
+    notes: "Observed speech stages a review card and does not write memory until accept. Authorized excerpt is included when a grant allows it. Live canary has not run.",
   },
   {
     id: "diagnostics.live",
@@ -219,7 +219,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Event-derived summary exists. Grant, budget, source hashes, request id, and retry category are still incomplete. Mobile trace sink is a dev route.",
+    notes: "Event-derived summary includes grant and attempt fields when a judgment runs. Mobile trace sink is still the dev route. No headed export proof.",
   },
   {
     id: "dev.console",

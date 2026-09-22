@@ -296,7 +296,13 @@ export class CaseRuntime {
   async onModelRequested(item: WorkItem): Promise<WorkDisposition> {
     const caseId = String(item.payload.caseId ?? "");
     const current = await this.deps.store.getCase(caseId);
-    if (!current || current.status === "completed" || current.status === "blocked" || current.status === "failed") {
+    if (
+      !current ||
+      current.status === "completed" ||
+      current.status === "blocked" ||
+      current.status === "failed" ||
+      current.status === "cancelled"
+    ) {
       return { kind: "complete" };
     }
     const text = await this.loadText(item);
@@ -324,6 +330,11 @@ export class CaseRuntime {
     );
     if (!existing) {
       const generated = await this.generateDirectAnswer(text, caseId);
+      if (this.deps.getAbortSignal().aborted || (!generated.ok && generated.failureReason === "cancelled")) {
+        return { kind: "complete" };
+      }
+      const latestCase = await this.deps.store.getCase(caseId);
+      if (!latestCase || latestCase.status === "cancelled") return { kind: "complete" };
       await this.deps.outcomes.publishFeedItem({
         itemId: feedItemId(caseId, "answer"),
         kind: "answer",
@@ -539,7 +550,13 @@ export class CaseRuntime {
       listening: await this.deps.store.getListening(this.deps.sessionId),
     };
 
-    for (const reflex of this.deps.reflexModules ?? []) {
+    const modules = [...(this.deps.reflexModules ?? [])].sort((left, right) => {
+      const rank = (mode: string) => (mode === "explicit_utterance" ? 0 : 1);
+      return rank(left.definition.approvalMode) - rank(right.definition.approvalMode);
+    });
+    let explicitHandled = false;
+    for (const reflex of modules) {
+      if (explicitHandled && reflex.definition.id === "reflex.resolve-acronym") continue;
       const triggers = reflex.detect(sourceEvent, detection);
       await this.deps.trace.emit({
         type: "reflex.detected",
@@ -564,7 +581,10 @@ export class CaseRuntime {
         });
 
         if (result.type === "finding" && reflex.definition.id !== "reflex.resolve-acronym") {
+          if (reflex.definition.approvalMode !== "explicit_utterance") continue;
+          if (this.deps.getAbortSignal().aborted) continue;
           await this.persistReviewedFinding(reflex.definition.id, trigger.token, caseId);
+          explicitHandled = true;
           findings.push(result.summary);
           signature = workSignature(reflex.definition.id, { token: trigger.token });
           continue;
@@ -622,17 +642,21 @@ export class CaseRuntime {
   }
 
   private async persistReviewedFinding(reflexId: string, token: string, caseId: string): Promise<void> {
-    const prefix =
+    if (this.deps.getAbortSignal().aborted) return;
+    const current = await this.deps.store.getCase(caseId);
+    if (!current || current.status === "cancelled") return;
+    const record =
       reflexId === "reflex.capture-note"
-        ? "note"
+        ? { kind: "note" as const, recordType: "note" }
         : reflexId === "reflex.remember-fact"
-          ? "fact"
-          : "next";
+          ? { kind: "fact" as const, recordType: "fact" }
+          : { kind: "recommendation" as const, recordType: "recommendation" };
+    const text = token.trim();
     await this.deps.store.learning.putMemory({
       memoryId: this.deps.ids.next("memory"),
-      kind: "note",
-      key: `${prefix}:${token.slice(0, 120)}`,
-      value: { text: token, reflexId, caseId },
+      kind: record.kind,
+      key: `${record.recordType}:${text.slice(0, 120) || "open"}`,
+      value: { text, recordType: record.recordType, status: "accepted", reflexId, caseId },
       source: "explicit_user",
       createdAt: this.deps.clock.now().toISOString(),
     });
@@ -642,7 +666,7 @@ export class CaseRuntime {
       status: "completed",
       caseId,
       reflexId,
-      reasonCode: prefix,
+      reasonCode: record.recordType,
     });
   }
 
@@ -670,6 +694,18 @@ export class CaseRuntime {
         },
         signal,
       );
+      if (signal.aborted) {
+        const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
+        await this.deps.trace.emit({
+          type: "model.failed",
+          stage: "model.response",
+          status: "failed",
+          caseId,
+          reasonCode: "cancelled",
+          durationMs,
+        });
+        return { ok: false, failureReason: "cancelled" };
+      }
       const durationMs = Math.max(0, this.deps.clock.now().getTime() - started);
       if (generated.ok) {
         await this.deps.trace.emit({

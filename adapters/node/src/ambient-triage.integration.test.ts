@@ -111,6 +111,18 @@ describe("ambient candidate triage", () => {
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.primary).toBe("save");
       expect(card?.title).toMatch(/Save this/i);
+      const before = await harness.store.learning.listMemories();
+      expect(before.some((memory) => memory.kind === "note" || memory.kind === "fact" || memory.kind === "recommendation")).toBe(
+        false,
+      );
+      expect(card?.recommendationId).toBeTruthy();
+      const accepted = await harness.client.execute({
+        type: "AcceptAmbientRecommendation",
+        recommendationId: card?.recommendationId ?? "",
+      });
+      expect(accepted.ok).toBe(true);
+      const after = await harness.store.learning.listMemories();
+      expect(after.filter((memory) => memory.kind === "note")).toHaveLength(1);
     } finally {
       await harness.client.stop();
       harness.close();

@@ -340,7 +340,7 @@ export type ActionCard = {
 };
 
 export type MemoryView = {
-  readonly kind: "glossary" | "birthday" | "note";
+  readonly kind: "glossary" | "birthday" | "note" | "fact" | "recommendation";
   readonly key: string;
   readonly fields: Readonly<Record<string, string>>;
 };

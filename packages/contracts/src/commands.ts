@@ -67,7 +67,7 @@ export type CaptureBirthdayCommand = {
 
 export type DeleteMemoryCommand = {
   readonly type: "DeleteMemory";
-  readonly kind: "glossary" | "birthday" | "note";
+  readonly kind: "glossary" | "birthday" | "note" | "fact" | "recommendation";
   readonly key: string;
 };
 

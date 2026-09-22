@@ -7,7 +7,7 @@ import type {
 import type { SourceSliceRef } from "./transcript.js";
 import type { ReflexActivationState, ReflexRunSummary } from "./changes.js";
 
-export type ApprovalMode = "always_ask" | "standing_grant_eligible";
+export type ApprovalMode = "always_ask" | "explicit_utterance" | "standing_grant_eligible";
 export type RollbackStrategy = "none" | "compensating_action" | "soft_disable";
 
 export type ReflexBudgets = {

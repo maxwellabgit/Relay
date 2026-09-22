@@ -12,6 +12,7 @@ export function phraseDefinition(input: {
   readonly displayName: string;
   readonly trigger: string;
   readonly explanationTemplate: string;
+  readonly approvalMode?: ReflexDefinition["approvalMode"];
 }): ReflexDefinition {
   return {
     id: input.id,
@@ -31,7 +32,7 @@ export function phraseDefinition(input: {
         actionVersion: 1,
       },
     ],
-    approvalMode: "always_ask",
+    approvalMode: input.approvalMode ?? "explicit_utterance",
     budgets: { maxSourceAttempts: 1, maxJudgmentRounds: 0, maxHostedTokens: 0 },
     retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
     evaluationFixtureIds: [input.id],
@@ -75,21 +76,38 @@ export function phraseModule(
   definition: ReflexDefinition,
   pattern: RegExp,
   summary: (token: string) => string,
+  options?: { readonly allowEmpty?: boolean; readonly emptySummary?: string },
 ): ReflexModule {
   return {
     definition,
     detect(event: SourceEvent) {
-      return detectPhrase(definition, pattern, event);
+      const match = event.text.trim().match(pattern);
+      if (!match) return [];
+      const token = match[1]?.trim() ?? "";
+      if (!token && !options?.allowEmpty) return [];
+      return [
+        {
+          reflexId: definition.id,
+          reflexVersion: definition.version,
+          token,
+          start: 0,
+          end: event.text.length,
+          reason: definition.triggers[0] ?? "phrase",
+        },
+      ];
     },
     async evaluate(context: ReflexContext) {
       const token = context.triggerToken?.trim() ?? "";
       if (!token) {
-        return {
-          type: "no_action",
-          summary: "empty",
-          sourceRefs: [],
-          judgmentIds: [],
-        };
+        if (!options?.emptySummary) {
+          return {
+            type: "no_action",
+            summary: "empty",
+            sourceRefs: [],
+            judgmentIds: [],
+          };
+        }
+        return findingFor(context, options.emptySummary);
       }
       return findingFor(context, summary(token));
     },

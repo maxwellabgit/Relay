@@ -1,6 +1,7 @@
 import type { PatternView, ReflexStateSnapshot, RelaySnapshot } from "@relay/contracts";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
+import { memoryLibraryLabel } from "./memory-label.js";
 
 type Props = {
   readonly open: boolean;
@@ -46,7 +47,7 @@ export function LibrarySheet({
           ) : (
             memories.slice(0, 20).map((memory) => (
               <Text key={`${memory.kind}:${memory.key}`} style={styles.row}>
-                {`${memory.kind} · ${memory.key}`}
+                {memoryLibraryLabel(memory)}
               </Text>
             ))
           )}

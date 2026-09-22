@@ -8,8 +8,9 @@
     "web": "expo start --web",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "export:web": "expo export --platform web",
-    "export:ios": "expo export --platform ios",
+    "export:web": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform web",
+    "export:ios": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform ios",
+    "export:android": "env -u EXPO_PUBLIC_RELAY_ALLOW_DEMO -u EXPO_PUBLIC_RELAY_DEV_CONSOLE expo export --platform android",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {

@@ -1,7 +1,6 @@
 import type { RelayClient } from "@relay/contracts";
 import type { RelayEngine } from "@relay/engine";
 import { Platform } from "react-native";
-import { createBrowserDemoClient } from "./createBrowserDemoClient";
 import { createDesktopClient } from "./createDesktopClient";
 import { createMobileClient } from "./createMobileClient";
 
@@ -36,6 +35,7 @@ export async function createAppClient(): Promise<AppClientHandle> {
   if (isNativeMobile()) return createMobileClient();
 
   if (isExplicitDemoAllowed()) {
+    const { createBrowserDemoClient } = await import("./createBrowserDemoClient.js");
     return createBrowserDemoClient();
   }
 

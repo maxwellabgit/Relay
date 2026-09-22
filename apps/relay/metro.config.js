@@ -1,6 +1,7 @@
 const { getDefaultConfig } = require("expo/metro-config");
 const fs = require("fs");
 const path = require("path");
+const { redirectProductionModule } = require("./metro-purity.cjs");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
@@ -17,6 +18,8 @@ config.resolver.disableHierarchicalLookup = true;
 const upstreamResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const resolver = upstreamResolveRequest ?? context.resolveRequest;
+  const redirected = redirectProductionModule(moduleName, process.env);
+  if (redirected) return resolver(context, redirected, platform);
   if (moduleName.startsWith(".") && moduleName.endsWith(".js")) {
     const withoutJs = moduleName.slice(0, -3);
     try {

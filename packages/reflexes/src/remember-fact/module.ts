@@ -9,6 +9,6 @@ const definition = phraseDefinition({
 
 export const rememberFactModule = phraseModule(
   definition,
-  /^(?:remember that|remember:)\s+(.{1,280})$/i,
-  (token) => `fact:${token}`,
+  /^(?:remember that|remember:|remember a fact:?)\s+(.{1,280})$/i,
+  (token) => `Remembered: ${token}`,
 );

@@ -50,7 +50,8 @@ describe("reviewed V1 reflex modules", () => {
       triggerToken: trigger?.token ?? "",
     });
     expect(result.type).toBe("finding");
-    if (result.type === "finding") expect(result.summary).toBe("note:buy filters");
+    if (result.type === "finding") expect(result.summary).toBe("Saved note: buy filters");
+    expect(captureNoteModule.definition.approvalMode).toBe("explicit_utterance");
   });
 
   it("remembers an explicit fact", () => {
@@ -59,6 +60,7 @@ describe("reviewed V1 reflex modules", () => {
       detection,
     );
     expect(trigger?.token).toBe("MSRP means list price");
+    expect(rememberFactModule.definition.approvalMode).toBe("explicit_utterance");
   });
 
   it("recommends only from an explicit next-action phrase", () => {
@@ -70,5 +72,11 @@ describe("reviewed V1 reflex modules", () => {
       detection,
     );
     expect(trigger?.token).toBe("call the supplier");
+    expect(recommendNextActionModule.definition.approvalMode).toBe("explicit_utterance");
+    const [question] = recommendNextActionModule.detect(
+      { ...event, text: "what should I do next?" },
+      detection,
+    );
+    expect(question?.token).toBe("");
   });
 });

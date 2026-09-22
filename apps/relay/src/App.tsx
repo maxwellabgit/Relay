@@ -8,7 +8,6 @@ import {
   type RelayCommand,
   type RelaySnapshot,
 } from "@relay/contracts";
-import { ACRONYM_BASIC_EVENTS } from "@relay/testkit/browser";
 import { RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
 import { ProductErrorBoundary } from "./ProductErrorBoundary";
@@ -258,24 +257,14 @@ export function App() {
           void openRunFolder();
         }}
         onReplayFixture={async (fixture, speed) => {
+          const enabled =
+            process.env.EXPO_PUBLIC_RELAY_DEV_CONSOLE === "1" ||
+            process.env.EXPO_PUBLIC_RELAY_DEV_CONSOLE === "true";
           const handle = handleRef.current;
-          if (!handle || fixture !== "acronym-basic") return;
-          const captureId = `capture_${Date.now()}`;
-          let previousAt = 0;
-          let index = 0;
+          if (!enabled || !handle || fixture !== "acronym-basic") return;
           try {
-            for (const event of ACRONYM_BASIC_EVENTS) {
-              if (event.type !== "segment.final") continue;
-              index += 1;
-              const gap = speed === 0 ? 0 : Math.max(0, event.atMs - previousAt) / speed;
-              previousAt = event.atMs;
-              if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
-              await handle.engine.ingestReplayFinalSegment({
-                ...event.segment,
-                segmentId: `${captureId}_${event.segment.segmentId}_${index}`,
-                sessionId: snapshot.runtime.sessionId ?? "session_web",
-              });
-            }
+            const { replayAcronymFixture } = await import("./dev/replay-acronym-fixture.js");
+            await replayAcronymFixture(handle.engine, snapshot.runtime.sessionId ?? "session_web", speed);
           } catch (error) {
             setNotice(error instanceof Error ? error.message : "replay_failed");
           }

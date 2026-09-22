@@ -9,6 +9,6 @@ const definition = phraseDefinition({
 
 export const captureNoteModule = phraseModule(
   definition,
-  /^(?:note:|save note:)\s+(.{1,280})$/i,
-  (token) => `note:${token}`,
+  /^(?:note:|save note:|add a note:?)\s+(.{1,280})$/i,
+  (token) => `Saved note: ${token}`,
 );

@@ -81,6 +81,11 @@ function respondTool(deps: {
         },
         signal,
       );
+      if (signal?.aborted) {
+        return envelope(definition.id, "failed", "No local result for this Ask.", [], [], {
+          reasonCode: "cancelled",
+        });
+      }
       if (!generated.ok) {
         return envelope(definition.id, "failed", "No local result for this Ask.", [], [], {
           reasonCode: generated.failureReason,

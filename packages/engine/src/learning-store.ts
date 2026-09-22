@@ -10,7 +10,7 @@ export const TRACE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const TRACE_ROTATE_BYTES = 100_000_000;
 export const RETENTION_LABEL = "trace 30d/100MB · failed 7d · memories until delete";
 
-export type MemoryKind = "glossary" | "birthday" | "note";
+export type MemoryKind = "glossary" | "birthday" | "note" | "fact" | "recommendation";
 
 export type MemoryRecord = {
   readonly memoryId: string;

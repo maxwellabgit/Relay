@@ -9,6 +9,7 @@ const definition = phraseDefinition({
 
 export const recommendNextActionModule = phraseModule(
   definition,
-  /^(?:next action:|what should i do next\??)\s*(.{1,280})$/i,
-  (token) => `next:${token}`,
+  /^(?:next action:|what should i do next\??)\s*(.{0,280})$/i,
+  (token) => `Next: ${token}`,
+  { allowEmpty: true, emptySummary: "What should I do next?" },
 );

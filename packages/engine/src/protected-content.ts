@@ -18,7 +18,7 @@ export function packMemoryValue(kind: MemoryKind, value: Readonly<Record<string,
     if (status) metadata.status = status;
     return { prose: expansion ? { expansion } : {}, metadata };
   }
-  if (kind === "note") {
+  if (kind === "note" || kind === "fact" || kind === "recommendation") {
     const { text = "", status = "", candidateEventId = "", ...rest } = value;
     const metadata: Record<string, string> = { ...rest };
     if (status) metadata.status = status;
@@ -44,7 +44,7 @@ export function unpackMemoryValue(
       ...(prose.expansion ? { expansion: prose.expansion } : {}),
     };
   }
-  if (kind === "note") {
+  if (kind === "note" || kind === "fact" || kind === "recommendation") {
     return {
       ...metadata,
       ...(prose.text ? { text: prose.text } : {}),

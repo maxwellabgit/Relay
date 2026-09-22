@@ -77,7 +77,7 @@ export class ToolBroker {
   async onToolRoute(item: WorkItem): Promise<WorkDisposition> {
     const caseId = String(item.payload.caseId ?? "");
     const current = await this.deps.store.getCase(caseId);
-    if (!current || current.status === "completed" || current.status === "blocked" || current.status === "failed") {
+    if (!current || terminalCase(current.status)) {
       return { kind: "complete" };
     }
     const text = String(item.payload.text ?? "");
@@ -181,7 +181,7 @@ export class ToolBroker {
     const text = String(item.payload.text ?? "");
     const usage = readUsage(item.payload);
     const current = await this.deps.store.getCase(caseId);
-    if (!current || current.status === "completed" || current.status === "blocked" || current.status === "failed") {
+    if (!current || terminalCase(current.status)) {
       return { kind: "complete" };
     }
 
@@ -256,6 +256,9 @@ export class ToolBroker {
             signal: this.deps.getAbortSignal(),
           })
         : await tool.execute(validated.value, this.deps.getAbortSignal());
+    if (this.deps.getAbortSignal().aborted || result.reasonCode === "cancelled") {
+      return { kind: "complete" };
+    }
     const durationMs = Date.now() - started;
     if (resolvedId === TOOL_RESPOND) {
       await this.deps.trace.emit({
@@ -758,6 +761,10 @@ function readUsage(payload: Record<string, unknown>): BudgetUsage {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function terminalCase(status: string): boolean {
+  return status === "completed" || status === "blocked" || status === "failed" || status === "cancelled";
 }
 
 function pickDeterministic(text: string, options: readonly string[]): string | null {
