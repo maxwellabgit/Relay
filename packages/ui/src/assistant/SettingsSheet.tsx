@@ -1,7 +1,14 @@
-import { SESSION_JEV_GRANT_DEFAULTS, type RelaySnapshot } from "@relay/contracts";
+import {
+  SESSION_JEV_GRANT_DEFAULTS,
+  UNSELECTED_MODEL_MESSAGE,
+  deliveryActions,
+  type ModelDeliveryView,
+  type RelaySnapshot,
+} from "@relay/contracts";
 import { useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme/colors.js";
+import { touchTarget } from "../theme/tokens.js";
 
 export type SettingsSheetProps = {
   readonly visible: boolean;
@@ -15,6 +22,12 @@ export type SettingsSheetProps = {
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth: () => void;
   readonly onExportDiagnostics?: () => string;
+  readonly modelDelivery?: ModelDeliveryView;
+  readonly onModelDownload?: () => void;
+  readonly onModelPause?: () => void;
+  readonly onModelResume?: () => void;
+  readonly onModelCancel?: () => void;
+  readonly onModelDelete?: () => void;
 };
 
 function chipDetail(snapshot: RelaySnapshot, id: string): { ok: boolean; detail: string } {
@@ -34,6 +47,12 @@ export function SettingsSheet({
   onRevokeJevDisclosure,
   onRefreshHealth,
   onExportDiagnostics,
+  modelDelivery,
+  onModelDownload,
+  onModelPause,
+  onModelResume,
+  onModelCancel,
+  onModelDelete,
 }: SettingsSheetProps) {
   const [keyDraft, setKeyDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -187,11 +206,50 @@ export function SettingsSheet({
             <Text style={styles.meta}>
               {model.ok ? "Ready" : "Unavailable"} · {model.detail}
             </Text>
-            <Text style={styles.hint}>
-              {nativeMobile
-                ? "An on-device model is not installed. Download stays off until a tested model is selected."
-                : "External llama.cpp-compatible server on 127.0.0.1:8080 (or RELAY_LOCAL_MODEL_PORT). Start with: ./dev/start-model.ps1 -StartHint"}
-            </Text>
+            {modelDelivery && modelDelivery.phase !== "unselected" ? (
+              <>
+                <Text style={styles.meta}>{modelDelivery.message}</Text>
+                <Text style={styles.meta}>
+                  {`${modelDelivery.bytesReceived} / ${modelDelivery.pin?.byteSize ?? 0} bytes`}
+                  {modelDelivery.wifiRecommended ? " · Use Wi-Fi" : ""}
+                </Text>
+                <View style={styles.row}>
+                  {deliveryActions(modelDelivery.phase).map((action) => (
+                    <Pressable
+                      key={action}
+                      accessibilityRole="button"
+                      accessibilityLabel={action === "download" ? "Download model" : action}
+                      onPress={() => {
+                        if (action === "download") onModelDownload?.();
+                        if (action === "pause") onModelPause?.();
+                        if (action === "resume") onModelResume?.();
+                        if (action === "cancel") onModelCancel?.();
+                        if (action === "delete") onModelDelete?.();
+                      }}
+                      style={[styles.btn, action === "delete" || action === "cancel" ? styles.btnDanger : styles.btnPrimary, styles.hit]}
+                    >
+                      <Text style={styles.btnLabel}>
+                        {action === "download"
+                          ? "Download"
+                          : action === "pause"
+                            ? "Pause"
+                            : action === "resume"
+                              ? "Resume"
+                              : action === "cancel"
+                                ? "Cancel"
+                                : "Delete"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <Text style={styles.hint}>
+                {nativeMobile
+                  ? UNSELECTED_MODEL_MESSAGE
+                  : "External llama.cpp-compatible server on 127.0.0.1:8080 (or RELAY_LOCAL_MODEL_PORT). Start with: ./dev/start-model.ps1 -StartHint"}
+              </Text>
+            )}
             <Pressable
               accessibilityRole="button"
               onPress={onRefreshHealth}
@@ -331,6 +389,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: "center",
+  },
+  hit: {
+    minHeight: touchTarget,
+    justifyContent: "center",
   },
   btnPrimary: {
     backgroundColor: colors.accentSoft,

@@ -23,6 +23,7 @@ export * from "./runtime-events.js";
 export * from "./diagnostics/live-summary.js";
 export * from "./diagnostics/redacted-export.js";
 export * from "./speech/session.js";
+export * from "./model/delivery.js";
 export * from "./disclosure/hosted-grant.js";
 export * from "./runtime-recorder.js";
 export * from "./transactions.js";

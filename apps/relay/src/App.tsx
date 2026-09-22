@@ -3,12 +3,14 @@ import { StatusBar } from "expo-status-bar";
 import { AppState } from "react-native";
 import {
   SESSION_JEV_GRANT_DEFAULTS,
+  unselectedModelDelivery,
   type ActionCard,
+  type ModelDeliveryView,
   type RelayClient,
   type RelayCommand,
   type RelaySnapshot,
 } from "@relay/contracts";
-import { buildRedactedDiagnostics } from "@relay/engine";
+import { ModelDelivery, buildRedactedDiagnostics } from "@relay/engine";
 import { isRetrying, productSurface, RelayWorkbench } from "@relay/ui";
 import { createAppClient, type AppClientHandle } from "./bootstrap/createAppClient";
 import { developerConsoleAllowed, readProcessEnv } from "./bootstrap/dev-console";
@@ -78,6 +80,15 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [phase, setPhase] = useState<"booting" | "failed" | "live">("booting");
+  const modelDeliveryRef = useRef(new ModelDelivery(null));
+  const modelAbort = useRef<AbortController | null>(null);
+  const [modelDelivery, setModelDelivery] = useState<ModelDeliveryView>(() => unselectedModelDelivery());
+
+  const beginModelDownload = () => {
+    const controller = new AbortController();
+    modelAbort.current = controller;
+    void modelDeliveryRef.current.start(controller.signal).then(setModelDelivery);
+  };
 
   const runCommand = async (command: RelayCommand): Promise<void> => {
     const client = clientRef.current;
@@ -278,6 +289,20 @@ export function App() {
           void runCommand({ type: "SnoozeCandidate", candidateId });
         }}
         onExportDiagnostics={() => JSON.stringify(buildRedactedDiagnostics(snapshot), null, 2)}
+        modelDelivery={modelDelivery}
+        onModelDownload={beginModelDownload}
+        onModelResume={beginModelDownload}
+        onModelPause={() => {
+          modelAbort.current?.abort();
+          setModelDelivery(modelDeliveryRef.current.pause());
+        }}
+        onModelCancel={() => {
+          modelAbort.current?.abort();
+          setModelDelivery(modelDeliveryRef.current.cancel());
+        }}
+        onModelDelete={() => {
+          setModelDelivery(modelDeliveryRef.current.deleteLocal());
+        }}
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
         onReplayFixture={async (fixture, speed) => {
           const handle = handleRef.current;

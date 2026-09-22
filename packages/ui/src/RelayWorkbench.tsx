@@ -1,4 +1,4 @@
-import type { ActionCard, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
 import type { ProductSurface } from "./assistant/product-surface.js";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -37,6 +37,12 @@ export type RelayWorkbenchProps = {
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
   readonly onExportDiagnostics?: () => string;
+  readonly modelDelivery?: ModelDeliveryView;
+  readonly onModelDownload?: () => void;
+  readonly onModelPause?: () => void;
+  readonly onModelResume?: () => void;
+  readonly onModelCancel?: () => void;
+  readonly onModelDelete?: () => void;
   readonly busy?: boolean;
   readonly notice?: string | null;
   readonly surface?: ProductSurface;
@@ -75,6 +81,12 @@ export function RelayWorkbench({
   onRevokeJevDisclosure,
   onRefreshHealth,
   onExportDiagnostics,
+  modelDelivery,
+  onModelDownload,
+  onModelPause,
+  onModelResume,
+  onModelCancel,
+  onModelDelete,
   busy = false,
   notice = null,
   surface = "ready",
@@ -112,6 +124,12 @@ export function RelayWorkbench({
       {...(onRevokeJevDisclosure !== undefined ? { onRevokeJevDisclosure } : {})}
       {...(onRefreshHealth !== undefined ? { onRefreshHealth } : {})}
       {...(onExportDiagnostics !== undefined ? { onExportDiagnostics } : {})}
+      {...(modelDelivery !== undefined ? { modelDelivery } : {})}
+      {...(onModelDownload !== undefined ? { onModelDownload } : {})}
+      {...(onModelPause !== undefined ? { onModelPause } : {})}
+      {...(onModelResume !== undefined ? { onModelResume } : {})}
+      {...(onModelCancel !== undefined ? { onModelCancel } : {})}
+      {...(onModelDelete !== undefined ? { onModelDelete } : {})}
       busy={busy}
       notice={notice}
       surface={surface}

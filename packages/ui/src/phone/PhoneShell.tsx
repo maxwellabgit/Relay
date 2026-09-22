@@ -1,4 +1,4 @@
-import type { ActionCard, FeedItemSnapshot, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, FeedItemSnapshot, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
@@ -46,6 +46,12 @@ type Props = {
   readonly onRevokeJevDisclosure?: (grantId: string) => void;
   readonly onRefreshHealth?: () => void;
   readonly onExportDiagnostics?: () => string;
+  readonly modelDelivery?: ModelDeliveryView;
+  readonly onModelDownload?: () => void;
+  readonly onModelPause?: () => void;
+  readonly onModelResume?: () => void;
+  readonly onModelCancel?: () => void;
+  readonly onModelDelete?: () => void;
   readonly busy?: boolean;
   readonly notice?: string | null;
   readonly surface?: ProductSurface;
@@ -74,6 +80,12 @@ export function PhoneShell({
   onRevokeJevDisclosure,
   onRefreshHealth,
   onExportDiagnostics,
+  modelDelivery,
+  onModelDownload,
+  onModelPause,
+  onModelResume,
+  onModelCancel,
+  onModelDelete,
   busy = false,
   notice = null,
   surface = "ready",
@@ -300,6 +312,12 @@ export function PhoneShell({
         {...(onRevokeJevDisclosure ? { onRevokeJevDisclosure } : {})}
         onRefreshHealth={() => onRefreshHealth?.()}
         {...(onExportDiagnostics ? { onExportDiagnostics } : {})}
+        {...(modelDelivery ? { modelDelivery } : {})}
+        {...(onModelDownload ? { onModelDownload } : {})}
+        {...(onModelPause ? { onModelPause } : {})}
+        {...(onModelResume ? { onModelResume } : {})}
+        {...(onModelCancel ? { onModelCancel } : {})}
+        {...(onModelDelete ? { onModelDelete } : {})}
       />
       <LibrarySheet
         open={libraryOpen}

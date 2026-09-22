@@ -8,6 +8,7 @@ export * from "./commands.js";
 export * from "./diagnostics.js";
 export * from "./glasses.js";
 export * from "./judgments.js";
+export * from "./model-delivery.js";
 export * from "./operations.js";
 export * from "./ports.js";
 export * from "./reflexes.js";
