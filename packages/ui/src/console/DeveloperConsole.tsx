@@ -9,6 +9,15 @@ import type {
 import { useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme/colors.js";
+import { touchTarget } from "../theme/tokens.js";
+import {
+  copyableRunIds,
+  exportTraceSelection,
+  filterConsoleTrace,
+  traceProvider,
+  traceSeverity,
+  type ConsoleSeverity,
+} from "./console-trace.js";
 import { JevDecisionTree } from "./JevDecisionTree.js";
 import { projectJevTree } from "./projectJevTree.js";
 
@@ -49,6 +58,10 @@ export function DeveloperConsole({
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [reasonFilter, setReasonFilter] = useState<string | null>(null);
+  const [runFilter, setRunFilter] = useState<string | null>(null);
+  const [caseFilter, setCaseFilter] = useState<string | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [severityFilter, setSeverityFilter] = useState<ConsoleSeverity | null>(null);
 
   const rows = paused ? frozen : snapshot.trace;
   const receivedRequest = receivedRequestText(snapshot);
@@ -57,11 +70,14 @@ export function DeveloperConsole({
     [snapshot.decision, receivedRequest],
   );
 
-  const filtered = rows.filter((row) => {
-    if (stageFilter && row.stage !== stageFilter) return false;
-    if (statusFilter && row.status !== statusFilter) return false;
-    if (reasonFilter && row.reasonCode !== reasonFilter) return false;
-    return true;
+  const filtered = filterConsoleTrace(rows, {
+    runId: runFilter,
+    caseId: caseFilter,
+    provider: providerFilter,
+    severity: severityFilter,
+    stage: stageFilter,
+    status: statusFilter,
+    reason: reasonFilter,
   });
 
   const stageChips = uniqueValues(rows.map((r) => r.stage));
@@ -162,11 +178,25 @@ export function DeveloperConsole({
           stageFilter={stageFilter}
           statusFilter={statusFilter}
           reasonFilter={reasonFilter}
+          runChips={uniqueValues(rows.map((row) => row.runId))}
+          caseChips={uniqueValues(rows.map((row) => row.caseId))}
+          providerChips={uniqueValues(rows.map((row) => traceProvider(row)))}
+          severityChips={uniqueValues(rows.map((row) => traceSeverity(row)))}
+          runFilter={runFilter}
+          caseFilter={caseFilter}
+          providerFilter={providerFilter}
+          severityFilter={severityFilter}
           paused={paused}
           speed={speed}
           onSetStageFilter={setStageFilter}
           onSetStatusFilter={setStatusFilter}
           onSetReasonFilter={setReasonFilter}
+          onSetRunFilter={setRunFilter}
+          onSetCaseFilter={setCaseFilter}
+          onSetProviderFilter={setProviderFilter}
+          onSetSeverityFilter={(value) => {
+            setSeverityFilter(value === "error" || value === "warn" || value === "info" ? value : null);
+          }}
           onTogglePause={() => {
             setFrozen(snapshot.trace);
             setPaused((value) => !value);
@@ -269,14 +299,26 @@ function LogsPane({
   stageChips,
   statusChips,
   reasonChips,
+  runChips,
+  caseChips,
+  providerChips,
+  severityChips,
   stageFilter,
   statusFilter,
   reasonFilter,
+  runFilter,
+  caseFilter,
+  providerFilter,
+  severityFilter,
   paused,
   speed,
   onSetStageFilter,
   onSetStatusFilter,
   onSetReasonFilter,
+  onSetRunFilter,
+  onSetCaseFilter,
+  onSetProviderFilter,
+  onSetSeverityFilter,
   onTogglePause,
   onSetSpeed,
   onReplayFixture,
@@ -289,14 +331,26 @@ function LogsPane({
   readonly stageChips: string[];
   readonly statusChips: string[];
   readonly reasonChips: string[];
+  readonly runChips: string[];
+  readonly caseChips: string[];
+  readonly providerChips: string[];
+  readonly severityChips: string[];
   readonly stageFilter: string | null;
   readonly statusFilter: string | null;
   readonly reasonFilter: string | null;
+  readonly runFilter: string | null;
+  readonly caseFilter: string | null;
+  readonly providerFilter: string | null;
+  readonly severityFilter: ConsoleSeverity | null;
   readonly paused: boolean;
   readonly speed: number;
   readonly onSetStageFilter: (value: string | null) => void;
   readonly onSetStatusFilter: (value: string | null) => void;
   readonly onSetReasonFilter: (value: string | null) => void;
+  readonly onSetRunFilter: (value: string | null) => void;
+  readonly onSetCaseFilter: (value: string | null) => void;
+  readonly onSetProviderFilter: (value: string | null) => void;
+  readonly onSetSeverityFilter: (value: string | null) => void;
   readonly onTogglePause: () => void;
   readonly onSetSpeed: (value: number) => void;
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
@@ -304,6 +358,7 @@ function LogsPane({
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
 }) {
+  const [selectionText, setSelectionText] = useState<string | null>(null);
   return (
     <View style={styles.stack}>
       <Text style={styles.section}>Evidence</Text>
@@ -328,9 +383,45 @@ function LogsPane({
         </Pressable>
       </View>
 
+      <FilterRow label="run" values={runChips} active={runFilter} onSelect={onSetRunFilter} />
+      <FilterRow label="case" values={caseChips} active={caseFilter} onSelect={onSetCaseFilter} />
+      <FilterRow label="provider" values={providerChips} active={providerFilter} onSelect={onSetProviderFilter} />
+      <FilterRow label="severity" values={severityChips} active={severityFilter} onSelect={onSetSeverityFilter} />
       <FilterRow label="stage" values={stageChips} active={stageFilter} onSelect={onSetStageFilter} />
       <FilterRow label="status" values={statusChips} active={statusFilter} onSelect={onSetStatusFilter} />
       <FilterRow label="reason" values={reasonChips} active={reasonFilter} onSelect={onSetReasonFilter} />
+      <View style={styles.row}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Copy run identifiers"
+          onPress={() =>
+            setSelectionText(
+              copyableRunIds({
+                runId: snapshot.runtime.runId,
+                caseId: snapshot.runtime.activeCaseId,
+                decisionId: snapshot.decision?.decisionId ?? null,
+                sessionId: snapshot.runtime.sessionId,
+              }),
+            )
+          }
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>Copy IDs</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Export the filtered event selection"
+          onPress={() => setSelectionText(exportTraceSelection(chronological))}
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>Export selection</Text>
+        </Pressable>
+      </View>
+      {selectionText ? (
+        <Text selectable accessibilityLabel="Copied identifiers or exported selection" style={styles.trace}>
+          {selectionText}
+        </Text>
+      ) : null}
 
       <Text style={styles.traceHeader}>{"time | +delta | duration | stage | status | case | episode | reason"}</Text>
       {chronological.length === 0 ? <Text style={styles.empty}>No canonical events yet.</Text> : null}
@@ -617,7 +708,8 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    minHeight: touchTarget,
+    justifyContent: "center",
   },
   buttonActive: { borderColor: colors.cyan, backgroundColor: colors.accentSoft },
   buttonText: { color: colors.text, fontSize: 12 },
