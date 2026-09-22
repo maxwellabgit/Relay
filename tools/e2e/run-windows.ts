@@ -31,8 +31,9 @@ async function main(): Promise<void> {
       console.log(`${key}\t${journey.id}\t${journey.title}`);
     }
     console.log("");
-    console.log("Additional golden journeys (2–12) are proven by integration suites via:");
-    console.log("  npm run test:e2e:golden");
+    console.log("Canonical journeys 01–12: tools/e2e/golden-journeys.manifest.mjs");
+    console.log("Only journey 01 is headed-product today. 02–05 and 07–12 are");
+    console.log("integration-lower-layer (npm run test:e2e:golden). 06 has no harness yet.");
     return;
   }
 

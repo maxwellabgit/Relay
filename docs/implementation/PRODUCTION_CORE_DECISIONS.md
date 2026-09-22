@@ -30,3 +30,15 @@ Durable architecture decisions for the production-core branch. Prefer amending t
 - **Why:** Desktop previously wrote under `RELAY\runs` while replay CLI used repo `./runs`, blocking live Cursor analysis.
 - **CLI:** `diagnose:latest`, `diagnose:case`, `logs:follow`, `e2e:last`, `compare:runs`.
 - **Console:** Current Case / Decisions / Run Events; Jev detail only when judgment evidence exists.
+
+## ADR-PC-006 — Exact-SHA release evidence
+
+- **Decision:** A status ledger may mark a gate GREEN only when a successful GitHub Actions workflow exists whose `head_sha` equals the claimed tip SHA. Parent-SHA greens are historical only.
+- **Why:** `4b64928` declared completion using parent `4a4529d` / run `35684028985` before exact-tip run `35727102376` finished.
+- **Consequence:** Finalization ledgers (`FINALIZATION_STATUS.md`) record exact SHA + run URL; production-core is FOUNDATION COMPLETE / V1 BLOCKED until F0–F8 pass.
+
+## ADR-PC-007 — Golden journey manifest
+
+- **Decision:** Canonical journey IDs `01`–`12` live in `tools/e2e/golden-journeys.manifest.mjs` with honest `proofKind` (`headed-product` | `integration-lower-layer` | `missing-harness`). `npm run test:e2e:golden` is a runner-safe Node→Vitest invocation (no nested `tsx`).
+- **Why:** Combined IDs hid journey 06; nested `tsx` failed in managed Linux; integration proofs were over-claimed as golden E2E.
+- **Consequence:** Architecture tests fail on missing/duplicate IDs. V1 product proof requires headed/device harnesses (F6), not integration alone.

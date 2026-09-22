@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,3 +32,10 @@ jobs:
           CI: true
           EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
           GIT_COMMIT: ${{ github.sha }}
+      - name: Upload verify summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-v1-summary
+          path: .dev-data/verify/latest-summary.json
+          if-no-files-found: warn

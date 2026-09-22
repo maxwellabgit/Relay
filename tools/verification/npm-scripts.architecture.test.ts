@@ -61,13 +61,16 @@ describe("verification script integrity", () => {
   it("GitHub Actions check workflow delegates to verify:v1 (no stale npm run list)", () => {
     const workflow = readFileSync(resolve(root, ".github/workflows/check.yml"), "utf8");
     expect(workflow).toContain("npm run verify:v1");
+    expect(workflow).toMatch(/timeout-minutes:\s*45/);
     expect(workflow).not.toMatch(/npm run test:smoke/);
     expect(workflow).not.toMatch(/npm run build:desktop/);
   });
 
-  it("verify:v1 runner imports the shared manifest", () => {
+  it("verify:v1 runner imports the shared manifest and streams child output", () => {
     const runner = readFileSync(resolve(root, "tools/verify-v1.mjs"), "utf8");
     expect(runner).toContain("verification/manifest.mjs");
+    expect(runner).toContain('stdio: ["ignore", "inherit", "inherit"]');
+    expect(runner).toContain("latest-summary.json");
     const manifest = readFileSync(resolve(root, "tools/verification/manifest.mjs"), "utf8");
     expect(manifest).toContain('name: "smoke"');
     expect(manifest).toContain('name: "halo-install"');

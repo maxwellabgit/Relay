@@ -4,7 +4,9 @@ What has been verified on the TypeScript/Tauri Windows path, and what has not.
 
 ## Current decision
 
-Windows V1 release candidate is on branch `main`. Architecture authority remains:
+**V1 / TestFlight is NO-GO.** Production-core on `main` (`4b64928`) is **foundation complete only**. Release authority: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md` and live ledger `docs/implementation/FINALIZATION_STATUS.md`.
+
+Architecture authority remains:
 
 ```text
 TypeScript engine

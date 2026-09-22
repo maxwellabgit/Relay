@@ -1,10 +1,15 @@
 # Windows V1 Acceptance Record
 
+## Current decision
+
+**V1 blocked.** Foundation tip `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` has exact-tip verify:v1 PASS (Actions `35727102376`). That is not product or TestFlight completion. See `docs/implementation/FINALIZATION_STATUS.md`.
+
 ## Current production-core baseline
 
-- Branch (implementation): `cursor/relay-production-core`
-- Historical main tip reviewed: `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7`
-- Included history: `9fce11241019321d3d326c5b37f7578efc8d5630` (deterministic MSRP path) + `05997c1` (Ask text in developer console)
+- Branch (implementation): `cursor/relay-production-core` (merged to `main`)
+- Reviewed tip: `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6`
+- Implementation parent: `4a4529d1529adf6d6460e17e2797e02b16135182`
+- Historical anchors: `05997c1`, `9fce112`
 - Architecture authority: TypeScript engine + Tauri Windows adapters
 - Preservation tag for retired .NET stack: `relay-dotnet-a6bf987`
 
@@ -18,6 +23,13 @@ GitHub Actions `check` for `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7` **failed**
 
 Production-core Phase 0 restores `test:smoke`, keeps `test:manual:msrp` separate, and routes both local `verify:v1` and GitHub Actions through one shared verification manifest.
 
+## Exact-tip CI for `4b64928`
+
+| Check | Result |
+| --- | --- |
+| GitHub Actions `35727102376` | PASS (`head_sha` = `4b64928…`) |
+| Meaning | verify:v1 source gate only — not headed 02–12, mobile, or store proof |
+
 ## Prior freeze tip (last known green before MSRP commits)
 
 **Final main SHA (CI-green tip before `9fce112`/`05997c1`):** `9237836042793dc28ced794b1066fe7a0a4b6438`
@@ -27,16 +39,18 @@ Production-core Phase 0 restores `test:smoke`, keeps `test:manual:msrp` separate
 | `npm run verify:v1` | PASS (historical) |
 | GitHub Actions for `9237836` | PASS (run `35552370959`) |
 
-## Verification commands (Phase 0+)
+## Verification commands
 
 ```powershell
 npm ci
 npm run verify:v1              # shared manifest (includes smoke + desktop build)
 npm run test:manual:msrp       # Node-harness preflight — not desktop E2E
-npm run test:e2e:msrp          # Headed Tauri MSRP with isolated profile
+npm run test:e2e:msrp          # Headed Tauri MSRP (journey 01 only)
+npm run test:e2e:golden        # Integration lower layer only (not V1 product proof)
 ```
 
-Shared manifest: `tools/verification/manifest.mjs`.
+Shared manifest: `tools/verification/manifest.mjs`.  
+Golden IDs: `tools/e2e/golden-journeys.manifest.mjs`.
 
 ## Manual Windows dogfood
 
@@ -44,16 +58,17 @@ Status: **operator-driven** via `npm run readiness:dogfood` — not claimed by t
 
 ## Installed NSIS smoke
 
-Status: **PASS** on production-core Phase 8 — `.dev-data/nsis-smoke-latest/result.json` (`silent_install_and_launch_ok`).
+Status: historical foundation PASS (process survival) — not an installed functional product journey (F6).
 
 ## Headed Windows E2E
 
-Status: **PASS** — `npm run test:e2e:msrp` evidence under `.dev-data/e2e/msrp-headed-latest/`.
+Status: journey **01** headed PASS historically. Journeys **02–12** are not headed product proofs; **06** has no harness.
 
 ## Known remaining limitations
 
-- Golden journeys 2–12 are proven via integration harnesses (`npm run test:e2e:golden`); only journey 1 is headed desktop UI.
+- See finalization review findings (mobile demo, connectors, model, soak depth, diagnostics, store).
 - Live model/audio/Jev dogfood remains a manual operator gate.
+
 ## Stop point
 
-Production-core work proceeds phase-by-phase on `cursor/relay-production-core`. Windows V1 remains the release target; iPhone productization does not start until Windows V1 gates are green.
+Finalization proceeds F0→F8 on `cursor/v1-testflight-finalization-45e9`. Do not claim V1 or TestFlight until FINALIZATION_STATUS marks those phases GREEN with exact-SHA evidence.

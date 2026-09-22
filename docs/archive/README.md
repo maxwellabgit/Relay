@@ -12,7 +12,9 @@ They are not the current product specification.
 - `docs/CONNECTORS.md`
 - `docs/REFLEXES.md`
 - `docs/PRIVACY.md`
-- `docs/implementation/PRODUCTION_CORE_STATUS.md`
+- `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md` (V1 / TestFlight release authority)
+- `docs/implementation/FINALIZATION_STATUS.md` (live finalization ledger)
+- `docs/implementation/PRODUCTION_CORE_STATUS.md` (foundation ledger only)
 
 ## Archived baseline
 

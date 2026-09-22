@@ -1,67 +1,47 @@
 # PRODUCTION CORE RESULTS
 
-Final release proof for `cursor/relay-production-core`.
+Foundation release proof for `cursor/relay-production-core` (merged).  
+**Not a V1 or TestFlight completion record.** See `FINALIZATION_STATUS.md`.
 
 ## Status
 
-COMPLETE. Phases 0–8 GREEN with Bugbot PASS per phase. Tip `4a4529d` — GitHub Actions https://github.com/maxwellabgit/Relay/actions/runs/35684028985 PASS.
+**FOUNDATION COMPLETE / V1 BLOCKED.**
+
+Production-core Phases 0–8 delivered a coherent TypeScript engine foundation. Tip `4b64928` has exact-tip verify:v1 PASS (Actions `35727102376`). That is **not** V1 product completion.
 
 ## Outcome summary
 
-RELAY production-core delivers helpful Ask (tools + claim verify), ambient triage with wired recommendation cards, bounded Reflex proposal/activation with Library controls, live diagnostics, and a responsive product surface usable without the developer console. Windows headed MSRP E2E, NSIS silent-install smoke, soak, crash-recovery, and golden journey integration proofs passed; CI verify:v1 is green on the tip.
+RELAY production-core delivers a durable desktop engine path (Ask tools, ambient triage contracts, bounded Reflex proposal/activation, live diagnostics, shared product surface). Windows headed MSRP (journey 01) and Node integration lower-layer suites exist. Mobile remains an in-memory demo. Journeys 02–12 are not headed product proofs. Journey 06 has no harness. Soak and NSIS smoke do not prove full product workflows.
 
-## Branch and final SHA
+## Branch and SHAs
 
-- Branch: `cursor/relay-production-core`
-- Final SHA: `4a4529d1529adf6d6460e17e2797e02b16135182`
-- CI: https://github.com/maxwellabgit/Relay/actions/runs/35684028985
+- Foundation tip: `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6`
+- Implementation parent: `4a4529d1529adf6d6460e17e2797e02b16135182`
+- Exact-tip CI: https://github.com/maxwellabgit/Relay/actions/runs/35727102376
+- Historical parent CI (do not cite as tip proof): https://github.com/maxwellabgit/Relay/actions/runs/35684028985
 
-## Starting SHA and named commits
+## Verification table (foundation only)
 
-- Start: `05997c1defd3cecac6fb82ba9b4efc24f30ea6e7`
-- Named: `9fce112`, `05997c1`
-- Preservation tag: `relay-dotnet-a6bf987`
+| Gate | Result | Meaning |
+| --- | --- | --- |
+| Exact-tip `npm run verify:v1` | PASS on `4b64928` | Source/CI gate only |
+| `npm run test:e2e:msrp` | Historical PASS | Journey 01 headed |
+| `npm run test:e2e:golden` | Lower-layer integration only | Not headed 02–12 |
+| `npm run test:soak` | ~45s Node Ask loop | Not 30-minute product soak |
+| `npm run test:nsis:smoke` | Install + short process survival | Not installed functional journey |
 
-## Phase table
+## Remaining V1 blockers (non-exhaustive)
 
-| Phase | State |
-| --- | --- |
-| 0–7 | GREEN (see PRODUCTION_CORE_STATUS.md) |
-| 8 Professional UI + Windows hardening | GREEN (Bugbot PASS; local release gates PASS) |
+See finalization review findings. Highlights:
 
-## Verification table
-
-| Gate | Result |
-| --- | --- |
-| `npm run verify:v1` | PASS |
-| `npm run test:e2e:msrp` | PASS |
-| `npm run test:e2e:golden` | PASS (28 tests) |
-| `npm run test:soak` | PASS |
-| `npm run test:nsis:smoke` | PASS |
-| Phase 8 Bugbot | PASS |
-
-## Golden E2E table
-
-| Journey | Proof |
-| --- | --- |
-| 01 Deterministic glossary | Headed Tauri `test:e2e:msrp` |
-| 02–03 Helpful / tool Ask | tool-kernel integration |
-| 04–05 Ambient ignore / note | ambient-triage integration |
-| 07 Ambiguous acronym | bounded-expansion integration |
-| 08 Claim verification | claim-verify integration |
-| 09 Crash / restart | windows-v1-crash-recovery |
-| 10 Write authority | tool-kernel / operations |
-| 11–12 Pattern + activation | bounded-expansion lifecycle |
-
-## Installed NSIS result
-
-PASS — silent install + launch recorded in `.dev-data/nsis-smoke-latest/result.json`.
-
-## Remaining blockers
-
-- Full headed automation for journeys 2–12 remains Node-integration backed; journey 1 is headed desktop.
-- Live model/audio/Jev dogfood remains operator-driven via `readiness:dogfood` (not claimed automated).
+- No `createMobileClient()`; Expo adapter placeholder
+- No on-device mobile model; no mobile SQLite/artifact/Jev/audio production path
+- Connectors/tools often fixtures; hide or wire with receipts
+- Only one production Reflex (`resolve-acronym@1`)
+- Golden journeys incomplete / mostly integration
+- Diagnostics live-summary hard-coded unknowns
+- Store/EAS/privacy not ready; background audio claimed early
 
 ## Windows V1 stop before iPhone
 
-Windows V1 gates are the release bar. iPhone/Expo productization starts only after CI is green on the Phase 8 tip.
+Windows product-proof gates (F6) must pass before claiming TestFlight readiness. Foundation CI green alone does not authorize iPhone/Expo productization claims.
