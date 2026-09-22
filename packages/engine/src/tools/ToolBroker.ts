@@ -321,6 +321,8 @@ export class ToolBroker {
       result.status === "failed" &&
       (result.reasonCode === "network" ||
         result.reasonCode === "not_authorized" ||
+        result.reasonCode === "authentication" ||
+        result.reasonCode === "missing_secret" ||
         result.reasonCode === "timeout" ||
         result.reasonCode === "rate_limited" ||
         result.reasonCode === "overloaded")

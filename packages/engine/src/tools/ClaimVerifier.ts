@@ -273,7 +273,7 @@ export class ClaimVerifier {
 
     if (!outcome.response.ok) {
       const category = outcome.response.failure.category;
-      if (category === "disabled" || category === "not_authorized" || category === "missing_secret") {
+      if (category === "disabled" || category === "not_authorized" || category === "missing_secret" || category === "authentication") {
         return {
           ok: false,
           blocked: true,
@@ -364,7 +364,7 @@ export class ClaimVerifier {
 
     if (!outcome.response.ok) {
       const category = outcome.response.failure.category;
-      if (category === "disabled" || category === "not_authorized" || category === "missing_secret") {
+      if (category === "disabled" || category === "not_authorized" || category === "missing_secret" || category === "authentication") {
         return {
           ok: false,
           blocked: true,
