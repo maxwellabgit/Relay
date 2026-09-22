@@ -14,7 +14,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | Historical foundation tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Exact-tip CI (reviewed baseline) | https://github.com/maxwellabgit/Relay/actions/runs/35742750378 PASS (`head_sha` = `1862daa…`, verify:v1 only) |
 | Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
-| Active gate | G2 core semantics |
+| Active gate | G3 mobile model, speech, diagnostics |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
@@ -41,7 +41,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
 | G1 Live Jev | OPEN | Rounds and one-time resume landed. Still open: live canary |
 | G2 Core semantics | OPEN | Semantics and export purity landed at `589598a`. Still open: Windows installer and headed product proof |
-| G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
+| G3 Mobile model, speech, diagnostics | OPEN | Trace file, share export, and listening fail-closed landed at `80f741b`. Still open: model tournament, real speech, both phones |
 | G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
 | G5 Production CI lanes | OPEN | Rust, headed, speech, model, and purity lanes are not all green at one SHA |
 | G6 Headed Windows journeys | OPEN | One deterministic journey only; eleven product journeys missing |
@@ -85,10 +85,11 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | G1 grant command `33251e5` | Unit 124, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G1 rounds and resume `ba54708` | Unit 126, architecture 18, integration 70 PASS. `tsc -b` exit 0. Gate remains OPEN |
 | 2026-09-22 | G2 semantics and bundle `589598a` | `tsc -b` exit 0. Unit 128, architecture 21, integration 74, replay 2, privacy 5 PASS. Web/iOS/Android exports omit the fixture. Gate remains OPEN |
+| 2026-09-22 | G3 mobile diagnostics `80f741b` | `tsc -b` exit 0. Unit 130, architecture 21, integration 75, replay 2, privacy 5 PASS. Gate remains OPEN |
 
 ## Next exact action
 
-Do not mark G1 GREEN. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. Semantics and the web/iOS/Android export scan landed at `589598a`; the Windows installer and headed journeys are still open. Next code is G3 that does not need a device: replace the mobile dev trace route, add Share Diagnostics, and stop showing a fake listening waveform.
+Do not mark G1 GREEN. The live canary stays blocked until a human imports the key outside this agent. Do not mark G2 GREEN. The Windows installer and headed journeys are still open. Do not mark G3 GREEN. Trace, share export, and listening fail-closed landed at `80f741b`. The on-device model tournament and real speech still need an iPhone 15 Pro Max and a Galaxy S23 Ultra. Next code that can run here is G4 boot and error surfaces, and hiding the developer console by build flavor.
 
 ## GREEN rule
 
