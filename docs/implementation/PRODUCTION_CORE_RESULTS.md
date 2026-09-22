@@ -13,7 +13,7 @@ RELAY production-core delivers helpful Ask (tools + claim verify), ambient triag
 ## Branch and final SHA
 
 - Branch: `cursor/relay-production-core`
-- Final SHA: filled after Phase 8 commit
+- Final SHA: `3f4a3994063e68c6978a0a01c58afe67a6f2a116`
 
 ## Starting SHA and named commits
 
