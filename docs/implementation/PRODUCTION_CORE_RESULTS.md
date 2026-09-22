@@ -4,16 +4,17 @@ Final release proof for `cursor/relay-production-core`.
 
 ## Status
 
-COMPLETE locally through Phase 8 Bugbot PASS. Windows V1 gates exercised on this machine; GitHub Actions will re-confirm on the Phase 8 push.
+COMPLETE. Phases 0–8 GREEN with Bugbot PASS per phase. Tip `4a4529d` — GitHub Actions https://github.com/maxwellabgit/Relay/actions/runs/35684028985 PASS.
 
 ## Outcome summary
 
-RELAY production-core delivers helpful Ask (tools + claim verify), ambient triage with wired recommendation cards, bounded Reflex proposal/activation with Library controls, live diagnostics, and a responsive product surface usable without the developer console. Windows headed MSRP E2E, NSIS silent-install smoke, soak, crash-recovery, and golden journey integration proofs passed locally.
+RELAY production-core delivers helpful Ask (tools + claim verify), ambient triage with wired recommendation cards, bounded Reflex proposal/activation with Library controls, live diagnostics, and a responsive product surface usable without the developer console. Windows headed MSRP E2E, NSIS silent-install smoke, soak, crash-recovery, and golden journey integration proofs passed; CI verify:v1 is green on the tip.
 
 ## Branch and final SHA
 
 - Branch: `cursor/relay-production-core`
-- Final SHA: `3f4a3994063e68c6978a0a01c58afe67a6f2a116`
+- Final SHA: `4a4529d1529adf6d6460e17e2797e02b16135182`
+- CI: https://github.com/maxwellabgit/Relay/actions/runs/35684028985
 
 ## Starting SHA and named commits
 
