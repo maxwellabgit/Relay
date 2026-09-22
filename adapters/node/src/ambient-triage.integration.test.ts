@@ -275,11 +275,10 @@ describe("ambient candidate triage", () => {
         );
       }, 15_000);
       const snap = await harness.client.getSnapshot();
+      const observedCase = await harness.store.getCase(observedCaseId);
       expect(snap.listening).toBe(true);
       expect(snap.feedItems.some((item) => item.kind === "ask")).toBe(true);
-      expect(
-        snap.cases.some((c) => c.caseId === observedCaseId || c.origin === "observed"),
-      ).toBe(true);
+      expect(observedCase?.origin).toBe("observed");
       expect(
         snap.feedItems.some((item) => item.kind === "answer") ||
           snap.cases.some((c) => c.origin === "direct"),

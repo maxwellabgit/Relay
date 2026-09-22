@@ -10,6 +10,7 @@ import type { EngineStore } from "../store.js";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { knownReason, structuralToolId } from "../runtime-events.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -42,6 +43,7 @@ export type ToolBrokerDeps = {
   readonly mode?: "live" | "recorded" | "replay";
   readonly publicSearch?: PublicSearchPort;
   readonly github?: GitHubReadPort;
+  readonly sessionId: string;
 };
 
 type BudgetUsage = {
@@ -68,6 +70,7 @@ export class ToolBroker {
       ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
       ...(deps.github ? { github: deps.github } : {}),
       ...(deps.mode ? { mode: deps.mode } : {}),
+      sessionId: deps.sessionId,
     });
   }
 
@@ -477,6 +480,14 @@ export class ToolBroker {
       caseVersion,
     };
 
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      text.trim()
+        ? [{ sourceClass: "conversation_excerpt", field: "excerpt", text: text.slice(0, 400) }]
+        : [],
+    );
     const started = Date.now();
     const outcome = await runJudgmentLifecycle(
       {
@@ -486,6 +497,7 @@ export class ToolBroker {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       this.deps.getAbortSignal(),

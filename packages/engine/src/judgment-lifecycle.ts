@@ -10,6 +10,7 @@ import type {
 import { localOnlyPolicy } from "@relay/contracts";
 import type { EngineStore } from "./store.js";
 import type { Clock, IdFactory } from "./scheduler.js";
+import { evaluateHostedDisclosure, type DisclosureScope, type DisclosureSource, type DisclosedSource, type HostedJudgmentGrant } from "./disclosure/hosted-grant.js";
 
 export type JudgmentLifecycleDeps = {
   readonly store: EngineStore;
@@ -22,6 +23,15 @@ export type JudgmentLifecycleDeps = {
    * Missing callback fails closed (not authorized). Thrown errors → not_authorized.
    */
   readonly isHostedProcessingAllowed?: () => boolean | Promise<boolean>;
+  readonly disclosure?: {
+    readonly grant: HostedJudgmentGrant | null;
+    readonly now: string;
+    readonly scope: DisclosureScope;
+    readonly requestsUsed: number;
+    readonly bytesUsed: number;
+    readonly sources: readonly (DisclosureSource & DisclosedSource)[];
+    readonly commit: (bytes: number) => Promise<void>;
+  };
 };
 
 function encode(value: unknown): Uint8Array {
@@ -73,6 +83,8 @@ function safeRequestArtifact(request: JudgmentRequest, requestHash: string): Uin
     model: request.model,
     provider: request.provider ?? null,
     requestHash,
+    ...(request.disclosureGrantId ? { disclosureGrantId: request.disclosureGrantId } : {}),
+    ...(request.disclosedSources ? { disclosedSources: request.disclosedSources } : {}),
     state: sanitizeState(
       request.state && typeof request.state === "object" ? (request.state as Record<string, unknown>) : {},
     ),
@@ -129,8 +141,34 @@ export async function runJudgmentLifecycle(
   request: JudgmentRequest,
   signal: AbortSignal,
 ): Promise<{ record: JudgmentRecord; response: JudgmentResponse; providerCalled: boolean }> {
-  const requestHash = request.requestHash ?? (await canonicalizeRequestHash(request));
-  const cached = await deps.store.findCompletedJudgmentByHash(requestHash);
+  let effectiveRequest = request;
+  let disclosureFailure: JudgmentFailure | null = null;
+  if (deps.disclosure) {
+    const decision = evaluateHostedDisclosure({
+      grant: deps.disclosure.grant,
+      now: deps.disclosure.now,
+      scope: deps.disclosure.scope,
+      requestsUsed: deps.disclosure.requestsUsed,
+      bytesUsed: deps.disclosure.bytesUsed,
+      sources: deps.disclosure.sources,
+      structuralState: request.state,
+    });
+    if (!decision.ok) {
+      disclosureFailure = {
+        category: "not_authorized",
+        message: `disclosure_${decision.reason}`,
+      };
+    } else {
+      effectiveRequest = {
+        ...request,
+        state: decision.state,
+        disclosureGrantId: decision.grantId,
+        disclosedSources: decision.disclosed,
+      };
+    }
+  }
+  const requestHash = effectiveRequest.requestHash ?? (await canonicalizeRequestHash(effectiveRequest));
+  const cached = disclosureFailure ? null : await deps.store.findCompletedJudgmentByHash(requestHash);
   if (cached?.responseArtifactId) {
     try {
       const raw = await deps.artifacts.get({
@@ -165,7 +203,7 @@ export async function runJudgmentLifecycle(
     }
   }
 
-  const requestBytes = safeRequestArtifact(request, requestHash);
+  const requestBytes = safeRequestArtifact(effectiveRequest, requestHash);
   const requestArtifact = await deps.artifacts.put(requestBytes, localOnlyPolicy());
   const judgmentId = deps.ids.next("jud");
   const createdAt = deps.clock.now().toISOString();
@@ -178,9 +216,9 @@ export async function runJudgmentLifecycle(
     createdAt,
     requestArtifactId: requestArtifact.artifactId,
     requestHash,
-    ...(request.caseId ? { caseId: request.caseId } : {}),
-    ...(request.caseVersion != null ? { caseVersion: request.caseVersion } : {}),
-    ...(request.provider ? { provider: request.provider } : {}),
+    ...(effectiveRequest.caseId ? { caseId: effectiveRequest.caseId } : {}),
+    ...(effectiveRequest.caseVersion != null ? { caseVersion: effectiveRequest.caseVersion } : {}),
+    ...(effectiveRequest.provider ? { provider: effectiveRequest.provider } : {}),
   };
   await deps.store.upsertJudgment(requested);
 
@@ -199,6 +237,10 @@ export async function runJudgmentLifecycle(
       allowed = false;
       gateFailure = { category: "not_authorized", message: "hosted_processing_disabled" };
     }
+  }
+  if (allowed && disclosureFailure) {
+    allowed = false;
+    gateFailure = disclosureFailure;
   }
   if (!allowed && gateFailure) {
     const response: JudgmentResponse = {
@@ -220,7 +262,8 @@ export async function runJudgmentLifecycle(
     return { record: completed, response, providerCalled: false };
   }
 
-  const response = await deps.judgments.judge({ ...request, requestHash }, signal);
+  if (deps.disclosure) await deps.disclosure.commit(deps.disclosure.sources.reduce((total, source) => total + source.bytes, 0));
+  const response = await deps.judgments.judge({ ...effectiveRequest, requestHash }, signal);
 
   const responseArtifact = await deps.artifacts.put(safeResponseArtifact(response), localOnlyPolicy());
   const completedAt = deps.clock.now().toISOString();

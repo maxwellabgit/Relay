@@ -50,6 +50,11 @@ export type JudgmentRequest = {
   readonly caseId?: string;
   readonly caseVersion?: number;
   readonly disclosureGrantId?: string;
+  readonly disclosedSources?: readonly {
+    readonly sourceClass: string;
+    readonly sha256: string;
+    readonly bytes: number;
+  }[];
   readonly requestHash?: string;
   readonly provider?: string;
 };

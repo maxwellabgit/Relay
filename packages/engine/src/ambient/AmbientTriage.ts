@@ -21,6 +21,7 @@ import { encodeText, type EngineTrace } from "../engine-helpers.js";
 import { decideAmbientRoute, type AmbientRouteDecision } from "./route-policy.js";
 import { ambientProviderState } from "./provider-state.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 
 export const AMBIENT_QUESTION_SET_ID = "judgment.ambient-triage";
 export const AMBIENT_QUESTION_SET_VERSION = "ambient-triage@1";
@@ -40,6 +41,7 @@ export type AmbientTriageDeps = {
   readonly getActiveCaseId: () => string | null;
   readonly emitSnapshot: () => Promise<void>;
   readonly mode?: "live" | "recorded" | "replay";
+  readonly sessionId: string;
 };
 
 export type AmbientTriageResult = {
@@ -497,6 +499,20 @@ export class AmbientTriage {
       },
     };
 
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      [
+        {
+          sourceClass: "ambient_transcript",
+          field: "excerpt",
+          text,
+          localOnly: false,
+          revealsLocalOnly: false,
+        },
+      ],
+    );
     const { response } = await runJudgmentLifecycle(
       {
         store: this.deps.store,
@@ -505,6 +521,7 @@ export class AmbientTriage {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       this.deps.getAbortSignal(),

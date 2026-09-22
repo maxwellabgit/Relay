@@ -10,6 +10,7 @@ import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import { acronymProviderState } from "./acronym-state.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
@@ -35,6 +36,7 @@ export type JudgmentServiceDeps = {
   readonly getAbortSignal: () => AbortSignal;
   readonly getActiveCaseId: () => string | null;
   readonly offerGlossary: (token: string, expansion: string) => Promise<void>;
+  readonly sessionId: string;
 };
 
 function providerRequestIdFrom(response: JudgmentResponse): string | null {
@@ -113,7 +115,22 @@ export class JudgmentService {
       caseId,
       caseVersion: current.version,
     };
+    const contextExcerpt = String(item.payload.contextExcerpt ?? "");
     const started = Date.now();
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      contextExcerpt
+        ? [
+            {
+              sourceClass: "conversation_excerpt",
+              field: "contextExcerpt",
+              text: contextExcerpt,
+            },
+          ]
+        : [],
+    );
     const outcome = await runJudgmentLifecycle(
       {
         store: this.deps.store,
@@ -122,6 +139,7 @@ export class JudgmentService {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       this.deps.getAbortSignal(),

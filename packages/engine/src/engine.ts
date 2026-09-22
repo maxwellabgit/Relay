@@ -130,6 +130,7 @@ export class RelayEngine {
       ...(deps.episodeDefinitions ? { episodeDefinitions: deps.episodeDefinitions } : {}),
       outcomes: this.outcomes,
       trace: this.trace,
+      sessionId: deps.sessionId,
       getAbortSignal,
       setActiveEpisodeId: (id) => {
         this.activeEpisodeId = id;
@@ -165,6 +166,7 @@ export class RelayEngine {
       getActiveCaseId: () => this.activeCaseId,
       emitSnapshot,
       ...(deps.mode ? { mode: deps.mode } : {}),
+      sessionId: deps.sessionId,
     });
 
     this.cases = new CaseRuntime({
@@ -200,6 +202,7 @@ export class RelayEngine {
       getAbortSignal,
       getActiveCaseId: () => this.activeCaseId,
       offerGlossary: (token, expansion) => this.cases.offerGlossary(token, expansion),
+      sessionId: deps.sessionId,
     });
 
     this.operations = new OperationService({
@@ -238,6 +241,7 @@ export class RelayEngine {
       ...(deps.mode ? { mode: deps.mode } : {}),
       ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
       ...(deps.github ? { github: deps.github } : {}),
+      sessionId: deps.sessionId,
     });
 
     this.dispatcher = new WorkDispatcher({

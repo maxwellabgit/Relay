@@ -16,6 +16,7 @@ import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 
@@ -32,6 +33,7 @@ export type ClaimVerifierDeps = {
   readonly publicSearch?: PublicSearchPort;
   readonly github?: GitHubReadPort;
   readonly mode?: "live" | "recorded" | "replay";
+  readonly sessionId: string;
 };
 
 export type ClaimEligibleSources = {
@@ -269,6 +271,12 @@ export class ClaimVerifier {
       caseVersion,
     };
 
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      [{ sourceClass: "claim_excerpt", field: "excerpts", text: claim.slice(0, 400) }],
+    );
     const outcome = await runJudgmentLifecycle(
       {
         store: this.deps.store,
@@ -277,6 +285,7 @@ export class ClaimVerifier {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       signal,
@@ -364,6 +373,19 @@ export class ClaimVerifier {
       })),
     };
 
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      [
+        { sourceClass: "claim_excerpt", field: "excerpts", text: claim.slice(0, 400) },
+        ...excerpts.map((item) => ({
+          sourceClass: "claim_excerpt" as const,
+          field: "excerpts" as const,
+          text: item.slice(0, 240),
+        })),
+      ],
+    );
     const outcome = await runJudgmentLifecycle(
       {
         store: this.deps.store,
@@ -372,6 +394,7 @@ export class ClaimVerifier {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       signal,

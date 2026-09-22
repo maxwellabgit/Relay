@@ -769,6 +769,7 @@ function requeueCompletedJudgmentWork(databasePath: string, caseId: string): voi
         attempt: 1,
         explicitAsk: true,
         sourceEventId: source?.source_event_id ?? "",
+        contextExcerpt: BESS_ASK.slice(0, 400),
       }),
       at,
     );

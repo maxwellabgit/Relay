@@ -39,7 +39,7 @@ F2–F8 stay non-green. “CODE LANDED” is not GREEN. Exact-tip verify:v1 on `
 | Gate | State | What blocks GREEN |
 | --- | --- | --- |
 | G0 Freeze the truth | GREEN | `e281f2ce4bbbad17c4be0720dc6bd92839f12107` — see `evidence/G0/` |
-| G1 Live Jev | OPEN | Protocol slice landed (model, excerpt, retries). Still open: scoped grant, budget, two-round limit, resume-once, live canary |
+| G1 Live Jev | OPEN | Grant enforcement landed. Still open: production grant command, two-round limit, resume-once, live canary |
 | G2 Core semantics | OPEN | `App.tsx` testkit import; note/fact/recommendation distinction; bundle purity |
 | G3 Mobile model, speech, diagnostics | OPEN | `mobile_model_pending`, unavailable speech, dev trace route, device benchmarks |
 | G4 UI and developer console | OPEN | Boot/error states, fake waveform, flavor-based Dev hiding, visual evidence |
@@ -81,10 +81,11 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 | 2026-09-22 | Review verdict against `1862daa` | NO-GO. Remaining work is code plus device, not human-only |
 | 2026-09-22 | G0 commit `e281f2c` | Local capability unit test PASS (12). Status docs agree. G1–G8 remain open |
 | 2026-09-22 | G1 protocol slice `8a5746b` | Unit 119 and architecture 18 PASS. `tsc -b` exit 0. Gate remains OPEN |
+| 2026-09-22 | G1 grant slice | Unit 123, architecture 18, integration 69 PASS. `tsc -b` exit 0. Gate remains OPEN |
 
 ## Next exact action
 
-Continue G1. The provider model is `jev-latest`, ambient and acronym requests include authorized context, and 429/529 retries honor Retry-After. Do not mark G1 GREEN. Next code is the scoped disclosure grant, byte/request budget, two-round limit, and one-time resume. The live canary stays blocked until those automated tests pass and a human imports the key outside this agent.
+Continue G1. Disclosure grants are required before a provider call. The hosted-processing switch is only the master off. Do not mark G1 GREEN. Next code is a production grant command, the two-round limit, and one-time resume. The live canary stays blocked until those automated tests pass and a human imports the key outside this agent.
 
 ## GREEN rule
 

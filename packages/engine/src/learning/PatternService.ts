@@ -14,6 +14,7 @@ import {
 } from "../learning-store.js";
 import { knownReason } from "../runtime-events.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
+import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
@@ -38,6 +39,7 @@ export type PatternServiceDeps = {
   readonly storageDetail?: string;
   readonly episodeDefinitions?: readonly EpisodeDefinition[];
   readonly outcomes: OutcomeRecorder;
+  readonly sessionId: string;
   readonly trace: EngineTrace;
   readonly getAbortSignal: () => AbortSignal;
   readonly setActiveEpisodeId: (id: string | null) => void;
@@ -383,6 +385,12 @@ export class PatternService {
         benefit: { type: "noul", instructions: "Is this repeated work stable enough to offer as a capability?" },
       },
     };
+    const disclosure = await loadDisclosureGate(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      [],
+    );
     const outcome = await runJudgmentLifecycle(
       {
         store: this.deps.store,
@@ -391,6 +399,7 @@ export class PatternService {
         clock: this.deps.clock,
         ids: this.deps.ids,
         isHostedProcessingAllowed: () => this.deps.store.getHostedProcessingEnabled(),
+        disclosure,
       },
       request,
       this.deps.getAbortSignal(),

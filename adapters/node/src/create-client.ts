@@ -1,6 +1,12 @@
 import type { JudgmentPort, GitHubReadPort, PublicSearchPort, TextModelPort } from "@relay/contracts";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
-import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
+import {
+  createRelayClientFromEngine,
+  HostedGrantLedger,
+  recordedHarnessGrant,
+  RelayEngine,
+  type EngineDeps,
+} from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
 import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
 import { tmpdir } from "node:os";
@@ -100,9 +106,13 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   const engine = new RelayEngine(deps);
   const client = createRelayClientFromEngine(engine);
 
-  // Recorded harnesses exercise Jev paths without live disclosure; grant is ON for fixtures.
-  // Production desktop defaults to OFF (key present ≠ disclosure permission).
-  void sqlite.setHostedProcessingEnabled(true);
+  // Recorded harnesses exercise Jev paths with an explicit session grant.
+  // Production desktop defaults to OFF. The boolean alone does not authorize disclosure.
+  await sqlite.setHostedProcessingEnabled(true);
+  await new HostedGrantLedger(store).save(
+    recordedHarnessGrant(options.sessionId ?? "session_test"),
+    clock.now().toISOString(),
+  );
 
   // Bind sqlite transaction boundary onto the invoke-backed store facade.
   store.runInTransaction = <T>(work: () => Promise<T>) => sqlite.runInTransaction(work);
