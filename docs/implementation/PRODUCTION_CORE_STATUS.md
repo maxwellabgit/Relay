@@ -20,7 +20,7 @@ Cross-run ledger for `cursor/relay-production-core`. Update only this file for p
 | Phase 4 commits | `641473d`, `c739032`, `87c2695` |
 | Phase 5 commits | `e23a1a8`, `1abde49` |
 | Phase 6 commits | `3063e57`, `796c109`, `536f8bb`, `057e358` |
-| Phase 7 commits | `b45573d` (+ follow-up fix commit pending) |
+| Phase 7 commits | `b45573d`, `ecc8061` |
 
 ## Phase states
 
