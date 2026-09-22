@@ -11,6 +11,8 @@ type Props = {
   readonly listening?: boolean;
   readonly busy?: boolean;
   readonly waitingLabel?: string | null;
+  readonly value?: string;
+  readonly onChangeText?: (text: string) => void;
 };
 
 export function Composer({
@@ -20,8 +22,16 @@ export function Composer({
   listening = false,
   busy = false,
   waitingLabel = null,
+  value,
+  onChangeText,
 }: Props) {
-  const [text, setText] = useState("");
+  const [internal, setInternal] = useState("");
+  const text = value ?? internal;
+  const setText = (next: string | ((current: string) => string)) => {
+    const resolved = typeof next === "function" ? next(text) : next;
+    onChangeText?.(resolved);
+    if (value === undefined) setInternal(resolved);
+  };
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
 

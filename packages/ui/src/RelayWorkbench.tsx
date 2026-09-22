@@ -13,6 +13,8 @@ export type RelayWorkbenchProps = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
+  readonly composerText?: string;
+  readonly onComposerText?: (text: string) => void;
   readonly onAction?: (action: ActionCard) => void;
   readonly onAcceptAmbient?: (recommendationId: string) => void;
   readonly onDismissAmbient?: (recommendationId: string) => void;
@@ -57,6 +59,8 @@ export function RelayWorkbench({
   snapshot,
   onListenChange,
   onSubmit,
+  composerText,
+  onComposerText,
   onAction,
   onAcceptAmbient,
   onDismissAmbient,
@@ -106,6 +110,8 @@ export function RelayWorkbench({
       snapshot={snapshot}
       onListenChange={onListenChange}
       onSubmit={onSubmit}
+      {...(composerText !== undefined ? { composerText } : {})}
+      {...(onComposerText !== undefined ? { onComposerText } : {})}
       showBezel={showBezel && layout !== "narrow"}
       {...(onAction !== undefined ? { onAction } : {})}
       {...(onAcceptAmbient !== undefined ? { onAcceptAmbient } : {})}

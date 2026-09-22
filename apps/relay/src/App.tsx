@@ -80,6 +80,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [phase, setPhase] = useState<"booting" | "failed" | "live">("booting");
+  const [composerText, setComposerText] = useState("");
   const modelDeliveryRef = useRef(new ModelDelivery(null));
   const modelAbort = useRef<AbortController | null>(null);
   const [modelDelivery, setModelDelivery] = useState<ModelDeliveryView>(() => unselectedModelDelivery());
@@ -191,6 +192,8 @@ export function App() {
           void runCommand({ type: "SetListening", enabled });
         }}
         onSubmit={(text) => runCommand({ type: "SubmitText", text })}
+        composerText={composerText}
+        onComposerText={setComposerText}
         onCancelActive={() => {
           void runCommand({ type: "CancelActive" });
         }}

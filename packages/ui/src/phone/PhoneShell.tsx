@@ -33,6 +33,8 @@ type Props = {
   readonly snapshot: RelaySnapshot;
   readonly onListenChange: (enabled: boolean) => void;
   readonly onSubmit: (text: string) => void | boolean | Promise<void | boolean>;
+  readonly composerText?: string;
+  readonly onComposerText?: (text: string) => void;
   readonly onAction?: (action: ActionCard) => void;
   readonly onAcceptAmbient?: (recommendationId: string) => void;
   readonly onDismissAmbient?: (recommendationId: string) => void;
@@ -67,6 +69,8 @@ export function PhoneShell({
   snapshot,
   onListenChange,
   onSubmit,
+  composerText,
+  onComposerText,
   onAction,
   onAcceptAmbient,
   onDismissAmbient,
@@ -291,6 +295,8 @@ export function PhoneShell({
         listening={snapshot.listening}
         waitingLabel={waitingLabel}
         busy={working}
+        {...(composerText !== undefined ? { value: composerText } : {})}
+        {...(onComposerText ? { onChangeText: onComposerText } : {})}
         {...(onCancelActive ? { onCancel: onCancelActive } : {})}
       />
 
