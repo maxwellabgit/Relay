@@ -9,6 +9,7 @@ import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { knownReason, structuralToolId } from "../runtime-events.js";
+import { draftSearchQuery } from "../model/search-query.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
 import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
@@ -620,20 +621,7 @@ export class ToolBroker {
       const stripped = text.replace(/search\s+(my\s+)?memory\s+for\s+/i, "").trim();
       if (stripped) return { query: stripped };
     }
-    // Local model may draft query language only; code still validates schema.
-    const drafted = await this.deps.model.generate(
-      {
-        taskKind: "tool_args",
-        prompt: `Extract a short search query from this Ask. Reply with the query only.\n\nAsk: ${text}`,
-        maxTokens: 40,
-        temperature: 0,
-      },
-      this.deps.getAbortSignal(),
-    );
-    if (drafted.ok && drafted.text.trim()) {
-      return { query: drafted.text.trim().replace(/^["']|["']$/g, "") };
-    }
-    return { query: text.trim() };
+    return { query: await draftSearchQuery({ model: this.deps.model, ask: text, signal: this.deps.getAbortSignal() }) };
   }
 
   private async enqueueExecute(
