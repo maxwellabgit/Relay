@@ -1,12 +1,11 @@
 import type { JudgmentPort, RelayClient, TextModelPort } from "@relay/contracts";
 import {
-  createExpoDocumentFiles,
-  createExpoSecureSecretStore,
   openMobileBackend,
   type ByteFilePort,
   type MobileBackend,
   type SecretStore,
 } from "@relay/adapter-expo";
+import { createExpoDocumentFiles, createExpoSecureSecretStore } from "@relay/adapter-expo/durable-host";
 import {
   createProductionIds,
   createRelayClientFromEngine,

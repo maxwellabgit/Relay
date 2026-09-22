@@ -46,6 +46,5 @@ export {
   type SpeechStatus,
 } from "./lifecycle.js";
 export { openMobileBackend, type MobileBackend } from "./mobile-backend.js";
-export { createExpoDocumentFiles, createExpoSecureSecretStore } from "./durable-host.js";
 
 export const EXPO_ADAPTER_BOOTSTRAP = "1.0.0" as const;
