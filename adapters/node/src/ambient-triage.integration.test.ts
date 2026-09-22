@@ -23,7 +23,10 @@ function micSegment(sessionId: string, segmentId: string, text: string, sequence
   };
 }
 
-function ambientJudgments(scores: Partial<AmbientTriageScores>, calls?: { count: number }): JudgmentPort {
+function ambientJudgments(
+  scores: Partial<AmbientTriageScores>,
+  seen?: { count: number; excerpts: string[] },
+): JudgmentPort {
   const recorded = new RecordedJudgmentPort([
     {
       questionSetId: "judgment.ambient-triage",
@@ -40,7 +43,11 @@ function ambientJudgments(scores: Partial<AmbientTriageScores>, calls?: { count:
   ]);
   return {
     async judge(request, signal) {
-      if (calls) calls.count += 1;
+      if (seen) {
+        seen.count += 1;
+        const state = request.state as { excerpt?: unknown } | undefined;
+        if (typeof state?.excerpt === "string") seen.excerpts.push(state.excerpt);
+      }
       return recorded.judge(request, signal);
     },
   };
@@ -95,10 +102,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("surfaces a quiet note recommendation for durable information", async () => {
-    const calls = { count: 0 };
+    const seen = { count: 0, excerpts: [] as string[] };
     const harness = await startListeningHarness(
       "ambient_note",
-      ambientJudgments({ worth_remembering: 0.85 }, calls),
+      ambientJudgments({ worth_remembering: 0.85 }, seen),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -130,7 +137,8 @@ describe("ambient candidate triage", () => {
       expect(accepted.ok).toBe(true);
       const after = await harness.store.learning.listMemories();
       expect(after.filter((memory) => memory.kind === "note")).toHaveLength(1);
-      expect(calls.count).toBe(0);
+      expect(seen.count).toBe(1);
+      expect(seen.excerpts).toEqual(["Remember, our deployment target is Azure West US"]);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -138,10 +146,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("routes corrections toward a save recommendation", async () => {
-    const calls = { count: 0 };
+    const seen = { count: 0, excerpts: [] as string[] };
     const harness = await startListeningHarness(
       "ambient_correction",
-      ambientJudgments({ possible_correction: 0.82, worth_remembering: 0.65 }, calls),
+      ambientJudgments({ possible_correction: 0.82, worth_remembering: 0.65 }, seen),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -160,7 +168,8 @@ describe("ambient candidate triage", () => {
       const snap = await harness.client.getSnapshot();
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.reason).toMatch(/correction/i);
-      expect(calls.count).toBe(0);
+      expect(seen.count).toBe(1);
+      expect(seen.excerpts).toEqual(["Actually the API endpoint is v2, not v1"]);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -168,10 +177,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("suggests a task for commitments", async () => {
-    const calls = { count: 0 };
+    const seen = { count: 0, excerpts: [] as string[] };
     const harness = await startListeningHarness(
       "ambient_commitment",
-      ambientJudgments({ possible_commitment: 0.82 }, calls),
+      ambientJudgments({ possible_commitment: 0.82 }, seen),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -185,7 +194,8 @@ describe("ambient candidate triage", () => {
       const snap = await harness.client.getSnapshot();
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.primary).toBe("create_task");
-      expect(calls.count).toBe(0);
+      expect(seen.count).toBe(1);
+      expect(seen.excerpts).toEqual(["I'll finish the report by Friday"]);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -193,10 +203,10 @@ describe("ambient candidate triage", () => {
   });
 
   it("interrupts only with urgency and a high interrupt score", async () => {
-    const calls = { count: 0 };
+    const seen = { count: 0, excerpts: [] as string[] };
     const harness = await startListeningHarness(
       "ambient_urgency",
-      ambientJudgments({ interrupt_worthy: 0.95, possible_commitment: 0.5 }, calls),
+      ambientJudgments({ interrupt_worthy: 0.95, possible_commitment: 0.5 }, seen),
     );
     try {
       await harness.engine.ingestFinalSegment(
@@ -216,7 +226,8 @@ describe("ambient candidate triage", () => {
       const card = snap.actions.find((a) => a.kind === "ambient_recommendation");
       expect(card?.quiet).toBe(false);
       expect(card?.primary).toBe("review");
-      expect(calls.count).toBe(0);
+      expect(seen.count).toBe(1);
+      expect(seen.excerpts).toEqual(["We need to ship this ASAP, it's blocking the release"]);
     } finally {
       await harness.client.stop();
       harness.close();
@@ -225,10 +236,10 @@ describe("ambient candidate triage", () => {
 
   it("resumes ambient triage after hosted processing is enabled", async () => {
     const sessionId = "ambient_hosted_resume";
-    const calls = { count: 0 };
+    const seen = { count: 0, excerpts: [] as string[] };
     const harness = await createNodeHarness({
       sessionId,
-      judgments: ambientJudgments({ worth_remembering: 0.85 }, calls),
+      judgments: ambientJudgments({ worth_remembering: 0.85 }, seen),
     });
     try {
       await harness.client.start();
@@ -260,7 +271,8 @@ describe("ambient candidate triage", () => {
       const after = await harness.client.getSnapshot();
       expect(after.cases.every((c) => c.status === "completed")).toBe(true);
       expect(after.actions.some((a) => a.kind === "ambient_recommendation")).toBe(true);
-      expect(calls.count).toBe(0);
+      expect(seen.count).toBe(0);
+      expect(seen.excerpts).toEqual([]);
     } finally {
       await harness.client.stop();
       harness.close();

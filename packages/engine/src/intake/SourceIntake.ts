@@ -1,5 +1,6 @@
 import type { TranscriptSegmentV1 } from "@relay/contracts";
 import { localOnlyPolicy } from "@relay/contracts";
+import { initialDisclosureSeal } from "../disclosure/hosted-grant.js";
 import { shouldCreateCaseForFinal } from "../policies.js";
 import { encodeText, sha256Hex, type EngineTrace } from "../engine-helpers.js";
 import type { Clock, IdFactory } from "../scheduler.js";
@@ -56,13 +57,27 @@ export class SourceIntake {
     };
   }
 
+  private async sealPolicy(
+    segment: TranscriptSegmentV1,
+    isAsk: boolean,
+  ): Promise<ReturnType<typeof localOnlyPolicy>> {
+    if (isAsk || segment.origin !== "microphone") return localOnlyPolicy();
+    return initialDisclosureSeal(
+      this.deps.store,
+      this.deps.clock.now().toISOString(),
+      { kind: "session", id: this.deps.sessionId },
+      "ambient_transcript",
+    );
+  }
+
   async commitFinalSegment(
     segment: TranscriptSegmentV1,
     opts: { readonly isAsk: boolean; readonly requireListening: boolean },
   ): Promise<string> {
     const bytes = encodeText(segment.text);
     const sha256 = await sha256Hex(bytes);
-    const artifact = await this.deps.artifacts.put(bytes, localOnlyPolicy());
+    const seal = await this.sealPolicy(segment, opts.isAsk);
+    const artifact = await this.deps.artifacts.put(bytes, seal);
     const sourceEventId = this.deps.ids.next("src");
     const at = this.deps.clock.now().toISOString();
 

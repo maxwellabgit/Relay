@@ -144,6 +144,29 @@ export function buildHostedJudgmentGrant(input: {
   };
 }
 
+/**
+ * Policy for the first seal of a source. A later put cannot widen it.
+ * Hosted session is used only when hosted processing is on and the grant allows the class.
+ */
+export async function initialDisclosureSeal(
+  store: EngineStore,
+  now: string,
+  scope: DisclosureScope,
+  sourceClass: SourceClass,
+): Promise<DataPolicy> {
+  try {
+    if (!(await store.getHostedProcessingEnabled())) return localOnlyPolicy();
+    const read = await new HostedGrantLedger(grantAccountFor(store)).read(scope);
+    const grant = read.grant;
+    if (!grant || grant.revokedAt) return localOnlyPolicy();
+    if (Date.parse(now) >= Date.parse(grant.expiresAt)) return localOnlyPolicy();
+    if (!grant.allowedSourceClasses.includes(sourceClass)) return localOnlyPolicy();
+    return hostedSessionPolicy();
+  } catch {
+    return localOnlyPolicy();
+  }
+}
+
 export function recordedHarnessGrant(scopeId: string): HostedJudgmentGrant {
   return {
     grantId: "grant_recorded_harness",

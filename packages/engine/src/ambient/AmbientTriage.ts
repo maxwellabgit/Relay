@@ -17,7 +17,7 @@ import type { OverlayState } from "../projections/OverlayState.js";
 import { PRIORITY_DIRECT } from "../queue.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
-import { encodeText, type EngineTrace } from "../engine-helpers.js";
+import { type EngineTrace } from "../engine-helpers.js";
 import { decideAmbientRoute, type AmbientRouteDecision } from "./route-policy.js";
 import { ambientProviderState } from "./provider-state.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
@@ -457,19 +457,16 @@ export class AmbientTriage {
     | { ok: true; scores: AmbientTriageScores }
     | { ok: false; reasonCode: string; waitHosted?: boolean }
   > {
-    const sourceBytes = encodeText(text);
-    const sourceRef = await this.deps.artifacts.put(sourceBytes, localOnlyPolicy());
     if (!(await this.deps.store.getHostedProcessingEnabled())) {
       return { ok: false, reasonCode: "disabled", waitHosted: true };
     }
-    const provenance = await this.deps.artifacts.provenance(sourceRef.artifactId);
+    const provenance = await this.deps.artifacts.provenance(sourceSlice.artifactId);
     const disclosable =
       provenance != null &&
-      provenance.sha256 === sourceRef.sha256 &&
+      provenance.sha256 === sourceSlice.sha256 &&
       isHostedEligible(provenance.policy) &&
       provenance.derivedFrom.every((row) => row.disclosure !== "local_only");
-    // Observed microphone text is sealed local-only. Route it on-device.
-    // A caller cannot reseal those bytes as hosted-eligible.
+    // The intake seal is authoritative. A later put cannot widen local-only bytes.
     if (!disclosable) {
       return { ok: true, scores: localAmbientScores(candidate, text) };
     }
@@ -481,7 +478,7 @@ export class AmbientTriage {
       caseId,
       caseVersion,
       state: ambientProviderState(text),
-      sourceObjectRefs: [{ artifactId: sourceRef.artifactId, sha256: sourceRef.sha256 }],
+      sourceObjectRefs: [{ artifactId: sourceSlice.artifactId, sha256: sourceSlice.sha256 }],
       questions: {
         worth_remembering: {
           type: "noul",
@@ -523,8 +520,8 @@ export class AmbientTriage {
         {
           sourceClass: "ambient_transcript",
           field: "excerpt",
-          artifactId: sourceRef.artifactId,
-          sha256: sourceRef.sha256,
+          artifactId: sourceSlice.artifactId,
+          sha256: sourceSlice.sha256,
         },
       ],
     );
