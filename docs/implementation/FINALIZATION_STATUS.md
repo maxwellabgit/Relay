@@ -19,7 +19,7 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 
 | Phase | State | Tip SHA (when GREEN) | Exact CI / evidence | Notes |
 | --- | --- | --- | --- | --- |
-| F0 Reopen + release truth | GATES LOCAL / AWAITING EXACT-TIP CI | (pending push tip) | local format/arch/unit/golden PASS; CI pending | See `evidence/F0/` |
+| F0 Reopen + release truth | GATES LOCAL / AWAITING EXACT-TIP CI | `0e3fe8d` | local format/arch/unit/golden PASS; CI pending | See `evidence/F0/` |
 | F1 V1 contracts + matrix | BLOCKED | — | — | Awaits F0 |
 | F2 Mobile composition | BLOCKED | — | — | Awaits F1 |
 | F3 Tiny model + Reflexes | BLOCKED | — | — | Awaits F2 |
@@ -58,7 +58,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 
 ## Next exact action
 
-Complete F0: commit reopen + manifests + CI/verify hardening; run local architecture/golden gates; push for exact-tip CI ≤45 minutes.
+Wait for exact-tip Actions on `0e3fe8d`. If PASS, mark F0 GREEN and begin F1 (V1 product contract + capability matrix). If FAIL, diagnose without weakening gates.
 
 ## GREEN rule
 

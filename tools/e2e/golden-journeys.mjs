@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-env node */
 /**
  * Golden lower-layer runner — runner-safe Node spawn of Vitest (no nested tsx).
  * Journey 01 (headed) is separate via npm run test:e2e:msrp.

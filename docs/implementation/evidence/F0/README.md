@@ -25,3 +25,9 @@ Recorded after push — see `FINALIZATION_STATUS.md` evidence log. GREEN require
 - Runner-safe `node tools/e2e/golden-journeys.mjs` (no nested tsx)
 - Streaming `verify:v1` with always-written summary
 - CI `timeout-minutes: 45` + verify summary artifact
+
+## CI fix
+
+- Exact-tip CI failed at lint: `tools/e2e/golden-journeys.mjs` Node globals under flat ESLint.
+- Fix: ignore `tools/e2e/**/*.mjs` like other Node runners; add `eslint-env node`.
+
