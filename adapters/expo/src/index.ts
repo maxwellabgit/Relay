@@ -1,35 +1,5 @@
 /** Expo mobile adapter — durable SQLite, encrypted artifacts, foreground speech, lifecycle. */
 
-import type { SecretStore } from "./encrypted-artifacts.js";
-
-export type ExpoSecretStore = SecretStore;
-
-export type ExpoSystemOneTransport = {
-  systemOne(request: {
-    model: string;
-    payload: unknown;
-  }): Promise<
-    | { ok: true; body: unknown }
-    | { ok: false; category: "disabled" | "missing_secret" | "network"; message: string }
-  >;
-};
-
-/**
- * Missing key means disabled — never a fake positive, never compile secrets into JS.
- * Hosted requests go through createTypeSafeJudgmentPort in the mobile client.
- */
-export function createExpoSystemOneTransport(secrets: ExpoSecretStore): ExpoSystemOneTransport {
-  return {
-    async systemOne() {
-      const key = await secrets.get("typesafe_api_key");
-      if (!key) {
-        return { ok: false, category: "missing_secret", message: "typesafe_key_missing" };
-      }
-      return { ok: false, category: "disabled", message: "native_system_one_pending_dev_client" };
-    },
-  };
-}
-
 export {
   EncryptedArtifactStore,
   MemoryByteFiles,

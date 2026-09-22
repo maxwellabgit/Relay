@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -137,6 +138,37 @@ describe("production composition purity", () => {
     expect(app.version).toBe(V1_APPLICATION_IDS.marketingVersion);
     expect(desktop.version).toBe(V1_APPLICATION_IDS.marketingVersion);
     expect(desktop.dependencies["@relay/app"]).toBe(app.version);
+  });
+
+  it("does not keep the unused pending mobile judgment transport", () => {
+    const roots = [
+      resolve(root, "adapters/expo/src"),
+      resolve(root, "apps/relay/src"),
+    ];
+    const files: string[] = [];
+    const visit = (dir: string) => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          if (entry === "node_modules" || entry === "dist") continue;
+          visit(full);
+          continue;
+        }
+        if (entry.endsWith(".test.ts") || entry.endsWith(".test.tsx")) continue;
+        if (entry.endsWith(".ts") || entry.endsWith(".tsx")) files.push(full);
+      }
+    };
+    for (const dir of roots) visit(dir);
+    const hits = files.filter((file) =>
+      readFileSync(file, "utf8").includes("native_system_one_pending_dev_client"),
+    );
+    expect(hits).toEqual([]);
+    const mobile = readFileSync(
+      resolve(root, "apps/relay/src/bootstrap/createMobileClient.native.ts"),
+      "utf8",
+    );
+    expect(mobile).toContain("createTypeSafeJudgmentPort");
   });
 
   it("product contract document exists and references the capability module", () => {
