@@ -50,6 +50,20 @@ export function formatModelBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/** Size line for a pinned download. Raw byte counts stay in the delivery record. */
+export function formatModelDeliveryProgress(
+  view: Pick<ModelDeliveryView, "bytesReceived" | "pin" | "wifiRecommended">,
+): string {
+  const total = view.pin?.byteSize ?? 0;
+  const wifi = view.wifiRecommended ? " · Use Wi-Fi" : "";
+  return `${formatModelBytes(view.bytesReceived)} / ${formatModelBytes(total)}${wifi}`;
+}
+
+/** Version, license, and content hash for a pinned model. */
+export function formatModelDeliveryIdentity(pin: ModelPin): string {
+  return `${pin.version} · ${pin.license} · ${pin.sha256}`;
+}
+
 export function deliveryActions(phase: ModelDeliveryPhase): readonly DeliveryAction[] {
   switch (phase) {
     case "available":

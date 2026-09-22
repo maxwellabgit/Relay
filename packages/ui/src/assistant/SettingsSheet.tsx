@@ -2,6 +2,8 @@ import {
   SESSION_JEV_GRANT_DEFAULTS,
   UNSELECTED_MODEL_MESSAGE,
   deliveryActions,
+  formatModelDeliveryIdentity,
+  formatModelDeliveryProgress,
   type ModelDeliveryView,
   type RelaySnapshot,
 } from "@relay/contracts";
@@ -209,10 +211,12 @@ export function SettingsSheet({
             {modelDelivery && modelDelivery.phase !== "unselected" ? (
               <>
                 <Text style={styles.meta}>{modelDelivery.message}</Text>
-                <Text style={styles.meta}>
-                  {`${modelDelivery.bytesReceived} / ${modelDelivery.pin?.byteSize ?? 0} bytes`}
-                  {modelDelivery.wifiRecommended ? " · Use Wi-Fi" : ""}
-                </Text>
+                <Text style={styles.meta}>{formatModelDeliveryProgress(modelDelivery)}</Text>
+                {modelDelivery.pin ? (
+                  <Text selectable style={styles.meta}>
+                    {formatModelDeliveryIdentity(modelDelivery.pin)}
+                  </Text>
+                ) : null}
                 <View style={styles.row}>
                   {deliveryActions(modelDelivery.phase).map((action) => (
                     <Pressable

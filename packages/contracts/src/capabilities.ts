@@ -99,7 +99,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "No tested model is selected, so download stays off. A delivery controller can pause, cancel, verify a hash, and delete a local copy when a pin exists. Device tournament has not selected a runtime.",
+    notes: "No tested model is selected, so download stays off. A delivery controller can pause, cancel, verify a hash, and delete a local copy when a pin exists. Settings then show size, version, license, and the content hash. Device tournament has not selected a runtime.",
   },
   {
     id: "jev.hosted",
