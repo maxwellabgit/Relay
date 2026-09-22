@@ -72,6 +72,21 @@ describe("production composition purity", () => {
     expect(text).toContain("isExplicitDemoAllowed");
   });
 
+  it("production desktop and mobile clients do not inject public search or github", () => {
+    const desktop = readFileSync(
+      resolve(root, "apps/relay/src/bootstrap/createDesktopClient.ts"),
+      "utf8",
+    );
+    const mobile = readFileSync(
+      resolve(root, "apps/relay/src/bootstrap/createMobileClient.native.ts"),
+      "utf8",
+    );
+    for (const text of [desktop, mobile]) {
+      expect(text).not.toMatch(/publicSearch\s*:/);
+      expect(text).not.toMatch(/github\s*:/);
+    }
+  });
+
   it("createMobileClient uses the expo durable backend and not testkit", () => {
     const text = readFileSync(
       resolve(root, "apps/relay/src/bootstrap/createMobileClient.native.ts"),

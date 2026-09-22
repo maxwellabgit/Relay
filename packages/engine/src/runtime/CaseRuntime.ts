@@ -562,6 +562,12 @@ export class CaseRuntime {
           isExplicitAsk: isAsk,
         });
 
+        if (result.type === "finding" && reflex.definition.id !== "reflex.resolve-acronym") {
+          await this.persistReviewedFinding(reflex.definition.id, trigger.token, caseId);
+          findings.push(result.summary);
+          signature = workSignature(reflex.definition.id, { token: trigger.token });
+          continue;
+        }
         if (result.type === "finding") {
           findings.push(result.summary);
           signature = workSignature("acronym.lookup", { outcome: "exact", token: trigger.token });
@@ -612,6 +618,31 @@ export class CaseRuntime {
       }
     }
     return { findings, signature, clarify: null, suppressSearch };
+  }
+
+  private async persistReviewedFinding(reflexId: string, token: string, caseId: string): Promise<void> {
+    const prefix =
+      reflexId === "reflex.capture-note"
+        ? "note"
+        : reflexId === "reflex.remember-fact"
+          ? "fact"
+          : "next";
+    await this.deps.store.learning.putMemory({
+      memoryId: this.deps.ids.next("memory"),
+      kind: "note",
+      key: `${prefix}:${token.slice(0, 120)}`,
+      value: { text: token, reflexId, caseId },
+      source: "explicit_user",
+      createdAt: this.deps.clock.now().toISOString(),
+    });
+    await this.deps.trace.emit({
+      type: "policy.evaluated",
+      stage: "policy.evaluate",
+      status: "completed",
+      caseId,
+      reflexId,
+      reasonCode: prefix,
+    });
   }
 
   private async generateDirectAnswer(
