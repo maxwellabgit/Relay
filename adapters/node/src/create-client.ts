@@ -1,4 +1,4 @@
-import type { JudgmentPort, TextModelPort } from "@relay/contracts";
+import type { JudgmentPort, PublicSearchPort, TextModelPort } from "@relay/contracts";
 import { TauriEngineStore } from "@relay/adapter-tauri/engine-store";
 import { createRelayClientFromEngine, RelayEngine, type EngineDeps } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
@@ -20,6 +20,7 @@ export type NodeHarnessOptions = {
   readonly ids?: EngineDeps["ids"];
   readonly judgments?: JudgmentPort;
   readonly model?: TextModelPort;
+  readonly publicSearch?: PublicSearchPort;
   readonly reflexModules?: EngineDeps["reflexModules"];
   readonly episodeDefinitions?: EngineDeps["episodeDefinitions"];
   readonly durableDecisionArtifacts?: boolean;
@@ -83,6 +84,7 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
     sessionId: options.sessionId ?? "session_test",
     reflexModules: options.reflexModules ?? createProductionReflexes(store.learning),
     ...(options.episodeDefinitions ? { episodeDefinitions: options.episodeDefinitions } : {}),
+    ...(options.publicSearch ? { publicSearch: options.publicSearch } : {}),
     storageDetail: "sqlite",
     jevStatus: { ok: true, detail: "recorded" },
     modelStatus: options.model

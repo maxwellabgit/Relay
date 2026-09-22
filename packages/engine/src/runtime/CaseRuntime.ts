@@ -245,15 +245,15 @@ export class CaseRuntime {
       }
 
       const waiting = await this.deps.store.updateCase(caseId, latest.version, {
-        phase: "model",
+        phase: "decide",
         status: "waiting",
-        waitKind: "model",
+        waitKind: "tool",
         at,
       });
       if (!waiting) return { kind: "complete" };
       await this.deps.store.enqueue({
         workId: modelWorkId(caseId),
-        type: "model.requested",
+        type: "tool.route",
         priority: PRIORITY_DIRECT,
         availableAt: at,
         createdAt: at,
@@ -261,18 +261,22 @@ export class CaseRuntime {
           caseId,
           caseVersion: waiting.version,
           sourceEventId,
+          text,
           textArtifactId: String(item.payload.textArtifactId ?? ""),
           textSha256: String(item.payload.textSha256 ?? ""),
+          toolSteps: 0,
+          judgmentRounds: 0,
+          sourceAttempts: 0,
         },
         parentWorkId: item.workId,
         correlationId: caseId,
       });
       await this.deps.trace.emit({
-        type: "model.requested",
-        stage: "model.request",
+        type: "judgment.requested",
+        stage: "judgment.request",
         status: "waiting",
         caseId,
-        reasonCode: "direct_answer",
+        reasonCode: "choice",
       });
       return { kind: "complete" };
     }

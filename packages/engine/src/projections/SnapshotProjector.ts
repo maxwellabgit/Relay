@@ -7,12 +7,14 @@ import type { ArtifactStorePort } from "@relay/contracts";
 import type { TraceSink } from "../trace-sink.js";
 import type { EngineTrace } from "../engine-helpers.js";
 import type { OverlayState } from "./OverlayState.js";
+import type { AuthorityState } from "../operations/AuthorityState.js";
 
 export type SnapshotProjectorDeps = {
   readonly store: EngineStore;
   readonly artifacts: ArtifactStorePort;
   readonly sessionId: string;
   readonly overlays: OverlayState;
+  readonly authority: AuthorityState;
   readonly trace: EngineTrace;
   readonly traceSink?: TraceSink;
   readonly storageDetail?: string;
@@ -94,6 +96,7 @@ export class SnapshotProjector {
       this.deps.overlays.getInputPreview(),
       this.deps.overlays.listActions(),
     ]);
+    const authority = await this.deps.authority.project();
     return {
       ...snapshot,
       ...inspected,
@@ -102,6 +105,9 @@ export class SnapshotProjector {
       caseExecution: inspected.caseExecution,
       currentInputPreview,
       actions,
+      approvals: authority.approvals,
+      connections: this.deps.authority.toConnectionSnapshots(authority.connections),
+      reflexes: authority.reflexes,
     };
   }
 

@@ -1,5 +1,45 @@
 import type { ConnectorActionRef } from "./artifacts.js";
 import type { ApproveOperationCommand, RejectOperationCommand } from "./commands.js";
+import type { SourceSliceRef } from "./transcript.js";
+import type { OperationPrecondition } from "./reflexes.js";
+
+export type OperationRiskClass = "low" | "medium" | "high";
+export type OperationApprovalMode = "none" | "once" | "always";
+export type OperationStatus =
+  | "proposed"
+  | "awaiting_approval"
+  | "approved"
+  | "rejected"
+  | "executing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/** Durable write/proposal envelope — reads use ToolResultEnvelope instead. */
+export type OperationEnvelope = {
+  readonly operationId: string;
+  readonly caseId: string;
+  readonly caseVersion: number;
+  readonly toolId: string;
+  readonly action: ConnectorActionRef;
+  readonly canonicalArguments: unknown;
+  readonly canonicalHash: string;
+  readonly connectionId: string;
+  readonly connectionVersion: number;
+  readonly requestedResourceScope: unknown;
+  readonly inputRefs: readonly SourceSliceRef[];
+  readonly preconditions: readonly OperationPrecondition[];
+  readonly riskClass: OperationRiskClass;
+  readonly approvalMode: OperationApprovalMode;
+  readonly idempotencyKey: string;
+  readonly attemptCount: number;
+  readonly leaseOwner?: string;
+  readonly leaseUntil?: string;
+  readonly providerReceipt?: string;
+  readonly status: OperationStatus;
+  readonly proposedAt: string;
+  readonly summary: string;
+};
 
 export type PendingOperationApproval = {
   readonly operationId: string;

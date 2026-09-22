@@ -96,19 +96,34 @@ export class OutcomeRecorder {
   ): Promise<void> {
     const current = await this.deps.store.getCase(caseId);
     if (!current) return;
-    await runInTransaction(this.deps.store, async () => {
-      await this.deps.store.updateCase(caseId, current.version, {
+    if (current.status === "completed" || current.status === "cancelled") return;
+    const expectedVersion = current.version;
+    const updated = await runInTransaction(this.deps.store, async () => {
+      const next = await this.deps.store.updateCase(caseId, expectedVersion, {
         status,
         phase: status === "completed" ? "done" : "judge",
         waitKind: null,
         at: this.deps.clock.now().toISOString(),
       });
+      if (!next) return null;
       await this.deps.store.appendDomainEvent("case.finished", this.deps.clock.now().toISOString(), {
         caseId,
         status,
         expectedVersion: version,
       });
+      return next;
     });
+    if (!updated) {
+      // Retry once against the latest version — tool route may have raced a phase bump.
+      const latest = await this.deps.store.getCase(caseId);
+      if (!latest || latest.status === "completed" || latest.status === "cancelled") return;
+      await this.deps.store.updateCase(caseId, latest.version, {
+        status,
+        phase: status === "completed" ? "done" : "judge",
+        waitKind: null,
+        at: this.deps.clock.now().toISOString(),
+      });
+    }
     if (activeCaseId === caseId) {
       await this.deps.overlays.clearInputPreview(caseId);
     }

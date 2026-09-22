@@ -9,5 +9,6 @@ export * from "./judgments.js";
 export * from "./operations.js";
 export * from "./ports.js";
 export * from "./reflexes.js";
+export * from "./tools.js";
 export * from "./trace.js";
 export * from "./transcript.js";

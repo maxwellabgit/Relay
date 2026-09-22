@@ -2,6 +2,7 @@
   ArtifactStorePort,
   GlassesDisplayPort,
   JudgmentPort,
+  PublicSearchPort,
   ReflexModule,
   RelayChange,
   RelayCommand,
@@ -17,6 +18,8 @@ import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
+import { AuthorityState } from "./operations/AuthorityState.js";
+import { OperationService } from "./operations/OperationService.js";
 import { OutcomeRecorder } from "./outcomes/OutcomeRecorder.js";
 import { OverlayState } from "./projections/OverlayState.js";
 import { SnapshotProjector } from "./projections/SnapshotProjector.js";
@@ -25,6 +28,9 @@ import { CaseRuntime } from "./runtime/CaseRuntime.js";
 import { WorkDispatcher } from "./runtime/WorkDispatcher.js";
 import { Scheduler, type Clock, type IdFactory } from "./scheduler.js";
 import type { EngineStore } from "./store.js";
+import { registerBuiltinTools } from "./tools/builtins.js";
+import { ToolBroker } from "./tools/ToolBroker.js";
+import { ToolRegistry } from "./tools/ToolRegistry.js";
 import type { TraceSink } from "./trace-sink.js";
 
 export type EngineDeps = {
@@ -38,6 +44,7 @@ export type EngineDeps = {
   readonly reflexModules?: readonly ReflexModule[];
   readonly episodeDefinitions?: readonly EpisodeDefinition[];
   readonly glasses?: GlassesDisplayPort;
+  readonly publicSearch?: PublicSearchPort;
   readonly storageDetail?: string;
   readonly jevStatus?: { ok: boolean; detail: string };
   readonly modelStatus?: { ok: boolean; detail: string; model?: string | null };
@@ -49,7 +56,7 @@ export type EngineDeps = {
 
 /**
  * Public engine facade. Owns lifecycle cancellation and delegates domain work
- * to cohesive services under intake / runtime / judgments / outcomes / learning / projections.
+ * to cohesive services under intake / runtime / judgments / tools / operations / outcomes / learning / projections.
  */
 export class RelayEngine {
   private readonly scheduler: Scheduler;
@@ -68,6 +75,9 @@ export class RelayEngine {
   private readonly intake: SourceIntake;
   private readonly cases: CaseRuntime;
   private readonly judgments: JudgmentService;
+  private readonly authority: AuthorityState;
+  private readonly operations: OperationService;
+  private readonly tools: ToolBroker;
   private readonly dispatcher: WorkDispatcher;
   private readonly projector: SnapshotProjector;
 
@@ -168,6 +178,41 @@ export class RelayEngine {
       offerGlossary: (token, expansion) => this.cases.offerGlossary(token, expansion),
     });
 
+    this.authority = new AuthorityState(deps.store);
+    this.operations = new OperationService({
+      authority: this.authority,
+      clock: deps.clock,
+      ids: deps.ids,
+      trace: this.trace,
+      emitSnapshot,
+    });
+
+    const registry = new ToolRegistry();
+    registerBuiltinTools(registry, {
+      learning: deps.store.learning,
+      artifacts: deps.artifacts,
+      model: deps.model,
+      clock: deps.clock,
+      ...(deps.publicSearch ? { publicSearch: deps.publicSearch } : {}),
+    });
+    this.tools = new ToolBroker({
+      registry,
+      store: deps.store,
+      artifacts: deps.artifacts,
+      model: deps.model,
+      judgments: deps.judgments,
+      authority: this.authority,
+      clock: deps.clock,
+      ids: deps.ids,
+      scheduler: this.scheduler,
+      outcomes: this.outcomes,
+      trace: this.trace,
+      getAbortSignal,
+      getActiveCaseId: () => this.activeCaseId,
+      emitSnapshot,
+      ...(deps.mode ? { mode: deps.mode } : {}),
+    });
+
     this.dispatcher = new WorkDispatcher({
       store: deps.store,
       clock: deps.clock,
@@ -175,6 +220,7 @@ export class RelayEngine {
       scheduler: this.scheduler,
       cases: this.cases,
       judgments: this.judgments,
+      tools: this.tools,
       trace: this.trace,
       emitSnapshot,
       setActiveCaseId: (id) => {
@@ -191,6 +237,7 @@ export class RelayEngine {
       artifacts: deps.artifacts,
       sessionId: deps.sessionId,
       overlays: this.overlays,
+      authority: this.authority,
       trace: this.trace,
       ...(deps.trace ? { traceSink: deps.trace } : {}),
       ...(deps.storageDetail ? { storageDetail: deps.storageDetail } : {}),
@@ -291,8 +338,11 @@ export class RelayEngine {
         return this.patterns.startWorkSession();
       case "EndWorkSession":
         return this.patterns.endWorkSession();
-      default:
+      default: {
+        const handled = await this.operations.execute(command);
+        if (handled) return handled;
         return { ok: false, summary: "unsupported_command", error: command.type };
+      }
     }
   }
 

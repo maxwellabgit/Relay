@@ -5,6 +5,8 @@ export type WorkItemType =
   | "judgment.completed"
   | "model.requested"
   | "model.completed"
+  | "tool.route"
+  | "tool.execute"
   | "operation.completed"
   | "timer.due";
 

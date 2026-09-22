@@ -4,6 +4,7 @@ import type { EngineStore } from "../store.js";
 import { sleep, type EngineTrace } from "../engine-helpers.js";
 import type { CaseRuntime } from "./CaseRuntime.js";
 import type { JudgmentService, WorkDisposition } from "../judgments/JudgmentService.js";
+import type { ToolBroker } from "../tools/ToolBroker.js";
 import { runInTransaction } from "../transactions.js";
 
 export type WorkDispatcherDeps = {
@@ -13,6 +14,7 @@ export type WorkDispatcherDeps = {
   readonly scheduler: Scheduler;
   readonly cases: CaseRuntime;
   readonly judgments: JudgmentService;
+  readonly tools: ToolBroker;
   readonly trace: EngineTrace;
   readonly emitSnapshot: () => Promise<void>;
   readonly setActiveCaseId: (id: string | null) => void;
@@ -60,6 +62,10 @@ export class WorkDispatcher {
         return this.deps.judgments.onJudgmentRequested(item);
       case "model.requested":
         return this.deps.cases.onModelRequested(item);
+      case "tool.route":
+        return this.deps.tools.onToolRoute(item);
+      case "tool.execute":
+        return this.deps.tools.onToolExecute(item);
       case "case.resume":
         await this.onCaseResume(item);
         return { kind: "complete" };
