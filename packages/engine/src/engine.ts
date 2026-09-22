@@ -345,6 +345,36 @@ export class RelayEngine {
         await this.projector.emitSnapshot();
         return { ok: true, summary: "provider_health_refreshed" };
       }
+      case "CancelActive": {
+        if (!this.running) return { ok: false, summary: "not_running", error: "not_running" };
+        const caseId = this.activeCaseId;
+        const previous = this.loopPromise;
+        this.abort?.abort();
+        await previous;
+        if (!this.running) return { ok: true, summary: "cancelled", ...(caseId ? { caseId } : {}) };
+        this.abort = new AbortController();
+        this.loopPromise = this.dispatcher.runLoop(this.abort.signal);
+        if (caseId) {
+          const current = await this.deps.store.getCase(caseId);
+          if (current && current.status !== "completed" && current.status !== "cancelled") {
+            await this.deps.store.updateCase(caseId, current.version, {
+              status: "cancelled",
+              phase: current.phase,
+              waitKind: null,
+              at: this.deps.clock.now().toISOString(),
+            });
+          }
+        }
+        await this.trace.emit({
+          type: "outcome.recorded",
+          status: "failed",
+          reasonCode: "cancelled",
+          ...(caseId ? { caseId } : {}),
+        });
+        this.activeCaseId = null;
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: "cancelled", ...(caseId ? { caseId } : {}) };
+      }
       case "SubmitText": {
         await this.overlays.setInputPreview(command.text);
         const segment = this.intake.makeTypedSegment(command.text);

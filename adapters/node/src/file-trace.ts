@@ -4,6 +4,7 @@ import type { DiagnosticLatestPointer, DiagnosticLiveSummary } from "@relay/cont
 import { TRACE_RETENTION_MS, TRACE_ROTATE_BYTES } from "@relay/engine";
 import { isTraceEvent, type TraceSink } from "@relay/engine";
 import type { RuntimeEventV2 } from "@relay/engine";
+import { observeDiagnostics, type DiagnosticObservation } from "@relay/engine";
 import { createDiagnosticPathPort } from "./diagnostic-paths.js";
 
 export type FileTraceOptions = {
@@ -51,6 +52,7 @@ export function createFileTraceSink(
     effectiveRuns.startsWith(`${canonicalRuns}${canonicalRuns.includes("\\") ? "\\" : "/"}`) ||
     /[/\\]diagnostics[/\\]runs(?:[/\\]|$)/i.test(runsRoot);
   let wroteManifest = false;
+  const observations: DiagnosticObservation[] = [];
 
   return {
     runId,
@@ -94,8 +96,10 @@ export function createFileTraceSink(
             uncleanShutdown: false,
           });
         }
-        await writeLiveSummaryStub({ paths, runId, runDir: directory, commit, profile });
+        await writeLiveSummary({ paths, runId, runDir: directory, commit, profile, observations });
       }
+      observations.push(observationFrom(event));
+      if (observations.length > 1000) observations.splice(0, observations.length - 1000);
       await compactOldRuns(runsRoot);
       await rotateIfNeeded(file);
       await appendFile(file, `${JSON.stringify(event)}\n`, "utf8");
@@ -112,6 +116,7 @@ export function createFileTraceSink(
           uncleanShutdown: false,
         });
       }
+      await writeLiveSummary({ paths, runId, runDir: directory, commit, profile, observations });
       if (event.eventType === "run.ended") {
         await completeManifest(directory, true);
         if (publishLatest) {
@@ -197,33 +202,49 @@ async function writeLatestAndHeartbeat(input: {
   );
 }
 
-async function writeLiveSummaryStub(input: {
+function observationFrom(event: RuntimeEventV2): DiagnosticObservation {
+  return {
+    at: event.at,
+    eventType: event.eventType,
+    status: event.status,
+    stage: event.stage,
+    ...(event.reasonCode ? { reasonCode: event.reasonCode } : {}),
+    ...(event.queueDepth != null ? { queueDepth: event.queueDepth } : {}),
+    ...(event.caseId ? { caseId: event.caseId } : {}),
+    ...(event.attempt != null ? { attempt: event.attempt } : {}),
+    ...(event.reflexId ? { reflexId: event.reflexId } : {}),
+    ...(event.toolId ? { toolId: event.toolId } : {}),
+  };
+}
+
+async function writeLiveSummary(input: {
   paths: ReturnType<typeof createDiagnosticPathPort>;
   runId: string;
   runDir: string;
   commit: string;
   profile: string;
+  observations: readonly DiagnosticObservation[];
 }): Promise<void> {
+  const observed = observeDiagnostics(input.observations, Date.now());
   const summary: DiagnosticLiveSummary = {
     schemaVersion: 1,
     runId: input.runId,
     commit: input.commit,
     profile: input.profile,
-    providerReadiness: { jev: "not_observed", model: "not_observed", audio: "not_observed" },
-    queue: { ready: 0, oldestReadyMs: 0, deadLetters: 0 },
-    activeCases: 0,
-    waitingCases: 0,
-    failedCases: 0,
-    latestCase: { caseId: null, stage: null, blocker: null },
-    latestJudgment: {
-      questionSet: null,
-      selectedRoute: null,
-      policyResult: null,
-      observed: false,
+    providerReadiness: observed.providerReadiness,
+    queue: {
+      ready: observed.queueReady,
+      oldestReadyMs: observed.oldestReadyMs,
+      deadLetters: observed.deadLetters,
     },
-    latestTool: { toolId: null, result: null, observed: false },
-    deadLetters: 0,
-    retrySchedule: null,
+    activeCases: observed.activeCases,
+    waitingCases: observed.waitingCases,
+    failedCases: observed.failedCases,
+    latestCase: observed.latestCase,
+    latestJudgment: observed.latestJudgment,
+    latestTool: observed.latestTool,
+    deadLetters: observed.deadLetters,
+    retrySchedule: observed.retrySchedule,
     paths: {
       runDir: input.runDir,
       eventsPath: join(input.runDir, "events.jsonl"),

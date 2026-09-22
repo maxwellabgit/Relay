@@ -1,6 +1,7 @@
 import type { ActionCard, RelaySnapshot } from "@relay/contracts";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { AmbientFeedback } from "./assistant/AmbientRecommendationCard.js";
 import { DeveloperConsole } from "./console/DeveloperConsole.js";
 import { PhoneShell } from "./phone/PhoneShell.js";
@@ -32,6 +33,8 @@ export type RelayWorkbenchProps = {
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
   readonly onRefreshHealth?: () => void;
+  readonly busy?: boolean;
+  readonly notice?: string | null;
   /** When false, product surface is full-bleed (mobile). Default true. */
   readonly showBezel?: boolean;
 };
@@ -64,6 +67,8 @@ export function RelayWorkbench({
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
   onRefreshHealth,
+  busy = false,
+  notice = null,
   showBezel = true,
 }: RelayWorkbenchProps) {
   const { width } = useWindowDimensions();
@@ -71,10 +76,9 @@ export function RelayWorkbench({
 
   const layout: "wide" | "medium" | "narrow" =
     width >= WIDE ? "wide" : width >= MEDIUM ? "medium" : "narrow";
-  const forceDev = showDeveloperPanel === true;
-  const hideDev = showDeveloperPanel === false;
-  const showDevInline = !hideDev && (forceDev || layout === "wide");
-  const showDevDrawer = !hideDev && !showDevInline && (forceDev || layout === "medium" || layout === "narrow");
+  const showDev = showDeveloperPanel === true;
+  const showDevInline = showDev && layout === "wide";
+  const showDevDrawer = showDev && !showDevInline;
 
   const phone = (
     <PhoneShell
@@ -96,6 +100,8 @@ export function RelayWorkbench({
       {...(onDeleteTypeSafeKey !== undefined ? { onDeleteTypeSafeKey } : {})}
       {...(onSetHostedProcessing !== undefined ? { onSetHostedProcessing } : {})}
       {...(onRefreshHealth !== undefined ? { onRefreshHealth } : {})}
+      busy={busy}
+      notice={notice}
     />
   );
 
@@ -111,6 +117,7 @@ export function RelayWorkbench({
   };
 
   return (
+    <SafeAreaProvider>
     <View style={styles.root}>
       <View
         style={[
@@ -163,6 +170,7 @@ export function RelayWorkbench({
         </Modal>
       ) : null}
     </View>
+    </SafeAreaProvider>
   );
 }
 

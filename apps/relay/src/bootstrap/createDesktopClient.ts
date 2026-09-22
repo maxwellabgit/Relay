@@ -18,9 +18,11 @@ import {
   createProductionIds,
   createRelayClientFromEngine,
   JevHealthTracker,
+  observeDiagnostics,
   parseTypeSafeBody,
   RelayEngine,
   TYPESAFE_MODEL,
+  type DiagnosticObservation,
   type EngineDeps,
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
@@ -45,6 +47,12 @@ export type DesktopClientHandle = {
   readonly engine: RelayEngine;
   readonly store: TauriEngineStore;
   readonly artifacts: ArtifactStorePort;
+  readonly secrets: {
+    status(): Promise<"present" | "disabled" | "unknown">;
+    set(value: string): Promise<void>;
+    delete(): Promise<void>;
+  };
+  onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -144,7 +152,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       },
       queue: {
         ready: snapshot.runtime.queueDepth,
-        oldestReadyMs: 0,
+        oldestReadyMs: oldestReadyMs(snapshot),
         deadLetters: snapshot.runtime.deadLetters,
       },
       activeCases,
@@ -161,9 +169,9 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         policyResult: snapshot.decision?.result ?? snapshot.gate?.result ?? null,
         observed: Boolean(snapshot.decision ?? snapshot.gate),
       },
-      latestTool: { toolId: null, result: null, observed: false },
+      latestTool: observedFrom(snapshot).latestTool,
       deadLetters: snapshot.runtime.deadLetters,
-      retrySchedule: null,
+      retrySchedule: retryScheduleFrom(snapshot),
       paths: {
         runDir: directoryLabel,
         eventsPath: `${directoryLabel}\\events.jsonl`,
@@ -366,9 +374,73 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     engine,
     store,
     artifacts,
+    secrets: {
+      async status() {
+        try {
+          const secret = String((await invoke("secret_status").catch(() => "disabled")) ?? "disabled");
+          return secret === "present" ? "present" : "disabled";
+        } catch {
+          return "unknown";
+        }
+      },
+      async set(value: string) {
+        await invoke("secret_set", { request: { name: "typesafe_api_key", value } });
+      },
+      async delete() {
+        await invoke("secret_delete", { request: { name: "typesafe_api_key" } });
+      },
+    },
+    async onHostBackground() {
+      try {
+        await audio.stop();
+      } catch {
+        audioHealth.ok = false;
+        audioHealth.detail = "unavailable";
+      }
+    },
     start: () => client.start(),
     stop: () => client.stop(),
   };
+}
+
+function observedFrom(snapshot: RelaySnapshot) {
+  return observeDiagnostics(observationsFrom(snapshot), Date.now());
+}
+
+function observationsFrom(snapshot: RelaySnapshot): DiagnosticObservation[] {
+  return snapshot.trace.map((row) => ({
+    at: row.at,
+    eventType: row.type,
+    status: row.status,
+    reasonCode: row.reasonCode,
+    queueDepth: row.queueDepth,
+    caseId: row.caseId,
+    stage: row.stage,
+    attempt: row.attempt,
+    reflexId: row.reflexId,
+    toolId: row.toolId,
+  }));
+}
+
+function oldestReadyMs(snapshot: RelaySnapshot): number {
+  if (snapshot.runtime.queueDepth <= 0) return 0;
+  const derived = observedFrom(snapshot).oldestReadyMs;
+  if (derived > 0) return derived;
+  const times = snapshot.trace
+    .filter((row) => row.status === "waiting" || row.status === "started")
+    .map((row) => Date.parse(row.at))
+    .filter((value) => Number.isFinite(value));
+  if (times.length === 0) return 0;
+  return Math.max(0, Date.now() - Math.min(...times));
+}
+
+function retryScheduleFrom(snapshot: RelaySnapshot): string | null {
+  const now = Date.now();
+  const due = snapshot.waits
+    .map((wait) => wait.dueAt)
+    .filter((value): value is string => typeof value === "string" && Date.parse(value) > now)
+    .sort();
+  return due[0] ?? observedFrom(snapshot).retrySchedule;
 }
 
 function createNativeJudgmentPort(invoke: TauriInvoke): JudgmentPort {

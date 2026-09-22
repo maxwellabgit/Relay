@@ -1,7 +1,7 @@
 import type { JudgmentPort, RelayClient, TextModelPort } from "@relay/contracts";
 import {
-  MemoryByteFiles,
-  MemorySecretStore,
+  createExpoDocumentFiles,
+  createExpoSecureSecretStore,
   openMobileBackend,
   type ByteFilePort,
   type MobileBackend,
@@ -33,6 +33,12 @@ export type MobileClientHandle = {
   readonly client: RelayClient;
   readonly engine: RelayEngine;
   readonly backend: MobileBackend;
+  readonly secrets: {
+    status(): Promise<"present" | "disabled" | "unknown">;
+    set(value: string): Promise<void>;
+    delete(): Promise<void>;
+  };
+  onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -50,8 +56,8 @@ const unavailableModel: TextModelPort = {
 export async function createMobileClient(
   options: MobileClientOptions = {},
 ): Promise<MobileClientHandle> {
-  const secrets = options.secrets ?? new MemorySecretStore();
-  const files = options.files ?? new MemoryByteFiles();
+  const secrets = options.secrets ?? createExpoSecureSecretStore();
+  const files = options.files ?? createExpoDocumentFiles();
   const backend =
     options.backend ??
     (await openMobileBackend({
@@ -95,6 +101,19 @@ export async function createMobileClient(
     client,
     engine,
     backend,
+    secrets: {
+      async status() {
+        const key = await secrets.get("typesafe_api_key");
+        return key ? "present" : "disabled";
+      },
+      async set(value: string) {
+        await secrets.set("typesafe_api_key", value);
+      },
+      async delete() {
+        await secrets.delete("typesafe_api_key");
+      },
+    },
+    onHostBackground: () => backend.lifecycle.background(),
     async start() {
       const speech = await backend.speech.status();
       audioStatus.ok = speech.ok;

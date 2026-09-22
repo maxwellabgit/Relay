@@ -65,6 +65,25 @@ describe("diagnostic paths", () => {
         latestJudgment: { observed: boolean };
       };
       expect(summary.latestJudgment.observed).toBe(false);
+      await sink.append({
+        schemaVersion: 2,
+        sequence: 3,
+        runId: "run_test1",
+        at: new Date(Date.now() - 5_000).toISOString(),
+        eventType: "tool.completed",
+        stage: "tool.execute",
+        status: "completed",
+        reasonCode: "completed",
+        toolId: "assistant.respond",
+        queueDepth: 1,
+      });
+      const derived = JSON.parse(await readFile(join(runsRoot, "run_test1", "live-summary.json"), "utf8")) as {
+        latestTool: { toolId: string | null; observed: boolean };
+        queue: { ready: number; oldestReadyMs: number };
+      };
+      expect(derived.latestTool).toEqual({ toolId: "assistant.respond", result: "completed", observed: true });
+      expect(derived.queue.ready).toBe(1);
+      expect(derived.queue.oldestReadyMs).toBeGreaterThanOrEqual(4_000);
       const events = await readFile(join(runsRoot, "run_test1", "events.jsonl"), "utf8");
       expect(events).toContain("source.accepted");
     } finally {

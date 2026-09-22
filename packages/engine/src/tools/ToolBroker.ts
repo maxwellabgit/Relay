@@ -1,4 +1,4 @@
-import type { ToolResultEnvelope } from "@relay/contracts";
+import type { ToolResultEnvelope, ToolResultStatus } from "@relay/contracts";
 import type { ToolBudgets } from "@relay/contracts";
 import type { WorkDisposition } from "../judgments/JudgmentService.js";
 import type { ArtifactStorePort, JudgmentPort, TextModelPort } from "@relay/contracts";
@@ -8,7 +8,7 @@ import { PRIORITY_DIRECT, type WorkItem } from "../queue.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
-import { knownReason } from "../runtime-events.js";
+import { knownReason, structuralToolId } from "../runtime-events.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -630,6 +630,15 @@ export class ToolBroker {
       judgmentRounds: usage.judgmentRounds,
       sourceAttempts: usage.sourceAttempts,
     });
+    const routedId = structuralToolId(toolId);
+    await this.deps.trace.emit({
+      type: "tool.routed",
+      stage: "tool.execute",
+      status: "started",
+      caseId,
+      reasonCode: "start",
+      ...(routedId ? { toolId: routedId } : {}),
+    });
     await this.deps.scheduler.enqueue(
       "tool.execute",
       {
@@ -680,6 +689,16 @@ export class ToolBroker {
         end: c.sourceSlice.end,
       })),
     });
+    const completedId = structuralToolId(result.toolId);
+    await this.deps.trace.emit({
+      type: "tool.completed",
+      stage: "tool.execute",
+      status: toolTraceStatus(result.status),
+      caseId,
+      reasonCode: toolTraceReason(result.status, result.reasonCode),
+      durationMs,
+      ...(completedId ? { toolId: completedId } : {}),
+    });
     await this.deps.trace.emit({
       type: "outcome.recorded",
       stage: "episode.complete",
@@ -700,6 +719,20 @@ export class ToolBroker {
     });
     await this.deps.outcomes.finishCase(caseId, caseVersion, "failed", this.deps.getActiveCaseId());
   }
+}
+
+function toolTraceStatus(status: ToolResultStatus): "completed" | "failed" | "waiting" {
+  if (status === "needs_approval") return "waiting";
+  if (status === "ok" || status === "empty") return "completed";
+  return "failed";
+}
+
+function toolTraceReason(status: ToolResultStatus, reasonCode?: string): string {
+  if (status === "ok") return "completed";
+  if (status === "empty") return "no_match";
+  if (status === "denied") return "not_authorized";
+  if (status === "needs_approval") return "confirmation_required";
+  return knownReason(reasonCode ?? "fail");
 }
 
 function readUsage(payload: Record<string, unknown>): BudgetUsage {

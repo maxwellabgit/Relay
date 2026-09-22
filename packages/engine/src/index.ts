@@ -20,6 +20,7 @@ export * from "./trace-sink.js";
 export * from "./episodes.js";
 export * from "./ids.js";
 export * from "./runtime-events.js";
+export * from "./diagnostics/live-summary.js";
 export * from "./runtime-recorder.js";
 export * from "./transactions.js";
 export * from "./typesafe-judgment.js";

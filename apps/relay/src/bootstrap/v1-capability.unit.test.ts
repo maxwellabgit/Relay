@@ -93,6 +93,10 @@ describe("production composition purity", () => {
       "utf8",
     );
     expect(text).toContain("openMobileBackend");
+    expect(text).toContain("createExpoSecureSecretStore");
+    expect(text).toContain("createExpoDocumentFiles");
+    expect(text).not.toContain("new MemorySecretStore");
+    expect(text).not.toContain("new MemoryByteFiles");
     expect(text).not.toContain("@relay/testkit");
     expect(text).not.toContain("MemoryEngineStore");
     expect(text).not.toContain("MemoryArtifactStore");

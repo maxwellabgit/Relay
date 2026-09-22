@@ -16,6 +16,12 @@ export type BrowserDemoHandle = {
   readonly engine: RelayEngine;
   readonly store: MemoryEngineStore;
   readonly artifacts: MemoryArtifactStore;
+  readonly secrets: {
+    status(): Promise<"present" | "disabled" | "unknown">;
+    set(value: string): Promise<void>;
+    delete(): Promise<void>;
+  };
+  onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -32,10 +38,11 @@ export function createBrowserDemoClient(options: BrowserDemoOptions = {}): Brows
       next: (prefix: string) => `${prefix}_${++n}`,
     } satisfies EngineDeps["ids"]);
 
+  const demoKey = { value: null as string | null };
   const judgments: JudgmentPort =
     options.judgments ??
     createTypeSafeJudgmentPort({
-      getApiKey: () => null,
+      getApiKey: () => demoKey.value,
       retryDelayMs: 0,
     });
 
@@ -69,6 +76,18 @@ export function createBrowserDemoClient(options: BrowserDemoOptions = {}): Brows
     engine,
     store,
     artifacts,
+    secrets: {
+      async status() {
+        return demoKey.value ? "present" : "disabled";
+      },
+      async set(value: string) {
+        demoKey.value = value;
+      },
+      async delete() {
+        demoKey.value = null;
+      },
+    },
+    async onHostBackground() {},
     start: () => client.start(),
     stop: () => client.stop(),
   };

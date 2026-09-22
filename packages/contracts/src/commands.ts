@@ -207,6 +207,10 @@ export type ReplayFixtureCommand = {
   readonly speed: number;
 };
 
+export type CancelActiveCommand = {
+  readonly type: "CancelActive";
+};
+
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
@@ -241,7 +245,8 @@ export type RelayCommand =
   | ActivateReflexCommand
   | PauseReflexCommand
   | RollbackReflexCommand
-  | ReplayFixtureCommand;
+  | ReplayFixtureCommand
+  | CancelActiveCommand;
 
 export type RelayCommandResult = {
   readonly ok: boolean;

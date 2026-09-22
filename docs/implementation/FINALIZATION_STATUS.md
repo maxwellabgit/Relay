@@ -11,7 +11,7 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | Reviewed tip | `4b64928bedaeea6d601ec50ef18ad8fc03fc1bb6` |
 | Implementation parent | `4a4529d1529adf6d6460e17e2797e02b16135182` |
 | Exact-tip CI (reviewed foundation) | https://github.com/maxwellabgit/Relay/actions/runs/35727102376 PASS (`head_sha` = `4b64928…`) |
-| Active phase | F2 (code landed; physical device rehydrate still required) |
+| Active phase | Code closeout landed; device, model tournament, and store gates still open |
 | Release decision | **NO-GO / V1 BLOCKED** |
 | Foundation | production-core Phases 0–8 are **FOUNDATION COMPLETE** only (not V1 complete) |
 
@@ -22,9 +22,9 @@ Update only this file for finalization phase state. Exact-SHA evidence is mandat
 | F0 Reopen + release truth | GREEN | `a80e8cc9f2b66e62e845e7efff1ac20d83a272fd` | https://github.com/maxwellabgit/Relay/actions/runs/35734873042 PASS | See `evidence/F0/` |
 | F1 V1 contracts + matrix | GREEN | `3473b83195376ce5515efce4947f58355451ea2e` | https://github.com/maxwellabgit/Relay/actions/runs/35737611615 PASS | See `evidence/F1/` |
 | F2 Mobile composition | DEVICE GATE | — | Node reopen + encrypted artifacts PASS locally | Physical iPhone/Android relaunch still required before GREEN |
-| F3 Tiny model + Reflexes | BLOCKED | — | — | Awaits F2 |
-| F4 UI lifecycle quality | BLOCKED | — | — | Awaits F3 |
-| F5 Observability | BLOCKED | — | — | Awaits F4 |
+| F3 Tiny model + Reflexes | IN PROGRESS | — | Four reviewed modules registered; model tournament not run | Device benchmark and provider receipts still open |
+| F4 UI lifecycle quality | CODE LANDED | — | Dev drawer opt-in; safe area, keyboard, list, errors, cancel | Not GREEN: no device a11y matrix |
+| F5 Observability | CODE LANDED | — | Live summary derived from events; `diagnose:latest --explain`; redacted export | Not GREEN until exact-tip CI |
 | F6 Product proof tests | BLOCKED | — | — | Awaits F5 |
 | F7 Privacy / store | BLOCKED | — | — | Awaits F6; human Apple metadata |
 | F8 TestFlight RC | BLOCKED | — | — | Awaits F7; human credentials / devices |
@@ -61,7 +61,7 @@ Integration-lower-layer proofs are retained as the lower test layer. They are **
 
 ## Next exact action
 
-F2 code is in tree but not GREEN: run the physical iPhone and Android create/relaunch/rehydrate check on a custom native Expo client. Continue F3–F5 code that does not require devices; do not claim mobile production proof from Node alone.
+Code closeouts for diagnostics, production Dev hiding, composer input events, command errors/cancel, and mobile secure-store/document files are in the tree. Do not mark F2–F8 GREEN. Remaining stops are human-only: physical Expo relaunch on iPhone and Android, mobile-tiny benchmark tournament, Apple/EAS credentials, privacy/legal answers, and TestFlight.
 
 ## GREEN rule
 

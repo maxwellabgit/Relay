@@ -5,9 +5,17 @@ import { createBrowserDemoClient } from "./createBrowserDemoClient";
 import { createDesktopClient } from "./createDesktopClient";
 import { createMobileClient } from "./createMobileClient";
 
+export type AppSecretControl = {
+  status(): Promise<"present" | "disabled" | "unknown">;
+  set(value: string): Promise<void>;
+  delete(): Promise<void>;
+};
+
 export type AppClientHandle = {
   readonly client: RelayClient;
   readonly engine: RelayEngine;
+  readonly secrets: AppSecretControl;
+  onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 };

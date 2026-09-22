@@ -159,6 +159,8 @@ export async function inspectRuntime(
       receiptId: event.receiptId ?? null,
       reflexId: event.reflexId ?? null,
       result: event.status,
+      toolId: event.toolId ?? null,
+      queueDepth: event.queueDepth ?? null,
     })),
     memories: memories.map((memory) => ({
       kind: memory.kind,

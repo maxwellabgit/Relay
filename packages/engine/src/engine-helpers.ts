@@ -49,6 +49,8 @@ const STAGE_FOR: Record<string, RuntimeEventV2["stage"]> = {
   "candidate.rejected": "proposal.create",
   "review.created": "review.evaluate",
   "work.failed": "work",
+  "tool.routed": "tool.execute",
+  "tool.completed": "tool.execute",
 };
 
 export type TraceEmitInput = {
@@ -63,6 +65,7 @@ export type TraceEmitInput = {
   durationMs?: number;
   attempt?: number;
   selectedOutcome?: string;
+  toolId?: string;
 };
 
 /** Engine-facing trace API backed by RuntimeRecorder. */
@@ -93,6 +96,7 @@ export class EngineTrace {
       ...(partial.reasonCode ? { reasonCode: knownReason(partial.reasonCode) } : {}),
       ...(partial.durationMs != null ? { durationMs: partial.durationMs } : {}),
       ...(partial.attempt != null ? { attempt: partial.attempt } : {}),
+      ...(partial.toolId ? { toolId: partial.toolId } : {}),
       queueDepth: await this.store.countWorkItems(),
     });
   }

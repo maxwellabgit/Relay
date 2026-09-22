@@ -1,6 +1,15 @@
 import type { ActionCard, FeedItemSnapshot, RelaySnapshot, StatusChipState } from "@relay/contracts";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   AmbientRecommendationCard,
   type AmbientFeedback,
@@ -26,6 +35,8 @@ type Props = {
   readonly onDeleteTypeSafeKey?: () => Promise<void>;
   readonly onSetHostedProcessing?: (enabled: boolean) => void;
   readonly onRefreshHealth?: () => void;
+  readonly busy?: boolean;
+  readonly notice?: string | null;
   readonly onApproveCandidate?: (candidateId: string) => void;
   readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
@@ -48,6 +59,8 @@ export function PhoneShell({
   onDeleteTypeSafeKey,
   onSetHostedProcessing,
   onRefreshHealth,
+  busy = false,
+  notice = null,
   onApproveCandidate,
   onActivateReflex,
   onPauseReflex,
@@ -58,8 +71,9 @@ export function PhoneShell({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
-  const threadRef = useRef<ScrollView>(null);
+  const threadRef = useRef<FlatList<FeedItemSnapshot>>(null);
   const reducedMotion = usePrefersReducedMotion();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!snapshot.listening) {
@@ -89,8 +103,23 @@ export function PhoneShell({
         ? `Working · ${snapshot.queueDepth} queued`
         : null;
 
+  const working =
+    busy ||
+    snapshot.queueDepth > 0 ||
+    snapshot.cases.some((item) => item.status === "active" || item.status === "waiting");
+
   const screen = (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={showBezel ? 0 : insets.top}
+    >
+    <View
+      style={[
+        styles.screen,
+        showBezel ? null : { paddingTop: insets.top, paddingBottom: insets.bottom },
+      ]}
+    >
       <View style={styles.header}>
         <View style={styles.brandRow}>
           <Text style={styles.brand} accessibilityRole="header">
@@ -165,20 +194,20 @@ export function PhoneShell({
         ) : null}
       </View>
 
-      <ScrollView
+      <FlatList
         ref={threadRef}
+        data={snapshot.feedItems}
+        keyExtractor={(item) => item.itemId}
+        renderItem={({ item }) => <Bubble item={item} />}
         style={styles.thread}
         contentContainerStyle={styles.threadContent}
+        ListEmptyComponent={
+          <Text style={styles.empty}>Ask RELAY anything. Listening stays quiet until something useful appears.</Text>
+        }
         onContentSizeChange={() => {
           threadRef.current?.scrollToEnd({ animated: !reducedMotion });
         }}
-      >
-        {snapshot.feedItems.length === 0 ? (
-          <Text style={styles.empty}>Ask RELAY anything. Listening stays quiet until something useful appears.</Text>
-        ) : (
-          snapshot.feedItems.map((item) => <Bubble key={item.itemId} item={item} />)
-        )}
-      </ScrollView>
+      />
 
       {ambientActions.length > 0 ? (
         <View style={styles.ambientStack}>
@@ -210,10 +239,17 @@ export function PhoneShell({
         </View>
       ) : null}
 
+      {notice ? (
+        <Text style={styles.notice} accessibilityLiveRegion="polite">
+          {notice}
+        </Text>
+      ) : null}
+
       <Composer
         onSubmit={onSubmit}
         listening={snapshot.listening}
         waitingLabel={waitingLabel}
+        busy={working}
         {...(onCancelActive ? { onCancel: onCancelActive } : {})}
       />
 
@@ -243,6 +279,7 @@ export function PhoneShell({
         {...(onRollbackReflex ? { onRollbackReflex } : {})}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 
   if (!showBezel) {
@@ -440,6 +477,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.sm,
     paddingBottom: space.xs,
     gap: space.xs,
+  },
+  notice: {
+    color: colors.danger,
+    fontSize: typeScale.xs,
+    paddingHorizontal: space.md,
+    paddingBottom: space.xs,
   },
   empty: {
     color: colors.textMuted,

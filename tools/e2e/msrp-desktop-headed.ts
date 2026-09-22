@@ -65,8 +65,6 @@ async function main(): Promise<void> {
     evidence.screenshotAsk = join(evidenceDir, "01-composer-ready.png");
     await page.screenshot({ path: evidence.screenshotAsk, fullPage: true });
 
-    // WebView2 + RN Web controlled TextInput does not reliably accept CDP keystrokes into
-    // React state. Drive the production onSubmit callback wired above the composer testID.
     const submitted = await submitAskThroughComposer(page, ASK);
     if (!submitted.ok) {
       throw new Error(`composer submit failed: ${submitted.reason}`);
@@ -353,45 +351,41 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 }
 
 /**
- * Invoke the production Ask submit path bound to the composer testID tree.
- * CDP keystrokes do not reliably update RN Web controlled TextInput React state.
+ * Type into the composer and press Send.
+ * Uses the DOM value setter plus an input event so the controlled field updates,
+ * then clicks the Send control. Does not walk React internals.
  */
 async function submitAskThroughComposer(
   page: Page,
   text: string,
 ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
-  return page.evaluate((value) => {
-    const input = document.querySelector('[data-testid="relay-composer-input"]');
-    if (!input) return { ok: false as const, reason: "composer input missing" };
-
-    type Fiber = {
-      memoizedProps?: Record<string, unknown>;
-      return?: Fiber | null;
-    };
-
-    const fiberKey = Object.keys(input).find((key) => key.startsWith("__reactFiber$"));
-    if (!fiberKey) return { ok: false as const, reason: "react fiber missing on composer input" };
-
-    let fiber = (input as unknown as Record<string, Fiber>)[fiberKey] ?? null;
-    let onSubmit: ((next: string) => void) | null = null;
-    let path = "none";
-    for (let depth = 0; depth < 24 && fiber; depth += 1) {
-      const props = fiber.memoizedProps ?? {};
-      if (typeof props.onSubmit === "function") {
-        onSubmit = props.onSubmit as (next: string) => void;
-        path = Object.keys(props).includes("snapshot")
-          ? "workbench_or_shell_onSubmit"
-          : "composer_onSubmit";
-        if (Object.keys(props).includes("snapshot")) {
-          break;
-        }
-      }
-      fiber = fiber.return ?? null;
+  const input = page.locator('[data-testid="relay-composer-input"]');
+  if ((await input.count()) === 0) return { ok: false, reason: "composer input missing" };
+  const typed = await page.evaluate((value) => {
+    const root = document.querySelector('[data-testid="relay-composer-input"]');
+    const node =
+      root instanceof HTMLInputElement || root instanceof HTMLTextAreaElement
+        ? root
+        : (root?.querySelector("textarea, input") ?? null);
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return { ok: false as const, reason: "composer input missing" };
     }
-    if (!onSubmit) return { ok: false as const, reason: "production onSubmit handler not found" };
-    onSubmit(value);
-    return { ok: true as const, path };
+    const prototype = Object.getPrototypeOf(node) as {
+      value?: { set?: (v: string) => void };
+    } | null;
+    const setter = prototype ? Object.getOwnPropertyDescriptor(prototype, "value")?.set : undefined;
+    if (!setter) return { ok: false as const, reason: "composer value setter missing" };
+    setter.call(node, value);
+    node.dispatchEvent(
+      new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }),
+    );
+    return { ok: true as const };
   }, text);
+  if (!typed.ok) return typed;
+  const send = page.locator('[data-testid="relay-composer-send"]');
+  if ((await send.count()) === 0) return { ok: false, reason: "composer send missing" };
+  await send.click();
+  return { ok: true, path: "composer_input_event" };
 }
 
 function sleep(ms: number): Promise<void> {

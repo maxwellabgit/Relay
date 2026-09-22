@@ -30,17 +30,46 @@ function readLatest(): DiagnosticLatestPointer {
   return JSON.parse(readFileSync(pointer, "utf8")) as DiagnosticLatestPointer;
 }
 
+function readSummary(latest: DiagnosticLatestPointer): DiagnosticLiveSummary | null {
+  const summaryPath = join(latest.runDir, "live-summary.json");
+  if (!existsSync(summaryPath)) return null;
+  return JSON.parse(readFileSync(summaryPath, "utf8")) as DiagnosticLiveSummary;
+}
+
+function explainLines(
+  latest: DiagnosticLatestPointer,
+  summary: DiagnosticLiveSummary | null,
+): string[] {
+  if (!summary) {
+    return [`run ${latest.runId}`, "live summary missing", "private prose omitted"];
+  }
+  const tool = summary.latestTool.observed
+    ? `tool ${summary.latestTool.toolId ?? "unknown"} result ${summary.latestTool.result ?? "unknown"}`
+    : "no tool observed";
+  return [
+    `run ${latest.runId} mode ${latest.mode} profile ${latest.profile}`,
+    `case ${summary.latestCase.caseId ?? "none"} stage ${summary.latestCase.stage ?? "none"} blocker ${summary.latestCase.blocker ?? "none"}`,
+    `queue ready ${summary.queue.ready} oldest ${summary.queue.oldestReadyMs}ms dead ${summary.deadLetters}`,
+    tool,
+    summary.retrySchedule ? `retry ${summary.retrySchedule}` : "no retry scheduled",
+    `judgment ${summary.latestJudgment.observed ? (summary.latestJudgment.policyResult ?? "observed") : "not observed"}`,
+    "private prose omitted",
+  ];
+}
+
 function diagnoseLatest(): void {
   const latest = readLatest();
-  const summaryPath = join(latest.runDir, "live-summary.json");
-  const summary = existsSync(summaryPath)
-    ? (JSON.parse(readFileSync(summaryPath, "utf8")) as DiagnosticLiveSummary)
-    : null;
+  const summary = readSummary(latest);
+  if (args.includes("--explain")) {
+    console.log(explainLines(latest, summary).join("\n"));
+    return;
+  }
   console.log(
     JSON.stringify(
       {
         latest,
         liveSummary: summary,
+        explain: explainLines(latest, summary),
         eventsPath: join(latest.runDir, "events.jsonl"),
         heartbeatPath: join(latest.runDir, "heartbeat.json"),
       },
@@ -48,6 +77,37 @@ function diagnoseLatest(): void {
       2,
     ),
   );
+}
+
+function exportRedacted(): void {
+  const latest = readLatest();
+  const summary = readSummary(latest);
+  const outDir = join(latest.runDir, "export");
+  mkdirSync(outDir, { recursive: true });
+  const out = join(outDir, "redacted-summary.json");
+  writeFileSync(
+    out,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        redacted: true,
+        proseIncluded: false,
+        latest: {
+          runId: latest.runId,
+          mode: latest.mode,
+          commit: latest.commit,
+          profile: latest.profile,
+          cleanShutdown: latest.cleanShutdown,
+        },
+        liveSummary: summary,
+        explain: explainLines(latest, summary),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  console.log(JSON.stringify({ ok: true, path: out, proseIncluded: false }, null, 2));
 }
 
 function diagnoseCase(): void {
@@ -175,6 +235,10 @@ async function main(): Promise<void> {
     case "latest":
       diagnoseLatest();
       return;
+    case "diagnose:export":
+    case "export":
+      exportRedacted();
+      return;
     case "diagnose:case":
     case "case":
       diagnoseCase();
@@ -192,7 +256,8 @@ async function main(): Promise<void> {
       return;
     default:
       console.log(`Usage:
-  npm run diagnose:latest
+  npm run diagnose:latest [--explain]
+  npm run diagnose:export
   npm run diagnose:case -- --case <caseId>
   npm run logs:follow
   npm run e2e:last

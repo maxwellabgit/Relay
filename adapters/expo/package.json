@@ -15,6 +15,8 @@
     "@relay/contracts": "0.1.0",
     "@relay/engine": "0.1.0",
     "@relay/sqlite-core": "0.1.0",
+    "expo-file-system": "~57.0.7",
+    "expo-secure-store": "~57.0.0",
     "expo-sqlite": "~57.0.3"
   },
   "devDependencies": {

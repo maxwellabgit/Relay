@@ -46,6 +46,7 @@
     "replay:last": "tsx tools/replay/src/cli.ts replay:last",
     "eval:thresholds": "tsx tools/replay/src/cli.ts eval:thresholds",
     "diagnose:latest": "tsx tools/diagnose/cli.ts diagnose:latest",
+    "diagnose:export": "tsx tools/diagnose/cli.ts diagnose:export",
     "diagnose:case": "tsx tools/diagnose/cli.ts diagnose:case",
     "logs:follow": "tsx tools/diagnose/cli.ts logs:follow",
     "e2e:last": "tsx tools/diagnose/cli.ts e2e:last",

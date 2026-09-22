@@ -295,6 +295,8 @@ export type TraceRow = {
   readonly receiptId: string | null;
   readonly reflexId: string | null;
   readonly result: string | null;
+  readonly toolId: string | null;
+  readonly queueDepth: number | null;
 };
 
 export type ActionCard = {

@@ -13,6 +13,7 @@ export const RUNTIME_STAGES = [
   "episode.complete",
   "pattern.update",
   "review.evaluate",
+  "tool.execute",
   "run",
   "session",
   "work",
@@ -48,6 +49,8 @@ const EVENT_TYPES = new Set([
   "outcome.recorded",
   "work.failed",
   "compaction.completed",
+  "tool.routed",
+  "tool.completed",
 ]);
 
 const REASON_CODES = new Set([
@@ -134,6 +137,7 @@ const ID_FIELDS = [
   "decisionId",
   "captureSessionId",
   "workSessionId",
+  "toolId",
 ] as const;
 
 export type RuntimeEventV2 = {
@@ -158,6 +162,7 @@ export type RuntimeEventV2 = {
   readonly durationMs?: number;
   readonly attempt?: number;
   readonly queueDepth?: number;
+  readonly toolId?: string;
 };
 
 const ALLOWED = new Set([
@@ -182,6 +187,7 @@ const ALLOWED = new Set([
   "durationMs",
   "attempt",
   "queueDepth",
+  "toolId",
 ]);
 
 export function isRuntimeEvent(value: unknown): value is RuntimeEventV2 {
@@ -223,6 +229,12 @@ function isSafeId(value: string): boolean {
 
 function isCount(value: unknown): boolean {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** Structural tool id safe for trace events. Strips version suffixes and prose. */
+export function structuralToolId(toolId: string): string | null {
+  const stripped = toolId.toLowerCase().replace(/@\d+$/, "").replace(/[^a-z0-9._-]/g, "");
+  return isSafeId(stripped) ? stripped : null;
 }
 
 export function knownReason(code: string): string {

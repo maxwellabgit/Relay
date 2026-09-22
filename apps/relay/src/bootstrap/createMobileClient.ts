@@ -4,6 +4,12 @@ import type { RelayEngine } from "@relay/engine";
 export type MobileClientHandle = {
   readonly client: RelayClient;
   readonly engine: RelayEngine;
+  readonly secrets: {
+    status(): Promise<"present" | "disabled" | "unknown">;
+    set(value: string): Promise<void>;
+    delete(): Promise<void>;
+  };
+  onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 };

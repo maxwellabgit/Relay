@@ -16,7 +16,8 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@relay/contracts": "0.1.0"
+    "@relay/contracts": "0.1.0",
+    "react-native-safe-area-context": "^5.6.2"
   },
   "peerDependencies": {
     "react": "*",
