@@ -66,7 +66,7 @@ Inspection at 22:19 local on 2026-09-22: `HEAD` is `c6514fa6978ba0da8e73a13db1be
 | 6 Halo adapter | Policy tests PASS. Shipping feature disabled | Official emulator NOT_RUN. Physical Halo DEVICE_BLOCKED. Do not claim hardware. |
 | 7 Headed journeys | Journey 01 PASS. Typed note, fact, next action, model-unavailable, and relaunch PASS on the packaged app. Helpful chat NOT_RUN. Acronym choice HUMAN_BLOCKED | `npm run test:e2e:desktop` evidence under `artifacts/e2e/`. Journeys 03, 04, 06, 08, 10, 11, and 12 are still not headed product PASS. |
 | 8 UI polish | NOT_RUN | No screenshot matrix. |
-| 9 Cleanup, CI, release automation | CI manifest includes Android export, secret scan, and NSIS smoke. `verify:v1` was not rerun on `d679848` | Branch protection was not changed. |
+| 9 Cleanup, CI, release automation | `npm run verify:v1` PASS on `7f0fc475dbda3f27773789d1fb32e4aa393ff513` at 23:02 local, exit 0, 230881 ms | GitHub Actions did not run because nothing was pushed. Branch protection was not changed. |
 | 10 Live canary and rehearsals | HUMAN_BLOCKED | |
 | 11 TestFlight | HUMAN_BLOCKED | `REPLACE_WITH_*` remains in `eas.json`. No authentication or submission. |
 
@@ -101,6 +101,7 @@ Follow-up on the uncommitted tree at 22:26 local, parent `c6514fa6978ba0da8e73a1
 | `npm run verify:secrets` | 22:43 | 0 | PASS | no pem, AWS, or sk- hits in source |
 | `npm run verify:eas-ids` | 22:43 | 1 | HUMAN_BLOCKED | placeholder EAS project id and `REPLACE_WITH_*` Apple submit fields |
 | `npx vitest run --project unit --project integration --project replay --project architecture --project privacy --reporter=dot` | 22:45 | 0 | PASS, 292 tests, 74 files | tree committed immediately afterward as `6e14487` |
+| `npm run verify:v1` | 22:58–23:02 | 0 | PASS, 20 steps, 230881 ms | SHA `7f0fc475dbda3f27773789d1fb32e4aa393ff513`. Summary `.dev-data/verify/latest-summary.json` |
 
 The queued clarification prompt now stores an artifact reference. `JudgmentService` loads the labels from that artifact. Inline `optionIds` still work for crash-recovery fixtures that already wrote a prompt. This fix is not committed. The combined unit/integration/replay/architecture/privacy command was not re-run, so that earlier FAIL row stays a historical result and is not rewritten as PASS.
 
@@ -136,7 +137,7 @@ NOT_RUN:
 - Cross-version Windows upgrade and a signed installer.
 - Helpful local chat on a running local model. The packaged app showed the unavailable answer.
 - Headed journeys 03, 04, 06, 08, 10, 11, and 12.
-- Full `npm run verify:v1` on the current SHA.
+- GitHub Actions execution of `check` / `verify:v1`. The same command passed locally on `7f0fc47`.
 - Official Halo emulator and physical Halo.
 - On-device model tournament and speech.
 - EAS project id, Apple id, ASC app id, and team id. `npm run verify:eas-ids` lists them. Do not invent values.
@@ -160,7 +161,7 @@ That command is not authorized.
 
 ## Next action
 
-Run `npm run verify:v1` on the current SHA and record its exit. Do not push. Do not run `eas build`. Do not enable Halo shipping.
+`npm run verify:v1` passed on `7f0fc475dbda3f27773789d1fb32e4aa393ff513`. Next independent work is the headed journeys that still have no packaged harness (03, 04, 06, 08, 10, 11, 12) and the official Halo emulator, which stays disabled until that integration is real. Do not push. Do not run `eas build`.
 
 ## Branch protection to require later
 
