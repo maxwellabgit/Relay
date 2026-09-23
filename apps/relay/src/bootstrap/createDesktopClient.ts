@@ -400,7 +400,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
           return "unknown";
         }
       },
-      async set(_value: string) {
+      async set(value: string) {
+        void value;
         throw new Error("secret_bridge_rejected");
       },
       async import() {

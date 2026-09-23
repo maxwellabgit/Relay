@@ -16,6 +16,7 @@ import type {
   CandidateRecord,
   EngineStore,
   EpisodeRecord,
+  HostedJudgmentGrant,
   LearningStore,
   MemoryKind,
   MemoryRecord,
@@ -274,7 +275,7 @@ export class TauriEngineStore implements EngineStore {
     return (await this.call({ op: "is_ambient_suppressed", key })) === true;
   }
 
-  saveHostedGrant(grant: import("@relay/engine").HostedJudgmentGrant, at: string): Promise<void> {
+  saveHostedGrant(grant: HostedJudgmentGrant, at: string): Promise<void> {
     return this.voidOp({ op: "save_hosted_grant", grant, at });
   }
 
@@ -283,12 +284,12 @@ export class TauriEngineStore implements EngineStore {
   }
 
   async findHostedGrant(grantId: string) {
-    return (await this.call({ op: "find_hosted_grant", grantId })) as import("@relay/engine").HostedJudgmentGrant | null;
+    return (await this.call({ op: "find_hosted_grant", grantId })) as HostedJudgmentGrant | null;
   }
 
   async readHostedGrant(scope: { kind: "session" | "project"; id: string }) {
     return (await this.call({ op: "read_hosted_grant", scope })) as {
-      grant: import("@relay/engine").HostedJudgmentGrant | null;
+      grant: HostedJudgmentGrant | null;
       requestsUsed: number;
       bytesUsed: number;
     };

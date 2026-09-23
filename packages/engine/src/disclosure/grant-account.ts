@@ -44,8 +44,9 @@ export class InMemoryGrantAccount implements GrantAccount {
   private readonly holds = new Map<string, Hold>();
   private chain: Promise<unknown> = Promise.resolve();
 
-  save(grant: HostedJudgmentGrant, _at: string): Promise<void> {
+  save(grant: HostedJudgmentGrant, at: string): Promise<void> {
     return this.exclusive(() => {
+      void at;
       const current = this.grants.get(grant.grantId);
       const revokedAt = current?.revokedAt ?? grant.revokedAt;
       this.grants.set(grant.grantId, {
