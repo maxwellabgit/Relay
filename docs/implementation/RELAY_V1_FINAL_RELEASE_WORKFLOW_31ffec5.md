@@ -67,7 +67,7 @@ Inspection at 22:19 local on 2026-09-22: `HEAD` is `c6514fa6978ba0da8e73a13db1be
 | 7 Headed journeys | COMPLETE for the packaged paths this machine can run. BLOCKED_EXTERNAL for the rest | PASS: glossary, note, fact, next action, hosted off with no key, model-unavailable message, relaunch. NOT_RUN: helpful chat, public search, ambient dismiss, claim check, pattern, shadow. HUMAN_BLOCKED: live acronym choice. DEVICE_BLOCKED: microphone transcript. |
 | 8 UI polish | COMPLETE for the captured desktop states | Screenshots in the latest `artifacts/e2e/` run: empty composer, settings, listen, relaunch. No separate mobile screenshot matrix. |
 | 9 Cleanup, CI, release automation | `npm run verify:v1` PASS on `7f0fc475dbda3f27773789d1fb32e4aa393ff513` at 23:02 local, exit 0, 230881 ms | GitHub Actions did not run because nothing was pushed. Branch protection was not changed. |
-| 10 Live canary and rehearsals | BLOCKED_EXTERNAL | Refusal with no key is covered by unit tests and by the headed settings screen. A paid live call was not made. |
+| 10 Live canary and rehearsals | PASS for one noul, one choice, and one score call after native import | Staging file deleted after import. Results in `.dev-data/canary/result.json`. No key is stored in that file. Devices and TestFlight stay blocked. |
 | 11 TestFlight | BLOCKED_EXTERNAL | `npm run verify:eas-ids` exits 1. Bundle id `app.relay.assistant` is present. Project id and Apple submit fields are placeholders. No `eas build`. |
 
 ## Commands and results
@@ -121,8 +121,7 @@ The queued clarification prompt now stores an artifact reference. `JudgmentServi
 
 HUMAN_BLOCKED:
 
-- Create `%LOCALAPPDATA%\Temp\relay-jev-key.txt` with one key line. Do not paste the key into Cursor.
-- Import it through the native RELAY UI, confirm the plaintext file was deleted, and run the live canary.
+- The staging file was imported natively and deleted. The live noul, choice, and score calls returned HTTP 200. Do not paste the key into Cursor.
 - Apple Developer membership, App Store Connect app, Expo account, 2FA, signing, and TestFlight submission authorization.
 
 DEVICE_BLOCKED:

@@ -328,6 +328,23 @@ mod tests {
     }
 
     #[test]
+    fn import_real_staging_file_when_env_set() {
+        let Ok(path) = std::env::var("RELAY_KEY_STAGING_FILE") else {
+            return;
+        };
+        if path.is_empty() {
+            return;
+        }
+        let staging = std::path::PathBuf::from(&path);
+        import_staging_file(&staging).expect("import");
+        assert!(
+            !staging.exists(),
+            "staging file should be deleted after import"
+        );
+        assert_eq!(secret_status(), "present");
+    }
+
+    #[test]
     fn import_replaces_rereads_and_deletes_staging_file() {
         with_temp_localappdata("secret-import", |dir| {
             let staging = write_staging(dir, "relay-jev-key.txt", "test-key-value-aaaa\n");

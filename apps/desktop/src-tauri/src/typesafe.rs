@@ -123,6 +123,94 @@ fn post_once(
     }
 }
 
+#[cfg(test)]
+mod live_canary {
+    use super::typesafe_judge;
+    use super::TypesafeJudgeRequest;
+
+    #[test]
+    fn minimum_kinds_when_requested() {
+        if std::env::var("RELAY_LIVE_CANARY").ok().as_deref() != Some("1") {
+            return;
+        }
+        let cases = [
+            (
+                "noul",
+                serde_json::json!({
+                    "model": "jev-latest",
+                    "state": { "purpose": "connectivity" },
+                    "questions": {
+                        "useful": { "type": "noul", "instructions": "Is this a connectivity check?" }
+                    }
+                }),
+            ),
+            (
+                "choice",
+                serde_json::json!({
+                    "model": "jev-latest",
+                    "state": { "purpose": "connectivity" },
+                    "questions": {
+                        "pick": {
+                            "type": "choice",
+                            "instructions": "Pick one.",
+                            "criteria": { "yes": "Yes", "no": "No" }
+                        }
+                    }
+                }),
+            ),
+            (
+                "score",
+                serde_json::json!({
+                    "model": "jev-latest",
+                    "state": { "purpose": "connectivity" },
+                    "questions": {
+                        "rank": {
+                            "type": "score",
+                            "instructions": "Score clarity from 0 to 1.",
+                            "criteria": ["clarity"]
+                        }
+                    }
+                }),
+            ),
+        ];
+        let mut rows = Vec::new();
+        for (kind, body) in cases {
+            let result = typesafe_judge(TypesafeJudgeRequest {
+                model: "jev-latest".into(),
+                body,
+            });
+            let answer = result
+                .body
+                .as_ref()
+                .and_then(|value| value.get("answers"))
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            rows.push(serde_json::json!({
+                "kind": kind,
+                "ok": result.ok,
+                "status": result.status,
+                "category": result.category,
+                "latencyMs": result.latency_ms,
+                "requestId": result.request_id,
+                "answer": answer,
+            }));
+            assert!(
+                result.ok,
+                "{kind} canary failed status={} category={}",
+                result.status, result.category
+            );
+        }
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.dev-data/canary");
+        std::fs::create_dir_all(&dir).expect("canary dir");
+        std::fs::write(
+            dir.join("result.json"),
+            format!("{}\n", serde_json::json!(rows)),
+        )
+        .expect("canary result");
+    }
+}
+
 #[tauri::command]
 pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
     let _ = &request.model;
