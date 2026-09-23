@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedSessionPolicy, localOnlyPolicy } from "@relay/contracts";
-import { MemoryArtifactStore } from "@relay/testkit";
+import { MemoryArtifactStore, recordedHarnessGrant } from "@relay/testkit";
 import {
   createTypeSafeJudgmentPort,
   parseTypeSafeBody,
@@ -9,7 +9,6 @@ import { InMemoryGrantAccount } from "./grant-account.js";
 import {
   evaluateHostedDisclosure,
   hashText,
-  recordedHarnessGrant,
   resolveSealedSource,
 } from "./hosted-grant.js";
 

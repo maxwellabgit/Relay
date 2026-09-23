@@ -1,16 +1,23 @@
-"""Halo NDJSON bridge for RELAY glasses display.
+"""Halo display policy for RELAY.
 
-Reads versioned NDJSON from stdin and writes versioned NDJSON to stdout.
-Uses EmulatorBrilliantMsg when --emulator is set; hardware BrilliantMsg later.
+Frames are clipped, deduplicated, and limited to glanceable kinds.
+The official Brilliant transport is used only when brilliant-msg and
+halo-emulator both import. Otherwise the shipping feature stays disabled.
+This module does not emulate hardware.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from dataclasses import dataclass, field
 from typing import Any
+
+ALLOWED_KINDS = frozenset({"status", "finding", "conflict", "ack"})
+MAX_QUEUE = 4
+MAX_BODY = 180
 
 
 @dataclass
@@ -23,11 +30,8 @@ class FrameBuffer:
     frames: list[dict[str, Any]] = field(default_factory=list)
 
     def show(self, frame: dict[str, Any]) -> None:
-        title = str(frame.get("title") or "")
-        body = str(frame.get("body") or "")
-        # TxPlainText-style truncation for 256x256 plain text.
-        title = title[:40]
-        body = wrap_plain_text(body, width=32, max_lines=6)
+        title = str(frame.get("title") or "")[:40]
+        body = wrap_plain_text(str(frame.get("body") or ""), width=32, max_lines=6)
         self.last_title = title
         self.last_body = body
         self.cleared = False
@@ -73,62 +77,103 @@ def wrap_plain_text(text: str, width: int = 32, max_lines: int = 6) -> str:
     return result
 
 
-class EmulatorBrilliantMsg:
-    """Firmware-faithful adapter shim compatible with Halo emulator surface."""
+def official_transport_available() -> bool:
+    return importlib.util.find_spec("brilliant_msg") is not None and importlib.util.find_spec("halo_emulator") is not None
 
-    def __init__(self) -> None:
+
+class HaloDisplay:
+    """One policy adapter. Transport stays disabled until the official SDK imports."""
+
+    def __init__(self, transport: str | None = None) -> None:
         self.fb = FrameBuffer()
-        self.connected = True
-        self.buttons: list[str] = []
+        self.state = "disconnected"
+        self.queue: list[tuple[str, str, str]] = []
+        self.last_signature: tuple[str, str, str] | None = None
+        self.acks: list[str] = []
+        self.transport = transport if transport is not None else (
+            "official" if official_transport_available() else "disabled"
+        )
 
-    def tx_plain_text(self, title: str, body: str) -> None:
-        self.fb.show({"kind": "finding", "title": title, "body": body})
+    def show(self, frame: dict[str, Any]) -> dict[str, Any]:
+        if self.transport == "disabled":
+            return {"ok": False, "reason": "halo_disabled", "state": self.state}
+        kind = str(frame.get("kind") or "")
+        if kind not in ALLOWED_KINDS:
+            return {"ok": False, "reason": "kind_rejected", "state": self.state}
+        body = str(frame.get("body") or "")
+        if len(body) > MAX_BODY:
+            return {"ok": False, "reason": "unbounded", "state": self.state}
+        title = str(frame.get("title") or "")
+        signature = (kind, title, body)
+        if signature == self.last_signature:
+            return {"ok": True, "suppressed": True, "state": self.state}
+        if len(self.queue) >= MAX_QUEUE:
+            return {"ok": False, "reason": "backpressure", "state": self.state}
+        self.queue.append(signature)
+        self.last_signature = signature
+        self.fb.show({"kind": kind, "title": title, "body": body})
+        return {"ok": True, "state": self.state, "snapshot": self.fb.snapshot()}
 
-    def clear(self) -> None:
+    def clear(self) -> dict[str, Any]:
+        self.queue.clear()
+        self.last_signature = None
         self.fb.clear()
+        return {"ok": True, "state": self.state, "snapshot": self.fb.snapshot()}
 
-    def inject_button(self, name: str) -> None:
-        self.buttons.append(name)
+    def acknowledge(self, name: str) -> dict[str, Any]:
+        self.acks.append(name)
+        if self.queue:
+            self.queue.pop(0)
+        return {"ok": True, "name": name, "state": self.state}
+
+    def set_state(self, state: str) -> dict[str, Any]:
+        allowed = {"disconnected", "scanning", "connecting", "connected", "degraded", "reconnecting"}
+        if state not in allowed:
+            return {"ok": False, "reason": "state_rejected", "state": self.state}
+        self.state = state
+        if state == "disconnected":
+            self.queue.clear()
+            self.fb.clear()
+        return {"ok": True, "state": self.state, "snapshot": self.fb.snapshot()}
 
 
-def handle_message(adapter: EmulatorBrilliantMsg, msg: dict[str, Any]) -> dict[str, Any]:
-    v = msg.get("v", 1)
-    mtype = msg.get("type")
-    if mtype == "display.show":
-        frame = msg.get("frame") or {}
-        kind = frame.get("kind", "status")
-        if kind == "clear":
-            adapter.clear()
-        else:
-            adapter.tx_plain_text(str(frame.get("title") or ""), str(frame.get("body") or ""))
-        return {"v": v, "type": "display.ack", "ok": True, "snapshot": adapter.fb.snapshot()}
-    if mtype == "display.clear":
-        adapter.clear()
-        return {"v": v, "type": "display.ack", "ok": True, "snapshot": adapter.fb.snapshot()}
-    if mtype == "button":
+def handle_message(adapter: HaloDisplay, msg: dict[str, Any]) -> dict[str, Any]:
+    version = msg.get("v", 1)
+    kind = msg.get("type")
+    if kind == "display.show":
+        result = adapter.show(msg.get("frame") or {})
+        return {"v": version, "type": "display.ack", **result}
+    if kind == "display.clear":
+        return {"v": version, "type": "display.ack", **adapter.clear()}
+    if kind == "button":
         name = str(msg.get("name") or "unknown")
-        adapter.inject_button(name)
-        return {"v": v, "type": "button.ack", "name": name}
-    if mtype == "snapshot":
-        return {"v": v, "type": "snapshot", "snapshot": adapter.fb.snapshot(), "buttons": list(adapter.buttons)}
-    if mtype == "disconnect":
-        adapter.connected = False
-        return {"v": v, "type": "connection", "connected": False}
-    if mtype == "reconnect":
-        adapter.connected = True
-        return {"v": v, "type": "connection", "connected": True}
-    return {"v": v, "type": "error", "message": f"unknown_type:{mtype}"}
+        return {"v": version, "type": "button.ack", **adapter.acknowledge(name)}
+    if kind == "connection":
+        return {"v": version, "type": "connection", **adapter.set_state(str(msg.get("state") or ""))}
+    if kind == "snapshot":
+        return {
+            "v": version,
+            "type": "snapshot",
+            "transport": adapter.transport,
+            "state": adapter.state,
+            "snapshot": adapter.fb.snapshot(),
+            "acks": list(adapter.acks),
+            "queued": len(adapter.queue),
+        }
+    return {"v": version, "type": "error", "message": f"unknown_type:{kind}"}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="relay-halo-bridge")
-    parser.add_argument("--emulator", action="store_true", default=True)
-    parser.add_argument("--interactive", action="store_true", help="pygame preview later")
+    parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
-    adapter = EmulatorBrilliantMsg()
-    if args.interactive:
-        print(json.dumps({"v": 1, "type": "info", "message": "interactive_preview_pending"}), flush=True)
-
+    adapter = HaloDisplay()
+    if args.status:
+        print(
+            json.dumps({"v": 1, "type": "status", "transport": adapter.transport, "state": adapter.state}),
+            flush=True,
+        )
+        return
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -138,8 +183,7 @@ def main() -> None:
         except json.JSONDecodeError as exc:
             print(json.dumps({"v": 1, "type": "error", "message": f"invalid_json:{exc}"}), flush=True)
             continue
-        out = handle_message(adapter, msg)
-        print(json.dumps(out), flush=True)
+        print(json.dumps(handle_message(adapter, msg)), flush=True)
 
 
 if __name__ == "__main__":

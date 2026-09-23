@@ -39,7 +39,7 @@
     "readiness:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/windows-v1-readiness.ps1",
     "readiness:dogfood": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/windows-v1-dogfood-readiness.ps1",
     "audio:prepare": "npm run prepare:audio --workspace @relay/audio-tools",
-    "halo:emulator": "python -m relay_halo.bridge --emulator",
+    "halo:emulator": "python -m relay_halo.bridge --status",
     "halo:test": "python -m pytest tools/halo/tests -q",
     "replay": "tsx tools/replay/src/cli.ts replay",
     "logs:tail": "tsx tools/replay/src/cli.ts logs:tail",

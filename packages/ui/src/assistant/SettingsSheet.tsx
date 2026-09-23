@@ -203,11 +203,7 @@ export function SettingsSheet({
               {SESSION_JEV_GRANT_DEFAULTS.maxBytes} bytes, 12 hours.
             </Text>
             {snapshot.jevDisclosure ? (
-              <Text style={styles.meta}>
-                Active {snapshot.jevDisclosure.grantId} · {snapshot.jevDisclosure.requestsUsed}/
-                {snapshot.jevDisclosure.maxRequests} requests · {snapshot.jevDisclosure.bytesUsed}/
-                {snapshot.jevDisclosure.maxBytes} bytes · until {snapshot.jevDisclosure.expiresAt}
-              </Text>
+              <Text style={styles.meta}>A session grant is on. Request counts stay in the developer console.</Text>
             ) : (
               <Text style={styles.meta}>No active session grant.</Text>
             )}

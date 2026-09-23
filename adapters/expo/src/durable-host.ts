@@ -32,7 +32,9 @@ export function createExpoSecureSecretStore(): SecretStore {
       return SecureStore.getItemAsync(secureKey(key));
     },
     async set(key, value) {
-      await SecureStore.setItemAsync(secureKey(key), value);
+      await SecureStore.setItemAsync(secureKey(key), value, {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
     },
     async delete(key) {
       await SecureStore.deleteItemAsync(secureKey(key));

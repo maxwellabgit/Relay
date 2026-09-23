@@ -61,13 +61,15 @@ export class SourceIntake {
     segment: TranscriptSegmentV1,
     isAsk: boolean,
   ): Promise<ReturnType<typeof localOnlyPolicy>> {
-    if (isAsk || segment.origin !== "microphone") return localOnlyPolicy();
-    return initialDisclosureSeal(
-      this.deps.store,
-      this.deps.clock.now().toISOString(),
-      { kind: "session", id: this.deps.sessionId },
-      "ambient_transcript",
-    );
+    const now = this.deps.clock.now().toISOString();
+    const scope = { kind: "session" as const, id: this.deps.sessionId };
+    if (segment.origin === "microphone" && !isAsk) {
+      return initialDisclosureSeal(this.deps.store, now, scope, "ambient_transcript");
+    }
+    if (isAsk || segment.origin === "typed") {
+      return initialDisclosureSeal(this.deps.store, now, scope, "conversation_excerpt");
+    }
+    return localOnlyPolicy();
   }
 
   async commitFinalSegment(

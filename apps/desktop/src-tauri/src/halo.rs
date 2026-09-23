@@ -1,4 +1,5 @@
 #[tauri::command]
 pub fn halo_status() -> String {
-    "scaffold".into()
+    // Official emulator and physical BLE are not connected in this build.
+    "disabled".into()
 }

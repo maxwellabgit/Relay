@@ -3,13 +3,13 @@ import { localOnlyPolicy, type ArtifactStorePort, type DataPolicy } from "@relay
 import { runJudgmentLifecycle } from "../judgment-lifecycle.js";
 import type { EngineStore } from "../store.js";
 import { SESSION_JEV_GRANT_DEFAULTS } from "@relay/contracts";
+import { recordedHarnessGrant } from "@relay/testkit";
 import { InMemoryGrantAccount } from "./grant-account.js";
 import {
   buildHostedJudgmentGrant,
   evaluateHostedDisclosure,
   hashText,
   HostedGrantLedger,
-  recordedHarnessGrant,
   sessionDisclosureView,
   type DisclosureSource,
   type HostedJudgmentGrant,

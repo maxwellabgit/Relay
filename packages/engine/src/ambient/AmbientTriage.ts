@@ -291,24 +291,19 @@ export class AmbientTriage {
     const noteText = card.noteText ?? card.title ?? card.label;
     const primary = card.primary ?? "save";
 
-    const noteStatus =
-      primary === "create_task"
-        ? "task"
-        : primary === "verify"
-          ? "verify_pending"
-          : primary === "review"
-            ? "reviewed"
-            : "confirmed";
-
-    const existing = await this.deps.store.learning.getMemory("note", noteKey);
-    if (primary === "save" || primary === "review" || primary === "verify" || primary === "create_task") {
+    const memoryKind = memoryKindForPrimary(primary);
+    const existing = memoryKind
+      ? await this.deps.store.learning.getMemory(memoryKind, noteKey)
+      : null;
+    if (memoryKind) {
       await this.deps.store.learning.putMemory({
         memoryId: existing?.memoryId ?? this.deps.ids.next("mem"),
-        kind: "note",
+        kind: memoryKind,
         key: noteKey,
         value: {
           text: noteText,
-          status: noteStatus,
+          status: primary === "review" ? "reviewed" : "accepted",
+          recordType: memoryKind,
           ...(card.candidateEventId ? { candidateEventId: card.candidateEventId } : {}),
         },
         source: "explicit_user",
@@ -326,13 +321,14 @@ export class AmbientTriage {
 
     const feedSummary =
       primary === "create_task"
-        ? `Task noted: ${noteText}`
+        ? `Task: ${noteText}`
         : primary === "verify"
           ? `Verify: ${noteText}`
           : primary === "review"
-            ? `Reviewed: ${noteText}`
-            : `Saved: ${noteText}`;
-    const feedKind = primary === "create_task" || primary === "review" ? "task" : "memory";
+            ? `Review: ${noteText}`
+            : `Note: ${noteText}`;
+    const feedKind =
+      primary === "create_task" ? "task" : primary === "review" ? "recommendation" : primary === "verify" ? "verification" : "note";
 
     await this.deps.outcomes.publishFeedItem({
       itemId: this.deps.ids.next("feed"),
@@ -375,19 +371,6 @@ export class AmbientTriage {
         0,
         { correlationId: created.caseId },
       );
-      await this.deps.store.learning.putMemory({
-        memoryId: existing?.memoryId ?? this.deps.ids.next("mem"),
-        kind: "note",
-        key: noteKey,
-        value: {
-          text: noteText,
-          status: "verify_pending",
-          verifyCaseId: created.caseId,
-          ...(card.candidateEventId ? { candidateEventId: card.candidateEventId } : {}),
-        },
-        source: "explicit_user",
-        createdAt: existing?.createdAt ?? at,
-      });
     }
 
     await this.deps.emitSnapshot();
@@ -612,7 +595,11 @@ export class AmbientTriage {
     const primary = primaryForRoute(decision.route);
     const title = titleForRoute(decision.route, noteText);
     const reason = reasonLine(decision.reasonCode, candidate.kind);
-    const deduped = await this.dedupeNote(candidate.subjectKey, noteText);
+    const deduped = await this.dedupeMemory(
+      memoryKindForPrimary(primary) ?? "note",
+      candidate.subjectKey,
+      noteText,
+    );
     if (deduped) {
       await this.deps.store.updateCandidateEventStatus(candidate.candidateEventId, "ignored", at);
       return {
@@ -669,12 +656,24 @@ export class AmbientTriage {
     return { candidate, route: decision, recommendationId };
   }
 
-  private async dedupeNote(subjectKey: string | null | undefined, noteText: string): Promise<boolean> {
+  private async dedupeMemory(
+    kind: "note" | "fact" | "recommendation",
+    subjectKey: string | null | undefined,
+    noteText: string,
+  ): Promise<boolean> {
     if (!subjectKey) return false;
-    const existing = await this.deps.store.learning.getMemory("note", subjectKey);
+    const existing = await this.deps.store.learning.getMemory(kind, subjectKey);
     if (!existing?.value.text) return false;
     return normalize(existing.value.text) === normalize(noteText);
   }
+}
+
+function memoryKindForPrimary(
+  primary: "save" | "verify" | "create_task" | "review",
+): "note" | "recommendation" | null {
+  if (primary === "save") return "note";
+  if (primary === "create_task" || primary === "review") return "recommendation";
+  return null;
 }
 
 /** On-device scores for a local-only observed candidate. These never leave the device. */

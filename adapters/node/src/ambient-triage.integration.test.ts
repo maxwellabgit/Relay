@@ -196,6 +196,20 @@ describe("ambient candidate triage", () => {
       expect(card?.primary).toBe("create_task");
       expect(seen.count).toBe(1);
       expect(seen.excerpts).toEqual(["I'll finish the report by Friday"]);
+      const recommendationId = card?.recommendationId;
+      const noteKey = card?.noteKey;
+      expect(recommendationId).toBeTruthy();
+      expect(noteKey).toBeTruthy();
+      const accepted = await harness.client.execute({
+        type: "AcceptAmbientRecommendation",
+        recommendationId: recommendationId ?? "",
+      });
+      expect(accepted.ok).toBe(true);
+      const recommendation = await harness.store.learning.getMemory("recommendation", noteKey ?? "");
+      const note = await harness.store.learning.getMemory("note", noteKey ?? "");
+      expect(recommendation?.kind).toBe("recommendation");
+      expect(recommendation?.value.recordType).toBe("recommendation");
+      expect(note).toBeNull();
     } finally {
       await harness.client.stop();
       harness.close();

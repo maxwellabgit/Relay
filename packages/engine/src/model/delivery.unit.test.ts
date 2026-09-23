@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_MODEL_DOWNLOAD_BYTES, UNSELECTED_MODEL_MESSAGE, deliveryActions } from "@relay/contracts";
-import { ModelDelivery, type ModelByteSource } from "./delivery.js";
+import { ModelDelivery, type ModelByteSource, type ModelChunkSink } from "./delivery.js";
 
 const text = new TextEncoder().encode("model-bytes");
 
@@ -118,5 +118,59 @@ describe("model delivery", () => {
     const cleared = delivery.cancel();
     expect(cleared.phase).toBe("available");
     expect(cleared.bytesReceived).toBe(0);
+  });
+
+  it("refuses to assemble a large model in memory when no file sink exists", async () => {
+    const calls = { count: 0 };
+    const delivery = new ModelDelivery(
+      {
+        id: "large",
+        version: "1",
+        license: "example",
+        byteSize: 33 * 1024 * 1024,
+        sha256: "b".repeat(64),
+      },
+      sourceOf(text, calls),
+    );
+    const view = await delivery.start(new AbortController().signal);
+    expect(view.phase).toBe("rejected");
+    expect(view.message).toContain("file");
+    expect(calls.count).toBe(0);
+  });
+
+  it("streams chunks to a sink and verifies that digest", async () => {
+    const chunks: Uint8Array[] = [];
+    const sink: ModelChunkSink = {
+      async append(chunk) {
+        chunks.push(chunk.slice());
+      },
+      async digest() {
+        const merged = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        return sha256(merged);
+      },
+      async reset() {
+        chunks.length = 0;
+      },
+      async commit() {
+        return undefined;
+      },
+    };
+    const pin = {
+      id: "streamed",
+      version: "1",
+      license: "example",
+      byteSize: text.byteLength,
+      sha256: await sha256(text),
+    };
+    const delivery = new ModelDelivery(pin, sourceOf(text, { count: 0 }), 4, sink);
+    const view = await delivery.start(new AbortController().signal);
+    expect(view.phase).toBe("installed");
+    expect(view.bytesReceived).toBe(text.byteLength);
+    expect(chunks.length).toBeGreaterThan(1);
   });
 });

@@ -11,6 +11,15 @@ export type ModelByteSource = {
 };
 
 const DEFAULT_CHUNK_BYTES = 262_144;
+/** Larger pins must stream to a file sink. They are never assembled in one JavaScript buffer. */
+const IN_MEMORY_BYTE_LIMIT = 32 * 1024 * 1024;
+
+export type ModelChunkSink = {
+  append(chunk: Uint8Array): Promise<void>;
+  digest(): Promise<string>;
+  reset(): Promise<void>;
+  commit(): Promise<void>;
+};
 
 /**
  * Downloads a pinned model only when a pin and a byte source exist.
@@ -19,6 +28,7 @@ const DEFAULT_CHUNK_BYTES = 262_144;
 export class ModelDelivery {
   private phase: ModelDeliveryView["phase"] = "unselected";
   private bytes = new Uint8Array(0);
+  private received = 0;
   private message = unselectedModelDelivery().message;
   private generation = 0;
   private paused = false;
@@ -27,6 +37,7 @@ export class ModelDelivery {
     private readonly pin: ModelPin | null,
     private readonly source?: ModelByteSource,
     private readonly chunkBytes = DEFAULT_CHUNK_BYTES,
+    private readonly sink?: ModelChunkSink,
   ) {
     if (pin) {
       this.phase = "available";
@@ -38,7 +49,7 @@ export class ModelDelivery {
     return {
       phase: this.phase,
       pin: this.pin,
-      bytesReceived: this.bytes.byteLength,
+      bytesReceived: this.sink ? this.received : this.bytes.byteLength,
       message: this.message,
       wifiRecommended: this.pin !== null && this.phase !== "installed" && this.phase !== "unselected",
     };
@@ -49,7 +60,15 @@ export class ModelDelivery {
     if (!pinIsDownloadable(this.pin)) {
       this.phase = "rejected";
       this.bytes = new Uint8Array(0);
+      this.received = 0;
       this.message = rejectionMessage(this.pin);
+      return this.view();
+    }
+    if (this.pin.byteSize > IN_MEMORY_BYTE_LIMIT && !this.sink) {
+      this.phase = "rejected";
+      this.bytes = new Uint8Array(0);
+      this.received = 0;
+      this.message = "This model must be written to a file. It is not loaded into memory.";
       return this.view();
     }
     if (!this.source) {
@@ -86,6 +105,8 @@ export class ModelDelivery {
     this.generation += 1;
     this.paused = true;
     this.bytes = new Uint8Array(0);
+    this.received = 0;
+    void this.sink?.reset();
     if (this.pin) {
       this.phase = "available";
       this.message = offerMessage(this.pin);
@@ -97,6 +118,8 @@ export class ModelDelivery {
     if (this.phase !== "installed") return this.view();
     this.generation += 1;
     this.bytes = new Uint8Array(0);
+    this.received = 0;
+    void this.sink?.reset();
     if (!this.pin) return unselectedModelDelivery();
     this.phase = "available";
     this.message = offerMessage(this.pin);
@@ -107,17 +130,18 @@ export class ModelDelivery {
     const pin = this.pin;
     const source = this.source;
     if (!pin || !source) return;
-    while (this.bytes.byteLength < pin.byteSize) {
+    const held = () => (this.sink ? this.received : this.bytes.byteLength);
+    while (held() < pin.byteSize) {
       if (this.generation !== generation) return;
       if (signal.aborted || this.paused) {
         this.phase = "paused";
         this.message = "Download paused.";
         return;
       }
-      const length = Math.min(this.chunkBytes, pin.byteSize - this.bytes.byteLength);
+      const length = Math.min(this.chunkBytes, pin.byteSize - held());
       let chunk: Uint8Array;
       try {
-        chunk = await source.read(this.bytes.byteLength, length, signal);
+        chunk = await source.read(held(), length, signal);
       } catch {
         if (this.generation !== generation) return;
         this.phase = "paused";
@@ -126,30 +150,45 @@ export class ModelDelivery {
       }
       if (this.generation !== generation) return;
       if (chunk.byteLength !== length) {
-        this.bytes = new Uint8Array(0);
+        await this.dropPartial();
         this.phase = "rejected";
         this.message = "The download stopped before the expected size.";
         return;
       }
-      const merged = new Uint8Array(this.bytes.byteLength + chunk.byteLength);
-      merged.set(this.bytes);
-      merged.set(chunk, this.bytes.byteLength);
-      this.bytes = merged;
+      if (this.sink) {
+        await this.sink.append(chunk);
+        this.received += chunk.byteLength;
+      } else {
+        const merged = new Uint8Array(this.bytes.byteLength + chunk.byteLength);
+        merged.set(this.bytes);
+        merged.set(chunk, this.bytes.byteLength);
+        this.bytes = merged;
+      }
     }
     if (this.generation !== generation) return;
     this.phase = "verifying";
     this.message = "Checking the download hash.";
-    const digest = await crypto.subtle.digest("SHA-256", this.bytes);
+    const actual = this.sink
+      ? await this.sink.digest()
+      : [...new Uint8Array(await crypto.subtle.digest("SHA-256", this.bytes))]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
     if (this.generation !== generation) return;
-    const actual = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
     if (actual !== pin.sha256) {
-      this.bytes = new Uint8Array(0);
+      await this.dropPartial();
       this.phase = "rejected";
       this.message = "The download hash did not match.";
       return;
     }
+    if (this.sink) await this.sink.commit();
     this.phase = "installed";
     this.message = `${pin.id} ${pin.version} verified.`;
+  }
+
+  private async dropPartial(): Promise<void> {
+    this.bytes = new Uint8Array(0);
+    this.received = 0;
+    if (this.sink) await this.sink.reset();
   }
 }
 

@@ -134,6 +134,13 @@ export function DeveloperConsole({
                     : "In progress"}
                 </Text>
               </SideCard>
+              <SideCard title="Hosted grant">
+                <Text style={styles.sideBody}>
+                  {snapshot.jevDisclosure
+                    ? `${snapshot.jevDisclosure.grantId} · ${snapshot.jevDisclosure.requestsUsed}/${snapshot.jevDisclosure.maxRequests} requests · ${snapshot.jevDisclosure.bytesUsed}/${snapshot.jevDisclosure.maxBytes} bytes`
+                    : "No active grant."}
+                </Text>
+              </SideCard>
               <GateDetails gate={snapshot.gate} />
               <JudgmentEvidence attempts={snapshot.decision?.attempts ?? []} />
             </View>

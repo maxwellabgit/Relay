@@ -254,8 +254,7 @@ async function bundleText(dir: string): Promise<string> {
   const parts: string[] = [];
   for (const file of files) {
     if (file.endsWith(".hbc")) {
-      const { stdout } = await execFileAsync("strings", [file], { maxBuffer: 32 * 1024 * 1024 });
-      parts.push(stdout);
+      parts.push((await readFile(file)).toString("latin1"));
     } else if (file.endsWith(".js") || file.endsWith(".html") || file.endsWith(".json")) {
       parts.push(await readFile(file, "utf8"));
     }
@@ -283,11 +282,22 @@ describe("production export purity", () => {
     for (const platform of ["web", "ios", "android"] as const) {
       const dir = await mkdtemp(join(tmpdir(), `relay-${platform}-`));
       try {
-        await execFileAsync(
-          "npx",
-          ["expo", "export", "--platform", platform, "--output-dir", dir],
-          { cwd: resolve(root, "apps/relay"), env, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 },
-        );
+        const expoCli = resolve(root, "node_modules/expo/bin/cli");
+        const command = existsSync(expoCli)
+          ? process.execPath
+          : process.platform === "win32"
+            ? "npx.cmd"
+            : "npx";
+        const args = existsSync(expoCli)
+          ? [expoCli, "export", "--platform", platform, "--output-dir", dir]
+          : ["expo", "export", "--platform", platform, "--output-dir", dir];
+        await execFileAsync(command, args, {
+          cwd: resolve(root, "apps/relay"),
+          env,
+          timeout: 180_000,
+          maxBuffer: 8 * 1024 * 1024,
+          shell: !existsSync(expoCli) && process.platform === "win32",
+        });
         const text = await bundleText(dir);
         const hits = BUNDLE_FORBIDDEN.filter((needle) => text.includes(needle));
         expect(hits, platform).toEqual([]);

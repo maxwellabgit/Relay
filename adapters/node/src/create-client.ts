@@ -4,12 +4,11 @@ import {
   createRelayClientFromEngine,
   grantAccountFor,
   HostedGrantLedger,
-  recordedHarnessGrant,
   RelayEngine,
   type EngineDeps,
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
-import { RecordedJudgmentPort, recordedSuccess } from "@relay/testkit";
+import { RecordedJudgmentPort, recordedHarnessGrant, recordedSuccess } from "@relay/testkit";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DecisionArtifactStore, decisionArtifactRoot } from "./decision-artifacts.js";

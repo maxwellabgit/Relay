@@ -10,7 +10,7 @@ import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { hostedSessionPolicy, isHostedEligible } from "@relay/contracts";
+import { isHostedEligible } from "@relay/contracts";
 import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import { parkHostedWait } from "./durable-wait.js";
 import { acronymProviderState } from "./acronym-state.js";
@@ -142,19 +142,23 @@ export class JudgmentService {
     const contextExcerpt = String(item.payload.contextExcerpt ?? "");
     const started = Date.now();
     const disclosureSources = [];
-    if (contextExcerpt) {
-      const sealed = await this.deps.artifacts.put(
-        new TextEncoder().encode(contextExcerpt),
-        hostedSessionPolicy(),
-      );
-      const provenance = await this.deps.artifacts.provenance(sealed.artifactId);
-      const revealing = provenance?.derivedFrom.some((row) => row.disclosure === "local_only") ?? false;
-      if (provenance && isHostedEligible(provenance.policy) && !revealing) {
+    const parentArtifactId = String(item.payload.textArtifactId ?? "");
+    const parentSha256 = String(item.payload.textSha256 ?? "");
+    if (contextExcerpt && parentArtifactId && parentSha256) {
+      const provenance = await this.deps.artifacts.provenance(parentArtifactId);
+      const revealing =
+        !provenance || provenance.derivedFrom.some((row) => row.disclosure === "local_only");
+      if (
+        provenance &&
+        provenance.sha256 === parentSha256 &&
+        isHostedEligible(provenance.policy) &&
+        !revealing
+      ) {
         disclosureSources.push({
           sourceClass: "conversation_excerpt" as const,
           field: "contextExcerpt" as const,
-          artifactId: sealed.artifactId,
-          sha256: sealed.sha256,
+          artifactId: parentArtifactId,
+          sha256: parentSha256,
         });
       }
     }

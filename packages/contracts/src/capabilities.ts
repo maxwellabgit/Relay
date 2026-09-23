@@ -187,7 +187,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Hidden. No production adapter or receipts.",
+    notes: "Wikipedia OpenSearch adapter is unit-tested and is not injected into production clients. The tool stays hidden until a public disclosure connector is granted.",
   },
   {
     id: "tool.github-read",
@@ -251,7 +251,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "degraded",
     ios: "unverified-on-device",
     android: "unverified-on-device",
-    notes: "Desktop DPAPI and mobile SecureStore code exist. Windows file import and physical SecureStore proof are open.",
+    notes: "Desktop DPAPI file import exists. Physical SecureStore proof is open.",
   },
 ]);
 

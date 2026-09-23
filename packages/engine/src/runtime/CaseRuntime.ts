@@ -115,6 +115,8 @@ export class CaseRuntime {
           explicitAsk: isAsk,
           sourceEventId,
           contextExcerpt: text.slice(0, 400),
+          textArtifactId: String(item.payload.textArtifactId ?? ""),
+          textSha256: String(item.payload.textSha256 ?? ""),
         },
         PRIORITY_DIRECT,
         this.deps.ids,
