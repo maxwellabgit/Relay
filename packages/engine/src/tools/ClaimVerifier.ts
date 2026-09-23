@@ -1,4 +1,5 @@
 import type {
+  ArtifactRef,
   ArtifactStorePort,
   ClaimSourceId,
   ClaimVerdict,
@@ -16,7 +17,7 @@ import { evaluateChoiceGate, validateChoiceDistribution } from "../policies.js";
 import type { LearningStore } from "../learning-store.js";
 import { encodeText } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
+import { artifactParentRef, loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
 import type { Clock, IdFactory } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 
@@ -55,6 +56,7 @@ export class ClaimVerifier {
     readonly caseVersion: number;
     readonly eligible: ClaimEligibleSources;
     readonly signal: AbortSignal;
+    readonly parents?: readonly ArtifactRef[];
   }): Promise<ToolResultEnvelope> {
     const claim = input.claim.trim();
     if (!claim) {
@@ -94,7 +96,14 @@ export class ClaimVerifier {
       sourceAttempts < DEFAULT_TOOL_BUDGETS.maxSourceAttempts &&
       judgmentRounds < DEFAULT_TOOL_BUDGETS.maxJudgmentRounds
     ) {
-      const source = await this.chooseSource(input.caseId, input.caseVersion, claim, pool, input.signal);
+      const source = await this.chooseSource(
+      input.caseId,
+      input.caseVersion,
+      claim,
+      pool,
+      input.parents ?? [],
+      input.signal,
+    );
       if (!source.ok) {
         if (source.blocked) {
           return envelope("denied", source.message, allCitations, allSlices, {
@@ -179,11 +188,17 @@ export class ClaimVerifier {
         continue;
       }
 
+      const judgeable = retrieved.citations.filter((citation) => citation.sourceRole !== "secondary");
+      if (judgeable.length === 0) {
+        continue;
+      }
+
       const support = await this.judgeSupport(
         input.caseId,
         input.caseVersion,
         claim,
-        retrieved.citations,
+        judgeable,
+        input.parents ?? [],
         input.signal,
       );
       judgmentRounds += 1;
@@ -238,6 +253,7 @@ export class ClaimVerifier {
     caseVersion: number,
     claim: string,
     pool: readonly ClaimSourceId[],
+    parents: readonly ArtifactRef[],
     signal: AbortSignal,
   ): Promise<
     | { ok: true; source: ClaimSourceId }
@@ -275,6 +291,7 @@ export class ClaimVerifier {
       text: claim.slice(0, 400),
       sourceClass: "claim_excerpt",
       field: "excerpts",
+      derivedFrom: parents,
     });
     const disclosure = await loadDisclosureGate(
       this.deps.store,
@@ -341,6 +358,7 @@ export class ClaimVerifier {
     caseVersion: number,
     claim: string,
     citations: readonly ToolCitation[],
+    parents: readonly ArtifactRef[],
     signal: AbortSignal,
   ): Promise<
     | { ok: true; verdict: ClaimVerdict }
@@ -351,7 +369,10 @@ export class ClaimVerifier {
       contradicted: "Evidence contradicts the claim",
       insufficient: "Evidence is insufficient to decide",
     };
-    const excerpts = citations.map((c) => c.snippet ?? c.title).slice(0, 5);
+    const excerpts = citations
+      .map((citation) => citation.snippet?.slice(0, 240) ?? "")
+      .filter((item) => item.trim().length > 0)
+      .slice(0, 5);
     const request = {
       questionSetId: CLAIM_SUPPORT_SET,
       questionSetVersion: "1",
@@ -379,22 +400,33 @@ export class ClaimVerifier {
       })),
     };
 
-    const claimSources = (
-      await Promise.all([
-        sealedDisclosureInput(this.deps.artifacts, {
-          text: claim.slice(0, 400),
-          sourceClass: "claim_excerpt",
-          field: "excerpts",
-        }),
-        ...excerpts.map((item) =>
-          sealedDisclosureInput(this.deps.artifacts, {
-            text: item.slice(0, 240),
-            sourceClass: "claim_excerpt",
-            field: "excerpts",
-          }),
-        ),
-      ])
-    ).filter((item): item is NonNullable<typeof item> => item != null);
+    const excerptSources = [];
+    for (const citation of citations.slice(0, 5)) {
+      const snippet = citation.snippet?.slice(0, 240) ?? "";
+      if (!snippet.trim()) continue;
+      const parent = await artifactParentRef(
+        this.deps.artifacts,
+        citation.sourceSlice.artifactId,
+        citation.sourceSlice.sha256,
+      );
+      if (!parent) continue;
+      const sealed = await sealedDisclosureInput(this.deps.artifacts, {
+        text: snippet,
+        sourceClass: "claim_excerpt",
+        field: "excerpts",
+        derivedFrom: [parent],
+      });
+      if (sealed) excerptSources.push(sealed);
+    }
+    const claimSource = await sealedDisclosureInput(this.deps.artifacts, {
+      text: claim.slice(0, 400),
+      sourceClass: "claim_excerpt",
+      field: "excerpts",
+      derivedFrom: parents,
+    });
+    const claimSources = [claimSource, ...excerptSources].filter(
+      (item): item is NonNullable<typeof item> => item != null,
+    );
     const disclosure = await loadDisclosureGate(
       this.deps.store,
       this.deps.artifacts,
@@ -502,6 +534,8 @@ export class ClaimVerifier {
       const citations: ToolCitation[] = [];
       const slices: SourceSliceRef[] = [];
       for (const hit of hits.slice(0, 5)) {
+        if (hit.role === "secondary" && !hit.snippet.trim()) continue;
+        if (!hit.snippet.trim()) continue;
         const body = `${hit.title}\n${hit.url}\n${hit.snippet}`;
         const bytes = encodeText(body);
         const ref = await this.deps.artifacts.put(bytes, publicPolicy());
@@ -517,6 +551,7 @@ export class ClaimVerifier {
           title: hit.title,
           url: hit.url,
           snippet: hit.snippet,
+          ...(hit.role ? { sourceRole: hit.role } : {}),
           sourceSlice: slice,
         });
       }

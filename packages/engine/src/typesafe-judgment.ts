@@ -225,6 +225,17 @@ function emptyTransport(configured: boolean, requestBytes: number): JudgmentTran
   };
 }
 
+export function attachJudgmentTransport(
+  response: JudgmentResponse,
+  report: JudgmentTransportReport,
+): JudgmentResponse {
+  return withTransport(response, report);
+}
+
+export function beginTransportReport(configured: boolean, requestBytes: number) {
+  return emptyTransport(configured, requestBytes);
+}
+
 function withTransport(
   response: JudgmentResponse,
   report: JudgmentTransportReport,

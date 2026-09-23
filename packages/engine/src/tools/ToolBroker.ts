@@ -11,7 +11,7 @@ import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { knownReason, structuralToolId } from "../runtime-events.js";
 import { draftSearchQuery } from "../model/search-query.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
+import { artifactParentRef, loadDisclosureGate, sealedDisclosureInput } from "../disclosure/hosted-grant.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { AuthorityState } from "../operations/AuthorityState.js";
 import {
@@ -255,6 +255,7 @@ export class ToolBroker {
             caseVersion: current.version,
             eligible: await this.claimEligibleSources(),
             signal: this.deps.getAbortSignal(),
+            parents: await parentRefsFromPayload(this.deps.artifacts, item.payload),
           })
         : await tool.execute(validated.value, this.deps.getAbortSignal());
     if (this.deps.getAbortSignal().aborted || result.reasonCode === "cancelled") {
@@ -488,6 +489,7 @@ export class ToolBroker {
       text: text.slice(0, 400),
       sourceClass: "conversation_excerpt",
       field: "excerpt",
+      derivedFrom: await parentRefsFromPayload(this.deps.artifacts, item.payload),
     });
     const disclosure = await loadDisclosureGate(
       this.deps.store,
@@ -667,6 +669,8 @@ export class ToolBroker {
         caseVersion,
         toolId,
         text,
+        textArtifactId: String(item.payload.textArtifactId ?? ""),
+        textSha256: String(item.payload.textSha256 ?? ""),
         toolSteps: usage.toolSteps,
         judgmentRounds: usage.judgmentRounds,
         sourceAttempts: usage.sourceAttempts,
@@ -802,3 +806,15 @@ function formatAnswer(result: ToolResultEnvelope): string {
 }
 
 export { DEFAULT_TOOL_BUDGETS };
+
+async function parentRefsFromPayload(
+  artifacts: ArtifactStorePort,
+  payload: Record<string, unknown>,
+) {
+  const parent = await artifactParentRef(
+    artifacts,
+    String(payload.textArtifactId ?? ""),
+    String(payload.textSha256 ?? ""),
+  );
+  return parent ? [parent] : [];
+}

@@ -21,10 +21,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     bundleIdentifier: "app.relay.assistant",
     infoPlist: {
-      // Foreground listening only for V1; background audio mode removed until F7 policy proof.
+      // Foreground listening only. Halo is not a V1 capability, so Bluetooth is not declared.
       NSMicrophoneUsageDescription: "RELAY listens only while you enable Listen.",
-      NSBluetoothAlwaysUsageDescription: "RELAY connects to Brilliant Halo glasses.",
-      NSBluetoothPeripheralUsageDescription: "RELAY connects to Brilliant Halo glasses.",
+      NSSpeechRecognitionUsageDescription: "RELAY transcribes speech only while Listen is on.",
     },
   },
   android: {

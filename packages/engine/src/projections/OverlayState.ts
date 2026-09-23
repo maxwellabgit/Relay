@@ -290,6 +290,8 @@ export class OverlayState {
         quiet: ref.quiet,
         noteKey: ref.noteKey,
         noteText,
+        noteArtifactId: ref.noteArtifactId,
+        noteSha256: ref.noteSha256,
       };
     }
     if (ref.kind === "replace_memory") {

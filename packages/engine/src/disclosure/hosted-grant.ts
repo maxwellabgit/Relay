@@ -3,6 +3,7 @@ import {
   isHostedEligible,
   localOnlyPolicy,
   type ArtifactProvenance,
+  type ArtifactRef,
   type ArtifactStorePort,
   type DataPolicy,
 } from "@relay/contracts";
@@ -277,16 +278,37 @@ export function grantAccountFor(store: EngineStore): GrantAccount {
   throw new Error("hosted_grant_account_missing");
 }
 
+/** Parent seal for a shortened or rewritten disclosure. Missing provenance fails closed. */
+export async function artifactParentRef(
+  artifacts: ArtifactStorePort,
+  artifactId: string,
+  sha256: string,
+): Promise<ArtifactRef | null> {
+  if (!artifactId || !sha256) return null;
+  const provenance = await artifacts.provenance(artifactId);
+  if (!provenance || provenance.sha256 !== sha256) return null;
+  return { artifactId, sha256, policy: provenance.policy };
+}
+
+/**
+ * Seal derived text only by citing parent artifacts.
+ * `put` inherits the strictest parent policy, so a local-only source cannot become hosted.
+ */
 export async function sealedDisclosureInput(
   artifacts: ArtifactStorePort,
   input: {
     readonly text: string;
     readonly sourceClass: SourceClass;
     readonly field: DisclosureSource["field"];
+    readonly derivedFrom: readonly ArtifactRef[];
   },
 ): Promise<UnresolvedDisclosureSource | null> {
-  if (!input.text.trim()) return null;
-  const ref = await artifacts.put(new TextEncoder().encode(input.text), hostedSessionPolicy());
+  if (!input.text.trim() || input.derivedFrom.length === 0) return null;
+  const ref = await artifacts.put(
+    new TextEncoder().encode(input.text),
+    hostedSessionPolicy(),
+    input.derivedFrom,
+  );
   const provenance = await artifacts.provenance(ref.artifactId);
   if (!provenance || !isHostedEligible(provenance.policy)) return null;
   if (provenance.derivedFrom.some((row) => row.disclosure === "local_only")) return null;

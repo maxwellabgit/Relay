@@ -365,6 +365,8 @@ export type ActionCard = {
   readonly quiet?: boolean;
   readonly noteKey?: string;
   readonly noteText?: string;
+  readonly noteArtifactId?: string;
+  readonly noteSha256?: string;
 };
 
 export type MemoryView = {

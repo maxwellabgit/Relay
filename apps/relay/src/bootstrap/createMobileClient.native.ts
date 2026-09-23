@@ -1,5 +1,8 @@
 import type { JudgmentPort, RelayClient, TextModelPort } from "@relay/contracts";
 import {
+  createDeviceForegroundSpeech,
+  createDeviceTextModel,
+  deviceModelStatus,
   openMobileBackend,
   type ByteFilePort,
   type MobileBackend,
@@ -45,12 +48,6 @@ export type MobileClientHandle = {
   stop(): Promise<void>;
 };
 
-const unavailableModel: TextModelPort = {
-  async generate() {
-    return { ok: false, failureReason: "model_unavailable" };
-  },
-};
-
 /**
  * Production Expo composition. Native builds open expo-sqlite.
  * Tests inject a SqlHandle-backed backend. Demo memory stores are not used.
@@ -60,11 +57,13 @@ export async function createMobileClient(
 ): Promise<MobileClientHandle> {
   const secrets = options.secrets ?? createExpoSecureSecretStore();
   const files = options.files ?? createExpoDocumentFiles();
+  const speech = createDeviceForegroundSpeech();
   const backend =
     options.backend ??
     (await openMobileBackend({
       files,
       secrets,
+      speech,
     }));
   const jev = new JevHealthTracker();
   const judgments =
@@ -82,7 +81,7 @@ export async function createMobileClient(
     store: backend.store,
     artifacts: backend.artifacts,
     judgments,
-    model: options.model ?? unavailableModel,
+    model: options.model ?? createDeviceTextModel(),
     clock: options.clock ?? { now: () => new Date() },
     ids,
     sessionId,
@@ -130,10 +129,14 @@ export async function createMobileClient(
       if (!wasListening) await engine.refreshSnapshot();
     },
     async start() {
-      const speech = await backend.speech.status();
-      const relaunch = speechOnRelaunch(speech);
-      audioStatus.ok = speech.ok;
+      const speechStatus = await backend.speech.status();
+      const relaunch = speechOnRelaunch(speechStatus);
+      audioStatus.ok = speechStatus.ok;
       audioStatus.detail = relaunch.detail;
+      const installed = await deviceModelStatus();
+      modelStatus.ok = installed.ok;
+      modelStatus.detail = installed.detail;
+      modelStatus.model = installed.model;
       const key = await secrets.get("typesafe_api_key");
       const hosted = await backend.store.getHostedProcessingEnabled().catch(() => false);
       jev.apply({ secretPresent: Boolean(key), hostedEnabled: hosted });

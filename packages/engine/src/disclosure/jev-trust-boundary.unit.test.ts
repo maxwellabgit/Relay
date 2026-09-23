@@ -10,6 +10,7 @@ import {
   evaluateHostedDisclosure,
   hashText,
   resolveSealedSource,
+  sealedDisclosureInput,
 } from "./hosted-grant.js";
 
 const now = "2026-09-22T00:00:00.000Z";
@@ -64,6 +65,41 @@ describe("Jev trust boundary", () => {
     });
     expect(source.policy.disclosure).toBe("local_only");
     expect(source.derivedFrom.some((row) => row.disclosure === "local_only")).toBe(true);
+  });
+
+  it("refuses a changed-byte derivative of local-only text without a hosted parent", async () => {
+    const store = new MemoryArtifactStore();
+    const parentText = "local-only source sentence for the claim";
+    const parent = await store.put(new TextEncoder().encode(parentText), localOnlyPolicy());
+    const derived = `${parentText.slice(0, 18)} rewritten`;
+    expect(new TextEncoder().encode(derived)).not.toEqual(new TextEncoder().encode(parentText));
+    const sealed = await sealedDisclosureInput(store, {
+      text: derived,
+      sourceClass: "claim_excerpt",
+      field: "excerpts",
+      derivedFrom: [parent],
+    });
+    expect(sealed).toBeNull();
+    const child = await store.put(new TextEncoder().encode(derived), hostedSessionPolicy(), [parent]);
+    expect(child.policy.disclosure).toBe("local_only");
+
+    const hosted = await store.put(new TextEncoder().encode("hosted parent passage"), hostedSessionPolicy());
+    const hostedChild = await sealedDisclosureInput(store, {
+      text: "hosted parent shortened",
+      sourceClass: "conversation_excerpt",
+      field: "excerpt",
+      derivedFrom: [hosted],
+    });
+    expect(hostedChild).not.toBeNull();
+    expect(hostedChild?.sha256).not.toBe(hosted.sha256);
+
+    const orphan = await sealedDisclosureInput(store, {
+      text: "orphan derived text",
+      sourceClass: "claim_excerpt",
+      field: "excerpts",
+      derivedFrom: [],
+    });
+    expect(orphan).toBeNull();
   });
 
   it("does not consume budget when the key is missing", async () => {

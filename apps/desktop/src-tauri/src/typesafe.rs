@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
+
+static CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 use crate::secrets::read_typesafe_api_key;
 
@@ -123,6 +128,7 @@ fn post_once(
     }
 }
 
+/// Connectivity evidence only. Grant, disclosure, UI, and health live in the packaged app.
 #[cfg(test)]
 mod live_canary {
     use super::typesafe_judge;
@@ -186,6 +192,7 @@ mod live_canary {
                 .map(|value| value.to_string())
                 .unwrap_or_default();
             rows.push(serde_json::json!({
+                "evidence": "connectivity",
                 "kind": kind,
                 "ok": result.ok,
                 "status": result.status,
@@ -212,9 +219,17 @@ mod live_canary {
 }
 
 #[tauri::command]
+pub fn typesafe_cancel() {
+    CANCEL_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// One native HTTP attempt. A newer cancel generation returns without waiting
+/// for the socket, so an in-flight request does not block the desktop command.
+#[tauri::command]
 pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
     let _ = &request.model;
     let started = Instant::now();
+    let generation = CANCEL_GENERATION.load(Ordering::SeqCst);
 
     let api_key = match read_typesafe_api_key() {
         Ok(value) => value,
@@ -229,34 +244,62 @@ pub fn typesafe_judge(request: TypesafeJudgeRequest) -> TypesafeJudgeResult {
         }
     };
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .build();
+    let body = request.body;
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(15))
+            .build();
+        let _ = sender.send(post_once(&agent, &api_key, &body));
+    });
 
-    match post_once(&agent, &api_key, &request.body) {
-        Ok(exchange) => TypesafeJudgeResult {
-            ok: true,
-            status: exchange.status,
-            category: "ok".to_string(),
-            latency_ms: started.elapsed().as_millis() as u64,
-            retries: 0,
-            body: exchange.body,
-            retry_after: exchange.retry_after,
-            request_id: exchange.request_id,
-        },
-        Err(exchange) => {
-            let category = if exchange.status == 0 {
-                "network"
-            } else {
-                category_for_status(exchange.status)
-            };
-            fail(
-                category,
-                exchange.status,
+    loop {
+        if CANCEL_GENERATION.load(Ordering::SeqCst) != generation {
+            return fail(
+                "cancelled",
+                0,
                 started.elapsed().as_millis() as u64,
-                exchange.retry_after,
-                exchange.request_id,
-            )
+                None,
+                None,
+            );
+        }
+        match receiver.recv_timeout(Duration::from_millis(40)) {
+            Ok(Ok(exchange)) => {
+                return TypesafeJudgeResult {
+                    ok: true,
+                    status: exchange.status,
+                    category: "ok".to_string(),
+                    latency_ms: started.elapsed().as_millis() as u64,
+                    retries: 0,
+                    body: exchange.body,
+                    retry_after: exchange.retry_after,
+                    request_id: exchange.request_id,
+                };
+            }
+            Ok(Err(exchange)) => {
+                let category = if exchange.status == 0 {
+                    "network"
+                } else {
+                    category_for_status(exchange.status)
+                };
+                return fail(
+                    category,
+                    exchange.status,
+                    started.elapsed().as_millis() as u64,
+                    exchange.retry_after,
+                    exchange.request_id,
+                );
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return fail(
+                    "network",
+                    0,
+                    started.elapsed().as_millis() as u64,
+                    None,
+                    None,
+                );
+            }
         }
     }
 }

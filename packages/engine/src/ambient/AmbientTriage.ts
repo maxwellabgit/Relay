@@ -361,6 +361,8 @@ export class AmbientTriage {
           caseId: created.caseId,
           caseVersion: waiting?.version ?? created.version,
           text: noteText,
+          textArtifactId: card.noteArtifactId ?? "",
+          textSha256: card.noteSha256 ?? "",
           toolSteps: 0,
           judgmentRounds: 0,
           sourceAttempts: 0,

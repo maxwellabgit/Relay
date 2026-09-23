@@ -58,6 +58,8 @@ export type ToolCitation = {
   readonly title: string;
   readonly url?: string;
   readonly snippet?: string;
+  /** Primary is a cited source passage. Secondary is not proof by itself. */
+  readonly sourceRole?: "primary" | "secondary";
   readonly sourceSlice: SourceSliceRef;
 };
 
@@ -79,6 +81,12 @@ export type PublicSearchHit = {
   readonly url: string;
   readonly snippet: string;
   readonly retrievedAt: string;
+  /**
+   * `primary` is the cited passage itself.
+   * `secondary` is commentary about a source, including an encyclopedia extract.
+   * Search suggestions are not hits.
+   */
+  readonly role?: "primary" | "secondary";
 };
 
 /** Closed public-search adapter — engine never opens arbitrary HTTP. */

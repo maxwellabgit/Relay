@@ -169,14 +169,12 @@ async function main(): Promise<void> {
     if (child) await stopProcess(child);
   }
 
+  const runnerCompleted = true;
+  const releaseJourneysPassed = journeys.length > 0 && journeys.every((journey) => journey.status === "PASS");
   const result = {
-    ok: journeys.every(
-      (journey) =>
-        journey.status === "PASS" ||
-        journey.status === "NOT_RUN" ||
-        journey.status === "HUMAN_BLOCKED" ||
-        journey.status === "DEVICE_BLOCKED",
-    ),
+    runnerCompleted,
+    releaseJourneysPassed,
+    ok: releaseJourneysPassed,
     sha,
     binary,
     journeys,
@@ -185,9 +183,11 @@ async function main(): Promise<void> {
   const published = join(ROOT, ".dev-data", "e2e", "desktop-product-latest");
   await mkdir(published, { recursive: true });
   await writeFile(join(published, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
-  const failed = journeys.filter((journey) => journey.status === "FAIL");
-  console.log(JSON.stringify({ evidenceDir, failed: failed.length, journeys }, null, 2));
-  if (failed.length > 0) process.exit(1);
+  const failed = journeys.filter((journey) => journey.status !== "PASS");
+  console.log(
+    JSON.stringify({ evidenceDir, runnerCompleted, releaseJourneysPassed, failed: failed.length, journeys }, null, 2),
+  );
+  if (!releaseJourneysPassed) process.exit(1);
 }
 
 async function typedJourney(

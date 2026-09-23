@@ -475,6 +475,27 @@ pub fn read_trace_events(run_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn share_diagnostics(body: String) -> Result<String, String> {
+    if body.len() > 200_000 || body.contains('\0') {
+        return Err("rejected".to_string());
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).map_err(|_| "rejected".to_string())?;
+    if !parsed.is_object() {
+        return Err("rejected".to_string());
+    }
+    let root = diagnostics_root()?;
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let path = root.join("shared-diagnostics.json");
+    fs::write(&path, format!("{body}\n")).map_err(|error| error.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub fn open_run_folder() -> Result<String, String> {
     let root = diagnostics_root()?;
     std::process::Command::new("explorer")
@@ -490,6 +511,23 @@ pub fn diagnostics_latest_path() -> Result<String, String> {
         .join("latest.json")
         .to_string_lossy()
         .to_string())
+}
+
+#[tauri::command]
+pub fn write_canary_receipt(run_id: String, body: String) -> Result<String, String> {
+    if body.len() > 8_000 || body.contains('\0') || body.contains("sk-") {
+        return Err("rejected".to_string());
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).map_err(|_| "rejected".to_string())?;
+    if parsed.get("evidence").and_then(|value| value.as_str()) != Some("packaged_app") {
+        return Err("rejected".to_string());
+    }
+    let dir = run_dir(&run_id)?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join("canary.json");
+    fs::write(&path, format!("{body}\n")).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[cfg(test)]

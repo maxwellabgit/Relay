@@ -38,6 +38,7 @@
     "test:soak": "tsx tools/e2e/soak.ts",
     "test:nsis:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/nsis-install-smoke.ps1",
     "verify:v1": "node tools/verify-v1.mjs",
+    "verify:release-journeys": "node tools/verification/release-journeys.mjs",
     "verify:eas-ids": "node tools/verification/eas-identifiers.mjs",
     "verify:secrets": "node tools/verification/secret-scan.mjs",
     "readiness:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/windows-v1-readiness.ps1",

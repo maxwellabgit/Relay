@@ -2,8 +2,6 @@ import type {
   ArtifactStorePort,
   DiagnosticLiveSummary,
   JudgmentPort,
-  JudgmentRequest,
-  JudgmentResponse,
   RelayClient,
   RelayCommand,
   RelayCommandResult,
@@ -22,16 +20,14 @@ import {
   reduceSpeechSession,
   observeDiagnostics,
   RelayEngine,
-  runTypeSafeAttempts,
-  wireTypeSafeBody,
+  runPackagedLiveCanary,
   type DiagnosticObservation,
   type EngineDeps,
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
 import { createBrowserTraceSink } from "./trace-log";
+import { createNativeJudgmentPort, type TauriInvoke } from "./native-judgment-port";
 import { createWikipediaPublicSearch } from "./wikipedia-public-search";
-
-type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 type TauriHost = {
   __TAURI_INTERNALS__?: { invoke?: TauriInvoke };
@@ -249,7 +245,29 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   };
   refreshConfiguredHealth = refreshConfiguredHealthImpl;
 
+  let canaryStarted = false;
+  const maybeLiveCanary = async () => {
+    if (canaryStarted || !liveCanaryRequested()) return;
+    canaryStarted = true;
+    const receipt = await runPackagedLiveCanary(
+      nativeJudgments,
+      jevTracker,
+      new AbortController().signal,
+    );
+    await invoke("write_canary_receipt", {
+      runId,
+      body: JSON.stringify({
+        evidence: receipt.evidence,
+        ok: receipt.ok,
+        health: receipt.health,
+        rows: receipt.rows,
+      }),
+    }).catch(() => null);
+    await refreshConfiguredHealthImpl();
+  };
+
   await refreshConfiguredHealthImpl();
+  await maybeLiveCanary();
 
   const client: RelayClient = {
     start: async () => {
@@ -325,6 +343,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     execute: async (command: RelayCommand): Promise<RelayCommandResult> => {
       if (command.type === "RefreshProviderHealth") {
         await refreshConfiguredHealthImpl();
+        await maybeLiveCanary();
         return { ok: true, summary: "provider_health_refreshed" };
       }
 
@@ -475,55 +494,9 @@ function retryScheduleFrom(snapshot: RelaySnapshot): string | null {
   return due[0] ?? observedFrom(snapshot).retrySchedule;
 }
 
-function createNativeJudgmentPort(invoke: TauriInvoke): JudgmentPort {
-  return {
-    async judge(request: JudgmentRequest, signal: AbortSignal): Promise<JudgmentResponse> {
-      const body = wireTypeSafeBody(request);
-      return runTypeSafeAttempts({
-        signal,
-        questions: request.questions,
-        perform: async () => {
-          if (signal.aborted) return { kind: "transport", reason: "cancelled" };
-          const result = (await invoke("typesafe_judge", {
-            request: { model: body.model, body },
-          })) as {
-            ok: boolean;
-            status?: number;
-            category?: string;
-            latency_ms?: number;
-            body?: unknown;
-            retry_after?: string | null;
-            request_id?: string | null;
-          };
-          if (result?.category === "missing_secret") {
-            return {
-              kind: "terminal",
-              failure: { category: "missing_secret", message: "typesafe_key_missing" },
-            };
-          }
-          const status = Number(result?.status ?? (result?.ok ? 200 : 0));
-          if (result?.ok && result.body) {
-            return {
-              kind: "http",
-              status: status || 200,
-              bodyText: JSON.stringify(result.body),
-              retryAfter: result.retry_after ?? null,
-              requestId: result.request_id ?? null,
-              elapsedMs: Number(result.latency_ms ?? 0),
-            };
-          }
-          return {
-            kind: "http",
-            status,
-            bodyText: "",
-            retryAfter: result?.retry_after ?? null,
-            requestId: result?.request_id ?? null,
-            elapsedMs: Number(result?.latency_ms ?? 0),
-          };
-        },
-      });
-    },
-  };
+function liveCanaryRequested(): boolean {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.RELAY_LIVE_CANARY === "1";
 }
 
 function resolveBuildSha(): string {

@@ -47,7 +47,7 @@ export class SnapshotProjector {
       { id: "jev", label: "Jev", ok: jev.ok, detail: jev.detail },
       { id: "model", label: "Model", ok: model.ok, detail: modelDetail },
       { id: "audio", label: "Audio", ok: audio.ok, detail: audio.detail },
-      { id: "halo", label: "Halo", ok: false, detail: "offline" },
+      { id: "halo", label: "Halo", ok: true, detail: "not in V1" },
       {
         id: "storage",
         label: "Storage",

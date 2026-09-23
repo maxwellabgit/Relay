@@ -42,4 +42,4 @@ const dir = resolve(root, ".dev-data", "device");
 mkdirSync(dir, { recursive: true });
 writeFileSync(resolve(dir, "model-tournament.json"), `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));
-process.exit(report.status === "DEVICE_BLOCKED" ? 2 : 0);
+process.exit(report.status === "DEVICE_BLOCKED" ? 2 : 1);

@@ -34,7 +34,7 @@ export function isRetrying(
 
 const CORE_STATUS_IDS = new Set(["engine", "storage"]);
 
-/** Core health stays separate from optional providers. Jev or Halo being down is a warning. */
+/** Core health stays separate from Jev. Halo is not a V1 capability and is not a failure. */
 export function coreHealth(
   status: readonly { readonly id: string; readonly ok: boolean; readonly label: string }[],
   providers: readonly { readonly ok: boolean; readonly status: string }[],

@@ -43,8 +43,11 @@ pub fn run() {
             diagnostics::write_live_summary,
             diagnostics::read_trace_events,
             diagnostics::open_run_folder,
+            diagnostics::share_diagnostics,
             diagnostics::diagnostics_latest_path,
             typesafe::typesafe_judge,
+            typesafe::typesafe_cancel,
+            diagnostics::write_canary_receipt,
             hotkeys::hotkey_status,
             halo::halo_status,
             state::store_execute

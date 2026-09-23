@@ -8,7 +8,7 @@ import {
   type RelaySnapshot,
 } from "@relay/contracts";
 import { useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { colors } from "../theme/colors.js";
 import { touchTarget } from "../theme/tokens.js";
 
@@ -32,6 +32,24 @@ export type SettingsSheetProps = {
   readonly onModelCancel?: () => void;
   readonly onModelDelete?: () => void;
 };
+
+async function shareDiagnostics(json: string): Promise<boolean> {
+  const invoke = (
+    globalThis as {
+      __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+    }
+  ).__TAURI_INTERNALS__?.invoke;
+  try {
+    if (invoke) {
+      await invoke("share_diagnostics", { body: json });
+      return true;
+    }
+    await Share.share({ title: "RELAY diagnostics", message: json });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function chipDetail(snapshot: RelaySnapshot, id: string): { ok: boolean; detail: string } {
   const chip = snapshot.status.find((item) => item.id === id);
@@ -312,7 +330,12 @@ export function SettingsSheet({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Share diagnostics"
-                onPress={() => setExportText(onExportDiagnostics())}
+                onPress={() => {
+                  const json = onExportDiagnostics();
+                  void shareDiagnostics(json).then((shared) => {
+                    if (!shared) setExportText(json);
+                  });
+                }}
                 style={[styles.btn, styles.btnSecondary]}
               >
                 <Text style={styles.btnLabel}>Share diagnostics</Text>

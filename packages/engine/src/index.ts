@@ -1,4 +1,5 @@
 export * from "./jev-health.js";
+export * from "./live-canary.js";
 export * from "./ambient/AmbientTriage.js";
 export * from "./ambient/route-policy.js";
 export * from "./intake/CandidateExtractor.js";
