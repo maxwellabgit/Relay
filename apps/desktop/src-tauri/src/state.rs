@@ -496,12 +496,19 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "update_candidate_event_status" => update_candidate_event_status(conn, op),
         "put_ambient_suppression" => put_ambient_suppression(conn, op),
         "is_ambient_suppressed" => is_ambient_suppressed(conn, op),
-        "save_hosted_grant" | "revoke_hosted_grant" | "find_hosted_grant" | "read_hosted_grant"
-        | "reserve_hosted_grant" | "commit_hosted_grant" | "release_hosted_grant"
-        | "release_uncommitted_hosted_grants" => {
-            crate::grants::dispatch(conn, op.get("op").and_then(|value| value.as_str()).unwrap_or(""), op)
-                .unwrap_or(Err("unknown_op".into()))
-        }
+        "save_hosted_grant"
+        | "revoke_hosted_grant"
+        | "find_hosted_grant"
+        | "read_hosted_grant"
+        | "reserve_hosted_grant"
+        | "commit_hosted_grant"
+        | "release_hosted_grant"
+        | "release_uncommitted_hosted_grants" => crate::grants::dispatch(
+            conn,
+            op.get("op").and_then(|value| value.as_str()).unwrap_or(""),
+            op,
+        )
+        .unwrap_or(Err("unknown_op".into())),
         "put_review" => put_review(conn, op),
         "list_reviews" => list_reviews(conn),
         "compact" => compact(conn, op),

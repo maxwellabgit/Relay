@@ -56,8 +56,8 @@ fn header_value(response: &ureq::Response, name: &str) -> Option<String> {
 
 fn response_meta(response: &ureq::Response) -> (Option<String>, Option<String>) {
     let retry_after = header_value(response, "retry-after");
-    let request_id = header_value(response, "x-request-id")
-        .or_else(|| header_value(response, "request-id"));
+    let request_id =
+        header_value(response, "x-request-id").or_else(|| header_value(response, "request-id"));
     (retry_after, request_id)
 }
 

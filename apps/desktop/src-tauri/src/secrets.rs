@@ -206,7 +206,11 @@ fn parse_key_file(bytes: &[u8]) -> Result<String, String> {
 fn inside_relay_checkout(path: &Path) -> bool {
     let mut cursor = path.parent().map(Path::to_path_buf);
     while let Some(dir) = cursor {
-        let marker = dir.join("apps").join("desktop").join("src-tauri").join("Cargo.toml");
+        let marker = dir
+            .join("apps")
+            .join("desktop")
+            .join("src-tauri")
+            .join("Cargo.toml");
         if dir.join(".git").exists() && marker.exists() {
             return true;
         }
@@ -382,12 +386,18 @@ mod tests {
             fs::create_dir_all(repo.join(".git")).unwrap();
             fs::create_dir_all(repo.join("apps").join("desktop").join("src-tauri")).unwrap();
             fs::write(
-                repo.join("apps").join("desktop").join("src-tauri").join("Cargo.toml"),
+                repo.join("apps")
+                    .join("desktop")
+                    .join("src-tauri")
+                    .join("Cargo.toml"),
                 "[package]\nname = \"relay-desktop\"\n",
             )
             .unwrap();
             let staging = write_staging(&repo, "key.txt", "test-key-value-aaaa\n");
-            assert_eq!(import_staging_file(&staging).unwrap_err(), "secret_in_repository");
+            assert_eq!(
+                import_staging_file(&staging).unwrap_err(),
+                "secret_in_repository"
+            );
             assert!(staging.exists());
             assert!(read_typesafe_api_key().is_err());
         });

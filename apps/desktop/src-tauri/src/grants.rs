@@ -42,7 +42,12 @@ fn save(conn: &Connection, op: &Value) -> Result<Value, String> {
         .optional()
         .map_err(|error| error.to_string())?;
     let (requests, bytes, revoked) = existing.unwrap_or((0, 0, None));
-    let revoked_at = revoked.or_else(|| grant.get("revokedAt").and_then(|value| value.as_str()).map(str::to_string));
+    let revoked_at = revoked.or_else(|| {
+        grant
+            .get("revokedAt")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    });
     conn.execute(
         "INSERT INTO hosted_grants(grant_id, scope_kind, scope_id, created_at, expires_at, allowed_json, max_requests, max_bytes, revoked_at, requests_committed, bytes_committed)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -134,7 +139,9 @@ fn reserve(conn: &Connection, op: &Value) -> Result<Value, String> {
             |cursor| Ok((cursor.get::<_, i64>(0)?, cursor.get::<_, i64>(1)?)),
         )
         .map_err(|error| error.to_string())?;
-    if row.requests_committed + held.0 + 1 > row.max_requests || row.bytes_committed + held.1 + bytes > row.max_bytes {
+    if row.requests_committed + held.0 + 1 > row.max_requests
+        || row.bytes_committed + held.1 + bytes > row.max_bytes
+    {
         return Ok(json!({ "ok": false, "reason": "exhausted" }));
     }
     let reservation_id = req_str(op, "reservationId")?;
@@ -265,6 +272,9 @@ fn req_str(value: &Value, key: &str) -> Result<String, String> {
 fn req_i64(value: &Value, key: &str) -> Result<i64, String> {
     value
         .get(key)
-        .and_then(|item| item.as_i64().or_else(|| item.as_f64().map(|number| number as i64)))
+        .and_then(|item| {
+            item.as_i64()
+                .or_else(|| item.as_f64().map(|number| number as i64))
+        })
         .ok_or_else(|| format!("missing_{key}"))
 }

@@ -154,7 +154,9 @@ pub fn artifact_put(request: ArtifactPutRequest) -> Result<ArtifactPutResult, St
 }
 
 #[tauri::command]
-pub fn artifact_provenance(request: ArtifactProvenanceRequest) -> Result<serde_json::Value, String> {
+pub fn artifact_provenance(
+    request: ArtifactProvenanceRequest,
+) -> Result<serde_json::Value, String> {
     let path = objects_dir()?.join(format!("{}.prov.json", request.artifact_id));
     if !path.exists() {
         return Ok(serde_json::Value::Null);
@@ -163,7 +165,11 @@ pub fn artifact_provenance(request: ArtifactProvenanceRequest) -> Result<serde_j
     serde_json::from_str(&text).map_err(|error| error.to_string())
 }
 
-fn seal_policy(artifact_id: &str, sha256: &str, requested: serde_json::Value) -> Result<serde_json::Value, String> {
+fn seal_policy(
+    artifact_id: &str,
+    sha256: &str,
+    requested: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let path = objects_dir()?.join(format!("{artifact_id}.prov.json"));
     let requested_disclosure = requested
         .get("disclosure")

@@ -1,8 +1,8 @@
 mod artifacts;
-mod grants;
 mod audio;
 mod commands;
 mod diagnostics;
+mod grants;
 mod halo;
 mod hotkeys;
 mod local_model;
