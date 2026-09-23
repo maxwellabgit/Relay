@@ -60,13 +60,13 @@ Inspection at 22:19 local on 2026-09-22: `HEAD` is `c6514fa6978ba0da8e73a13db1be
 | --- | --- | --- |
 | 1 Jev trust boundary | PASS for the automated disclosure, retry, and response tests on `485a0be` | Live canary is HUMAN_BLOCKED. G1 is not green. |
 | 2 Jev secret provisioning | Windows import remains on `3849e95`. iOS device-only flag is in source. Physical Keychain is DEVICE_BLOCKED | Do not paste a key into Cursor. |
-| 3 Actions and tool execution | PASS for typed ambient acceptance, harness-grant move, and bundle purity | Public search stays hidden. Write effects still require acceptance. |
+| 3 Actions and tool execution | PASS for typed ambient acceptance, harness-grant move, and bundle purity | Wikipedia OpenSearch is injected. The tool still requires hosted processing and a public disclosure. Write effects still require acceptance. |
 | 4 Windows product and installer | PASS for same-version install, in-place reinstall, launch, uninstall that keeps `%LOCALAPPDATA%\\RELAY`, a path with a space, and a per-user temp directory | Cross-version upgrade and a signed installer were not run. Signing is not configured. |
 | 5 Native mobile runtime | NOT_RUN on device | In-memory assembly of large models is rejected. Tournament is DEVICE_BLOCKED. |
 | 6 Halo adapter | Policy tests PASS. Shipping feature disabled | Official emulator NOT_RUN. Physical Halo DEVICE_BLOCKED. Do not claim hardware. |
-| 7 Headed journeys | Journey 01 PASS on `10fc65e` at 22:49. Journeys 02–12 are not headed product PASS | `.dev-data/e2e/msrp-headed-latest/result.json`. Installer SHA-256 `E5BD01F97D8A86516912CE4F5E462F6D35DC8333BF8A61B2317BBC64E76A0856`. |
+| 7 Headed journeys | Journey 01 PASS. Typed note, fact, next action, model-unavailable, and relaunch PASS on the packaged app. Helpful chat NOT_RUN. Acronym choice HUMAN_BLOCKED | `npm run test:e2e:desktop` evidence under `artifacts/e2e/`. Journeys 03, 04, 06, 08, 10, 11, and 12 are still not headed product PASS. |
 | 8 UI polish | NOT_RUN | No screenshot matrix. |
-| 9 Cleanup, CI, release automation | NOT_RUN as a full CI expansion | Export purity now executes on this Windows host. Branch protection unchanged. |
+| 9 Cleanup, CI, release automation | CI manifest includes Android export, secret scan, and NSIS smoke. `verify:v1` was not rerun on `d679848` | Branch protection was not changed. |
 | 10 Live canary and rehearsals | HUMAN_BLOCKED | |
 | 11 TestFlight | HUMAN_BLOCKED | `REPLACE_WITH_*` remains in `eas.json`. No authentication or submission. |
 
@@ -134,7 +134,9 @@ FAIL:
 NOT_RUN:
 
 - Cross-version Windows upgrade and a signed installer.
-- Headed journeys 02–12 against the packaged app. Journey 01 passed on `10fc65e`.
+- Helpful local chat on a running local model. The packaged app showed the unavailable answer.
+- Headed journeys 03, 04, 06, 08, 10, 11, and 12.
+- Full `npm run verify:v1` on the current SHA.
 - Official Halo emulator and physical Halo.
 - On-device model tournament and speech.
 - EAS project id, Apple id, ASC app id, and team id. `npm run verify:eas-ids` lists them. Do not invent values.
@@ -158,7 +160,7 @@ That command is not authorized.
 
 ## Next action
 
-`npm run build:desktop` at `10fc65e9aa1d585e927f973accd2b5106fc92d5e` exited 0 at 22:48. Journey 01 passed on that binary. Next independent work is the remaining packaged journeys that do not yet have a headed harness, then the official Halo emulator check without enabling the shipping feature. Do not push. Do not run `eas build`.
+Run `npm run verify:v1` on the current SHA and record its exit. Do not push. Do not run `eas build`. Do not enable Halo shipping.
 
 ## Branch protection to require later
 
