@@ -45,25 +45,33 @@ async function main(): Promise<void> {
     child = launchDesktop(binary, profileRoot);
     browser = await connectCdp(DEBUG_PORT, LAUNCH_TIMEOUT_MS);
     const page = await firstPage(browser);
-    await page.waitForSelector('[data-testid="relay-composer-input"]', { timeout: LAUNCH_TIMEOUT_MS });
+    await page.waitForSelector('[data-testid="relay-composer-input"]', {
+      timeout: LAUNCH_TIMEOUT_MS,
+    });
     await waitUntilReady(page);
     await page.screenshot({ path: join(evidenceDir, "00-composer.png"), fullPage: true });
 
-    journeys.push(await typedJourney(page, evidenceDir, {
-      id: "05-note",
-      text: "note: headed note marker",
-      expect: "Saved note:",
-    }));
-    journeys.push(await typedJourney(page, evidenceDir, {
-      id: "05-fact",
-      text: "remember that headed fact marker",
-      expect: "Remembered:",
-    }));
-    journeys.push(await typedJourney(page, evidenceDir, {
-      id: "05-next-action",
-      text: "next action: review the release ledger",
-      expect: "Next:",
-    }));
+    journeys.push(
+      await typedJourney(page, evidenceDir, {
+        id: "05-note",
+        text: "note: headed note marker",
+        expect: "Saved note:",
+      }),
+    );
+    journeys.push(
+      await typedJourney(page, evidenceDir, {
+        id: "05-fact",
+        text: "remember that headed fact marker",
+        expect: "Remembered:",
+      }),
+    );
+    journeys.push(
+      await typedJourney(page, evidenceDir, {
+        id: "05-next-action",
+        text: "next action: review the release ledger",
+        expect: "Next:",
+      }),
+    );
 
     const chat = await typedJourney(page, evidenceDir, {
       id: "02-helpful-chat",
@@ -75,7 +83,8 @@ async function main(): Promise<void> {
       journeys.push({
         id: "02-helpful-chat",
         status: "NOT_RUN",
-        detail: "Packaged app has no local model server. It showed the unavailable answer instead of a model reply.",
+        detail:
+          "Packaged app has no local model server. It showed the unavailable answer instead of a model reply.",
       });
       journeys.push({
         id: "model-unavailable",
@@ -108,7 +117,9 @@ async function main(): Promise<void> {
     child = launchDesktop(binary, profileRoot);
     browser = await connectCdp(DEBUG_PORT, LAUNCH_TIMEOUT_MS);
     const reopened = await firstPage(browser);
-    await reopened.waitForSelector('[data-testid="relay-composer-input"]', { timeout: LAUNCH_TIMEOUT_MS });
+    await reopened.waitForSelector('[data-testid="relay-composer-input"]', {
+      timeout: LAUNCH_TIMEOUT_MS,
+    });
     await waitUntilReady(reopened);
     const restored = await waitForText(reopened, ["Remembered:", "Saved note:", "Next:"], 20_000);
     const statePath = join(profileRoot, "RELAY", "state.sqlite");
@@ -117,7 +128,9 @@ async function main(): Promise<void> {
     journeys.push({
       id: "09-crash-recovery",
       status: kept ? "PASS" : "FAIL",
-      detail: kept ? "Relaunch showed the saved note and state.sqlite was present." : "Relaunch did not show the saved note.",
+      detail: kept
+        ? "Relaunch showed the saved note and state.sqlite was present."
+        : "Relaunch did not show the saved note.",
     });
     await reopened.screenshot({ path: join(evidenceDir, "09-relaunch.png"), fullPage: true });
   } finally {
@@ -126,7 +139,13 @@ async function main(): Promise<void> {
   }
 
   const result = {
-    ok: journeys.every((journey) => journey.status === "PASS" || journey.status === "NOT_RUN" || journey.status === "HUMAN_BLOCKED" || journey.status === "DEVICE_BLOCKED"),
+    ok: journeys.every(
+      (journey) =>
+        journey.status === "PASS" ||
+        journey.status === "NOT_RUN" ||
+        journey.status === "HUMAN_BLOCKED" ||
+        journey.status === "DEVICE_BLOCKED",
+    ),
     sha,
     binary,
     journeys,
@@ -147,13 +166,21 @@ async function typedJourney(
 ): Promise<JourneyResult> {
   const submitted = await typeAndSend(page, input.text);
   if (!submitted.ok) return { id: input.id, status: "FAIL", detail: submitted.reason };
-  const found = await waitForText(page, [input.expect, input.alternate].filter((value): value is string => Boolean(value)), 20_000);
+  const found = await waitForText(
+    page,
+    [input.expect, input.alternate].filter((value): value is string => Boolean(value)),
+    20_000,
+  );
   await page.screenshot({ path: join(evidenceDir, `${input.id}.png`), fullPage: true });
-  if (!found) return { id: input.id, status: "FAIL", detail: `timed out waiting for ${input.expect}` };
+  if (!found)
+    return { id: input.id, status: "FAIL", detail: `timed out waiting for ${input.expect}` };
   return { id: input.id, status: "PASS", detail: found };
 }
 
-async function typeAndSend(page: Page, text: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function typeAndSend(
+  page: Page,
+  text: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const input = page.locator('[data-testid="relay-composer-input"]');
   if ((await input.count()) === 0) return { ok: false, reason: "composer input missing" };
   await input.click();
@@ -169,17 +196,28 @@ async function typeAndSend(page: Page, text: string): Promise<{ ok: true } | { o
 async function waitUntilReady(page: Page): Promise<void> {
   const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const body = await page.locator("body").innerText().catch(() => "");
-    if (body.length > 0 && !body.includes("still starting") && !body.includes("Starting RELAY")) return;
+    const body = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    if (body.length > 0 && !body.includes("still starting") && !body.includes("Starting RELAY"))
+      return;
     await sleep(250);
   }
   throw new Error("RELAY did not finish starting");
 }
 
-async function waitForText(page: Page, needles: string[], timeoutMs: number): Promise<string | null> {
+async function waitForText(
+  page: Page,
+  needles: string[],
+  timeoutMs: number,
+): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const body = await page.locator("body").innerText().catch(() => "");
+    const body = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     const found = needles.find((needle) => body.includes(needle));
     if (found) return found;
     await sleep(250);
@@ -262,7 +300,10 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   const deadline = Date.now() + 8_000;
   while (child.exitCode == null && Date.now() < deadline) await sleep(100);
   if (child.exitCode == null && child.pid) {
-    spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
     await sleep(500);
   }
 }
