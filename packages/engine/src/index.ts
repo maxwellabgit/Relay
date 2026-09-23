@@ -24,6 +24,7 @@ export * from "./diagnostics/live-summary.js";
 export * from "./diagnostics/redacted-export.js";
 export * from "./speech/session.js";
 export * from "./model/delivery.js";
+export * from "./model/file-sink.js";
 export * from "./disclosure/hosted-grant.js";
 export { InMemoryGrantAccount } from "./disclosure/grant-account.js";
 export * from "./runtime-recorder.js";

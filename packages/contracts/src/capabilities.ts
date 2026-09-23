@@ -184,10 +184,10 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
   {
     id: "tool.public-search",
     title: "Public search tool",
-    windows: "not-shipped",
-    ios: "not-shipped",
-    android: "not-shipped",
-    notes: "Wikipedia OpenSearch adapter is unit-tested and is not injected into production clients. The tool stays hidden until a public disclosure connector is granted.",
+    windows: "unverified-on-device",
+    ios: "unverified-on-device",
+    android: "unverified-on-device",
+    notes: "Wikipedia OpenSearch is injected into the desktop and mobile clients. Execution still requires hosted processing, a connected public-search connector, and a public disclosure.",
   },
   {
     id: "tool.github-read",

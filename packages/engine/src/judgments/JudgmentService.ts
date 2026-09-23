@@ -10,10 +10,11 @@ import type { EngineStore } from "../store.js";
 import type { ArtifactStorePort, JudgmentPort } from "@relay/contracts";
 import { feedItemId, type EngineTrace } from "../engine-helpers.js";
 import { JEV_MODEL } from "../typesafe-judgment.js";
-import { isHostedEligible } from "@relay/contracts";
+import { isHostedEligible, localOnlyPolicy } from "@relay/contracts";
 import { loadDisclosureGate } from "../disclosure/hosted-grant.js";
 import { parkHostedWait } from "./durable-wait.js";
 import { acronymProviderState } from "./acronym-state.js";
+import { getJsonArtifact } from "../protected-content.js";
 import type { OutcomeRecorder } from "../outcomes/OutcomeRecorder.js";
 import type { OverlayState } from "../projections/OverlayState.js";
 import type { PatternService } from "../learning/PatternService.js";
@@ -40,6 +41,32 @@ export type JudgmentServiceDeps = {
   readonly offerGlossary: (token: string, expansion: string) => Promise<void>;
   readonly sessionId: string;
 };
+
+async function optionLabelsFromPrompt(
+  artifacts: ArtifactStorePort,
+  parsed: {
+    optionIds?: string[];
+    optionLabelsArtifactId?: string;
+    optionLabelsSha256?: string;
+  },
+): Promise<string[]> {
+  const artifactId = parsed.optionLabelsArtifactId;
+  const sha256 = parsed.optionLabelsSha256;
+  if (artifactId && sha256) {
+    try {
+      const labels = await getJsonArtifact<string[]>(artifacts, {
+        artifactId,
+        sha256,
+        policy: localOnlyPolicy(),
+      });
+      if (Array.isArray(labels)) return labels.map((label) => String(label));
+    } catch {
+      return [];
+    }
+    return [];
+  }
+  return parsed.optionIds ?? [];
+}
 
 function providerRequestIdFrom(response: JudgmentResponse): string | null {
   if (response.ok) return response.success.providerRequestId ?? null;
@@ -92,6 +119,8 @@ export class JudgmentService {
     });
     let parsed: {
       optionIds?: string[];
+      optionLabelsArtifactId?: string;
+      optionLabelsSha256?: string;
       token?: string;
       choiceProbabilityMinimum?: number;
       choiceMarginMinimum?: number;
@@ -102,7 +131,7 @@ export class JudgmentService {
       await this.deps.outcomes.finishCase(caseId, current.version, "failed", this.deps.getActiveCaseId());
       return { kind: "dead", reasonCode: "invalid_gate" };
     }
-    const labels = parsed.optionIds ?? [];
+    const labels = await optionLabelsFromPrompt(this.deps.artifacts, parsed);
     const optionIds = labels.map((_, index) => `opt_${index + 1}`);
     const labelById: Record<string, string> = { no_match: "no_match" };
     const idByLabel = new Map<string, string>();

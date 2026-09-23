@@ -21,6 +21,7 @@ export class Scheduler {
     private readonly clock: Clock,
     private readonly owner: string,
     private readonly leaseMs = 30_000,
+    private readonly wake?: { kick(): void },
   ) {}
 
   async enqueue(
@@ -44,7 +45,13 @@ export class Scheduler {
       ...(correlation?.parentWorkId ? { parentWorkId: correlation.parentWorkId } : {}),
       ...(correlation?.correlationId ? { correlationId: correlation.correlationId } : {}),
     });
+    this.wake?.kick();
     return workId;
+  }
+
+  /** Wake the loop after a direct store enqueue that did not go through enqueue(). */
+  kick(): void {
+    this.wake?.kick();
   }
 
   async claim(): Promise<WorkItem | null> {

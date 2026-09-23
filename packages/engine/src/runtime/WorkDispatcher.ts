@@ -2,6 +2,7 @@ import { PRIORITY_OBSERVED, type WorkItem } from "../queue.js";
 import type { Clock, IdFactory, Scheduler } from "../scheduler.js";
 import type { EngineStore } from "../store.js";
 import { sleep, type EngineTrace } from "../engine-helpers.js";
+import type { WorkSignal } from "./work-signal.js";
 import type { CaseRuntime } from "./CaseRuntime.js";
 import type { JudgmentService, WorkDisposition } from "../judgments/JudgmentService.js";
 import type { ToolBroker } from "../tools/ToolBroker.js";
@@ -20,6 +21,7 @@ export type WorkDispatcherDeps = {
   readonly setActiveCaseId: (id: string | null) => void;
   readonly setActiveEpisodeId: (id: string | null) => void;
   readonly isRunning: () => boolean;
+  readonly wake?: WorkSignal;
 };
 
 export class WorkDispatcher {
@@ -29,7 +31,8 @@ export class WorkDispatcher {
     while (!signal.aborted && this.deps.isRunning()) {
       const item = await this.deps.scheduler.claim();
       if (!item) {
-        await sleep(25, signal);
+        if (this.deps.wake) await this.deps.wake.idleWait(25, signal);
+        else await sleep(25, signal);
         continue;
       }
       try {

@@ -26,6 +26,7 @@ import type { OverlayState } from "../projections/OverlayState.js";
 import type { PatternService } from "../learning/PatternService.js";
 import type { WorkDisposition } from "../judgments/JudgmentService.js";
 import type { AmbientTriage } from "../ambient/AmbientTriage.js";
+import { putJsonArtifact } from "../protected-content.js";
 import { runInTransaction } from "../transactions.js";
 
 export type CaseRuntimeDeps = {
@@ -110,7 +111,7 @@ export class CaseRuntime {
           caseId,
           token: reflex.clarify.token,
           reflexId: reflex.clarify.reflexId,
-          prompt: reflex.clarify.prompt,
+          prompt: await sealClarificationPrompt(this.deps.artifacts, reflex.clarify.prompt),
           attempt: 1,
           explicitAsk: isAsk,
           sourceEventId,
@@ -275,6 +276,7 @@ export class CaseRuntime {
         parentWorkId: item.workId,
         correlationId: caseId,
       });
+      this.deps.scheduler.kick();
       await this.deps.trace.emit({
         type: "judgment.requested",
         stage: "judgment.request",
@@ -790,6 +792,25 @@ export class CaseRuntime {
     );
     return { kind: "complete" };
   }
+}
+
+/** Keep choice labels in an artifact. The queued prompt stores only the artifact reference. */
+async function sealClarificationPrompt(artifacts: ArtifactStorePort, prompt: string): Promise<string> {
+  let parsed: { optionIds?: unknown };
+  try {
+    parsed = JSON.parse(prompt) as { optionIds?: unknown };
+  } catch {
+    return prompt;
+  }
+  if (!Array.isArray(parsed.optionIds) || parsed.optionIds.length === 0) return prompt;
+  const labels = parsed.optionIds.map((label) => String(label));
+  const ref = await putJsonArtifact(artifacts, labels);
+  return JSON.stringify({
+    ...parsed,
+    optionIds: [],
+    optionLabelsArtifactId: ref.artifactId,
+    optionLabelsSha256: ref.sha256,
+  });
 }
 
 function classifyAskText(text: string): "typed_glossary" | "typed_birthday" | "typed_acronym" | "typed_general" {

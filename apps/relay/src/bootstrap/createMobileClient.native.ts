@@ -18,6 +18,7 @@ import {
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
 import { createMobileTraceSink } from "./mobile-trace";
+import { createWikipediaPublicSearch } from "./wikipedia-public-search";
 
 export type MobileClientOptions = {
   readonly backend?: MobileBackend;
@@ -93,6 +94,7 @@ export async function createMobileClient(
     mode: "live",
     gitCommit: resolveBuildSha(),
     trace: createMobileTraceSink(files, runId),
+    publicSearch: createWikipediaPublicSearch(),
   };
 
   const engine = new RelayEngine(deps);

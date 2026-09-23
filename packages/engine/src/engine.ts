@@ -30,6 +30,7 @@ import { SnapshotProjector } from "./projections/SnapshotProjector.js";
 import { PRIORITY_DIRECT, PRIORITY_OBSERVED } from "./queue.js";
 import { CaseRuntime } from "./runtime/CaseRuntime.js";
 import { WorkDispatcher } from "./runtime/WorkDispatcher.js";
+import { WorkSignal } from "./runtime/work-signal.js";
 import { Scheduler, type Clock, type IdFactory } from "./scheduler.js";
 import type { EngineStore } from "./store.js";
 import { registerBuiltinTools } from "./tools/builtins.js";
@@ -64,6 +65,7 @@ export type EngineDeps = {
  * to cohesive services under intake / runtime / judgments / tools / operations / outcomes / learning / projections.
  */
 export class RelayEngine {
+  private readonly workSignal = new WorkSignal();
   private readonly scheduler: Scheduler;
   private readonly listeners = new Set<(change: RelayChange) => void>();
   private running = false;
@@ -88,7 +90,7 @@ export class RelayEngine {
   private readonly projector: SnapshotProjector;
 
   constructor(private readonly deps: EngineDeps) {
-    this.scheduler = new Scheduler(deps.store, deps.clock, "engine");
+    this.scheduler = new Scheduler(deps.store, deps.clock, "engine", 30_000, this.workSignal);
     this.recorder = new RuntimeRecorder({
       ...(deps.trace ? { sink: deps.trace } : {}),
       clock: deps.clock,
@@ -263,6 +265,7 @@ export class RelayEngine {
         this.activeEpisodeId = id;
       },
       isRunning: () => this.running,
+      wake: this.workSignal,
     });
 
     this.projector = new SnapshotProjector({

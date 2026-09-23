@@ -79,7 +79,8 @@ describe("local model generation path", () => {
   });
 });
 
-async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
+/** Matches the integration project testTimeout. A 2s cap expired when this file ran beside the export. */
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 20_000): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (await predicate()) return;

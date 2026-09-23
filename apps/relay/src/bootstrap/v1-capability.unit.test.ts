@@ -28,12 +28,12 @@ describe("V1 capability matrix", () => {
     expect(V1_APPLICATION_IDS.marketingVersion).toBe("1.0.0");
   });
 
-  it("hides search and github until a production adapter exists", () => {
-    expect(capabilityStatus("tool.public-search", "windows")).toBe("not-shipped");
+  it("keeps github hidden and records public search as unverified until headed proof", () => {
+    expect(capabilityStatus("tool.public-search", "windows")).toBe("unverified-on-device");
     expect(capabilityStatus("tool.github-read", "windows")).toBe("not-shipped");
-    expect(hiddenCapabilities("windows")).toContain("tool.public-search");
+    expect(hiddenCapabilities("windows")).not.toContain("tool.public-search");
     expect(hiddenCapabilities("windows")).toContain("tool.github-read");
-    expect(visibleCapabilities("windows")).not.toContain("tool.public-search");
+    expect(visibleCapabilities("windows")).toContain("tool.public-search");
   });
 
   it("records mobile storage as present but unverified, and stubs as not shipped", () => {
@@ -75,7 +75,7 @@ describe("production composition purity", () => {
     expect(text).toContain("isExplicitDemoAllowed");
   });
 
-  it("production desktop and mobile clients do not inject public search or github", () => {
+  it("production desktop and mobile clients inject public search and not github", () => {
     const desktop = readFileSync(
       resolve(root, "apps/relay/src/bootstrap/createDesktopClient.ts"),
       "utf8",
@@ -85,7 +85,8 @@ describe("production composition purity", () => {
       "utf8",
     );
     for (const text of [desktop, mobile]) {
-      expect(text).not.toMatch(/publicSearch\s*:/);
+      expect(text).toContain("createWikipediaPublicSearch");
+      expect(text).toMatch(/publicSearch\s*:/);
       expect(text).not.toMatch(/github\s*:/);
     }
   });

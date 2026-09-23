@@ -19,6 +19,10 @@ export type ModelChunkSink = {
   digest(): Promise<string>;
   reset(): Promise<void>;
   commit(): Promise<void>;
+  /** Bytes already on disk, so a restart continues instead of rewriting the file. */
+  received?(): Promise<number>;
+  /** Reject before any byte is written when the destination cannot hold the pin. */
+  prepare?(expectedBytes: number): Promise<void>;
 };
 
 /**
@@ -77,6 +81,17 @@ export class ModelDelivery {
       this.message = "No download source is configured.";
       return this.view();
     }
+    if (this.sink?.prepare) {
+      try {
+        await this.sink.prepare(this.pin.byteSize);
+      } catch {
+        this.phase = "rejected";
+        this.bytes = new Uint8Array(0);
+        this.received = 0;
+        this.message = "There is not enough free space for this model.";
+        return this.view();
+      }
+    }
     if (this.phase === "installed") return this.view();
     if (signal.aborted) {
       this.phase = "paused";
@@ -130,6 +145,9 @@ export class ModelDelivery {
     const pin = this.pin;
     const source = this.source;
     if (!pin || !source) return;
+    if (this.sink?.received) {
+      this.received = await this.sink.received();
+    }
     const held = () => (this.sink ? this.received : this.bytes.byteLength);
     while (held() < pin.byteSize) {
       if (this.generation !== generation) return;

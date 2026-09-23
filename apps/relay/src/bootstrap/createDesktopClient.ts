@@ -29,6 +29,7 @@ import {
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
 import { createBrowserTraceSink } from "./trace-log";
+import { createWikipediaPublicSearch } from "./wikipedia-public-search";
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -120,6 +121,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     mode: "live",
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
+    publicSearch: createWikipediaPublicSearch(),
   };
 
   const engine = new RelayEngine(deps);
