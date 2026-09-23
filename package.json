@@ -33,6 +33,7 @@
     "test:e2e:msrp": "tsx tools/e2e/msrp-desktop-headed.ts",
     "test:e2e:windows": "tsx tools/e2e/run-windows.ts",
     "test:e2e:desktop": "tsx tools/e2e/desktop-product-journeys.ts",
+    "test:device:tournament": "node tools/device/model-tournament.mjs",
     "test:e2e:golden": "node tools/e2e/golden-journeys.mjs",
     "test:soak": "tsx tools/e2e/soak.ts",
     "test:nsis:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev/nsis-install-smoke.ps1",

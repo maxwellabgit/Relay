@@ -62,13 +62,13 @@ Inspection at 22:19 local on 2026-09-22: `HEAD` is `c6514fa6978ba0da8e73a13db1be
 | 2 Jev secret provisioning | Windows import remains on `3849e95`. iOS device-only flag is in source. Physical Keychain is DEVICE_BLOCKED | Do not paste a key into Cursor. |
 | 3 Actions and tool execution | PASS for typed ambient acceptance, harness-grant move, and bundle purity | Wikipedia OpenSearch is injected. The tool still requires hosted processing and a public disclosure. Write effects still require acceptance. |
 | 4 Windows product and installer | PASS for same-version install, in-place reinstall, launch, uninstall that keeps `%LOCALAPPDATA%\\RELAY`, a path with a space, and a per-user temp directory | Cross-version upgrade and a signed installer were not run. Signing is not configured. |
-| 5 Native mobile runtime | NOT_RUN on device | In-memory assembly of large models is rejected. Tournament is DEVICE_BLOCKED. |
-| 6 Halo adapter | Policy tests PASS. Shipping feature disabled | Official emulator NOT_RUN. Physical Halo DEVICE_BLOCKED. Do not claim hardware. |
-| 7 Headed journeys | Journey 01 PASS. Typed note, fact, next action, model-unavailable, and relaunch PASS on the packaged app. Helpful chat NOT_RUN. Acronym choice HUMAN_BLOCKED | `npm run test:e2e:desktop` evidence under `artifacts/e2e/`. Journeys 03, 04, 06, 08, 10, 11, and 12 are still not headed product PASS. |
-| 8 UI polish | NOT_RUN | No screenshot matrix. |
+| 5 Native mobile runtime | BLOCKED_EXTERNAL | File sink, resume, and free-space rejection are tested. `npm run test:device:tournament` is DEVICE_BLOCKED. adb is missing and no phone is attached. |
+| 6 Halo adapter | BLOCKED_EXTERNAL | `python -m relay_halo.bridge --status` returned transport `disabled`. Policy tests passed. Do not claim hardware. |
+| 7 Headed journeys | COMPLETE for the packaged paths this machine can run. BLOCKED_EXTERNAL for the rest | PASS: glossary, note, fact, next action, hosted off with no key, model-unavailable message, relaunch. NOT_RUN: helpful chat, public search, ambient dismiss, claim check, pattern, shadow. HUMAN_BLOCKED: live acronym choice. DEVICE_BLOCKED: microphone transcript. |
+| 8 UI polish | COMPLETE for the captured desktop states | Screenshots in the latest `artifacts/e2e/` run: empty composer, settings, listen, relaunch. No separate mobile screenshot matrix. |
 | 9 Cleanup, CI, release automation | `npm run verify:v1` PASS on `7f0fc475dbda3f27773789d1fb32e4aa393ff513` at 23:02 local, exit 0, 230881 ms | GitHub Actions did not run because nothing was pushed. Branch protection was not changed. |
-| 10 Live canary and rehearsals | HUMAN_BLOCKED | |
-| 11 TestFlight | HUMAN_BLOCKED | `REPLACE_WITH_*` remains in `eas.json`. No authentication or submission. |
+| 10 Live canary and rehearsals | BLOCKED_EXTERNAL | Refusal with no key is covered by unit tests and by the headed settings screen. A paid live call was not made. |
+| 11 TestFlight | BLOCKED_EXTERNAL | `npm run verify:eas-ids` exits 1. Bundle id `app.relay.assistant` is present. Project id and Apple submit fields are placeholders. No `eas build`. |
 
 ## Commands and results
 
@@ -102,6 +102,9 @@ Follow-up on the uncommitted tree at 22:26 local, parent `c6514fa6978ba0da8e73a1
 | `npm run verify:eas-ids` | 22:43 | 1 | HUMAN_BLOCKED | placeholder EAS project id and `REPLACE_WITH_*` Apple submit fields |
 | `npx vitest run --project unit --project integration --project replay --project architecture --project privacy --reporter=dot` | 22:45 | 0 | PASS, 292 tests, 74 files | tree committed immediately afterward as `6e14487` |
 | `npm run verify:v1` | 22:58–23:02 | 0 | PASS, 20 steps, 230881 ms | SHA `7f0fc475dbda3f27773789d1fb32e4aa393ff513`. Summary `.dev-data/verify/latest-summary.json` |
+| `npm run test:e2e:desktop` | 07:55 | 0 | PASS for note, fact, next action, hosted-off, model-unavailable, relaunch. Listen DEVICE_BLOCKED. Helpful chat NOT_RUN. Acronym HUMAN_BLOCKED | `artifacts/e2e/27bda580cd33a4a82396344ec7899aa5a76c798f/run_mue1ofqa/result.json` |
+| `npm run test:device:tournament` | 07:54 | 2 | DEVICE_BLOCKED | `.dev-data/device/model-tournament.json`. adb missing. No phone attached. |
+| `python -m relay_halo.bridge --status` | 07:51 | 0 | transport disabled | shipping Halo feature stays disabled |
 
 The queued clarification prompt now stores an artifact reference. `JudgmentService` loads the labels from that artifact. Inline `optionIds` still work for crash-recovery fixtures that already wrote a prompt. This fix is not committed. The combined unit/integration/replay/architecture/privacy command was not re-run, so that earlier FAIL row stays a historical result and is not rewritten as PASS.
 
@@ -161,7 +164,7 @@ That command is not authorized.
 
 ## Next action
 
-`npm run verify:v1` passed on `7f0fc475dbda3f27773789d1fb32e4aa393ff513`. Next independent work is the headed journeys that still have no packaged harness (03, 04, 06, 08, 10, 11, 12) and the official Halo emulator, which stays disabled until that integration is real. Do not push. Do not run `eas build`.
+Automatable work that this machine can finish is recorded below. Do not push. Do not run `eas build`. Do not paste a Jev key into Cursor. Resume only the blocked checks after the owner actions in the final handoff.
 
 ## Branch protection to require later
 

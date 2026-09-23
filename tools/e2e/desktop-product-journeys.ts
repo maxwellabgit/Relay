@@ -109,6 +109,37 @@ async function main(): Promise<void> {
         : "No live Jev key is configured. The packaged app did not complete a hosted choice.",
     });
 
+    await page.getByText("Settings", { exact: true }).first().click();
+    await page.getByText("No active session grant.").waitFor({ timeout: 15_000 });
+    const settingsText = await page.locator("body").innerText();
+    const hostedOff = settingsText.includes("Off") && settingsText.includes("not set");
+    journeys.push({
+      id: "10-hosted-off-no-key",
+      status: hostedOff ? "PASS" : "FAIL",
+      detail: hostedOff
+        ? "Settings showed hosted processing Off, no key, and no session grant."
+        : "Settings did not show the expected off state.",
+    });
+    await page.screenshot({ path: join(evidenceDir, "10-settings.png"), fullPage: true });
+    await page.getByText("Close", { exact: true }).click();
+    const stop = page.getByText("Stop", { exact: true });
+    if ((await stop.count()) > 0) await stop.click();
+    await page.getByText("Send", { exact: true }).waitFor({ timeout: 20_000 });
+
+    await page.getByText("Listen", { exact: true }).click();
+    const listen = await waitForText(page, ["Listening stays off", "Listening for"], 8_000);
+    journeys.push({
+      id: "06-foreground-listening",
+      status: "DEVICE_BLOCKED",
+      detail:
+        listen === "Listening stays off"
+          ? "The packaged app kept listening off and explained why. No transcript was captured."
+          : listen === "Listening for"
+            ? "The control showed an active listen timer. No keyword transcript was captured."
+            : "Listen stayed idle. No microphone transcript was captured.",
+    });
+    await page.screenshot({ path: join(evidenceDir, "06-listen.png"), fullPage: true });
+
     await browser.close();
     browser = null;
     await stopProcess(child);
