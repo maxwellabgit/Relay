@@ -61,7 +61,7 @@ describe("verification script integrity", () => {
   it("GitHub Actions check workflow delegates to verify:v1 (no stale npm run list)", () => {
     const workflow = readFileSync(resolve(root, ".github/workflows/check.yml"), "utf8");
     expect(workflow).toContain("npm run verify:v1");
-    expect(workflow).toMatch(/timeout-minutes:\s*45/);
+    expect(workflow).toMatch(/timeout-minutes:\s*70/);
     expect(workflow).not.toMatch(/npm run test:smoke/);
     expect(workflow).not.toMatch(/npm run build:desktop/);
   });
@@ -75,6 +75,9 @@ describe("verification script integrity", () => {
     expect(manifest).toContain('name: "smoke"');
     expect(manifest).toContain('name: "halo-install"');
     expect(manifest).toContain('name: "desktop-build"');
+    expect(manifest).toContain('name: "android-export"');
+    expect(manifest).toContain('name: "secret-scan"');
+    expect(manifest).toContain('name: "nsis-smoke"');
   });
 
   it("package.json keeps smoke and manual MSRP as distinct commands", () => {

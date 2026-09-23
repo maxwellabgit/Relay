@@ -7,7 +7,7 @@ on:
 jobs:
   test:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -51,9 +51,9 @@ describe("golden journey manifest", () => {
 });
 
 describe("release truth enforcement", () => {
-  it("CI job has a 45-minute timeout and uploads verify summary", () => {
+  it("CI job has a 70-minute timeout and uploads verify summary", () => {
     const workflow = readFileSync(resolve(root, ".github/workflows/check.yml"), "utf8");
-    expect(workflow).toMatch(/timeout-minutes:\s*45/);
+    expect(workflow).toMatch(/timeout-minutes:\s*70/);
     expect(workflow).toContain("verify-v1-summary");
     expect(workflow).toContain(".dev-data/verify/latest-summary.json");
   });

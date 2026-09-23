@@ -21,6 +21,12 @@ export const verificationManifest = {
       args: ["run", "export:ios", "--workspace", "@relay/app"],
     },
     {
+      name: "android-export",
+      command: "npm",
+      args: ["run", "export:android", "--workspace", "@relay/app"],
+    },
+    { name: "secret-scan", command: "npm", args: ["run", "verify:secrets"] },
+    {
       name: "halo-install",
       command: "node",
       args: ["tools/verification/ensure-halo-test.mjs"],
@@ -51,6 +57,7 @@ export const verificationManifest = {
       args: ["run", "build:desktop"],
       env: { CI: "true" },
     },
+    { name: "nsis-smoke", command: "npm", args: ["run", "test:nsis:smoke"] },
   ],
 };
 
