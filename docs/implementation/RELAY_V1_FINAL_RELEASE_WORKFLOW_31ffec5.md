@@ -64,7 +64,7 @@ Inspection at 22:19 local on 2026-09-22: `HEAD` is `c6514fa6978ba0da8e73a13db1be
 | 4 Windows product and installer | PASS for same-version install, in-place reinstall, launch, uninstall that keeps `%LOCALAPPDATA%\\RELAY`, a path with a space, and a per-user temp directory | Cross-version upgrade and a signed installer were not run. Signing is not configured. |
 | 5 Native mobile runtime | NOT_RUN on device | In-memory assembly of large models is rejected. Tournament is DEVICE_BLOCKED. |
 | 6 Halo adapter | Policy tests PASS. Shipping feature disabled | Official emulator NOT_RUN. Physical Halo DEVICE_BLOCKED. Do not claim hardware. |
-| 7 Headed journeys | Journey 01 PASS on the 22:31 unsigned binary. Journeys 02–12 are not headed product PASS | Evidence `.dev-data/e2e/msrp-headed-latest/result.json`. That binary does not include later public-search or work-signal edits. |
+| 7 Headed journeys | Journey 01 PASS on `10fc65e` at 22:49. Journeys 02–12 are not headed product PASS | `.dev-data/e2e/msrp-headed-latest/result.json`. Installer SHA-256 `E5BD01F97D8A86516912CE4F5E462F6D35DC8333BF8A61B2317BBC64E76A0856`. |
 | 8 UI polish | NOT_RUN | No screenshot matrix. |
 | 9 Cleanup, CI, release automation | NOT_RUN as a full CI expansion | Export purity now executes on this Windows host. Branch protection unchanged. |
 | 10 Live canary and rehearsals | HUMAN_BLOCKED | |
@@ -134,7 +134,7 @@ FAIL:
 NOT_RUN:
 
 - Cross-version Windows upgrade and a signed installer.
-- Headed journeys 02–12 against the packaged app. Journey 01 passed on the 22:31 binary.
+- Headed journeys 02–12 against the packaged app. Journey 01 passed on `10fc65e`.
 - Official Halo emulator and physical Halo.
 - On-device model tournament and speech.
 - EAS project id, Apple id, ASC app id, and team id. `npm run verify:eas-ids` lists them. Do not invent values.
@@ -158,7 +158,7 @@ That command is not authorized.
 
 ## Next action
 
-Product commit `6e1448790270a15fbc32933e16e8dc40741559ba` exists. Rebuild `npm run build:desktop` so the installer matches it, then rerun `npx tsx tools/e2e/msrp-desktop-headed.ts`. Do not push. Do not run `eas build`.
+`npm run build:desktop` at `10fc65e9aa1d585e927f973accd2b5106fc92d5e` exited 0 at 22:48. Journey 01 passed on that binary. Next independent work is the remaining packaged journeys that do not yet have a headed harness, then the official Halo emulator check without enabling the shipping feature. Do not push. Do not run `eas build`.
 
 ## Branch protection to require later
 
