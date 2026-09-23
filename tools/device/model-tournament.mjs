@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global console, process */
 /**
  * Device model and speech tournament.
  * Does not invent results. Exits 2 when the named phones are not attached.
