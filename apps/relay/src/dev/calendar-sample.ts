@@ -42,6 +42,10 @@ export async function injectBirthdaySample(client: Pick<RelayClient, "execute">)
     type: "IngestObservedEvent",
     envelope: sampleEnvelope("evt_birthday_1", "1", "Birthday: Maya 03-14", at),
   });
+  await client.execute({
+    type: "IngestObservedEvent",
+    envelope: sampleEnvelope("evt_birthday_1", "2", "Birthday: Maya 04-01", at),
+  });
 }
 
 function sampleEnvelope(externalEventId: string, revision: string, content: string, at: string): EventEnvelope {
