@@ -12,7 +12,7 @@ import type {
 } from "@relay/contracts";
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
 import { startLiveTranscriptPump, TauriAudioPort, type AudioStatus } from "@relay/adapter-tauri/audio";
-import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
+import { TauriCaseFolder, TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
 import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
   applySpeechSuspend,
@@ -122,6 +122,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
     publicSearch: createWikipediaPublicSearch(),
+    caseFolder: new TauriCaseFolder((op) => storeInvoke("store_execute", { op })),
   };
 
   const engine = new RelayEngine(deps);

@@ -28,11 +28,14 @@ export type RelayWorkbenchProps = {
   readonly onEndSession?: () => void;
   readonly showDeveloperPanel?: boolean;
   readonly onReplayFixture?: (fixture: string, speed: number) => void;
+  readonly onInjectSample?: () => void;
   readonly onOpenLog?: () => void;
   readonly onApproveCandidate?: (candidateId: string) => void;
   readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
+  readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
@@ -78,11 +81,14 @@ export function RelayWorkbench({
   onEndSession,
   showDeveloperPanel,
   onReplayFixture,
+  onInjectSample,
   onOpenLog,
   onApproveCandidate,
   onActivateReflex,
   onPauseReflex,
   onRollbackReflex,
+  onDecideVerify,
+  onRenameCase,
   onRejectCandidate,
   onSnoozeCandidate,
   typeSafeKeyStatus,
@@ -134,6 +140,8 @@ export function RelayWorkbench({
       {...(onActivateReflex !== undefined ? { onActivateReflex } : {})}
       {...(onPauseReflex !== undefined ? { onPauseReflex } : {})}
       {...(onRollbackReflex !== undefined ? { onRollbackReflex } : {})}
+      {...(onDecideVerify !== undefined ? { onDecideVerify } : {})}
+      {...(onRenameCase !== undefined ? { onRenameCase } : {})}
       {...(typeSafeKeyStatus !== undefined ? { typeSafeKeyStatus } : {})}
       {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
       {...(onImportTypeSafeKey !== undefined ? { onImportTypeSafeKey } : {})}
@@ -158,6 +166,7 @@ export function RelayWorkbench({
   const consoleProps = {
     snapshot,
     ...(onReplayFixture !== undefined ? { onReplayFixture } : {}),
+    ...(onInjectSample !== undefined ? { onInjectSample } : {}),
     ...(onStartSession !== undefined ? { onStartSession } : {}),
     ...(onEndSession !== undefined ? { onEndSession } : {}),
     ...(onOpenLog !== undefined ? { onOpenLog } : {}),

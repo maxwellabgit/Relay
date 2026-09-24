@@ -15,6 +15,7 @@ import {
   type AmbientFeedback,
 } from "../assistant/AmbientRecommendationCard.js";
 import { Composer } from "../assistant/Composer.js";
+import { CasesPane, VerifyPane } from "../assistant/CaseSurfaces.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
 import {
@@ -66,6 +67,8 @@ type Props = {
   readonly onActivateReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
+  readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
+  readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   /** When false, render full-bleed product surface (Expo/mobile). Default true for desktop workbench. */
   readonly showBezel?: boolean;
 };
@@ -106,9 +109,12 @@ export function PhoneShell({
   onActivateReflex,
   onPauseReflex,
   onRollbackReflex,
+  onDecideVerify,
+  onRenameCase,
   showBezel = true,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [consumerView, setConsumerView] = useState<"messages" | "cases" | "verify">("messages");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
@@ -221,6 +227,24 @@ export function PhoneShell({
       </View>
 
       <View style={styles.listenRow}>
+        {(["messages", "cases", "verify"] as const).map((item) => {
+          const pending = snapshot.verifyItems?.filter((entry) => entry.disposition === "pending").length ?? 0;
+          const label = item === "verify" && pending > 0 ? `Verify ${pending}` : item[0]?.toUpperCase() + item.slice(1);
+          return (
+            <Pressable
+              key={item}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              onPress={() => setConsumerView(item)}
+              style={styles.headerBtn}
+            >
+              <Text style={styles.headerBtnLabel}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.listenRow}>
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: snapshot.listening }}
@@ -239,6 +263,20 @@ export function PhoneShell({
       ) : null}
       {audioCopy ? <Text style={styles.notice}>{`Listening stays off. ${audioCopy}`}</Text> : null}
 
+      {(snapshot.headsUp ?? []).slice(0, 2).map((notice) => (
+        <Text key={notice.id} accessibilityLiveRegion="polite" style={styles.notice}>
+          {notice.text}
+        </Text>
+      ))}
+      {consumerView === "cases" ? (
+        <CasesPane
+          cases={snapshot.projectCases ?? []}
+          activityIds={(snapshot.caseActivity ?? []).map((item) => item.projectCaseId)}
+          {...(onRenameCase ? { onRename: onRenameCase } : {})}
+        />
+      ) : consumerView === "verify" ? (
+        <VerifyPane items={snapshot.verifyItems ?? []} {...(onDecideVerify ? { onDecide: onDecideVerify } : {})} />
+      ) : (
       <FlatList
         ref={threadRef}
         data={snapshot.feedItems}
@@ -281,6 +319,7 @@ export function PhoneShell({
           }
         }}
       />
+      )}
 
       {ambientActions.length > 0 ? (
         <View style={styles.ambientStack}>

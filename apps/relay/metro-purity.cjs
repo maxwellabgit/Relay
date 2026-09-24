@@ -17,7 +17,8 @@ function redirectProductionModule(moduleName, env) {
   if (
     typeof moduleName !== "string" ||
     moduleName.includes("demo-blocked") ||
-    moduleName.includes("fixture-replay-blocked")
+    moduleName.includes("fixture-replay-blocked") ||
+    moduleName.includes("calendar-sample-blocked")
   ) {
     return null;
   }
@@ -33,6 +34,12 @@ function redirectProductionModule(moduleName, env) {
     /(?:^|\/)replay-acronym-fixture(?:\.js|\.ts)?$/.test(base)
   ) {
     return base.replace(/replay-acronym-fixture(?:\.js|\.ts)?$/, "fixture-replay-blocked");
+  }
+  if (
+    !allowOptional(env, "EXPO_PUBLIC_RELAY_DEV_CONSOLE") &&
+    /(?:^|\/)calendar-sample(?:\.js|\.ts)?$/.test(base)
+  ) {
+    return base.replace(/calendar-sample(?:\.js|\.ts)?$/, "calendar-sample-blocked");
   }
   return null;
 }

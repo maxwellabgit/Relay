@@ -287,6 +287,17 @@ export function App() {
             expectedStateVersion: stateVersion,
           });
         }}
+        onDecideVerify={(verifyId, decision, correction) => {
+          void runCommand({
+            type: "DecideVerify",
+            verifyId,
+            decision,
+            ...(correction ? { correction } : {}),
+          });
+        }}
+        onRenameCase={(projectCaseId, alias, expectedVersion) => {
+          void runCommand({ type: "RenameProjectCase", projectCaseId, alias, expectedVersion });
+        }}
         onRollbackReflex={(reflexId, version, stateVersion) => {
           void runCommand({
             type: "RollbackReflex",
@@ -316,6 +327,16 @@ export function App() {
           setModelDelivery(modelDeliveryRef.current.deleteLocal());
         }}
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
+        onInjectSample={() => {
+          void (async () => {
+            const { injectBirthdaySample } = await import("./dev/calendar-sample.js");
+            const client = clientRef.current;
+            if (!client) return;
+            await injectBirthdaySample(client);
+          })().catch((error: unknown) => {
+            setNotice(error instanceof Error ? error.message : "sample_failed");
+          });
+        }}
         onReplayFixture={async (fixture, speed) => {
           const handle = handleRef.current;
           if (!developerConsoleAllowed(readProcessEnv()) || !handle || fixture !== "acronym-basic") return;

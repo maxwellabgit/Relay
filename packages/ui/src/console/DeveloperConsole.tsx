@@ -31,15 +31,17 @@ type Props = {
   readonly onApproveCandidate?: (candidateId: string) => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
+  readonly onInjectSample?: () => void;
 };
 
-type Tab = "case" | "decisions" | "events";
+type Tab = "case" | "decisions" | "events" | "evidence";
 
 const SPEEDS = [0, 1, 10] as const;
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
   { id: "case", label: "Current Case" },
   { id: "decisions", label: "Decisions" },
   { id: "events", label: "Run Events" },
+  { id: "evidence", label: "Evidence" },
 ];
 
 export function DeveloperConsole({
@@ -51,6 +53,7 @@ export function DeveloperConsole({
   onApproveCandidate,
   onRejectCandidate,
   onSnoozeCandidate,
+  onInjectSample,
 }: Props) {
   const [tab, setTab] = useState<Tab>("case");
   const [speed, setSpeed] = useState<number>(0);
@@ -175,6 +178,38 @@ export function DeveloperConsole({
               </Text>
             </SideCard>
           )}
+        </View>
+      ) : null}
+
+      {tab === "evidence" ? (
+        <View>
+          <SideCard title="Invocations">
+            {(snapshot.reflexInvocations ?? []).length === 0 ? (
+              <Text style={styles.empty}>No Reflex invocation yet.</Text>
+            ) : (
+              (snapshot.reflexInvocations ?? []).map((item) => (
+                <Text key={item.invocationId} style={styles.meta}>
+                  {`${item.resultType} · ${item.reflexId} · ${item.authority} · ${item.invocationId}`}
+                </Text>
+              ))
+            )}
+          </SideCard>
+          <SideCard title="Sample">
+            {onInjectSample ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="Inject calendar sample" onPress={onInjectSample}>
+                <Text style={styles.meta}>Inject calendar sample</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.empty}>Sample injection is off.</Text>
+            )}
+          </SideCard>
+          <SideCard title="Bindings">
+            {(snapshot.observationBindings ?? []).map((item) => (
+              <Text key={item.bindingId} style={styles.meta}>
+                {`${item.resourceId} · ${item.enabled ? "observing" : "stopped"} · last ${item.lastSyncAt ?? "not checked"}`}
+              </Text>
+            ))}
+          </SideCard>
         </View>
       ) : null}
 
