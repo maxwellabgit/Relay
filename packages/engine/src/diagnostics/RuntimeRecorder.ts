@@ -54,6 +54,9 @@ export class RuntimeRecorder {
     attempt?: number;
     queueDepth?: number;
     toolId?: string;
+    executionId?: string;
+    projectCaseId?: string;
+    reflexInvocationId?: string;
     providerRequestId?: string;
     httpStatus?: number;
     disclosureGrantId?: string;
@@ -89,6 +92,9 @@ export class RuntimeRecorder {
       ...(partial.attempt != null ? { attempt: partial.attempt } : {}),
       ...(partial.queueDepth != null ? { queueDepth: partial.queueDepth } : {}),
       ...(partial.toolId ? { toolId: partial.toolId } : {}),
+      ...(partial.executionId ? { executionId: partial.executionId } : {}),
+      ...(partial.projectCaseId ? { projectCaseId: partial.projectCaseId } : {}),
+      ...(partial.reflexInvocationId ? { reflexInvocationId: partial.reflexInvocationId } : {}),
       ...(partial.providerRequestId ? { providerRequestId: partial.providerRequestId } : {}),
       ...(partial.httpStatus != null ? { httpStatus: partial.httpStatus } : {}),
       ...(partial.disclosureGrantId ? { disclosureGrantId: partial.disclosureGrantId } : {}),

@@ -27,12 +27,15 @@ const MIGRATION_11: &str =
     include_str!("../../../../packages/storage-schema/migrations/011_pattern_evidence_events.sql");
 const MIGRATION_12: &str =
     include_str!("../../../../packages/storage-schema/migrations/012_hosted_grants.sql");
+const MIGRATION_13: &str =
+    include_str!("../../../../packages/storage-schema/migrations/013_case_foundation.sql");
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub struct StateDb {
     conn: Connection,
     /// Depth of an explicit multi-op transaction opened via begin_transaction.
     txn_depth: u32,
+    root: PathBuf,
 }
 
 impl StateDb {
@@ -57,7 +60,16 @@ impl StateDb {
         let conn = Connection::open(path).map_err(|error| error.to_string())?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| error.to_string())?;
-        let mut db = Self { conn, txn_depth: 0 };
+        let root = path
+            .parent()
+            .map(Path::to_path_buf)
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let mut db = Self {
+            conn,
+            txn_depth: 0,
+            root,
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -67,6 +79,8 @@ impl StateDb {
             "begin_transaction" => self.begin_transaction(),
             "commit_transaction" => self.commit_transaction(),
             "rollback_transaction" => self.rollback_transaction(),
+            "case_folder_write" => self.case_folder_write(op),
+            "case_folder_read" => self.case_folder_read(op),
             _ if self.txn_depth > 0 => dispatch(&self.conn, op),
             _ => {
                 let tx = self
@@ -141,6 +155,7 @@ impl StateDb {
         apply_version(&tx, 10, MIGRATION_10)?;
         apply_version(&tx, 11, MIGRATION_11)?;
         apply_version(&tx, 12, MIGRATION_12)?;
+        apply_version(&tx, 13, MIGRATION_13)?;
         tx.commit().map_err(|error| error.to_string())?;
         crate::grants::release_uncommitted_on_open(&self.conn)?;
         self.migrate_legacy_protected_content()?;
@@ -512,6 +527,11 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "put_review" => put_review(conn, op),
         "list_reviews" => list_reviews(conn),
         "compact" => compact(conn, op),
+        "foundation_put" => foundation_put(conn, op),
+        "foundation_get" => foundation_get(conn, op),
+        "foundation_list" => foundation_list(conn, op),
+        "link_execution_case" => link_execution_case(conn, op),
+        "list_execution_cases" => list_execution_cases(conn, op),
         _ => Err("unknown_op".into()),
     }
 }
@@ -619,6 +639,20 @@ fn create_case(conn: &Connection, op: &Value) -> Result<Value, String> {
     conn.execute(
         "INSERT INTO cases(
           case_id, version, origin, kind, status, phase, priority, parent_case_id, created_at, updated_at
+        ) VALUES (?1, 1, ?2, ?3, 'active', 'intake', ?4, ?5, ?6, ?6)",
+        params![
+            case_id,
+            req_str(op, "origin")?,
+            req_str(op, "kind")?,
+            req_i64(op, "priority")?,
+            opt_str(op, "parentCaseId"),
+            at,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO executions(
+          execution_id, version, origin, kind, status, phase, priority, parent_execution_id, created_at, updated_at
         ) VALUES (?1, 1, ?2, ?3, 'active', 'intake', ?4, ?5, ?6, ?6)",
         params![
             case_id,
@@ -1652,6 +1686,7 @@ fn compact(conn: &Connection, op: &Value) -> Result<Value, String> {
 fn map_case(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let mut value = json!({
         "caseId": row.get::<_, String>("case_id")?,
+        "executionId": row.get::<_, String>("case_id")?,
         "version": row.get::<_, i64>("version")?,
         "origin": row.get::<_, String>("origin")?,
         "kind": row.get::<_, String>("kind")?,
@@ -2039,6 +2074,126 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
         year += 1;
     }
     (year, month, day as i64)
+}
+
+fn foundation_put(conn: &Connection, op: &Value) -> Result<Value, String> {
+    conn.execute(
+        "INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(kind, record_id) DO UPDATE SET
+           version = excluded.version,
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at",
+        params![
+            req_str(op, "kind")?,
+            req_str(op, "id")?,
+            req_i64(op, "version")?,
+            json_text(op.get("payload").unwrap_or(&Value::Null))?,
+            req_str(op, "at")?,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn foundation_get(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let row = conn
+        .query_row(
+            "SELECT record_id, version, payload_json, updated_at FROM foundation_records WHERE kind = ?1 AND record_id = ?2",
+            params![req_str(op, "kind")?, req_str(op, "id")?],
+            |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "version": row.get::<_, i64>(1)?,
+                    "payload": parse_json(&row.get::<_, String>(2)?).unwrap_or(Value::Null),
+                    "updatedAt": row.get::<_, String>(3)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(row.unwrap_or(Value::Null))
+}
+
+fn foundation_list(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let mut statement = conn
+        .prepare("SELECT record_id, version, payload_json, updated_at FROM foundation_records WHERE kind = ?1")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![req_str(op, "kind")?], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "version": row.get::<_, i64>(1)?,
+                "payload": parse_json(&row.get::<_, String>(2)?).unwrap_or(Value::Null),
+                "updatedAt": row.get::<_, String>(3)?,
+            }))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(Value::Array(items))
+}
+
+fn link_execution_case(conn: &Connection, op: &Value) -> Result<Value, String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO execution_case_links(execution_id, project_case_id, linked_at) VALUES (?1, ?2, ?3)",
+        params![req_str(op, "executionId")?, req_str(op, "projectCaseId")?, req_str(op, "at")?],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn list_execution_cases(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let mut statement = conn
+        .prepare("SELECT project_case_id FROM execution_case_links WHERE execution_id = ?1")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![req_str(op, "executionId")?], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(Value::String(row.map_err(|error| error.to_string())?));
+    }
+    Ok(Value::Array(items))
+}
+
+impl StateDb {
+    fn case_folder_write(&self, op: &Value) -> Result<Value, String> {
+        let case_id = req_str(op, "projectCaseId")?;
+        let relative = req_str(op, "relativePath")?;
+        let text = req_str(op, "text")?;
+        let path = safe_case_path(&self.root, &case_id, &relative)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, text.as_bytes()).map_err(|error| error.to_string())?;
+        std::fs::rename(&tmp, &path).map_err(|error| error.to_string())?;
+        Ok(Value::Null)
+    }
+
+    fn case_folder_read(&self, op: &Value) -> Result<Value, String> {
+        let case_id = req_str(op, "projectCaseId")?;
+        let relative = req_str(op, "relativePath")?;
+        let path = safe_case_path(&self.root, &case_id, &relative)?;
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(json!({ "text": text })),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+fn safe_case_path(root: &Path, case_id: &str, relative: &str) -> Result<PathBuf, String> {
+    if !matches!(relative, "main.md" | "rules.json" | "references.json" | "patterns.md") {
+        return Err("unsafe_case_path".into());
+    }
+    if case_id.is_empty() || case_id.contains('/') || case_id.contains('\\') || case_id.contains("..") {
+        return Err("unsafe_case_path".into());
+    }
+    Ok(root.join("cases").join(case_id).join(relative))
 }
 
 #[cfg(test)]

@@ -143,6 +143,21 @@ export class SqliteEngineStore implements EngineStore {
         input.at,
         input.at,
       );
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO executions(
+          execution_id, version, origin, kind, status, phase, priority, parent_execution_id, created_at, updated_at
+        ) VALUES (?, 1, ?, ?, 'active', 'intake', ?, ?, ?, ?)`,
+      )
+      .run(
+        input.caseId,
+        input.origin,
+        input.kind,
+        input.priority,
+        input.parentCaseId ?? null,
+        input.at,
+        input.at,
+      );
     await this.appendCaseEvent(input.caseId, 1, "case.created", input.at, {
       origin: input.origin,
       kind: input.kind,
@@ -733,6 +748,56 @@ export class SqliteEngineStore implements EngineStore {
       .run(reservationId);
   }
 
+  async putFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(kind, record_id) DO UPDATE SET
+           version = excluded.version,
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(kind, id, version, JSON.stringify(payload), at);
+  }
+
+  async getFoundation(kind: string, id: string): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null> {
+    const row = this.db
+      .prepare(
+        `SELECT record_id, version, payload_json, updated_at FROM foundation_records WHERE kind = ? AND record_id = ?`,
+      )
+      .get(kind, id) as { record_id: string; version: number; payload_json: string; updated_at: string } | undefined;
+    if (!row) return null;
+    return { id: row.record_id, version: row.version, payload: JSON.parse(row.payload_json) as unknown, updatedAt: row.updated_at };
+  }
+
+  async listFoundation(kind: string): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]> {
+    const rows = this.db
+      .prepare(`SELECT record_id, version, payload_json, updated_at FROM foundation_records WHERE kind = ?`)
+      .all(kind) as { record_id: string; version: number; payload_json: string; updated_at: string }[];
+    return rows.map((row) => ({
+      id: row.record_id,
+      version: row.version,
+      payload: JSON.parse(row.payload_json) as unknown,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO execution_case_links(execution_id, project_case_id, linked_at) VALUES (?, ?, ?)`,
+      )
+      .run(executionId, projectCaseId, at);
+  }
+
+  async listExecutionCases(executionId: string): Promise<readonly string[]> {
+    const rows = this.db
+      .prepare(`SELECT project_case_id FROM execution_case_links WHERE execution_id = ?`)
+      .all(executionId) as { project_case_id: string }[];
+    return rows.map((row) => row.project_case_id);
+  }
+
   async releaseUncommittedHostedGrants(): Promise<number> {
     const result = this.db
       .prepare(`UPDATE hosted_grant_reservations SET state = 'released' WHERE state = 'reserved'`)
@@ -818,6 +883,7 @@ type DbJudgment = {
 function mapCase(row: DbCase): CaseRecord {
   return {
     caseId: row.case_id,
+    executionId: row.case_id,
     version: row.version,
     origin: row.origin as CaseOrigin,
     kind: row.kind as CaseKind,
@@ -894,7 +960,11 @@ function applyMigrations(db: SqlHandle): void {
     if (!first) throw new Error("missing_migration_1");
     db.exec(first);
     db.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?)").run(now);
-    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+    const versions = Object.keys(MIGRATION_SQL)
+      .map((key) => Number(key))
+      .filter((version) => version > 1)
+      .sort((left, right) => left - right);
+    for (const version of versions) {
       const applied = db.prepare("SELECT version FROM schema_migrations WHERE version = ?").get(version);
       if (applied) continue;
       const sql = MIGRATION_SQL[version];

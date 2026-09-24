@@ -1,4 +1,5 @@
 import type { ConnectorActionRef, ConnectorRef, ReflexRef } from "./artifacts.js";
+import type { EventEnvelope, ObservationBinding, ScopedActionGrant } from "./events.js";
 
 export type SubmitTextCommand = {
   readonly type: "SubmitText";
@@ -240,6 +241,35 @@ export type CancelActiveCommand = {
   readonly type: "CancelActive";
 };
 
+export type IngestObservedEventCommand = {
+  readonly type: "IngestObservedEvent";
+  readonly envelope: EventEnvelope;
+};
+
+export type DecideVerifyCommand = {
+  readonly type: "DecideVerify";
+  readonly verifyId: string;
+  readonly decision: "accept" | "dismiss" | "correct";
+  readonly correction?: string;
+};
+
+export type RenameProjectCaseCommand = {
+  readonly type: "RenameProjectCase";
+  readonly projectCaseId: string;
+  readonly alias: string;
+  readonly expectedVersion: number;
+};
+
+export type BindObservationCommand = {
+  readonly type: "BindObservation";
+  readonly binding: ObservationBinding;
+};
+
+export type SetScopedGrantCommand = {
+  readonly type: "SetScopedGrant";
+  readonly grant: ScopedActionGrant;
+};
+
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
@@ -277,7 +307,12 @@ export type RelayCommand =
   | PauseReflexCommand
   | RollbackReflexCommand
   | ReplayFixtureCommand
-  | CancelActiveCommand;
+  | CancelActiveCommand
+  | IngestObservedEventCommand
+  | DecideVerifyCommand
+  | RenameProjectCaseCommand
+  | BindObservationCommand
+  | SetScopedGrantCommand;
 
 export type RelayCommandResult = {
   readonly ok: boolean;

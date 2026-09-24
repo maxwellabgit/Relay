@@ -12,7 +12,9 @@ An `OperationProposal` supplies action reference, arguments, input source refs, 
 
 Identifier display uses exact versions, for example `reflex.remember-birthday@1` and `google-calendar@1/google-calendar.event-create@1`.
 
-Production registers only these four definitions in the alpha:
+The designs below are not the registered runtime set. Production code registers four modules: `reflex.resolve-acronym`, `reflex.capture-note`, `reflex.remember-fact`, and `reflex.recommend-next-action`. None is `shipped`. Pass 1 adds a shared event runner for connected events and local Case actions. It does not make the calendar write designs below a live provider.
+
+Design notes kept for the later catalog:
 
 ## `reflex.remember-birthday@1`
 

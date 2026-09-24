@@ -642,4 +642,59 @@ class TauriLearning implements LearningStore {
   private async voidOp(op: Record<string, unknown>): Promise<void> {
     await this.call(op);
   }
+
+  async putFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void> {
+    await this.call({ op: "foundation_put", kind, id, version, payload, at });
+  }
+
+  async getFoundation(
+    kind: string,
+    id: string,
+  ): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null> {
+    const row = await this.call({ op: "foundation_get", kind, id });
+    if (!row || typeof row !== "object") return null;
+    return row as { id: string; version: number; payload: unknown; updatedAt: string };
+  }
+
+  async listFoundation(
+    kind: string,
+  ): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]> {
+    const rows = await this.call({ op: "foundation_list", kind });
+    return Array.isArray(rows)
+      ? (rows as { id: string; version: number; payload: unknown; updatedAt: string }[])
+      : [];
+  }
+
+  async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
+    await this.call({ op: "link_execution_case", executionId, projectCaseId, at });
+  }
+
+  async listExecutionCases(executionId: string): Promise<readonly string[]> {
+    const rows = await this.call({ op: "list_execution_cases", executionId });
+    return Array.isArray(rows) ? rows.filter((item): item is string => typeof item === "string") : [];
+  }
+}
+
+export class TauriCaseFolder {
+  constructor(private readonly invoke: (op: Record<string, unknown>) => Promise<unknown>) {}
+
+  async writeAtomic(projectCaseId: string, relativePath: string, bytes: Uint8Array): Promise<void> {
+    await this.invoke({
+      op: "case_folder_write",
+      projectCaseId,
+      relativePath,
+      text: new TextDecoder().decode(bytes),
+    });
+  }
+
+  async read(projectCaseId: string, relativePath: string): Promise<Uint8Array | null> {
+    const row = await this.invoke({ op: "case_folder_read", projectCaseId, relativePath });
+    if (!row || typeof row !== "object" || !("text" in row)) return null;
+    const text = (row as { text?: unknown }).text;
+    return typeof text === "string" ? new TextEncoder().encode(text) : null;
+  }
+
+  async recover(): Promise<number> {
+    return 0;
+  }
 }

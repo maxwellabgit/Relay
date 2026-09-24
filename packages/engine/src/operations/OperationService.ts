@@ -218,7 +218,7 @@ export class OperationService {
       ...connection,
       connectionVersion: connection.connectionVersion + 1,
       connected: true,
-      healthStatus: "connected",
+      healthStatus: "authority_recorded",
       grantedOAuthScopes: nextScopes,
       readScopes: unique([...connection.readScopes, `${connection.connector.id}.read`]),
     };
@@ -238,11 +238,11 @@ export class OperationService {
     const next: ConnectionRecord = {
       ...connection.row,
       connectionVersion: connection.row.connectionVersion + 1,
-      healthStatus: "discovered",
+      healthStatus: "discovery_unavailable",
     };
     await this.deps.authority.upsertConnection(next, at);
     await this.deps.emitSnapshot();
-    return { ok: true, summary: "resources_discovered", connectionId };
+    return { ok: false, summary: "discovery_unavailable", error: "discovery_unavailable", connectionId };
   }
 
   private async selectResources(
@@ -417,7 +417,7 @@ export class OperationService {
     const connection = await this.requireConnection(connectionId, expectedConnectionVersion);
     if (!connection.ok) return connection.result;
     await this.deps.emitSnapshot();
-    return { ok: true, summary: "imported_content_deleted", connectionId };
+    return { ok: false, summary: "delete_not_implemented", error: "delete_not_implemented", connectionId };
   }
 
   private async setReflex(

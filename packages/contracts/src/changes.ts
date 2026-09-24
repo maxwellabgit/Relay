@@ -126,6 +126,21 @@ export type RelaySnapshot = {
   readonly trace: readonly TraceRow[];
   readonly memories: readonly MemoryView[];
   readonly actions: readonly ActionCard[];
+  readonly projectCases?: readonly import("./project-cases.js").ProjectCaseView[];
+  readonly verifyItems?: readonly import("./verify.js").VerifyItemView[];
+  readonly caseActivity?: readonly import("./project-cases.js").CaseActivity[];
+  readonly headsUp?: readonly import("./project-cases.js").HeadsUpNotice[];
+  readonly observationBindings?: readonly import("./events.js").ObservationBinding[];
+  readonly reflexInvocations?: readonly {
+    readonly invocationId: string;
+    readonly reflexId: string;
+    readonly resultType: string;
+    readonly authority: string;
+    readonly executionId: string | null;
+    readonly projectCaseIds: readonly string[];
+    readonly receiptIds: readonly string[];
+    readonly at: string;
+  }[];
 };
 
 export type ActivityLine = {

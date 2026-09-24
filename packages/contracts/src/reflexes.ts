@@ -181,6 +181,46 @@ export type ReflexResult =
   | ClarificationRequiredResult
   | NoActionResult;
 
+export type StandardResultType =
+  | "finding"
+  | "notification"
+  | "case_change_proposed"
+  | "verification_required"
+  | "operation_proposed"
+  | "action_completed"
+  | "clarification_required"
+  | "no_action"
+  | "deferred"
+  | "failed";
+
+export type StandardReflexResult = {
+  readonly type: StandardResultType;
+  readonly summary: string;
+  readonly executionId: string | null;
+  readonly projectCaseIds: readonly string[];
+  readonly reflexId: string;
+  readonly reflexVersion: number;
+  readonly invocationId: string;
+  readonly eventId: string;
+  readonly judgmentIds: readonly string[];
+  readonly toolIds: readonly string[];
+  readonly authority: "allowed" | "denied" | "not_required" | "deferred";
+  readonly receiptIds: readonly string[];
+  readonly durationMs: number;
+  readonly retained: boolean;
+};
+
+export function assertStandardResult(result: StandardReflexResult): StandardReflexResult {
+  if (result.type === "action_completed" && result.receiptIds.length === 0) {
+    throw new Error("action_completed_without_receipt");
+  }
+  if (result.type === "no_action" && result.retained && result.authority === "allowed") {
+    throw new Error("no_action_retained_content");
+  }
+  if (!result.invocationId || !result.reflexId) throw new Error("incomplete_result");
+  return result;
+}
+
 export type ReflexModule = {
   readonly definition: ReflexDefinition;
   detect(event: SourceEvent, context: DetectionContext): TriggerCandidate[];

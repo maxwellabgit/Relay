@@ -129,4 +129,9 @@ export type EngineStore = {
   commitHostedGrant?(reservationId: string): Promise<void>;
   releaseHostedGrant?(reservationId: string): Promise<void>;
   releaseUncommittedHostedGrants?(): Promise<number>;
+  putFoundation?(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void>;
+  getFoundation?(kind: string, id: string): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null>;
+  listFoundation?(kind: string): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]>;
+  linkExecutionCase?(executionId: string, projectCaseId: string, at: string): Promise<void>;
+  listExecutionCases?(executionId: string): Promise<readonly string[]>;
 };

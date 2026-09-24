@@ -1,14 +1,17 @@
 ﻿import type {
   ArtifactStorePort,
+  EventEnvelope,
   GlassesDisplayPort,
   GitHubReadPort,
   JudgmentPort,
+  ObservationBinding,
   PublicSearchPort,
   ReflexModule,
   RelayChange,
   RelayCommand,
   RelayCommandResult,
   RelaySnapshot,
+  ScopedActionGrant,
   TextModelPort,
   TranscriptSegmentV1,
 } from "@relay/contracts";
@@ -19,6 +22,9 @@ import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { AmbientTriage } from "./ambient/AmbientTriage.js";
 import { buildHostedJudgmentGrant, grantAccountFor, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
 import { listHostedWaits, markHostedWaitResumed } from "./judgments/durable-wait.js";
+import { MemoryCaseFolder, type CaseFolderPort } from "./cases/case-folder.js";
+import { foundationFromEngineStore, MemoryFoundationStore } from "./cases/foundation-store.js";
+import { Pass1Foundation } from "./cases/pass1.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
@@ -58,6 +64,7 @@ export type EngineDeps = {
   readonly mode?: "live" | "recorded" | "replay";
   readonly gitCommit?: string;
   readonly trace?: TraceSink;
+  readonly caseFolder?: CaseFolderPort;
 };
 
 /**
@@ -88,6 +95,7 @@ export class RelayEngine {
   private readonly tools: ToolBroker;
   private readonly dispatcher: WorkDispatcher;
   private readonly projector: SnapshotProjector;
+  private readonly pass1: Pass1Foundation;
 
   constructor(private readonly deps: EngineDeps) {
     this.scheduler = new Scheduler(deps.store, deps.clock, "engine", 30_000, this.workSignal);
@@ -144,6 +152,16 @@ export class RelayEngine {
       authority: this.authority,
     });
 
+    this.pass1 = new Pass1Foundation({
+      records: foundationFromEngineStore(deps.store) ?? new MemoryFoundationStore(),
+      folder: deps.caseFolder ?? new MemoryCaseFolder(),
+      artifacts: deps.artifacts,
+      clock: deps.clock,
+      ids: deps.ids,
+      trace: (input) => this.trace.emit(input),
+      jevAvailable: deps.jevStatus?.ok === true,
+    });
+
     this.intake = new SourceIntake({
       store: deps.store,
       artifacts: deps.artifacts,
@@ -153,6 +171,12 @@ export class RelayEngine {
       scheduler: this.scheduler,
       trace: this.trace,
       emitSnapshot,
+      onExecution: async ({ executionId, text, origin }) => {
+        if (origin !== "typed" && origin !== "microphone" && origin !== "scripted_transcript") return;
+        const trimmed = text.trim();
+        if (!/\bhey relay\b/i.test(trimmed) && !/^[A-Z]{2,12}$/.test(trimmed)) return;
+        await this.pass1.onSpeech(trimmed, executionId);
+      },
     });
 
     this.ambient = new AmbientTriage({
@@ -288,6 +312,7 @@ export class RelayEngine {
       getActiveEpisodeId: () => this.activeEpisodeId,
       runId: () => resolveRunId(this.deps.trace?.runId),
       emit: (change) => this.emit(change),
+      pass1View: () => this.pass1.view(deps.clock.now().toISOString()),
     });
   }
 
@@ -299,6 +324,7 @@ export class RelayEngine {
     await this.deps.store.ensureSession(this.deps.sessionId, at);
     await this.deps.store.setListening(this.deps.sessionId, false);
     await this.deps.store.learning.compact(at);
+    await this.pass1.ensureSeeded();
     if (this.deps.trace) {
       this.recorder.hydrate([...(await this.deps.trace.read())]);
     } else {
@@ -466,6 +492,31 @@ export class RelayEngine {
         return this.ambient.dismissRecommendation(command.recommendationId);
       case "FeedbackAmbientRecommendation":
         return this.ambient.feedbackRecommendation(command.recommendationId, command.feedback);
+      case "IngestObservedEvent": {
+        const result = await this.pass1.ingest(command.envelope, null);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: result.type, ...(result.executionId ? { caseId: result.executionId } : {}) };
+      }
+      case "DecideVerify": {
+        await this.pass1.decideVerify(command.verifyId, command.decision, command.correction);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: `verify_${command.decision}` };
+      }
+      case "RenameProjectCase": {
+        const renamed = await this.pass1.rename(command.projectCaseId, command.alias, command.expectedVersion);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: "case_renamed", caseId: renamed.projectCaseId };
+      }
+      case "BindObservation": {
+        await this.pass1.bind(command.binding);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: "observation_bound" };
+      }
+      case "SetScopedGrant": {
+        await this.pass1.setGrant(command.grant);
+        await this.projector.emitSnapshot();
+        return { ok: true, summary: "grant_recorded" };
+      }
       default: {
         const handled = await this.operations.execute(command);
         if (handled) return handled;

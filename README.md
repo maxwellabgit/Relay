@@ -82,7 +82,7 @@ Raw source content is stored locally as an encrypted object. Ordinary logs and d
 
 ### Case
 
-A Case is one occurrence of work: a direct question, an observed claim, a possible birthday, a note candidate, or an acronym mention. Cases are durable and independently resumable.
+An Execution is one occurrence of work: a direct question, an observed claim, a note candidate, or an acronym mention. Executions are resumable jobs. A ProjectCase is the durable space for one line of work, with a stable id and a `main.md` Case Intent. An Execution may link to zero or more ProjectCases. `RunManifestV1` is a diagnostic process run, not an Execution.
 
 ### Judgment
 

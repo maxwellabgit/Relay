@@ -4,7 +4,9 @@ What has been verified on the TypeScript/Tauri Windows path, and what has not.
 
 ## Current decision
 
-**V1 / TestFlight is NO-GO.** Reviewed baseline `1862daacc8d06c6bc367c85b4cd523779d99b8fa` is on `main`. Exact-tip verify:v1 Actions `35742750378` passed. That run does not prove live Jev, headed Windows journeys, or physical devices.
+**V1 / TestFlight is NO-GO.** Reviewed baseline `1862daacc8d06c6bc367c85b4cd523779d99b8fa` is the historical matrix SHA. `main` at the Pass 1 branch point is `5631b2c6d19175e338116c03cbd9fe3c766b4605`. Exact-tip verify:v1 Actions `35742750378` passed on the older baseline. That run does not prove live Jev, headed Windows journeys, or physical devices.
+
+Jev canary: do not mark G1 green. The capability matrix still says the live canary has not run. `docs/implementation/RELAY_V1_FINAL_RELEASE_WORKFLOW_31ffec5.md` disagrees with itself (finding 11 and gate G1 say the canary did not run; phase 10 records native-import HTTP 200). No committed canary file is proof.
 
 Active workflow: `docs/implementation/RELAY_LIVE_JEV_TESTFLIGHT_FINAL_WORKFLOW_1862daa.md` (gates G0–G8).  
 Historical finalization review: `docs/implementation/RELAY_V1_TestFlight_Finalization_Review_4b64928.md`.  

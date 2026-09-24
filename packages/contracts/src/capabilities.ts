@@ -52,7 +52,13 @@ export type CapabilityId =
   | "dev.console"
   | "storage.sqlite"
   | "storage.protected-artifacts"
-  | "secrets.platform";
+  | "secrets.platform"
+  | "case.project"
+  | "verify.inbox"
+  | "connector.calendar"
+  | "connector.simulated-event"
+  | "ai.delegation"
+  | "halo.physical";
 
 export type CapabilityRow = {
   readonly id: CapabilityId;
@@ -252,6 +258,54 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     ios: "unverified-on-device",
     android: "unverified-on-device",
     notes: "Desktop DPAPI file import exists. Physical SecureStore proof is open.",
+  },
+  {
+    id: "case.project",
+    title: "Durable ProjectCase folder",
+    windows: "unverified-on-device",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "Pass 1 stores a Case Intent, rules, references, and entries separately from Executions. Headed Windows proof is still required before any shipped claim.",
+  },
+  {
+    id: "verify.inbox",
+    title: "Verify inbox",
+    windows: "unverified-on-device",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "Evidence status and review disposition are separate. Accept applies the previewed change. Dismiss does not. Not a shipped inbox until headed proof.",
+  },
+  {
+    id: "connector.calendar",
+    title: "Google Calendar connector",
+    windows: "not-shipped",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "No production OAuth, discovery, or provider receipt. Pass 2 only.",
+  },
+  {
+    id: "connector.simulated-event",
+    title: "Deterministic event fixture",
+    windows: "not-shipped",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "Test-only stand-in that emits EventEnvelope values. Release compositions must not import it. It is not a live connector.",
+  },
+  {
+    id: "ai.delegation",
+    title: "Approved external AI task",
+    windows: "not-shipped",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "Each task needs its own destination, context, and cost approval. Not implemented.",
+  },
+  {
+    id: "halo.physical",
+    title: "Physical Halo HUD",
+    windows: "not-shipped",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "Bridge stays disabled. No device evidence.",
   },
 ]);
 

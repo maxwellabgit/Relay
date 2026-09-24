@@ -18,6 +18,12 @@ export type SourceIntakeDeps = {
   readonly scheduler: Scheduler;
   readonly trace: EngineTrace;
   readonly emitSnapshot: () => Promise<void>;
+  readonly onExecution?: (input: {
+    readonly executionId: string;
+    readonly text: string;
+    readonly origin: string;
+    readonly isAsk: boolean;
+  }) => Promise<void>;
 };
 
 export class SourceIntake {
@@ -76,6 +82,23 @@ export class SourceIntake {
     segment: TranscriptSegmentV1,
     opts: { readonly isAsk: boolean; readonly requireListening: boolean },
   ): Promise<string> {
+    if (!segment.final) {
+      await this.deps.trace.note("source.rejected");
+      await this.deps.emitSnapshot();
+      return "";
+    }
+    if (opts.requireListening) {
+      const listening = await this.deps.store.getListening(this.deps.sessionId);
+      if (!listening) {
+        await this.deps.trace.emit({
+          type: "source.rejected",
+          status: "failed",
+          reasonCode: "listening_off",
+        });
+        await this.deps.emitSnapshot();
+        return "";
+      }
+    }
     const bytes = encodeText(segment.text);
     const sha256 = await sha256Hex(bytes);
     const seal = await this.sealPolicy(segment, opts.isAsk);
@@ -95,15 +118,6 @@ export class SourceIntake {
 
     if (!inserted) {
       return "";
-    }
-
-    if (opts.requireListening) {
-      const listening = await this.deps.store.getListening(this.deps.sessionId);
-      if (!listening) {
-        await this.deps.trace.note("source.rejected");
-        await this.deps.emitSnapshot();
-        return "";
-      }
     }
 
     const routing = shouldCreateCaseForFinal(segment.origin, opts.isAsk);
@@ -156,6 +170,12 @@ export class SourceIntake {
       { correlationId: record.caseId },
     );
 
+    await this.deps.onExecution?.({
+      executionId: record.caseId,
+      text: segment.text,
+      origin: segment.origin,
+      isAsk: opts.isAsk,
+    });
     await this.deps.emitSnapshot();
     return record.caseId;
   }

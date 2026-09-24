@@ -16,6 +16,7 @@ Capability labels are only `shipped`, `degraded`, `not-shipped`, or `unverified-
 | Toolchain at G0 | Node `v22.14.0`, npm `10.9.7`, rustc `1.83.0`, cargo `1.83.0` |
 | Active gate | G1 Live Jev (canary blocked); later code slices continue where a Linux VM can prove them |
 | Release decision | **NO-GO / V1 BLOCKED** |
+| Jev canary reading at `5631b2c` | Not a green G1. `capabilities.ts` and this ledger say the live canary has not run. `RELAY_V1_FINAL_RELEASE_WORKFLOW_31ffec5.md` records both “canary was not run” and a native-import noul/choice/score HTTP 200. No committed canary artifact is treated as proof. A private `.dev-data/canary/result.json` is not a gate. |
 | Foundation | production-core Phases 0–8 are foundation only. F0 and F1 are historical GREEN. They are not V1. |
 
 ## Phase states

@@ -82,6 +82,9 @@ export type TraceEmitInput = {
   status?: RuntimeEventV2["status"];
   reasonCode?: string;
   caseId?: string;
+  executionId?: string;
+  projectCaseId?: string;
+  reflexInvocationId?: string;
   reflexId?: string;
   judgmentId?: string;
   episodeId?: string;
@@ -135,6 +138,9 @@ export class EngineTrace {
       stage,
       status: partial.status ?? "completed",
       ...(partial.caseId ? { caseId: partial.caseId } : {}),
+      ...(partial.executionId ? { executionId: partial.executionId } : {}),
+      ...(partial.projectCaseId ? { projectCaseId: partial.projectCaseId } : {}),
+      ...(partial.reflexInvocationId ? { reflexInvocationId: partial.reflexInvocationId } : {}),
       ...(partial.reflexId ? { reflexId: partial.reflexId } : {}),
       ...(partial.judgmentId ? { judgmentId: partial.judgmentId } : {}),
       ...(partial.episodeId ? { episodeId: partial.episodeId } : {}),

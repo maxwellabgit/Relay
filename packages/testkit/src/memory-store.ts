@@ -56,6 +56,8 @@ export class MemoryEngineStore implements EngineStore {
   private readonly candidateEvents = new Map<string, CandidateEvent>();
   private readonly ambientSuppressions = new Map<string, { reason: string; createdAt: string }>();
   private readonly grants = new InMemoryGrantAccount();
+  private readonly foundation = new Map<string, { id: string; version: number; payload: unknown; updatedAt: string }>();
+  private readonly executionLinks: { executionId: string; projectCaseId: string }[] = [];
   private domainSeq = 0;
 
   close(): void {
@@ -111,6 +113,7 @@ export class MemoryEngineStore implements EngineStore {
   }): Promise<CaseRecord> {
     const record: CaseRecord = {
       caseId: input.caseId,
+      executionId: input.caseId,
       version: 1,
       origin: input.origin,
       kind: input.kind,
@@ -420,5 +423,28 @@ export class MemoryEngineStore implements EngineStore {
 
   releaseUncommittedHostedGrants(): Promise<number> {
     return this.grants.releaseUncommitted();
+  }
+
+  async putFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void> {
+    this.foundation.set(`${kind}:${id}`, { id, version, payload, updatedAt: at });
+  }
+
+  async getFoundation(kind: string, id: string): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null> {
+    return this.foundation.get(`${kind}:${id}`) ?? null;
+  }
+
+  async listFoundation(kind: string): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]> {
+    const prefix = `${kind}:`;
+    return [...this.foundation.entries()].filter(([key]) => key.startsWith(prefix)).map((entry) => entry[1]);
+  }
+
+  async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
+    void at;
+    if (this.executionLinks.some((link) => link.executionId === executionId && link.projectCaseId === projectCaseId)) return;
+    this.executionLinks.push({ executionId, projectCaseId });
+  }
+
+  async listExecutionCases(executionId: string): Promise<readonly string[]> {
+    return this.executionLinks.filter((link) => link.executionId === executionId).map((link) => link.projectCaseId);
   }
 }

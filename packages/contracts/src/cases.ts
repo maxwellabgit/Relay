@@ -24,8 +24,14 @@ export type CasePhase =
   | "publish"
   | "done";
 
+/**
+ * One phased job for one input. `caseId` is the legacy execution id.
+ * It is not a ProjectCase id. New readers should use `executionId`.
+ */
 export type CaseRecord = {
   readonly caseId: string;
+  /** Same value as caseId. Present on records written after the Pass 1 migration. */
+  readonly executionId?: string;
   readonly version: number;
   readonly origin: CaseOrigin;
   readonly kind: CaseKind;
@@ -37,6 +43,15 @@ export type CaseRecord = {
   readonly waitKind?: string;
   readonly parentCaseId?: string;
 };
+
+/** Canonical name for the per-input job. `caseId` remains the legacy key. */
+export type ExecutionRecord = CaseRecord & {
+  readonly executionId: string;
+};
+
+export function executionIdOf(record: CaseRecord): string {
+  return record.executionId ?? record.caseId;
+}
 
 export type CaseEventType =
   | "case.created"

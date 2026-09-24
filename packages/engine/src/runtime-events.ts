@@ -104,6 +104,9 @@ const REASON_CODES = new Set([
   "direct_answer",
   "below_usefulness",
   "no_match",
+  "scoped_action",
+  "duplicate_event",
+  "unselected_resource",
   "context_candidate",
   "bundled_dictionary",
   "explicit_memory",
@@ -138,6 +141,9 @@ const ID_FIELDS = [
   "captureSessionId",
   "workSessionId",
   "toolId",
+  "executionId",
+  "projectCaseId",
+  "reflexInvocationId",
 ] as const;
 
 export type RuntimeEventV2 = {
@@ -163,6 +169,10 @@ export type RuntimeEventV2 = {
   readonly attempt?: number;
   readonly queueDepth?: number;
   readonly toolId?: string;
+  /** Legacy execution id. Equal to caseId when both are present. Not a ProjectCase id. */
+  readonly executionId?: string;
+  readonly projectCaseId?: string;
+  readonly reflexInvocationId?: string;
   readonly providerRequestId?: string;
   readonly httpStatus?: number;
   readonly disclosureGrantId?: string;
@@ -202,6 +212,9 @@ const ALLOWED = new Set([
   "attempt",
   "queueDepth",
   "toolId",
+  "executionId",
+  "projectCaseId",
+  "reflexInvocationId",
   "providerRequestId",
   "httpStatus",
   "disclosureGrantId",

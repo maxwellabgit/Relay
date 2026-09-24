@@ -182,6 +182,9 @@ describe("production metro redirects", () => {
     expect(redirectProductionModule("./dev/replay-acronym-fixture.js", production)).toBe(
       "./dev/fixture-replay-blocked",
     );
+    expect(redirectProductionModule("./dev/calendar-sample.js", production)).toBe(
+      "./dev/calendar-sample-blocked",
+    );
     const internal = {
       EXPO_PUBLIC_RELAY_CHANNEL: "internal",
       EXPO_PUBLIC_RELAY_ALLOW_DEMO: "1",

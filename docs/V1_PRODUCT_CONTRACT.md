@@ -11,6 +11,19 @@ Do not reuse NepTranslate identifiers, EAS projects, credentials, branding, or l
 
 RELAY is a helpful local-first assistant and RELAY0 testing ground — not an always-on omniscient agent.
 
+## Target recorded in Pass 1, not yet shipped
+
+The September 23 product decisions are the target. They are not proof of implementation. See `docs/architecture/ADR-002-project-case-and-execution.md`.
+
+- A ProjectCase is a durable folder with `## Case Intent`. An Execution is the per-input job previously stored as `CaseRecord`.
+- Verify is the review inbox. Evidence status is not acceptance.
+- After a connector is authorized, the user selects resources and Case bindings before content is retained. Observation of those resources is independent of microphone Listening.
+- An activated Reflex may perform an explicitly scoped local action only after a fresh permission check and a durable receipt. Pass 1 proves that with a local Case edit. A provider write stays `not-shipped`.
+- The deterministic calendar adapter is test-only. Google Calendar, Gmail, Slack, GitHub writes, mobile model/speech, hosted external-AI delegation, and physical Halo stay `not-shipped` until Pass 2 evidence.
+- Consumer copy for deterministic results is a status line or one short question. That does not make the existing typed-ask path a shipped chat product.
+
+The committed four-Reflex list below remains the reviewed module set. `docs/REFLEXES.md` also describes birthday, claim, and preserve-information designs that are not registered modules.
+
 **RELAY turns repeated human judgment into software** through observable Cases, bounded Jev judgments, deterministic execution, and user-activated Reflexes.
 
 ## Included in V1
