@@ -231,7 +231,7 @@ describe("claim verification and GitHub read", () => {
     }
   });
 
-  it("GitHub read works when connected; revoked scope blocks github.search", async () => {
+  it("recorded GitHub authorization does not run github.search until the provider confirms", async () => {
     const github: GitHubReadPort = {
       async search(query) {
         return [
@@ -264,18 +264,19 @@ describe("claim verification and GitHub read", () => {
         text: "Search GitHub for claim budgets",
       });
       const caseId = accepted.caseId!;
-      await waitFor(async () => {
-        const snap = await harness.client.getSnapshot();
-        const row = await harness.store.getCase(caseId);
-        return (
-          snap.feedItems.some((i) => i.kind === "answer" && i.summary.includes("relay#42")) &&
-          row?.status === "completed"
-        );
-      });
+      let last = "none";
+      try {
+        await waitFor(async () => {
+          const row = await harness.store.getCase(caseId);
+          last = `${row?.status ?? "missing"}:${row?.phase ?? ""}:${row?.waitKind ?? ""}`;
+          return row?.status === "completed" || row?.status === "failed" || row?.status === "blocked";
+        }, 20_000);
+      } catch {
+        throw new Error(last);
+      }
       const answer =
         (await harness.client.getSnapshot()).feedItems.find((i) => i.kind === "answer")?.summary ?? "";
-      expect(answer).toContain("relay#42");
-      expect(answer).toContain("Sources:");
+      expect(answer).not.toContain("relay#42");
 
       const snap = await harness.client.getSnapshot();
       const connection = snap.connections.find((c) => c.connectionId === connectionId)!;

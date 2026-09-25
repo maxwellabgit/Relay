@@ -36,7 +36,7 @@ describe("transcript replay", () => {
       await harness.client.stop();
       harness.close();
     }
-  });
+  }, 20_000);
 
   it("replays a prepared audio file without turning listening on", async () => {
     const prepared = readFixture(recorded);

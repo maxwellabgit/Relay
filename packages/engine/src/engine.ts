@@ -1,17 +1,14 @@
 ﻿import type {
   ArtifactStorePort,
-  EventEnvelope,
   GlassesDisplayPort,
   GitHubReadPort,
   JudgmentPort,
-  ObservationBinding,
   PublicSearchPort,
   ReflexModule,
   RelayChange,
   RelayCommand,
   RelayCommandResult,
   RelaySnapshot,
-  ScopedActionGrant,
   TextModelPort,
   TranscriptSegmentV1,
 } from "@relay/contracts";
@@ -294,7 +291,7 @@ export class RelayEngine {
         outputSchema: { type: "object", properties: {}, additionalProperties: false },
         effect: "local_write",
         disclosure: "local_only",
-        requiredScopes: ["assistant.respond"],
+        requiredScopes: ["case.write"],
         timeoutMs: 1_000,
         retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
       },
@@ -390,7 +387,6 @@ export class RelayEngine {
     await this.deps.store.ensureSession(this.deps.sessionId, at);
     await this.deps.store.setListening(this.deps.sessionId, false);
     await this.deps.store.learning.compact(at);
-    await this.pass1.ensureSeeded();
     if (this.deps.trace) {
       this.recorder.hydrate([...(await this.deps.trace.read())]);
     } else {

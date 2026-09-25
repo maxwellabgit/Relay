@@ -16,7 +16,6 @@ import type {
 } from "@relay/contracts";
 import { assertStandardResult } from "@relay/contracts";
 import type { TraceEmitInput } from "../engine-helpers.js";
-import { sha256Hex } from "../engine-helpers.js";
 import type { CaseFolderPort } from "./case-folder.js";
 import type { FoundationStore } from "./foundation-store.js";
 
@@ -594,6 +593,7 @@ export class Pass1Foundation {
       version: item.version + 1,
       updatedAt: at,
       unreadCount: 0,
+      undoOf: `${projectCaseId}@${current.version}`,
     };
     await this.deps.records.put("verify_item", verifyId, next.version, next, at);
     return next;
@@ -833,8 +833,20 @@ export class Pass1Foundation {
     acceptedText?: string;
     connectionId?: string | null;
   }): Promise<VerifyItem> {
-    const existing = (await this.verifyItems()).find((item) => item.dedupeKey === input.dedupeKey);
     const at = this.now();
+    for (const prior of await this.verifyItems()) {
+      if (prior.disposition !== "pending" || prior.resourceId !== input.envelope.resourceId) continue;
+      const priorRevision = prior.sources.at(-1)?.revision ?? "0";
+      if (compareRevision(priorRevision, input.envelope.revision) >= 0) continue;
+      await this.deps.records.put(
+        "verify_item",
+        prior.verifyId,
+        prior.version + 1,
+        { ...prior, disposition: "superseded", version: prior.version + 1, updatedAt: at, unreadCount: 0 },
+        at,
+      );
+    }
+    const existing = (await this.verifyItems()).find((item) => item.dedupeKey === input.dedupeKey && item.disposition === "pending");
     if (existing) {
       const next: VerifyItem = {
         ...existing,
@@ -1222,12 +1234,16 @@ export class Pass1Foundation {
   }
 
   private async readRef(ref: { artifactId: string; sha256: string }): Promise<string> {
-    const bytes = await this.deps.artifacts.get({
-      artifactId: ref.artifactId,
-      sha256: ref.sha256,
-      policy: localOnlyPolicy(),
-    });
-    return new TextDecoder().decode(bytes);
+    try {
+      const bytes = await this.deps.artifacts.get({
+        artifactId: ref.artifactId,
+        sha256: ref.sha256,
+        policy: localOnlyPolicy(),
+      });
+      return new TextDecoder().decode(bytes);
+    } catch {
+      return "";
+    }
   }
 
   private async indexOnly(project: StoredCase): Promise<unknown> {
@@ -1314,22 +1330,6 @@ function subjectKeyOf(text: string): string {
   const acronym = /^([A-Za-z]{2,12}):/.exec(text.trim());
   if (acronym?.[1]) return acronym[1].toLowerCase();
   return text.trim().toLowerCase().slice(0, 40);
-}
-
-function toVerifyView(item: VerifyItem): VerifyItemView {
-  return {
-    verifyId: item.verifyId,
-    version: item.version,
-    evidenceStatus: item.evidenceStatus,
-    disposition: item.disposition,
-    reason: item.reason,
-    proposedChange: item.proposedChange,
-    projectCaseIds: item.projectCaseIds,
-    unreadCount: item.unreadCount,
-    updatedAt: item.updatedAt,
-    acceptedText: "",
-    proposedText: item.proposedChange,
-  };
 }
 
 function safeTraceId(value: string): string {

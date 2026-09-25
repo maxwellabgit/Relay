@@ -2169,7 +2169,9 @@ fn list_execution_cases(conn: &Connection, op: &Value) -> Result<Value, String> 
         .prepare("SELECT project_case_id FROM execution_case_links WHERE execution_id = ?1")
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params![req_str(op, "executionId")?], |row| row.get::<_, String>(0))
+        .query_map(params![req_str(op, "executionId")?], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|error| error.to_string())?;
     let mut items = Vec::new();
     for row in rows {
@@ -2206,10 +2208,17 @@ impl StateDb {
 }
 
 fn safe_case_path(root: &Path, case_id: &str, relative: &str) -> Result<PathBuf, String> {
-    if !matches!(relative, "main.md" | "rules.json" | "references.json" | "patterns.md") {
+    if !matches!(
+        relative,
+        "main.md" | "rules.json" | "references.json" | "patterns.md"
+    ) {
         return Err("unsafe_case_path".into());
     }
-    if case_id.is_empty() || case_id.contains('/') || case_id.contains('\\') || case_id.contains("..") {
+    if case_id.is_empty()
+        || case_id.contains('/')
+        || case_id.contains('\\')
+        || case_id.contains("..")
+    {
         return Err("unsafe_case_path".into());
     }
     Ok(root.join("cases").join(case_id).join(relative))

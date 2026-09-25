@@ -1,4 +1,7 @@
 import type { ConnectorActionRef, ConnectorRef, ReflexRef } from "./artifacts.js";
+import type { ObservationBinding } from "./events.js";
+import type { CaseActivity, HeadsUpNotice, ProjectCaseView } from "./project-cases.js";
+import type { VerifyItemView } from "./verify.js";
 
 export type FeedItemSnapshot = {
   readonly itemId: string;
@@ -126,11 +129,11 @@ export type RelaySnapshot = {
   readonly trace: readonly TraceRow[];
   readonly memories: readonly MemoryView[];
   readonly actions: readonly ActionCard[];
-  readonly projectCases?: readonly import("./project-cases.js").ProjectCaseView[];
-  readonly verifyItems?: readonly import("./verify.js").VerifyItemView[];
-  readonly caseActivity?: readonly import("./project-cases.js").CaseActivity[];
-  readonly headsUp?: readonly import("./project-cases.js").HeadsUpNotice[];
-  readonly observationBindings?: readonly import("./events.js").ObservationBinding[];
+  readonly projectCases?: readonly ProjectCaseView[];
+  readonly verifyItems?: readonly VerifyItemView[];
+  readonly caseActivity?: readonly CaseActivity[];
+  readonly headsUp?: readonly HeadsUpNotice[];
+  readonly observationBindings?: readonly ObservationBinding[];
   readonly reflexInvocations?: readonly {
     readonly invocationId: string;
     readonly reflexId: string;

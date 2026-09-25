@@ -246,4 +246,63 @@ describe("Pass 1 case and calendar slice", () => {
     const exact = await foundation.onSpeech("API", "exec_api");
     expect(exact.type).toBe("notification");
   });
+
+  it("rejects an impossible date, supersedes an older proposal, and withdraws provenance", async () => {
+    const { foundation, records } = harness();
+    await foundation.ensureSeeded();
+    await foundation.addEntry("case_birthdays", "Maya 03-14", 1);
+    await foundation.bind({
+      bindingId: "bind_birthdays",
+      connectionId: "connection_sample",
+      resourceId: "calendar:birthdays",
+      projectCaseIds: ["case_birthdays"],
+      eventKinds: ["calendar.event"],
+      contentLevel: "excerpt",
+      retention: "case_entry",
+      enabled: true,
+      revoked: false,
+      lastSyncAt: null,
+      lagMs: null,
+    });
+    const invalid = await foundation.ingest(
+      calendarEnvelope({
+        eventId: "event_bad_date",
+        externalEventId: "ext_bad",
+        revision: "1",
+        resourceId: "calendar:birthdays",
+        content: "Birthday: Maya 02-30",
+        selected: true,
+        at: "2026-09-24T12:00:00.000Z",
+      }),
+    );
+    expect(invalid.type).toBe("verification_required");
+    expect(invalid.summary).toBe("Invalid date.");
+    await foundation.ingest(
+      calendarEnvelope({
+        eventId: "event_old",
+        externalEventId: "ext_person",
+        revision: "2",
+        resourceId: "calendar:birthdays",
+        content: "Birthday: Maya 04-01",
+        selected: true,
+        at: "2026-09-24T12:00:00.000Z",
+      }),
+    );
+    await foundation.ingest(
+      calendarEnvelope({
+        eventId: "event_new",
+        externalEventId: "ext_person",
+        revision: "3",
+        resourceId: "calendar:birthdays",
+        content: "Birthday: Maya 05-02",
+        selected: true,
+        at: "2026-09-24T12:00:00.000Z",
+      }),
+    );
+    const items = (await foundation.view()).verifyItems;
+    expect(items.some((item) => item.disposition === "superseded")).toBe(true);
+    expect(items.filter((item) => item.disposition === "pending")).toHaveLength(1);
+    const indexed = JSON.stringify((await records.list("verify_item")).map((row) => row.payload));
+    expect(indexed.includes("SENTINEL")).toBe(false);
+  });
 });

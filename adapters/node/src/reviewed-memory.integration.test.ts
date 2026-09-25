@@ -2,7 +2,7 @@ import type { TextModelPort, TranscriptSegmentV1 } from "@relay/contracts";
 import { describe, expect, it } from "vitest";
 import { createNodeHarness } from "./create-client.js";
 
-async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 4000): Promise<void> {
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 12_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) return;

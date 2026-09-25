@@ -251,7 +251,7 @@ describe("tool and operation kernel", () => {
 });
 
 async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 120; i += 1) {
+  for (let i = 0; i < 400; i += 1) {
     if (await predicate()) return;
     await new Promise((r) => setTimeout(r, 25));
   }

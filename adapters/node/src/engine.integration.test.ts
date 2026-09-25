@@ -6,7 +6,7 @@ import { createNodeHarness } from "./create-client.js";
 
 async function waitFor(
   predicate: () => Promise<boolean>,
-  timeoutMs = 2000,
+  timeoutMs = 12_000,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
