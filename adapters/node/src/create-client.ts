@@ -49,11 +49,12 @@ export async function createNodeHarness(options: NodeHarnessOptions = {}) {
   const sqlite = await openSqliteEngineStore(databasePath, artifacts);
   const store = new TauriEngineStore(sqliteStoreInvoke(sqlite), artifacts);
   let n = 0;
+  const idNonce = Math.random().toString(36).slice(2, 8);
   const clock = options.clock ?? { now: () => new Date() };
   const ids =
     options.ids ??
     ({
-      next: (prefix: string) => `${prefix}_${++n}`,
+      next: (prefix: string) => `${prefix}_${idNonce}_${++n}`,
     } satisfies EngineDeps["ids"]);
 
   const judgments: JudgmentPort =
