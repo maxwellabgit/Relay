@@ -282,7 +282,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Not ready. OperationService has no live Calendar account. The sample is a fixture. Read-only daily gather is a separate local schedule, not this connector.",
+    notes: "Not ready for a live account. A read port can pull selected calendars into the Case path. No production OAuth or provider receipt.",
   },
   {
     id: "connector.simulated-event",
@@ -314,7 +314,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "unverified-on-device",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "One local time between 09:00 and 17:00 records bound resource ids. It does not call a provider or draft mail, sheets, or docs.",
+    notes: "One local time between 09:00 and 17:00 pulls bound resources when a read port is configured. Without an account it records no_provider. It does not draft mail or create Docs or Sheets.",
   },
 ]);
 

@@ -1,5 +1,6 @@
 ﻿import type {
   ArtifactStorePort,
+  EventEnvelope,
   GlassesDisplayPort,
   GitHubReadPort,
   JudgmentPort,
@@ -65,6 +66,8 @@ export type EngineDeps = {
   readonly caseFolder?: CaseFolderPort;
   /** Internal test workbench only. Release clients leave this unset. */
   readonly allowFixture?: boolean;
+  /** Read-only account pull. Absent until a real provider is connected. */
+  readonly sourceRead?: (resourceId: string) => Promise<readonly EventEnvelope[]>;
 };
 
 /**
@@ -166,6 +169,7 @@ export class RelayEngine {
       trace: (input) => this.trace.emit(input),
       jevAvailable: deps.jevStatus?.ok === true,
       runTool: (request) => this.runCaseTool(request),
+      ...(deps.sourceRead ? { pullSource: (resourceId: string) => deps.sourceRead!(resourceId) } : {}),
       judgeChoice: async (options) => {
         try {
           const response = await deps.judgments.judge(

@@ -55,8 +55,8 @@ Models never gain execution authority. The developer console projects runtime ev
 
 ## Explicitly not claimed
 
-- Google Calendar / Gmail / Sheets / GitHub / Plaid connectors. Pass 2 has not started a live account. P2.0 is the Case tool, claim, Verify, and privacy repair. A daily read between 09:00 and 17:00 records bound resource ids only.
-- Drafting mail or writing a new Google Sheet or Doc. That is a later Pass 2 step after read-only gather.
+- Google Calendar / Gmail / Sheets / GitHub / Plaid connectors. A read port and safe draft actions exist in code. A live Google account is not connected. Send, delete, and edits of existing files are refused.
+- Drafting mail or creating a new Google Sheet or Doc through that safe-draft gate. The provider call waits for a connected account and a user commit.
 - Working iPhone / TestFlight build
 - Physical Halo hardware
 - Any capability marked `shipped` (none are, at `1862daa`)

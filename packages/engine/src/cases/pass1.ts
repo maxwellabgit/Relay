@@ -75,6 +75,7 @@ export type Pass1Deps = {
     options: readonly string[],
   ) => Promise<{ ok: true; choice: string; judgmentId: string } | { ok: false }>;
   readonly runTool?: (request: CaseAppendRequest) => Promise<CaseAppendResult>;
+  readonly pullSource?: (resourceId: string) => Promise<readonly EventEnvelope[]>;
 };
 
 export type CaseAppendRequest = {
@@ -603,11 +604,22 @@ export class Pass1Foundation {
     const resources = (await this.bindings())
       .filter((binding) => binding.enabled && !binding.revoked && binding.retention !== "none")
       .map((binding) => binding.resourceId);
+    let events = 0;
+    if (this.deps.pullSource) {
+      for (const resourceId of resources) {
+        const envelopes = await this.deps.pullSource(resourceId);
+        for (const envelope of envelopes) {
+          if (envelope.resourceId !== resourceId) continue;
+          await this.ingest(envelope);
+          events += 1;
+        }
+      }
+    }
     const ran = await this.deps.records.insertIfAbsent(
       "source_gather",
       day,
       1,
-      { day, minute, mode: "read_only", resources, at: now },
+      { day, minute, mode: this.deps.pullSource ? "read_only" : "no_provider", resources, events, at: now },
       now,
     );
     return { ran, minute, resources };

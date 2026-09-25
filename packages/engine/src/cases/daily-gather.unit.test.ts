@@ -68,7 +68,7 @@ describe("daily read-only gather", () => {
     const again = await foundation.runDailyRead(new Date(due.getTime() + 120_000).toISOString());
     expect(again.ran).toBe(false);
     const stored = await records.get("source_gather", day);
-    expect((stored?.payload as { mode?: string }).mode).toBe("read_only");
+    expect((stored?.payload as { mode?: string }).mode).toBe("no_provider");
     expect((await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.version).toBe(version);
   });
 });
