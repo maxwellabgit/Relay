@@ -39,7 +39,9 @@ async function main(): Promise<void> {
     });
     browser = await connectCdp(DEBUG_PORT);
     const page = await firstPage(browser);
-    await page.waitForSelector('[data-testid="relay-composer-input"]', { timeout: LAUNCH_TIMEOUT_MS });
+    await page.waitForSelector('[data-testid="relay-composer-input"]', {
+      timeout: LAUNCH_TIMEOUT_MS,
+    });
     assertions.push("composer_visible");
     await page.screenshot({ path: join(evidenceDir, "00-ready.png"), fullPage: true });
     const cases = page.locator('[data-testid="relay-nav-cases"]');
@@ -91,13 +93,16 @@ async function main(): Promise<void> {
     });
     browser = await connectCdp(DEBUG_PORT);
     const reopened = await firstPage(browser);
-    await reopened.waitForSelector('[data-testid="relay-composer-input"]', { timeout: LAUNCH_TIMEOUT_MS });
+    await reopened.waitForSelector('[data-testid="relay-composer-input"]', {
+      timeout: LAUNCH_TIMEOUT_MS,
+    });
     await reopened.locator('[data-testid="relay-nav-cases"]').click();
     const persisted = await waitForText(reopened, ["Maya 04-01"], 20_000);
     const reopenedBody = await reopened.locator("body").innerText();
     await reopened.screenshot({ path: join(evidenceDir, "05-restart.png"), fullPage: true });
     await writeFile(join(evidenceDir, "05-restart.txt"), reopenedBody);
-    if (!persisted) throw new Error(`Accepted birthday did not survive restart: ${reopenedBody.slice(0, 500)}`);
+    if (!persisted)
+      throw new Error(`Accepted birthday did not survive restart: ${reopenedBody.slice(0, 500)}`);
     assertions.push("restart_keeps_accepted");
     if (reopenedBody.includes("Listening for")) throw new Error("Listening turned on");
     assertions.push("listening_off");
@@ -133,7 +138,9 @@ async function resolveDesktopBinary(): Promise<string> {
       /* next */
     }
   }
-  throw new Error("Set RELAY_E2E_BINARY or build the desktop app before the headed Pass 1 journey.");
+  throw new Error(
+    "Set RELAY_E2E_BINARY or build the desktop app before the headed Pass 1 journey.",
+  );
 }
 
 async function connectCdp(port: number): Promise<Browser> {
@@ -188,10 +195,17 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
   });
 }
 
-async function waitForText(page: Page, needles: string[], timeoutMs: number): Promise<string | null> {
+async function waitForText(
+  page: Page,
+  needles: string[],
+  timeoutMs: number,
+): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const body = await page.locator("body").innerText().catch(() => "");
+    const body = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     const found = needles.find((needle) => body.includes(needle));
     if (found) return found;
     await sleep(250);
