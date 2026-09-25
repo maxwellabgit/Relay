@@ -665,6 +665,11 @@ class TauriLearning implements LearningStore {
       : [];
   }
 
+  async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
+    const claimed = await this.call({ op: "foundation_claim", kind, id, version, payload, at });
+    return claimed === true;
+  }
+
   async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
     await this.call({ op: "link_execution_case", executionId, projectCaseId, at });
   }

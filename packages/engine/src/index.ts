@@ -16,7 +16,7 @@ export * from "./protected-content.js";
 export * from "./project-decision-run.js";
 export * from "./project-case-execution.js";
 export { calendarEnvelope, Pass1Foundation } from "./cases/pass1.js";
-export { MemoryCaseFolder } from "./cases/case-folder.js";
+export { MemoryCaseFolder, SealedCaseFolder } from "./cases/case-folder.js";
 export { MemoryFoundationStore } from "./cases/foundation-store.js";
 export * from "./store.js";
 export * from "./trace-sink.js";

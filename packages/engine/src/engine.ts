@@ -160,6 +160,16 @@ export class RelayEngine {
       ids: deps.ids,
       trace: (input) => this.trace.emit(input),
       jevAvailable: deps.jevStatus?.ok === true,
+      inspectConnection: async (connectionId) => {
+        const projection = await this.authority.project();
+        const connection = projection.connections.find((row) => row.connectionId === connectionId);
+        if (!connection) return null;
+        return {
+          healthStatus: connection.healthStatus,
+          observationEnabled: connection.observationEnabled,
+          selectedResources: connection.selectedResources,
+        };
+      },
     });
 
     this.intake = new SourceIntake({
@@ -468,10 +478,16 @@ export class RelayEngine {
         if (caseId) await this.overlays.setInputPreview(command.text, caseId);
         return { ok: true, summary: "ask_accepted", caseId };
       }
-      case "UpsertGlossaryEntry":
-        return this.cases.upsertGlossary(command.token, command.expansion, command.confirmed, command.replace === true);
-      case "CaptureBirthday":
-        return this.cases.captureBirthday(command.displayName, command.date, command.confirmed, command.replace === true);
+      case "UpsertGlossaryEntry": {
+        const saved = await this.cases.upsertGlossary(command.token, command.expansion, command.confirmed, command.replace === true);
+        if (saved.ok) await this.pass1.recordAccepted("case_acronyms", `${command.token}: ${command.expansion}`);
+        return saved;
+      }
+      case "CaptureBirthday": {
+        const saved = await this.cases.captureBirthday(command.displayName, command.date, command.confirmed, command.replace === true);
+        if (saved.ok) await this.pass1.recordAccepted("case_birthdays", `${command.displayName} ${command.date}`);
+        return saved;
+      }
       case "DeleteMemory":
         await this.deps.store.learning.deleteMemory(command.kind, command.key);
         await this.projector.emitSnapshot();
@@ -493,7 +509,15 @@ export class RelayEngine {
       case "FeedbackAmbientRecommendation":
         return this.ambient.feedbackRecommendation(command.recommendationId, command.feedback);
       case "IngestObservedEvent": {
-        const result = await this.pass1.ingest(command.envelope, null);
+        const executionId = this.deps.ids.next("case");
+        await this.deps.store.createCase({
+          caseId: executionId,
+          origin: "observed",
+          kind: "resolve",
+          priority: 50,
+          at: this.deps.clock.now().toISOString(),
+        });
+        const result = await this.pass1.ingest(command.envelope, executionId);
         await this.projector.emitSnapshot();
         return { ok: true, summary: result.type, ...(result.executionId ? { caseId: result.executionId } : {}) };
       }
@@ -507,16 +531,9 @@ export class RelayEngine {
         await this.projector.emitSnapshot();
         return { ok: true, summary: "case_renamed", caseId: renamed.projectCaseId };
       }
-      case "BindObservation": {
-        await this.pass1.bind(command.binding);
-        await this.projector.emitSnapshot();
-        return { ok: true, summary: "observation_bound" };
-      }
-      case "SetScopedGrant": {
-        await this.pass1.setGrant(command.grant);
-        await this.projector.emitSnapshot();
-        return { ok: true, summary: "grant_recorded" };
-      }
+      case "BindObservation":
+      case "SetScopedGrant":
+        return { ok: false, summary: "fixture_command_blocked", error: "fixture_command_blocked" };
       default: {
         const handled = await this.operations.execute(command);
         if (handled) return handled;
@@ -568,6 +585,77 @@ export class RelayEngine {
    * Developer/fixture replay final — does not require Listening and must not start audio.
    * Only scripted_transcript / audio_file origins are accepted.
    */
+  /** Dev-console only. Records authority state, then ingests two calendar envelopes. */
+  async installCalendarFixture(): Promise<void> {
+    const at = this.deps.clock.now().toISOString();
+    const resourceId = "calendar:birthdays";
+    await this.authority.upsertConnection(
+      {
+        connectionId: "connection_calendar_sample",
+        connectionVersion: 1,
+        connector: { id: "calendar.deterministic", version: 1 },
+        connected: false,
+        observationEnabled: true,
+        healthStatus: "authority_recorded",
+        selectedResources: [resourceId],
+        writeActionEnabled: {},
+        grantedOAuthScopes: [],
+        readScopes: [],
+      },
+      at,
+    );
+    await this.pass1.bind({
+      bindingId: "bind_birthdays",
+      connectionId: "connection_calendar_sample",
+      resourceId,
+      projectCaseIds: ["case_birthdays"],
+      eventKinds: ["calendar.event"],
+      contentLevel: "excerpt",
+      retention: "case_entry",
+      enabled: true,
+      revoked: false,
+      lastSyncAt: null,
+      lagMs: null,
+    });
+    await this.pass1.setGrant({
+      grantId: "grant_birthday_notice",
+      reflexId: "reflex.rule-notice",
+      reflexVersion: 1,
+      connectionId: "connection_calendar_sample",
+      resourceIds: [resourceId],
+      actionId: "case.entry.replace@1",
+      expiresAt: new Date(this.deps.clock.now().getTime() + 60 * 60 * 1000).toISOString(),
+      maxPerHour: 4,
+    });
+    const { calendarEnvelope } = await import("./cases/pass1.js");
+    for (const [revision, content] of [
+      ["1", "Birthday: Maya 03-14"],
+      ["2", "Birthday: Maya 04-01"],
+    ] as const) {
+      const executionId = this.deps.ids.next("case");
+      await this.deps.store.createCase({
+        caseId: executionId,
+        origin: "observed",
+        kind: "resolve",
+        priority: 50,
+        at,
+      });
+      await this.pass1.ingest(
+        calendarEnvelope({
+          eventId: `event_sample_${revision}`,
+          externalEventId: "evt_birthday_1",
+          revision,
+          resourceId,
+          content,
+          selected: true,
+          at,
+        }),
+        executionId,
+      );
+    }
+    await this.projector.emitSnapshot();
+  }
+
   async ingestReplayFinalSegment(segment: TranscriptSegmentV1): Promise<string> {
     return this.intake.ingestReplayFinalSegment(segment);
   }

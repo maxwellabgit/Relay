@@ -129,7 +129,8 @@ describe("tool and operation kernel", () => {
       const connectionId = completed.connectionId!;
       const snapBefore = await harness.client.getSnapshot();
       const connection = snapBefore.connections.find((c) => c.connectionId === connectionId);
-      expect(connection?.connected).toBe(true);
+      expect(connection?.connected).toBe(false);
+      expect(connection?.healthStatus).toBe("authority_recorded");
       await harness.client.execute({
         type: "GrantHostedDisclosure",
         connectionId,

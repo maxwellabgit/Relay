@@ -8,12 +8,15 @@ const SENTINEL = "CALENDAR_TITLE_SENTINEL_9f3a";
 
 class MemoryArtifacts {
   readonly saved: Uint8Array[] = [];
+  private readonly byId = new Map<string, Uint8Array>();
   async put(value: Uint8Array) {
+    const artifactId = `art_${this.saved.length + 1}`;
     this.saved.push(value);
-    return { artifactId: `art_${this.saved.length}`, sha256: "abc", policy: localOnlyPolicy() };
+    this.byId.set(artifactId, value);
+    return { artifactId, sha256: "abc", policy: localOnlyPolicy() };
   }
-  async get() {
-    return new Uint8Array();
+  async get(ref: { artifactId: string }) {
+    return this.byId.get(ref.artifactId) ?? new Uint8Array();
   }
   async provenance() {
     return null;
@@ -23,14 +26,21 @@ class MemoryArtifacts {
 function harness() {
   let n = 0;
   const artifacts = new MemoryArtifacts();
+  const records = new MemoryFoundationStore();
+  const folder = new MemoryCaseFolder();
   const foundation = new Pass1Foundation({
-    records: new MemoryFoundationStore(),
-    folder: new MemoryCaseFolder(),
+    records,
+    folder,
     artifacts,
     clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
     ids: { next: (prefix) => `${prefix}_${++n}` },
+    inspectConnection: async () => ({
+      healthStatus: "authority_recorded",
+      observationEnabled: true,
+      selectedResources: ["calendar:birthdays"],
+    }),
   });
-  return { foundation, artifacts };
+  return { foundation, artifacts, records, folder };
 }
 
 describe("Pass 1 case and calendar slice", () => {
@@ -56,7 +66,7 @@ describe("Pass 1 case and calendar slice", () => {
       reflexVersion: 1,
       connectionId: "connection_sample",
       resourceIds: ["calendar:birthdays"],
-      actionId: "case.entry.append@1",
+      actionId: "case.entry.replace@1",
       expiresAt: "2026-09-24T18:00:00.000Z",
       maxPerHour: 4,
     });
@@ -140,6 +150,8 @@ describe("Pass 1 case and calendar slice", () => {
     expect(result.type).toBe("verification_required");
     const pending = (await foundation.view()).verifyItems.find((item) => item.disposition === "pending");
     expect(pending?.evidenceStatus).toBe("Contradicted");
+    expect(pending?.acceptedText).toContain("03-14");
+    expect(pending?.proposedText).toContain("04-01");
     const before = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
     await foundation.decideVerify(pending!.verifyId, "dismiss");
     const after = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
@@ -149,6 +161,76 @@ describe("Pass 1 case and calendar slice", () => {
     expect(renamed.intent.startsWith("Remember who")).toBe(true);
     const undone = await foundation.undo("case_birthdays");
     expect(undone.alias).toBe("Birthdays");
+  });
+
+  it("replaces the accepted birthday when Verify is accepted", async () => {
+    const { foundation } = harness();
+    await foundation.ensureSeeded();
+    await foundation.addEntry("case_birthdays", "Maya 03-14", 1);
+    await foundation.bind({
+      bindingId: "bind_birthdays",
+      connectionId: "connection_sample",
+      resourceId: "calendar:birthdays",
+      projectCaseIds: ["case_birthdays"],
+      eventKinds: ["calendar.event"],
+      contentLevel: "excerpt",
+      retention: "case_entry",
+      enabled: true,
+      revoked: false,
+      lastSyncAt: null,
+      lagMs: null,
+    });
+    await foundation.ingest(
+      calendarEnvelope({
+        eventId: "event_conflict_accept",
+        externalEventId: "ext_conflict_accept",
+        revision: "2",
+        resourceId: "calendar:birthdays",
+        content: "Birthday: Maya 04-01",
+        selected: true,
+        at: "2026-09-24T12:00:00.000Z",
+      }),
+    );
+    const pending = (await foundation.view()).verifyItems.find((item) => item.disposition === "pending");
+    await foundation.decideVerify(pending!.verifyId, "accept");
+    const birthdays = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
+    const dates = birthdays?.entries.filter((entry) => entry.text.startsWith("Maya")) ?? [];
+    expect(dates).toHaveLength(1);
+    expect(dates[0]?.text).toBe("Maya 04-01");
+  });
+
+  it("reopens a sealed Case after the folder object is replaced", async () => {
+    const { records, artifacts } = harness();
+    const first = new Pass1Foundation({
+      records,
+      folder: new MemoryCaseFolder(),
+      artifacts,
+      clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
+      ids: { next: (prefix) => `${prefix}_restart` },
+      inspectConnection: async () => ({
+        healthStatus: "authority_recorded",
+        observationEnabled: true,
+        selectedResources: ["calendar:birthdays"],
+      }),
+    });
+    await first.ensureSeeded();
+    const second = new Pass1Foundation({
+      records,
+      folder: new MemoryCaseFolder(),
+      artifacts,
+      clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
+      ids: { next: (prefix) => `${prefix}_again` },
+    });
+    await second.ensureSeeded();
+    const view = await second.view();
+    expect(view.projectCases.map((item) => item.projectCaseId).sort()).toEqual([
+      "case_acronyms",
+      "case_birthdays",
+      "case_self_improvement",
+    ]);
+    expect(view.projectCases.find((item) => item.projectCaseId === "case_birthdays")?.intent).toContain("birthday");
+    const index = await records.get("project_case", "case_birthdays");
+    expect(JSON.stringify(index?.payload).includes("Remember who")).toBe(false);
   });
 
   it("keeps wake and exact acronym distinct from ordinary mention", async () => {

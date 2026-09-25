@@ -438,6 +438,13 @@ export class MemoryEngineStore implements EngineStore {
     return [...this.foundation.entries()].filter(([key]) => key.startsWith(prefix)).map((entry) => entry[1]);
   }
 
+  async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
+    const key = `${kind}:${id}`;
+    if (this.foundation.has(key)) return false;
+    this.foundation.set(key, { id, version, payload, updatedAt: at });
+    return true;
+  }
+
   async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
     void at;
     if (this.executionLinks.some((link) => link.executionId === executionId && link.projectCaseId === projectCaseId)) return;

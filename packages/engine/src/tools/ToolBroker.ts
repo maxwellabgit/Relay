@@ -387,7 +387,9 @@ export class ToolBroker {
   private async eligibleDefinitions(remaining: ToolBudgets) {
     const projection = await this.deps.authority.project();
     const connected = new Set(
-      projection.connections.filter((c) => c.connected).map((c) => c.connector.id),
+      projection.connections
+        .filter((row) => row.connected || row.healthStatus === "authority_recorded")
+        .map((row) => row.connector.id),
     );
     const scopes = new Set<string>();
     for (const connection of projection.connections) {
@@ -398,7 +400,10 @@ export class ToolBroker {
     const hasPublicDisclosure = projection.disclosures.some((grant) => {
       if (grant.disclosure !== "public") return false;
       const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
-      return connection?.connector.id === "public-search" && connection.connected;
+      return (
+        connection?.connector.id === "public-search" &&
+        (connection.connected || connection.healthStatus === "authority_recorded")
+      );
     });
     const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();
     // Public-search (and any Jev Choice among tools) requires hosted processing + connected connector + disclosure.
@@ -428,12 +433,17 @@ export class ToolBroker {
   private async claimEligibleSources(): Promise<ClaimEligibleSources> {
     const projection = await this.deps.authority.project();
     const connected = new Set(
-      projection.connections.filter((c) => c.connected).map((c) => c.connector.id),
+      projection.connections
+        .filter((row) => row.connected || row.healthStatus === "authority_recorded")
+        .map((row) => row.connector.id),
     );
     const hasPublicDisclosure = projection.disclosures.some((grant) => {
       if (grant.disclosure !== "public") return false;
       const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
-      return connection?.connector.id === "public-search" && connection.connected;
+      return (
+        connection?.connector.id === "public-search" &&
+        (connection.connected || connection.healthStatus === "authority_recorded")
+      );
     });
     const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();
     return {

@@ -217,7 +217,7 @@ export class OperationService {
     const next: ConnectionRecord = {
       ...connection,
       connectionVersion: connection.connectionVersion + 1,
-      connected: true,
+      connected: false,
       healthStatus: "authority_recorded",
       grantedOAuthScopes: nextScopes,
       readScopes: unique([...connection.readScopes, `${connection.connector.id}.read`]),
@@ -225,7 +225,7 @@ export class OperationService {
     await this.deps.authority.upsertConnection(next, at);
     await this.deps.authority.putAuthAttempt({ ...attempt, status: "completed" }, at);
     await this.deps.emitSnapshot();
-    return { ok: true, summary: "authorization_completed", connectionId: next.connectionId };
+    return { ok: true, summary: "authority_recorded", connectionId: next.connectionId };
   }
 
   private async discoverResources(

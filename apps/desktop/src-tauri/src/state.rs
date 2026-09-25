@@ -528,6 +528,7 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "list_reviews" => list_reviews(conn),
         "compact" => compact(conn, op),
         "foundation_put" => foundation_put(conn, op),
+        "foundation_claim" => foundation_claim(conn, op),
         "foundation_get" => foundation_get(conn, op),
         "foundation_list" => foundation_list(conn, op),
         "link_execution_case" => link_execution_case(conn, op),
@@ -2094,6 +2095,24 @@ fn foundation_put(conn: &Connection, op: &Value) -> Result<Value, String> {
     )
     .map_err(|error| error.to_string())?;
     Ok(Value::Null)
+}
+
+fn foundation_claim(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let changed = conn
+        .execute(
+            "INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(kind, record_id) DO NOTHING",
+            params![
+                req_str(op, "kind")?,
+                req_str(op, "id")?,
+                req_i64(op, "version")?,
+                json_text(op.get("payload").unwrap_or(&Value::Null))?,
+                req_str(op, "at")?,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Bool(changed > 0))
 }
 
 fn foundation_get(conn: &Connection, op: &Value) -> Result<Value, String> {

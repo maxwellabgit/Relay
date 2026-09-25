@@ -783,6 +783,17 @@ export class SqliteEngineStore implements EngineStore {
     }));
   }
 
+  async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
+    const result = this.db
+      .prepare(
+        `INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(kind, record_id) DO NOTHING`,
+      )
+      .run(kind, id, version, JSON.stringify(payload), at);
+    return result.changes > 0;
+  }
+
   async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
     this.db
       .prepare(

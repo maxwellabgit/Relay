@@ -13,6 +13,8 @@ export type FoundationStore = {
   list(kind: string): Promise<readonly FoundationRow[]>;
   linkExecution(executionId: string, projectCaseId: string, at: string): Promise<void>;
   listCaseLinks(executionId: string): Promise<readonly string[]>;
+  /** Insert once. A second call with the same kind and id does not overwrite. */
+  insertIfAbsent(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean>;
 };
 
 type MemoryLink = { executionId: string; projectCaseId: string; at: string };
@@ -42,6 +44,13 @@ export class MemoryFoundationStore implements FoundationStore {
   async listCaseLinks(executionId: string): Promise<readonly string[]> {
     return this.links.filter((link) => link.executionId === executionId).map((link) => link.projectCaseId);
   }
+
+  async insertIfAbsent(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
+    const key = `${kind}:${id}`;
+    if (this.rows.has(key)) return false;
+    this.rows.set(key, { id, version, payload, updatedAt: at });
+    return true;
+  }
 }
 
 export function foundationFromEngineStore(store: EngineStore): FoundationStore | null {
@@ -60,5 +69,12 @@ export function foundationFromEngineStore(store: EngineStore): FoundationStore |
     list: (kind) => store.listFoundation!(kind),
     linkExecution: (executionId, projectCaseId, at) => store.linkExecutionCase!(executionId, projectCaseId, at),
     listCaseLinks: (executionId) => store.listExecutionCases!(executionId),
+    insertIfAbsent: async (kind, id, version, payload, at) => {
+      if (store.claimFoundation) return store.claimFoundation(kind, id, version, payload, at);
+      const existing = await store.getFoundation!(kind, id);
+      if (existing) return false;
+      await store.putFoundation!(kind, id, version, payload, at);
+      return true;
+    },
   };
 }

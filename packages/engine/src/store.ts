@@ -134,4 +134,5 @@ export type EngineStore = {
   listFoundation?(kind: string): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]>;
   linkExecutionCase?(executionId: string, projectCaseId: string, at: string): Promise<void>;
   listExecutionCases?(executionId: string): Promise<readonly string[]>;
+  claimFoundation?(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean>;
 };

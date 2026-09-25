@@ -22,6 +22,13 @@ export type VerifyItem = {
   readonly dedupeKey: string;
   readonly unreadCount: number;
   readonly caseVersion: number;
+  readonly replaceEntryId: string | null;
+  readonly acceptedArtifactId: string | null;
+  readonly acceptedSha256: string | null;
+  readonly proposedArtifactId: string | null;
+  readonly proposedSha256: string | null;
+  readonly connectionId: string | null;
+  readonly resourceId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly undoOf: string | null;
@@ -37,4 +44,6 @@ export type VerifyItemView = {
   readonly projectCaseIds: readonly string[];
   readonly unreadCount: number;
   readonly updatedAt: string;
+  readonly acceptedText: string;
+  readonly proposedText: string;
 };

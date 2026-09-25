@@ -189,7 +189,7 @@ export function DeveloperConsole({
             ) : (
               (snapshot.reflexInvocations ?? []).map((item) => (
                 <Text key={item.invocationId} style={styles.meta}>
-                  {`${item.resultType} · ${item.reflexId} · ${item.authority} · ${item.invocationId}`}
+                  {`${item.resultType} · ${item.reflexId} · ${item.authority} · tools ${item.receiptIds.join(",") || "none"} · ${item.invocationId}`}
                 </Text>
               ))
             )}

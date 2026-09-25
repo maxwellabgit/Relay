@@ -329,10 +329,10 @@ export function App() {
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
         onInjectSample={() => {
           void (async () => {
+            const handle = handleRef.current;
+            if (!developerConsoleAllowed(readProcessEnv()) || !handle) return;
             const { injectBirthdaySample } = await import("./dev/calendar-sample.js");
-            const client = clientRef.current;
-            if (!client) return;
-            await injectBirthdaySample(client);
+            await injectBirthdaySample(handle.engine);
           })().catch((error: unknown) => {
             setNotice(error instanceof Error ? error.message : "sample_failed");
           });

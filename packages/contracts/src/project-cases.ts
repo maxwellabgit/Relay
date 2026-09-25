@@ -1,10 +1,19 @@
 export type ProjectCaseStatus = "active" | "archived";
 
+export type EntryProvenance = {
+  readonly provider: string;
+  readonly externalEventId: string;
+  readonly revision: string;
+  readonly status: "accepted" | "withdrawn";
+};
+
 export type ProjectCaseEntry = {
   readonly entryId: string;
   readonly kind: "fact" | "decision" | "question" | "problem" | "pattern";
+  readonly subjectKey: string;
   readonly text: string;
   readonly updatedAt: string;
+  readonly provenance: EntryProvenance | null;
 };
 
 export type ProjectCaseReference = {
@@ -54,6 +63,11 @@ export type ProjectCaseView = {
   readonly entryCount: number;
   readonly referenceCount: number;
   readonly pendingVerify: number;
+  readonly entries: readonly {
+    readonly entryId: string;
+    readonly text: string;
+    readonly provenance: string;
+  }[];
 };
 
 export type CaseActivityKind = "read" | "write" | "finding" | "execution" | "verify";
