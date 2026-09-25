@@ -124,6 +124,7 @@ export class Pass1Foundation {
     observationBindings: ObservationBinding[];
     reflexInvocations: StoredInvocation[];
   }> {
+    await this.ensureSeeded();
     const cases = await this.cases();
     const verify = await this.verifyItems();
     const pending = new Map<string, number>();
@@ -341,6 +342,26 @@ export class Pass1Foundation {
     const execution = executionId ?? (await this.deps.openExecution?.()) ?? null;
     executionId = execution;
     const content = envelope.content ?? "";
+    if (binding.contentLevel === "metadata" || binding.retention === "artifact_only") {
+      const limitedIds = [...binding.projectCaseIds];
+      const kept = binding.retention === "artifact_only" && content
+        ? await this.deps.artifacts.put(this.encode(content), localOnlyPolicy())
+        : null;
+      void kept;
+      const receiptId = await this.putReceipt(envelope, limitedIds, executionId, null, "processed");
+      return this.finish(this.result({
+        type: "no_action",
+        summary: binding.contentLevel === "metadata" ? "Metadata only. No Case fact." : "Artifact retained. No Case fact.",
+        executionId,
+        projectCaseIds: limitedIds,
+        reflexId: "reflex.source-activity",
+        eventId: envelope.eventId,
+        authority: "not_required",
+        receiptIds: [receiptId],
+        retained: binding.retention === "artifact_only",
+        durationMs: Date.now() - started,
+      }), envelope, receiptId);
+    }
     const artifact = content
       ? await this.deps.artifacts.put(this.encode(content), localOnlyPolicy())
       : null;

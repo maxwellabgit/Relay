@@ -16,8 +16,9 @@ export function CasesPane({ cases, activityIds, onRename }: Props) {
       {cases.map((item) => {
         const active = activityIds.includes(item.projectCaseId);
         return (
-          <View
+            <View
             key={item.projectCaseId}
+            testID={`relay-case-${item.projectCaseId}`}
             style={{
               borderWidth: 1,
               borderColor: active ? colors.accent : colors.border,
@@ -76,7 +77,7 @@ export function VerifyPane({
           <Text style={{ color: colors.textMuted, marginTop: 4 }}>{item.disposition}</Text>
           {onDecide && item.disposition === "pending" ? (
             <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Accept" onPress={() => onDecide(item.verifyId, "accept")}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Accept" testID="relay-verify-accept" onPress={() => onDecide(item.verifyId, "accept")}>
                 <Text style={{ color: colors.accent }}>Accept</Text>
               </Pressable>
               <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => onDecide(item.verifyId, "dismiss")}>

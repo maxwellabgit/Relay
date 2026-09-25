@@ -235,6 +235,7 @@ export function PhoneShell({
               key={item}
               accessibilityRole="button"
               accessibilityLabel={label}
+              testID={`relay-nav-${item}`}
               onPress={() => setConsumerView(item)}
               style={styles.headerBtn}
             >

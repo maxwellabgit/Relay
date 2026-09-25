@@ -304,5 +304,33 @@ describe("Pass 1 case and calendar slice", () => {
     expect(items.filter((item) => item.disposition === "pending")).toHaveLength(1);
     const indexed = JSON.stringify((await records.list("verify_item")).map((row) => row.payload));
     expect(indexed.includes("SENTINEL")).toBe(false);
+    await foundation.bind({
+      bindingId: "bind_birthdays",
+      connectionId: "connection_sample",
+      resourceId: "calendar:birthdays",
+      projectCaseIds: ["case_birthdays"],
+      eventKinds: ["calendar.event"],
+      contentLevel: "metadata",
+      retention: "case_entry",
+      enabled: true,
+      revoked: false,
+      lastSyncAt: null,
+      lagMs: null,
+    });
+    const metadata = await foundation.ingest(
+      calendarEnvelope({
+        eventId: "event_meta",
+        externalEventId: "ext_meta",
+        revision: "9",
+        resourceId: "calendar:birthdays",
+        content: "Birthday: Noel 01-02",
+        selected: true,
+        at: "2026-09-24T12:00:00.000Z",
+      }),
+    );
+    expect(metadata.type).toBe("no_action");
+    expect(metadata.summary).toContain("Metadata only");
+    const birthdays = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
+    expect(birthdays?.entries.some((entry) => entry.text.includes("Noel"))).toBe(false);
   });
 });
