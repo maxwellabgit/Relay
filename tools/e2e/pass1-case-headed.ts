@@ -45,11 +45,12 @@ async function main(): Promise<void> {
     const cases = page.locator('[data-testid="relay-nav-cases"]');
     if ((await cases.count()) === 0) throw new Error("Cases navigation missing");
     await cases.click();
-    await page.waitForTimeout(1500);
+    const found = await waitForText(page, ["Birthdays"], 15_000);
     const body = await page.locator("body").innerText();
-    if (!body.includes("Birthdays")) throw new Error("Birthdays Case was not visible");
-    assertions.push("birthdays_visible");
     await page.screenshot({ path: join(evidenceDir, "01-cases.png"), fullPage: true });
+    await writeFile(join(evidenceDir, "01-cases.txt"), body);
+    if (!found) throw new Error(`Birthdays Case was not visible: ${body.slice(0, 500)}`);
+    assertions.push("birthdays_visible");
     const listening = await page.locator("body").innerText();
     if (listening.includes("Listening for")) throw new Error("Listening turned on");
     assertions.push("listening_off");
@@ -127,6 +128,17 @@ async function gitSha(): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForText(page: Page, needles: string[], timeoutMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const body = await page.locator("body").innerText().catch(() => "");
+    const found = needles.find((needle) => body.includes(needle));
+    if (found) return found;
+    await sleep(250);
+  }
+  return null;
 }
 
 main().catch((error) => {
