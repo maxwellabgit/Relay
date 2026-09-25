@@ -247,6 +247,20 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return null;
     case "release_uncommitted_hosted_grants":
       return store.releaseUncommittedHostedGrants();
+    case "foundation_put":
+      await store.putFoundation(str(op, "kind"), str(op, "id"), Number(op.version), op.payload, str(op, "at"));
+      return null;
+    case "foundation_get":
+      return store.getFoundation(str(op, "kind"), str(op, "id"));
+    case "foundation_list":
+      return store.listFoundation(str(op, "kind"));
+    case "foundation_claim":
+      return store.claimFoundation(str(op, "kind"), str(op, "id"), Number(op.version), op.payload, str(op, "at"));
+    case "link_execution_case":
+      await store.linkExecutionCase(str(op, "executionId"), str(op, "projectCaseId"), str(op, "at"));
+      return null;
+    case "list_execution_cases":
+      return store.listExecutionCases(str(op, "executionId"));
     default:
       throw new Error(`unknown_op:${String(op.op)}`);
   }
