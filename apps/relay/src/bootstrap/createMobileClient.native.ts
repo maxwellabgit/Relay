@@ -148,8 +148,7 @@ export async function createMobileClient(
 }
 
 function resolveBuildSha(): string {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  const sha = env?.EXPO_PUBLIC_GIT_SHA ?? env?.GIT_COMMIT ?? env?.GITHUB_SHA;
+  const sha = process.env.EXPO_PUBLIC_GIT_SHA ?? process.env.GIT_COMMIT ?? process.env.GITHUB_SHA;
   if (sha && /^[0-9a-f]{7,40}$/i.test(sha)) return sha.toLowerCase();
   return "unknown";
 }
