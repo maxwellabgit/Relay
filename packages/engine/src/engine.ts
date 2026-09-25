@@ -21,7 +21,8 @@ import { buildHostedJudgmentGrant, grantAccountFor, HostedGrantLedger, sessionDi
 import { listHostedWaits, markHostedWaitResumed } from "./judgments/durable-wait.js";
 import { SealedCaseFolder, type CaseFolderPort } from "./cases/case-folder.js";
 import { foundationFromEngineStore, MemoryFoundationStore } from "./cases/foundation-store.js";
-import { Pass1Foundation } from "./cases/pass1.js";
+import { dailyReadMinute, gatherIsDue, localDateKey } from "./cases/daily-gather.js";
+import { Pass1Foundation, type CaseAppendRequest, type CaseAppendResult } from "./cases/pass1.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
 import { JudgmentService } from "./judgments/JudgmentService.js";
 import { PatternService } from "./learning/PatternService.js";
@@ -77,6 +78,7 @@ export class RelayEngine {
   private running = false;
   private loopPromise: Promise<void> | null = null;
   private abort: AbortController | null = null;
+  private gatherTimer: ReturnType<typeof setTimeout> | null = null;
   private activeEpisodeId: string | null = null;
   private activeCaseId: string | null = null;
 
@@ -163,7 +165,7 @@ export class RelayEngine {
       ids: deps.ids,
       trace: (input) => this.trace.emit(input),
       jevAvailable: deps.jevStatus?.ok === true,
-      runTool: (toolId) => this.runCaseTool(toolId),
+      runTool: (request) => this.runCaseTool(request),
       judgeChoice: async (options) => {
         try {
           const response = await deps.judgments.judge(
@@ -283,6 +285,7 @@ export class RelayEngine {
 
     const registry = new ToolRegistry();
     this.caseRegistry = registry;
+    const pass1 = this.pass1;
     registry.register({
       definition: {
         id: "case.entry.append@1",
@@ -295,14 +298,36 @@ export class RelayEngine {
         timeoutMs: 1_000,
         retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
       },
-      async execute() {
+      async execute(input) {
+        const request = input as CaseAppendRequest;
+        if (!request?.projectCaseId || !request.text || !request.dedupeKey) {
+          return {
+            toolId: "case.entry.append@1",
+            status: "denied",
+            summary: "Case append rejected.",
+            citations: [],
+            sourceSlices: [],
+            output: {},
+          };
+        }
+        const outcome = await pass1.commitAppend(request);
+        if (!outcome.ok) {
+          return {
+            toolId: "case.entry.append@1",
+            status: "denied",
+            summary: outcome.reason,
+            citations: [],
+            sourceSlices: [],
+            output: {},
+          };
+        }
         return {
           toolId: "case.entry.append@1",
           status: "ok",
-          summary: "Case append allowed.",
+          summary: "Case append recorded.",
           citations: [],
           sourceSlices: [],
-          output: {},
+          output: { receiptId: outcome.receiptId },
         };
       },
     });
@@ -394,15 +419,33 @@ export class RelayEngine {
     }
     this.loopPromise = this.dispatcher.runLoop(this.abort.signal);
     await this.trace.emit({ type: "run.started", reasonCode: "start" });
+    await this.armDailyRead(at);
     await this.projector.emitSnapshot();
   }
 
   async stop(): Promise<void> {
+    if (this.gatherTimer) clearTimeout(this.gatherTimer);
+    this.gatherTimer = null;
     this.running = false;
     this.abort?.abort();
     await this.loopPromise;
     this.loopPromise = null;
     await this.trace.emit({ type: "run.ended", reasonCode: "completed" });
+  }
+
+  private async armDailyRead(at: string): Promise<void> {
+    const now = new Date(at);
+    const minute = dailyReadMinute(localDateKey(now));
+    if (gatherIsDue(now, minute)) {
+      await this.pass1.runDailyRead(at);
+      return;
+    }
+    const due = new Date(now);
+    due.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+    const delay = Math.max(0, due.getTime() - now.getTime());
+    this.gatherTimer = setTimeout(() => {
+      void this.pass1.runDailyRead(this.deps.clock.now().toISOString());
+    }, delay);
   }
 
   /** Force a SnapshotReplaced projection after host-side status changes (e.g. audio). */
@@ -638,16 +681,19 @@ export class RelayEngine {
    * Developer/fixture replay final — does not require Listening and must not start audio.
    * Only scripted_transcript / audio_file origins are accepted.
    */
-  private async runCaseTool(toolId: string): Promise<boolean> {
-    const tool = this.caseRegistry?.get(toolId);
-    if (!tool) return false;
-    const result = await tool.execute({}, new AbortController().signal);
+  private async runCaseTool(request: CaseAppendRequest): Promise<CaseAppendResult> {
+    const tool = this.caseRegistry?.get("case.entry.append@1");
+    if (!tool) return { ok: false, reason: "tool_missing" };
+    const result = await tool.execute(request, new AbortController().signal);
     await this.trace.emit({
       type: result.status === "ok" ? "tool.completed" : "tool.routed",
       reasonCode: result.status === "ok" ? "policy_pass" : "not_authorized",
       toolId: "case.entry.append",
     });
-    return result.status === "ok";
+    if (result.status !== "ok") return { ok: false, reason: result.summary };
+    const receiptId = (result.output as { receiptId?: string }).receiptId;
+    if (!receiptId) return { ok: false, reason: "receipt_missing" };
+    return { ok: true, receiptId };
   }
 
   /** Dev-console only. Records authority state, then ingests two calendar envelopes. */

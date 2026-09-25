@@ -135,4 +135,12 @@ export type EngineStore = {
   linkExecutionCase?(executionId: string, projectCaseId: string, at: string): Promise<void>;
   listExecutionCases?(executionId: string): Promise<readonly string[]>;
   claimFoundation?(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean>;
+  replaceFoundation?(
+    kind: string,
+    id: string,
+    expectedVersion: number,
+    version: number,
+    payload: unknown,
+    at: string,
+  ): Promise<boolean>;
 };

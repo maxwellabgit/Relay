@@ -340,6 +340,26 @@ export class TauriEngineStore implements EngineStore {
     return claimed === true;
   }
 
+  async replaceFoundation(
+    kind: string,
+    id: string,
+    expectedVersion: number,
+    version: number,
+    payload: unknown,
+    at: string,
+  ): Promise<boolean> {
+    const replaced = await this.call({
+      op: "foundation_cas",
+      kind,
+      id,
+      expectedVersion,
+      version,
+      payload,
+      at,
+    });
+    return replaced === true;
+  }
+
   async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
     await this.call({ op: "link_execution_case", executionId, projectCaseId, at });
   }

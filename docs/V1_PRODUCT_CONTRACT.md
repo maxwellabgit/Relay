@@ -19,7 +19,7 @@ The September 23 product decisions are the target. They are not proof of impleme
 - Verify is the review inbox. Evidence status is not acceptance.
 - After a connector is authorized, the user selects resources and Case bindings before content is retained. Observation of those resources is independent of microphone Listening.
 - An activated Reflex may perform an explicitly scoped local action only after a fresh permission check and a durable receipt. Pass 1 proves that with a local Case edit. A provider write stays `not-shipped`.
-- The deterministic calendar adapter is test-only. Google Calendar, Gmail, Slack, GitHub writes, mobile model/speech, hosted external-AI delegation, and physical Halo stay `not-shipped` until Pass 2 evidence.
+- The deterministic calendar adapter is test-only. Google Calendar, Gmail, Slack, GitHub writes, mobile model/speech, hosted external-AI delegation, and physical Halo stay `not-shipped`. Pass 2 begins with P2.0 integrity repairs, then a live Calendar read. A daily gather picks one local time from 09:00 through 16:59 and records bound resource ids. It does not notify continuously and it does not draft mail or create Docs or Sheets.
 - Consumer copy for deterministic results is a status line or one short question. That does not make the existing typed-ask path a shipped chat product.
 
 The committed four-Reflex list below remains the reviewed module set. `docs/REFLEXES.md` also describes birthday, claim, and preserve-information designs that are not registered modules.

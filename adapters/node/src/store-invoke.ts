@@ -256,6 +256,15 @@ async function dispatch(store: SqliteEngineStore, op: Record<string, unknown>): 
       return store.listFoundation(str(op, "kind"));
     case "foundation_claim":
       return store.claimFoundation(str(op, "kind"), str(op, "id"), Number(op.version), op.payload, str(op, "at"));
+    case "foundation_cas":
+      return store.replaceFoundation(
+        str(op, "kind"),
+        str(op, "id"),
+        Number(op.expectedVersion),
+        Number(op.version),
+        op.payload,
+        str(op, "at"),
+      );
     case "link_execution_case":
       await store.linkExecutionCase(str(op, "executionId"), str(op, "projectCaseId"), str(op, "at"));
       return null;

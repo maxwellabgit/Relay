@@ -4,7 +4,7 @@ What has been verified on the TypeScript/Tauri Windows path, and what has not.
 
 ## Current decision
 
-**V1 / TestFlight is NO-GO.** Reviewed baseline `1862daacc8d06c6bc367c85b4cd523779d99b8fa` is the historical matrix SHA. `main` at the Pass 1 branch point is `5631b2c6d19175e338116c03cbd9fe3c766b4605`. Exact-tip verify:v1 Actions `35742750378` passed on the older baseline. That run does not prove live Jev, headed Windows journeys, or physical devices.
+**V1 / TestFlight is NO-GO.** Reviewed baseline `1862daacc8d06c6bc367c85b4cd523779d99b8fa` is the historical matrix SHA. `main` is `8bc700b07c8a0e66c289d8bfb620204bdd0719b6`. verify:v1 passed on that tip, including a reported headed Windows restart of an accepted birthday. That run was not independently rechecked from its bundle here. It does not prove live Jev, live Calendar, mobile, Halo, or EAS release IDs.
 
 Jev canary: do not mark G1 green. The capability matrix still says the live canary has not run. `docs/implementation/RELAY_V1_FINAL_RELEASE_WORKFLOW_31ffec5.md` disagrees with itself (finding 11 and gate G1 say the canary did not run; phase 10 records native-import HTTP 200). No committed canary file is proof.
 
@@ -55,7 +55,8 @@ Models never gain execution authority. The developer console projects runtime ev
 
 ## Explicitly not claimed
 
-- Google Calendar / Gmail / Sheets / GitHub / Plaid connectors wired end-to-end
+- Google Calendar / Gmail / Sheets / GitHub / Plaid connectors. Pass 2 has not started a live account. P2.0 is the Case tool, claim, Verify, and privacy repair. A daily read between 09:00 and 17:00 records bound resource ids only.
+- Drafting mail or writing a new Google Sheet or Doc. That is a later Pass 2 step after read-only gather.
 - Working iPhone / TestFlight build
 - Physical Halo hardware
 - Any capability marked `shipped` (none are, at `1862daa`)

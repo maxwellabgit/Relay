@@ -43,6 +43,17 @@ async function main(): Promise<void> {
       timeout: LAUNCH_TIMEOUT_MS,
     });
     assertions.push("composer_visible");
+    const embedded = (await page.locator('[data-testid="relay-build-sha"]').innerText()).trim();
+    if (!embedded || embedded === "unknown" || embedded !== sha) {
+      throw new Error(
+        `Running binary SHA ${embedded || "missing"} does not match claimed commit ${sha}`,
+      );
+    }
+    assertions.push("binary_sha_matches_commit");
+    const listening = page.locator('[data-testid="relay-listening"]');
+    if ((await listening.getAttribute("aria-checked")) !== "false")
+      throw new Error("Listening switch was not off");
+    assertions.push("listening_switch_off");
     await page.screenshot({ path: join(evidenceDir, "00-ready.png"), fullPage: true });
     const cases = page.locator('[data-testid="relay-nav-cases"]');
     if ((await cases.count()) === 0) throw new Error("Cases navigation missing");
@@ -103,9 +114,17 @@ async function main(): Promise<void> {
     await writeFile(join(evidenceDir, "05-restart.txt"), reopenedBody);
     if (!persisted)
       throw new Error(`Accepted birthday did not survive restart: ${reopenedBody.slice(0, 500)}`);
+    if (reopenedBody.includes("03-14"))
+      throw new Error("Replaced birthday 03-14 was still visible");
     assertions.push("restart_keeps_accepted");
-    if (reopenedBody.includes("Listening for")) throw new Error("Listening turned on");
-    assertions.push("listening_off");
+    assertions.push("replaced_date_absent");
+    if (
+      (await reopened.locator('[data-testid="relay-listening"]').getAttribute("aria-checked")) !==
+      "false"
+    ) {
+      throw new Error("Listening switch was on after restart");
+    }
+    assertions.push("listening_switch_off");
     await writeFile(
       join(evidenceDir, "result.json"),
       `${JSON.stringify({ sha, binary, profileRoot, assertions, status: "PASS" }, null, 2)}\n`,

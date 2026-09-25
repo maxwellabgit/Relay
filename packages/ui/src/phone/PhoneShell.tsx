@@ -249,6 +249,7 @@ export function PhoneShell({
         })}
       </View>
 
+      <Text testID="relay-build-sha" style={{ height: 0, opacity: 0, overflow: "hidden" }}>{snapshot.runtime.commit}</Text>
       {e2eFixture && onE2eCalendar ? (
         <Pressable
           accessibilityRole="button"
@@ -266,6 +267,7 @@ export function PhoneShell({
           accessibilityRole="switch"
           accessibilityState={{ checked: snapshot.listening }}
           accessibilityLabel="Listening"
+          testID="relay-listening"
           onPress={() => onListenChange(!snapshot.listening)}
           style={[styles.listenBtn, snapshot.listening ? styles.listenOn : styles.listenOff]}
         >

@@ -17,6 +17,7 @@ import type {
 import { assertStandardResult } from "@relay/contracts";
 import type { TraceEmitInput } from "../engine-helpers.js";
 import type { CaseFolderPort } from "./case-folder.js";
+import { dailyReadMinute, gatherIsDue, localDateKey } from "./daily-gather.js";
 import type { FoundationStore } from "./foundation-store.js";
 
 const ACTIVITY_MS = 120_000;
@@ -73,8 +74,18 @@ export type Pass1Deps = {
   readonly judgeChoice?: (
     options: readonly string[],
   ) => Promise<{ ok: true; choice: string; judgmentId: string } | { ok: false }>;
-  readonly runTool?: (toolId: string) => Promise<boolean>;
+  readonly runTool?: (request: CaseAppendRequest) => Promise<CaseAppendResult>;
 };
+
+export type CaseAppendRequest = {
+  readonly projectCaseId: string;
+  readonly text: string;
+  readonly expectedVersion: number;
+  readonly provenance: ProjectCaseEntry["provenance"];
+  readonly dedupeKey: string;
+};
+
+export type CaseAppendResult = { readonly ok: true; readonly receiptId: string } | { readonly ok: false; readonly reason: string };
 
 export class Pass1Foundation {
   private readonly activity: CaseActivity[] = [];
@@ -277,8 +288,9 @@ export class Pass1Foundation {
         durationMs: Date.now() - started,
       }), envelope, null);
     }
-    const prior = await this.receiptFor(envelope.dedupeKey);
-    if (prior) {
+    const claim = await this.claimEvent(envelope, executionId);
+    if (!claim.claimed) {
+      const prior = claim.existing;
       return this.result({
         type: "no_action",
         summary: "Duplicate event. One outcome kept.",
@@ -293,8 +305,10 @@ export class Pass1Foundation {
         invocationId: prior.reflexInvocationId ?? this.deps.ids.next("inv"),
       });
     }
+    const receiptId = claim.receiptId;
     const latest = await this.latestRevision(envelope.provider, envelope.externalEventId);
     if (latest && compareRevision(envelope.revision, latest) < 0) {
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "ignored", binding.projectCaseIds, executionId);
       return this.finish(this.result({
         type: "no_action",
         summary: "Older revision ignored.",
@@ -303,14 +317,14 @@ export class Pass1Foundation {
         reflexId: "reflex.source-activity",
         eventId: envelope.eventId,
         authority: "not_required",
-        receiptIds: [],
+        receiptIds: [receiptId],
         retained: false,
         durationMs: Date.now() - started,
-      }), envelope, null);
+      }), envelope, receiptId);
     }
     if (envelope.status === "withdrawn") {
       await this.markWithdrawn(binding.projectCaseIds, envelope);
-      const receiptId = await this.putReceipt(envelope, binding.projectCaseIds, executionId, null, "withdrawn");
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "withdrawn", binding.projectCaseIds, executionId);
       return this.finish(this.result({
         type: "no_action",
         summary: "Withdrawal recorded.",
@@ -348,7 +362,7 @@ export class Pass1Foundation {
         ? await this.deps.artifacts.put(this.encode(content), localOnlyPolicy())
         : null;
       void kept;
-      const receiptId = await this.putReceipt(envelope, limitedIds, executionId, null, "processed");
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "processed", limitedIds, executionId);
       return this.finish(this.result({
         type: "no_action",
         summary: binding.contentLevel === "metadata" ? "Metadata only. No Case fact." : "Artifact retained. No Case fact.",
@@ -380,8 +394,9 @@ export class Pass1Foundation {
         dedupeKey: envelope.dedupeKey,
         artifactId: artifact?.artifactId ?? null,
         envelope,
+        connectionId: binding.connectionId,
       });
-      const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "processed", caseIds, executionId);
       return this.finish(this.result({
         type: "verification_required",
         summary: "Needs evidence.",
@@ -398,7 +413,17 @@ export class Pass1Foundation {
     const person = parsed[1] ?? "";
     const monthDay = parsed[2] ?? "";
     if (!validMonthDay(monthDay)) {
-      const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
+      const verify = await this.openVerify({
+        evidenceStatus: "Needs evidence",
+        reason: "Invalid date.",
+        proposedChange: `Birthday date ${monthDay} is not a real day.`,
+        projectCaseIds: caseIds,
+        dedupeKey: `${envelope.dedupeKey}:invalid-date`,
+        artifactId: artifact?.artifactId ?? null,
+        envelope,
+        connectionId: binding.connectionId,
+      });
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "processed", caseIds, executionId);
       return this.finish(this.result({
         type: "verification_required",
         summary: "Invalid date.",
@@ -407,7 +432,7 @@ export class Pass1Foundation {
         reflexId: "reflex.rule-notice",
         eventId: envelope.eventId,
         authority: "denied",
-        receiptIds: [receiptId],
+        receiptIds: [receiptId, verify.verifyId],
         retained: true,
         durationMs: Date.now() - started,
       }), envelope, receiptId);
@@ -435,7 +460,7 @@ export class Pass1Foundation {
         verifyId: verify.verifyId,
         ...(caseIds[0] ? { projectCaseId: caseIds[0] } : {}),
       });
-      const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "processed", caseIds, executionId);
       return this.finish(this.result({
         type: "verification_required",
         summary: "Contradicted birthday.",
@@ -465,8 +490,9 @@ export class Pass1Foundation {
         dedupeKey: `${envelope.dedupeKey}:proposal`,
         artifactId: artifact?.artifactId ?? null,
         envelope,
+        connectionId: binding.connectionId,
       });
-      const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "processed", caseIds, executionId);
       return this.finish(this.result({
         type: "case_change_proposed",
         summary: "Write held for review.",
@@ -509,8 +535,23 @@ export class Pass1Foundation {
         durationMs: Date.now() - started,
       }), envelope, null);
     }
-    const toolOk = this.deps.runTool ? await this.deps.runTool("case.entry.append@1") : true;
-    if (!toolOk) {
+    const current = await this.requireCase(targetId);
+    const text = `${person} ${monthDay}`;
+    const request: CaseAppendRequest = {
+      projectCaseId: targetId,
+      text,
+      expectedVersion: current.version,
+      dedupeKey: envelope.dedupeKey,
+      provenance: {
+        provider: envelope.provider,
+        externalEventId: envelope.externalEventId,
+        revision: envelope.revision,
+        status: "accepted",
+      },
+    };
+    const appended = this.deps.runTool ? await this.deps.runTool(request) : await this.commitAppend(request);
+    if (!appended.ok) {
+      await this.completeReceipt(envelope.dedupeKey, receiptId, "ignored", caseIds, executionId);
       return this.finish(this.result({
         type: "failed",
         summary: "Tool rejected the Case write.",
@@ -522,26 +563,9 @@ export class Pass1Foundation {
         receiptIds: [],
         retained: false,
         durationMs: Date.now() - started,
-      }), envelope, null);
+      }), envelope, receiptId);
     }
-    const current = await this.requireCase(targetId);
-    const text = `${person} ${monthDay}`;
-    if (!current.entries.some((entry) => entry.text === text)) {
-      const next = this.withEntry(current, {
-        entryId: this.deps.ids.next("entry"),
-        kind: "fact",
-        subjectKey: subjectKeyOf(text),
-        text,
-        updatedAt: this.now(),
-        provenance: {
-          provider: envelope.provider,
-          externalEventId: envelope.externalEventId,
-          revision: envelope.revision,
-          status: "accepted",
-        },
-      });
-      await this.persistCase(next, "scoped.append", current);
-    }
+    if (appended.receiptId !== receiptId) throw new Error("tool_receipt_mismatch");
     this.mark(targetId, "write", executionId ?? undefined);
     this.mark(targetId, "finding", executionId ?? undefined);
     this.heads.push({
@@ -551,7 +575,6 @@ export class Pass1Foundation {
       at: this.now(),
       projectCaseId: targetId,
     });
-    const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
     const completed = this.result({
       type: "action_completed",
       summary: "Scoped Case update recorded.",
@@ -568,6 +591,48 @@ export class Pass1Foundation {
     return this.finish(completed, envelope, receiptId);
   }
 
+  async runDailyRead(now = this.now()): Promise<{ ran: boolean; minute: number; resources: readonly string[] }> {
+    const at = new Date(now);
+    const day = localDateKey(at);
+    const minute = dailyReadMinute(day);
+    if (await this.deps.records.get("source_gather", day)) return { ran: false, minute, resources: [] };
+    if (!gatherIsDue(at, minute)) {
+      await this.deps.records.insertIfAbsent("source_gather_plan", day, 1, { day, minute, mode: "read_only" }, now);
+      return { ran: false, minute, resources: [] };
+    }
+    const resources = (await this.bindings())
+      .filter((binding) => binding.enabled && !binding.revoked && binding.retention !== "none")
+      .map((binding) => binding.resourceId);
+    const ran = await this.deps.records.insertIfAbsent(
+      "source_gather",
+      day,
+      1,
+      { day, minute, mode: "read_only", resources, at: now },
+      now,
+    );
+    return { ran, minute, resources };
+  }
+
+  async commitAppend(request: CaseAppendRequest): Promise<CaseAppendResult> {
+    const current = await this.requireCase(request.projectCaseId);
+    if (current.version !== request.expectedVersion) return { ok: false, reason: "stale_case" };
+    if (!current.entries.some((entry) => entry.text === request.text)) {
+      const next = this.withEntry(current, {
+        entryId: this.deps.ids.next("entry"),
+        kind: "fact",
+        subjectKey: subjectKeyOf(request.text),
+        text: request.text,
+        updatedAt: this.now(),
+        provenance: request.provenance,
+      });
+      await this.persistCase(next, "scoped.append", current);
+    }
+    const receipt = await this.receiptFor(request.dedupeKey);
+    if (!receipt) return { ok: false, reason: "receipt_missing" };
+    await this.completeReceipt(request.dedupeKey, receipt.receiptId, "processed", [request.projectCaseId], receipt.executionId);
+    return { ok: true, receiptId: receipt.receiptId };
+  }
+
   async decideVerify(
     verifyId: string,
     decision: "accept" | "dismiss" | "correct",
@@ -575,12 +640,12 @@ export class Pass1Foundation {
   ): Promise<VerifyItem> {
     const row = await this.deps.records.get("verify_item", verifyId);
     if (!row) throw new Error("verify_missing");
-    const item = row.payload as VerifyItem;
+    const item = await this.hydrateVerify(row.payload as VerifyItem);
     if (item.disposition !== "pending") return item;
     const at = this.now();
     if (decision === "dismiss") {
       const next = { ...item, disposition: "dismissed" as const, version: item.version + 1, updatedAt: at, unreadCount: 0 };
-      await this.deps.records.put("verify_item", verifyId, next.version, next, at);
+      await this.storeVerify(next, at);
       return next;
     }
     const projectCaseId = item.projectCaseIds[0];
@@ -616,7 +681,7 @@ export class Pass1Foundation {
       unreadCount: 0,
       undoOf: `${projectCaseId}@${current.version}`,
     };
-    await this.deps.records.put("verify_item", verifyId, next.version, next, at);
+    await this.storeVerify(next, at);
     return next;
   }
 
@@ -786,20 +851,7 @@ export class Pass1Foundation {
     await this.storeInvocation(result, envelope.observedAt);
     const checkpoint = result.retained && result.summary !== "Older revision ignored.";
     if (checkpoint) {
-      await this.deps.records.put(
-        "source_cursor",
-        `cursor:${envelope.provider}:${envelope.resourceId}`,
-        1,
-        {
-          cursorId: `cursor:${envelope.provider}:${envelope.resourceId}`,
-          bindingId: (await this.bindings()).find((item) => item.resourceId === envelope.resourceId)?.bindingId ?? "",
-          provider: envelope.provider,
-          resourceId: envelope.resourceId,
-          token: envelope.revision,
-          updatedAt: this.now(),
-        },
-        this.now(),
-      );
+      await this.advanceCursor(envelope);
     }
     await this.emit(result);
     return result;
@@ -855,14 +907,15 @@ export class Pass1Foundation {
     connectionId?: string | null;
   }): Promise<VerifyItem> {
     const at = this.now();
+    const subject = subjectKeyOf(proposedFact(input.proposedChange) || input.proposedChange);
     for (const prior of await this.verifyItems()) {
       if (prior.disposition !== "pending" || prior.resourceId !== input.envelope.resourceId) continue;
+      const sameEvent = prior.sources.some((source) => source.externalEventId === input.envelope.externalEventId);
+      const priorSubject = subjectKeyOf(proposedFact(prior.proposedChange) || prior.proposedChange);
+      if (!sameEvent || priorSubject !== subject) continue;
       const priorRevision = prior.sources.at(-1)?.revision ?? "0";
       if (compareRevision(priorRevision, input.envelope.revision) >= 0) continue;
-      await this.deps.records.put(
-        "verify_item",
-        prior.verifyId,
-        prior.version + 1,
+      await this.storeVerify(
         { ...prior, disposition: "superseded", version: prior.version + 1, updatedAt: at, unreadCount: 0 },
         at,
       );
@@ -885,7 +938,7 @@ export class Pass1Foundation {
           },
         ],
       };
-      await this.deps.records.put("verify_item", existing.verifyId, next.version, next, at);
+      await this.storeVerify(next, at);
       return next;
     }
     const projectCaseId = input.projectCaseIds[0];
@@ -893,13 +946,14 @@ export class Pass1Foundation {
     const acceptedRef = input.acceptedText
       ? await this.deps.artifacts.put(this.encode(input.acceptedText), localOnlyPolicy())
       : null;
+    const proposedRef = await this.deps.artifacts.put(this.encode(input.proposedChange), localOnlyPolicy());
     const item: VerifyItem = {
       verifyId: this.deps.ids.next("verify"),
       version: 1,
       evidenceStatus: input.evidenceStatus,
       disposition: "pending",
       reason: input.reason,
-      proposedChange: input.proposedChange,
+      proposedChange: "",
       projectCaseIds: input.projectCaseIds,
       sources: [
         {
@@ -916,15 +970,15 @@ export class Pass1Foundation {
       replaceEntryId: input.replaceEntryId ?? null,
       acceptedArtifactId: acceptedRef?.artifactId ?? null,
       acceptedSha256: acceptedRef?.sha256 ?? null,
-      proposedArtifactId: input.artifactId,
-      proposedSha256: null,
+      proposedArtifactId: proposedRef.artifactId,
+      proposedSha256: proposedRef.sha256,
       connectionId: input.connectionId ?? null,
       resourceId: input.envelope.resourceId,
       createdAt: at,
       updatedAt: at,
       undoOf: null,
     };
-    await this.deps.records.put("verify_item", item.verifyId, 1, item, at);
+    await this.storeVerify(item, at);
     return item;
   }
 
@@ -991,11 +1045,16 @@ export class Pass1Foundation {
   }
 
   private async recheckScope(item: VerifyItem): Promise<void> {
-    if (!item.connectionId || !item.resourceId || !this.deps.inspectConnection) return;
+    if (item.sources.length === 0) return;
+    if (!item.connectionId || !item.resourceId || !this.deps.inspectConnection) throw new Error("scope_revoked");
     const connection = await this.deps.inspectConnection(item.connectionId);
-    if (!connection || !connection.selectedResources.includes(item.resourceId)) {
+    if (!connection || !connection.observationEnabled || !connection.selectedResources.includes(item.resourceId)) {
       throw new Error("scope_revoked");
     }
+    const binding = (await this.bindings()).find(
+      (entry) => entry.connectionId === item.connectionId && entry.resourceId === item.resourceId,
+    );
+    if (!binding || !binding.enabled || binding.revoked || binding.retention === "none") throw new Error("scope_revoked");
   }
 
   private async verifyView(item: VerifyItem): Promise<VerifyItemView> {
@@ -1013,7 +1072,10 @@ export class Pass1Foundation {
         item.acceptedArtifactId && item.acceptedSha256
           ? await this.readRef({ artifactId: item.acceptedArtifactId, sha256: item.acceptedSha256 })
           : "",
-      proposedText: item.proposedChange,
+      proposedText:
+        item.proposedSha256 && item.proposedArtifactId
+          ? await this.readRef({ artifactId: item.proposedArtifactId, sha256: item.proposedSha256 })
+          : item.proposedChange,
     };
   }
 
@@ -1033,11 +1095,21 @@ export class Pass1Foundation {
   private async consumeGrantUse(grant: ScopedActionGrant): Promise<boolean> {
     const hour = this.now().slice(0, 13);
     const id = `${grant.grantId}:${hour}`;
-    const existing = await this.deps.records.get("grant_use", id);
-    const count = existing ? Number((existing.payload as { count?: number }).count ?? 0) : 0;
-    if (count >= grant.maxPerHour) return false;
-    await this.deps.records.put("grant_use", id, count + 1, { count: count + 1 }, this.now());
-    return true;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const existing = await this.deps.records.get("grant_use", id);
+      const count = existing ? Number((existing.payload as { count?: number }).count ?? 0) : 0;
+      if (count >= grant.maxPerHour) return false;
+      const reserved = await this.deps.records.replaceIfVersion(
+        "grant_use",
+        id,
+        existing?.version ?? 0,
+        (existing?.version ?? 0) + 1,
+        { count: count + 1 },
+        this.now(),
+      );
+      if (reserved) return true;
+    }
+    return false;
   }
 
   private async activationOf(reflexId: string): Promise<"active" | "paused" | "rolled_back"> {
@@ -1046,32 +1118,87 @@ export class Pass1Foundation {
     return (row.payload as { activation: "active" | "paused" | "rolled_back" }).activation;
   }
 
-  private async putReceipt(
+  private async claimEvent(
     envelope: EventEnvelope,
-    projectCaseIds: readonly string[],
     executionId: string | null,
-    reflexInvocationId: string | null,
-    status: "processed" | "ignored" | "withdrawn",
-  ): Promise<string> {
+  ): Promise<
+    | { claimed: true; receiptId: string }
+    | {
+        claimed: false;
+        existing: {
+          receiptId: string;
+          projectCaseIds: readonly string[];
+          executionId: string | null;
+          reflexInvocationId: string | null;
+        };
+      }
+  > {
     const receiptId = this.deps.ids.next("rcpt");
     const payload = {
-        receiptId,
-        dedupeKey: envelope.dedupeKey,
-        provider: envelope.provider,
-        externalEventId: envelope.externalEventId,
-        revision: envelope.revision,
-        status,
-        projectCaseIds,
-        executionId,
-        reflexInvocationId,
-        createdAt: this.now(),
-      };
+      receiptId,
+      dedupeKey: envelope.dedupeKey,
+      provider: envelope.provider,
+      externalEventId: envelope.externalEventId,
+      revision: envelope.revision,
+      status: "reserved",
+      projectCaseIds: [] as string[],
+      executionId,
+      reflexInvocationId: null,
+      createdAt: this.now(),
+    };
     const claimed = await this.deps.records.insertIfAbsent("event_receipt", envelope.dedupeKey, 1, payload, this.now());
     if (!claimed) {
       const existing = await this.receiptFor(envelope.dedupeKey);
-      if (existing) return existing.receiptId;
+      return {
+        claimed: false,
+        existing: existing ?? { receiptId, projectCaseIds: [], executionId: null, reflexInvocationId: null },
+      };
     }
-    return receiptId;
+    return { claimed: true, receiptId };
+  }
+
+  private async completeReceipt(
+    dedupeKey: string,
+    receiptId: string,
+    status: "processed" | "ignored" | "withdrawn",
+    projectCaseIds: readonly string[],
+    executionId: string | null,
+  ): Promise<void> {
+    const existing = await this.receiptFor(dedupeKey);
+    if (!existing) return;
+    const row = await this.deps.records.get("event_receipt", dedupeKey);
+    const version = row?.version ?? 1;
+    await this.deps.records.replaceIfVersion(
+      "event_receipt",
+      dedupeKey,
+      version,
+      version + 1,
+      { ...existing, receiptId, status, projectCaseIds, executionId },
+      this.now(),
+    );
+  }
+
+  private async advanceCursor(envelope: EventEnvelope): Promise<void> {
+    const id = `cursor:${envelope.provider}:${envelope.resourceId}`;
+    const current = await this.deps.records.get("source_cursor", id);
+    const token = (current?.payload as { token?: string } | undefined)?.token ?? "";
+    if (token && compareRevision(envelope.revision, token) < 0) return;
+    const version = current?.version ?? 0;
+    await this.deps.records.replaceIfVersion(
+      "source_cursor",
+      id,
+      version,
+      version + 1,
+      {
+        cursorId: id,
+        bindingId: (await this.bindings()).find((item) => item.resourceId === envelope.resourceId)?.bindingId ?? "",
+        provider: envelope.provider,
+        resourceId: envelope.resourceId,
+        token: envelope.revision,
+        updatedAt: this.now(),
+      },
+      this.now(),
+    );
   }
 
   private async receiptFor(dedupeKey: string): Promise<{
@@ -1108,10 +1235,11 @@ export class Pass1Foundation {
     const entries = [];
     for (const entry of next.entries) {
       const textRef = await this.deps.artifacts.put(this.encode(entry.text), localOnlyPolicy());
+      const subjectRef = await this.deps.artifacts.put(this.encode(entry.subjectKey), localOnlyPolicy());
       entries.push({
         entryId: entry.entryId,
         kind: entry.kind,
-        subjectKey: entry.subjectKey,
+        subjectRef: { artifactId: subjectRef.artifactId, sha256: subjectRef.sha256 },
         textRef: { artifactId: textRef.artifactId, sha256: textRef.sha256 },
         updatedAt: entry.updatedAt,
         provenance: entry.provenance,
@@ -1211,7 +1339,7 @@ export class Pass1Foundation {
       intent?: string;
       intentRef?: { artifactId: string; sha256: string };
       sensitiveRef?: { artifactId: string; sha256: string };
-      entries?: Array<ProjectCaseEntry & { textRef?: { artifactId: string; sha256: string } }>;
+      entries?: Array<ProjectCaseEntry & { textRef?: { artifactId: string; sha256: string }; subjectRef?: { artifactId: string; sha256: string } }>;
       references?: StoredCase["references"];
       rules?: StoredCase["rules"];
       createdAt?: string;
@@ -1230,10 +1358,11 @@ export class Pass1Foundation {
     const entries: ProjectCaseEntry[] = [];
     for (const entry of row.entries ?? []) {
       const text = entry.textRef ? await this.readRef(entry.textRef) : entry.text;
+      const subjectKey = entry.subjectRef ? await this.readRef(entry.subjectRef) : entry.subjectKey || subjectKeyOf(text);
       entries.push({
         entryId: entry.entryId,
         kind: entry.kind,
-        subjectKey: entry.subjectKey || subjectKeyOf(text),
+        subjectKey,
         text,
         updatedAt: entry.updatedAt,
         provenance: entry.provenance ?? null,
@@ -1293,7 +1422,19 @@ export class Pass1Foundation {
   }
 
   private async verifyItems(): Promise<VerifyItem[]> {
-    return (await this.deps.records.list("verify_item")).map((row) => row.payload as VerifyItem);
+    return Promise.all((await this.deps.records.list("verify_item")).map((row) => this.hydrateVerify(row.payload as VerifyItem)));
+  }
+
+  private async storeVerify(item: VerifyItem, at: string): Promise<void> {
+    await this.deps.records.put("verify_item", item.verifyId, item.version, { ...item, proposedChange: "" }, at);
+  }
+
+  private async hydrateVerify(item: VerifyItem): Promise<VerifyItem> {
+    if (item.proposedChange || !item.proposedArtifactId || !item.proposedSha256) return item;
+    return {
+      ...item,
+      proposedChange: await this.readRef({ artifactId: item.proposedArtifactId, sha256: item.proposedSha256 }),
+    };
   }
 
   private async bindings(): Promise<ObservationBinding[]> {

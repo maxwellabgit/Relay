@@ -277,6 +277,7 @@ describe("Pass 1 case and calendar slice", () => {
     );
     expect(invalid.type).toBe("verification_required");
     expect(invalid.summary).toBe("Invalid date.");
+    expect(invalid.receiptIds.length).toBeGreaterThan(1);
     await foundation.ingest(
       calendarEnvelope({
         eventId: "event_old",
@@ -301,9 +302,14 @@ describe("Pass 1 case and calendar slice", () => {
     );
     const items = (await foundation.view()).verifyItems;
     expect(items.some((item) => item.disposition === "superseded")).toBe(true);
-    expect(items.filter((item) => item.disposition === "pending")).toHaveLength(1);
+    expect(items.filter((item) => item.disposition === "pending" && item.proposedText.includes("Maya"))).toHaveLength(1);
     const indexed = JSON.stringify((await records.list("verify_item")).map((row) => row.payload));
     expect(indexed.includes("SENTINEL")).toBe(false);
+    expect(indexed.includes("Maya")).toBe(false);
+    expect(indexed.includes("subjectKey")).toBe(false);
+    const caseIndex = JSON.stringify((await records.get("project_case", "case_birthdays"))?.payload);
+    expect(caseIndex.includes("Maya")).toBe(false);
+    expect(caseIndex.includes("subjectKey")).toBe(false);
     await foundation.bind({
       bindingId: "bind_birthdays",
       connectionId: "connection_sample",
@@ -333,4 +339,180 @@ describe("Pass 1 case and calendar slice", () => {
     const birthdays = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
     expect(birthdays?.entries.some((entry) => entry.text.includes("Noel"))).toBe(false);
   });
+
+  it("does not supersede an unrelated event on the same resource", async () => {
+    const { foundation } = harness();
+    await foundation.ensureSeeded();
+    await foundation.bind(binding());
+    await foundation.ingest(birthday("event_other", "ext_other", "1", "Birthday: Meeting 01-02"));
+    await foundation.ingest(birthday("event_maya", "ext_maya", "4", "Birthday: Maya 06-06"));
+    const pending = (await foundation.view()).verifyItems.filter((item) => item.disposition === "pending");
+    expect(pending.some((item) => item.proposedText.includes("Meeting"))).toBe(true);
+    expect(pending.some((item) => item.proposedText.includes("Maya"))).toBe(true);
+  });
+
+  it("leaves the Case unchanged when the tool rejects, and returns the edit receipt when it accepts", async () => {
+    const rejected = harness();
+    const blocking = new Pass1Foundation({
+      records: rejected.records,
+      folder: rejected.folder,
+      artifacts: rejected.artifacts,
+      clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
+      ids: { next: (prefix) => `${prefix}_block` },
+      inspectConnection: async () => ({
+        healthStatus: "authority_recorded",
+        observationEnabled: true,
+        selectedResources: ["calendar:birthdays"],
+      }),
+      runTool: async () => ({ ok: false, reason: "rejected" }),
+    });
+    await blocking.ensureSeeded();
+    await blocking.bind(binding());
+    await blocking.setGrant(grant());
+    const before = (await blocking.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
+    const denied = await blocking.ingest(birthday("event_deny", "ext_deny", "1", "Birthday: Maya 03-14"), "exec_deny");
+    expect(denied.type).toBe("failed");
+    const after = (await blocking.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
+    expect(after?.version).toBe(before?.version);
+    expect(after?.entries).toEqual(before?.entries);
+
+    const allowed = harness();
+    let editReceipt = "";
+    let writing = allowed.foundation;
+    writing = new Pass1Foundation({
+      records: allowed.records,
+      folder: allowed.folder,
+      artifacts: allowed.artifacts,
+      clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
+      ids: { next: (prefix) => `${prefix}_write` },
+      inspectConnection: async () => ({
+        healthStatus: "authority_recorded",
+        observationEnabled: true,
+        selectedResources: ["calendar:birthdays"],
+      }),
+      runTool: (request) => writing.commitAppend(request).then((result) => {
+        if (result.ok) editReceipt = result.receiptId;
+        return result;
+      }),
+    });
+    await writing.ensureSeeded();
+    await writing.bind(binding());
+    await writing.setGrant(grant());
+    const selected = await writing.ingest(birthday("event_ok", "ext_ok", "1", "Birthday: Maya 03-14"), "exec_ok");
+    expect(selected.type).toBe("action_completed");
+    expect(selected.receiptIds[0]).toBe(editReceipt);
+    const birthdays = (await writing.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays");
+    expect(birthdays?.entries.some((entry) => entry.text === "Maya 03-14")).toBe(true);
+  });
+
+  it("reserves the receipt before a failed write and does not apply the same event twice", async () => {
+    const { records, folder, artifacts } = harness();
+    let n = 0;
+    const foundation = new Pass1Foundation({
+      records,
+      folder,
+      artifacts,
+      clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
+      ids: { next: (prefix) => `${prefix}_${++n}` },
+      inspectConnection: async () => ({
+        healthStatus: "authority_recorded",
+        observationEnabled: true,
+        selectedResources: ["calendar:birthdays"],
+      }),
+      runTool: async () => {
+        throw new Error("interrupted");
+      },
+    });
+    await foundation.ensureSeeded();
+    await foundation.bind(binding());
+    await foundation.setGrant(grant());
+    const version = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.version;
+    await expect(foundation.ingest(birthday("event_cut", "ext_cut", "1", "Birthday: Maya 03-14"), "exec_cut")).rejects.toThrow("interrupted");
+    expect((await records.get("event_receipt", "calendar.deterministic:ext_cut:1"))?.payload).toBeTruthy();
+    expect((await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.version).toBe(version);
+    const again = await foundation.ingest(birthday("event_cut", "ext_cut", "1", "Birthday: Maya 03-14"), "exec_cut_2");
+    expect(again.type).toBe("no_action");
+    expect((await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.entries.some((entry) => entry.text === "Maya 03-14")).toBe(false);
+  });
+
+  it("keeps one grant use when two deliveries reserve the same hour", async () => {
+    const { foundation } = harness();
+    await foundation.ensureSeeded();
+    await foundation.bind(binding());
+    await foundation.setGrant({ ...grant(), maxPerHour: 1 });
+    const [first, second] = await Promise.all([
+      foundation.ingest(birthday("event_q1", "ext_q1", "1", "Birthday: Ada 01-01"), "exec_q1"),
+      foundation.ingest(birthday("event_q2", "ext_q2", "1", "Birthday: Grace 02-02"), "exec_q2"),
+    ]);
+    const completed = [first, second].filter((result) => result.type === "action_completed");
+    expect(completed).toHaveLength(1);
+  });
+
+  it("does not move the cursor backward for an older revision", async () => {
+    const { foundation, records } = harness();
+    await foundation.ensureSeeded();
+    await foundation.bind(binding());
+    await foundation.setGrant(grant());
+    await foundation.ingest(birthday("event_new", "ext_new", "3", "Birthday: Ada 01-01"), "exec_new");
+    await foundation.ingest(birthday("event_old", "ext_old", "1", "Birthday: Grace 02-02"), "exec_old");
+    const cursor = await records.get("source_cursor", "cursor:calendar.deterministic:calendar:birthdays");
+    expect((cursor?.payload as { token?: string }).token).toBe("3");
+    const revisions = await records.list("case_revision");
+    expect(revisions.length).toBeGreaterThan(0);
+    expect(revisions.every((row) => typeof (row.payload as { projectCaseId?: string }).projectCaseId === "string")).toBe(true);
+  });
+
+  it("refuses a source proposal after the binding is revoked", async () => {
+    const { foundation } = harness();
+    await foundation.ensureSeeded();
+    await foundation.addEntry("case_birthdays", "Maya 03-14", 1);
+    await foundation.bind(binding());
+    await foundation.ingest(birthday("event_revoke", "ext_revoke", "2", "Birthday: Maya 04-01"));
+    const pending = (await foundation.view()).verifyItems.find((item) => item.disposition === "pending");
+    await foundation.bind({ ...binding(), revoked: true });
+    const version = (await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.version;
+    await expect(foundation.decideVerify(pending!.verifyId, "accept")).rejects.toThrow("scope_revoked");
+    expect((await foundation.view()).projectCases.find((item) => item.projectCaseId === "case_birthdays")?.version).toBe(version);
+  });
 });
+
+function binding() {
+  return {
+    bindingId: "bind_birthdays",
+    connectionId: "connection_sample",
+    resourceId: "calendar:birthdays",
+    projectCaseIds: ["case_birthdays"],
+    eventKinds: ["calendar.event"],
+    contentLevel: "excerpt" as const,
+    retention: "case_entry" as const,
+    enabled: true,
+    revoked: false,
+    lastSyncAt: null,
+    lagMs: null,
+  };
+}
+
+function grant() {
+  return {
+    grantId: "grant_birthday",
+    reflexId: "reflex.rule-notice",
+    reflexVersion: 1,
+    connectionId: "connection_sample",
+    resourceIds: ["calendar:birthdays"],
+    actionId: "case.entry.append@1",
+    expiresAt: "2026-09-24T18:00:00.000Z",
+    maxPerHour: 4,
+  };
+}
+
+function birthday(eventId: string, externalEventId: string, revision: string, content: string) {
+  return calendarEnvelope({
+    eventId,
+    externalEventId,
+    revision,
+    resourceId: "calendar:birthdays",
+    content,
+    selected: true,
+    at: "2026-09-24T12:00:00.000Z",
+  });
+}

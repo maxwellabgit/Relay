@@ -783,6 +783,34 @@ export class SqliteEngineStore implements EngineStore {
     }));
   }
 
+  async replaceFoundation(
+    kind: string,
+    id: string,
+    expectedVersion: number,
+    version: number,
+    payload: unknown,
+    at: string,
+  ): Promise<boolean> {
+    if (expectedVersion === 0) {
+      const inserted = this.db
+        .prepare(
+          `INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(kind, record_id) DO NOTHING`,
+        )
+        .run(kind, id, version, JSON.stringify(payload), at);
+      if (inserted.changes > 0) return true;
+    }
+    const updated = this.db
+      .prepare(
+        `UPDATE foundation_records
+         SET version = ?, payload_json = ?, updated_at = ?
+         WHERE kind = ? AND record_id = ? AND version = ?`,
+      )
+      .run(version, JSON.stringify(payload), at, kind, id, expectedVersion);
+    return updated.changes > 0;
+  }
+
   async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
     const result = this.db
       .prepare(

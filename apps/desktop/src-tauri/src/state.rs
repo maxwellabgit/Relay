@@ -529,6 +529,7 @@ fn dispatch(conn: &Connection, op: &Value) -> Result<Value, String> {
         "compact" => compact(conn, op),
         "foundation_put" => foundation_put(conn, op),
         "foundation_claim" => foundation_claim(conn, op),
+        "foundation_cas" => foundation_cas(conn, op),
         "foundation_get" => foundation_get(conn, op),
         "foundation_list" => foundation_list(conn, op),
         "link_execution_case" => link_execution_case(conn, op),
@@ -2113,6 +2114,37 @@ fn foundation_claim(conn: &Connection, op: &Value) -> Result<Value, String> {
         )
         .map_err(|error| error.to_string())?;
     Ok(Value::Bool(changed > 0))
+}
+
+fn foundation_cas(conn: &Connection, op: &Value) -> Result<Value, String> {
+    let expected = req_i64(op, "expectedVersion")?;
+    let version = req_i64(op, "version")?;
+    let kind = req_str(op, "kind")?;
+    let id = req_str(op, "id")?;
+    let payload = json_text(op.get("payload").unwrap_or(&Value::Null))?;
+    let at = req_str(op, "at")?;
+    if expected == 0 {
+        let inserted = conn
+            .execute(
+                "INSERT INTO foundation_records(kind, record_id, version, payload_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(kind, record_id) DO NOTHING",
+                params![kind, id, version, payload, at],
+            )
+            .map_err(|error| error.to_string())?;
+        if inserted > 0 {
+            return Ok(Value::Bool(true));
+        }
+    }
+    let updated = conn
+        .execute(
+            "UPDATE foundation_records
+             SET version = ?1, payload_json = ?2, updated_at = ?3
+             WHERE kind = ?4 AND record_id = ?5 AND version = ?6",
+            params![version, payload, at, kind, id, expected],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Bool(updated > 0))
 }
 
 fn foundation_get(conn: &Connection, op: &Value) -> Result<Value, String> {

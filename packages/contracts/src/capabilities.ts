@@ -58,7 +58,8 @@ export type CapabilityId =
   | "connector.calendar"
   | "connector.simulated-event"
   | "ai.delegation"
-  | "halo.physical";
+  | "halo.physical"
+  | "source.daily-read";
 
 export type CapabilityRow = {
   readonly id: CapabilityId;
@@ -265,7 +266,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "unverified-on-device",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Pass 1 stores a Case Intent, rules, references, and entries separately from Executions. Headed Windows proof is still required before any shipped claim.",
+    notes: "Pass 1 stores a Case Intent, rules, references, and entries separately from Executions. A headed restart was reported at 8bc700b. P2.0 still requires the tool write, claim-before-effect, and privacy repairs before any shipped claim.",
   },
   {
     id: "verify.inbox",
@@ -273,7 +274,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "unverified-on-device",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "Evidence status and review disposition are separate. Accept applies the previewed change. Dismiss does not. Not a shipped inbox until headed proof.",
+    notes: "Evidence status and review disposition are separate. Accept applies the previewed change. Dismiss does not. P2.0 must keep unrelated events from superseding each other and must open a Verify item for an invalid date.",
   },
   {
     id: "connector.calendar",
@@ -281,7 +282,7 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     windows: "not-shipped",
     ios: "not-shipped",
     android: "not-shipped",
-    notes: "No production OAuth, discovery, or provider receipt. Pass 2 only.",
+    notes: "Not ready. OperationService has no live Calendar account. The sample is a fixture. Read-only daily gather is a separate local schedule, not this connector.",
   },
   {
     id: "connector.simulated-event",
@@ -306,6 +307,14 @@ export const V1_CAPABILITY_MATRIX: readonly CapabilityRow[] = Object.freeze([
     ios: "not-shipped",
     android: "not-shipped",
     notes: "Bridge stays disabled. No device evidence.",
+  },
+  {
+    id: "source.daily-read",
+    title: "Daily read-only source gather",
+    windows: "unverified-on-device",
+    ios: "not-shipped",
+    android: "not-shipped",
+    notes: "One local time between 09:00 and 17:00 records bound resource ids. It does not call a provider or draft mail, sheets, or docs.",
   },
 ]);
 
