@@ -82,18 +82,32 @@ export function VerifyPane({
               <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => onDecide(item.verifyId, "dismiss")}>
                 <Text style={{ color: colors.text }}>Dismiss</Text>
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Correct"
-                onPress={() => onDecide(item.verifyId, "correct", item.proposedText.replace(/^Set /, "").replace(" to ", " "))}
-              >
-                <Text style={{ color: colors.text }}>Correct</Text>
-              </Pressable>
+              <CorrectField
+                initial={item.proposedText}
+                onSubmit={(value) => onDecide(item.verifyId, "correct", value)}
+              />
             </View>
           ) : null}
         </View>
       ))}
     </ScrollView>
+  );
+}
+
+function CorrectField({ initial, onSubmit }: { readonly initial: string; readonly onSubmit: (value: string) => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <View style={{ gap: 8 }}>
+      <TextInput
+        accessibilityLabel="Correct value"
+        value={value}
+        onChangeText={setValue}
+        style={{ color: colors.text, borderWidth: 1, borderColor: colors.border, minHeight: 44, paddingHorizontal: 8 }}
+      />
+      <Pressable accessibilityRole="button" accessibilityLabel="Correct" onPress={() => onSubmit(value.trim())}>
+        <Text style={{ color: colors.text }}>Correct</Text>
+      </Pressable>
+    </View>
   );
 }
 

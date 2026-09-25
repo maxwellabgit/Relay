@@ -98,6 +98,7 @@ export class RelayEngine {
   private readonly dispatcher: WorkDispatcher;
   private readonly projector: SnapshotProjector;
   private readonly pass1: Pass1Foundation;
+  private caseRegistry: ToolRegistry | null = null;
 
   constructor(private readonly deps: EngineDeps) {
     this.scheduler = new Scheduler(deps.store, deps.clock, "engine", 30_000, this.workSignal);
@@ -165,6 +166,32 @@ export class RelayEngine {
       ids: deps.ids,
       trace: (input) => this.trace.emit(input),
       jevAvailable: deps.jevStatus?.ok === true,
+      runTool: (toolId) => this.runCaseTool(toolId),
+      judgeChoice: async (options) => {
+        try {
+          const response = await deps.judgments.judge(
+            {
+              questionSetId: "acronym.sense",
+              questionSetVersion: "1",
+              model: "jev-latest",
+              state: {},
+              questions: {
+                sense: {
+                  type: "choice",
+                  instructions: "Which supplied sense applies?",
+                  criteria: Object.fromEntries(options.map((option) => [option, option])),
+                },
+              },
+            },
+            new AbortController().signal,
+          );
+          const answer = response.ok ? response.success.answers.sense : null;
+          if (!response.ok || !answer || answer.type !== "choice") return { ok: false };
+          return { ok: true, choice: answer.choice, judgmentId: answer.choice };
+        } catch {
+          return { ok: false };
+        }
+      },
       inspectConnection: async (connectionId) => {
         const projection = await this.authority.project();
         const connection = projection.connections.find((row) => row.connectionId === connectionId);
@@ -258,6 +285,30 @@ export class RelayEngine {
     });
 
     const registry = new ToolRegistry();
+    this.caseRegistry = registry;
+    registry.register({
+      definition: {
+        id: "case.entry.append@1",
+        description: "Append one accepted Case entry.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        outputSchema: { type: "object", properties: {}, additionalProperties: false },
+        effect: "local_write",
+        disclosure: "local_only",
+        requiredScopes: ["assistant.respond"],
+        timeoutMs: 1_000,
+        retryPolicy: { maxAttempts: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
+      },
+      async execute() {
+        return {
+          toolId: "case.entry.append@1",
+          status: "ok",
+          summary: "Case append allowed.",
+          citations: [],
+          sourceSlices: [],
+          output: {},
+        };
+      },
+    });
     registerBuiltinTools(registry, {
       learning: deps.store.learning,
       artifacts: deps.artifacts,
@@ -591,6 +642,18 @@ export class RelayEngine {
    * Developer/fixture replay final — does not require Listening and must not start audio.
    * Only scripted_transcript / audio_file origins are accepted.
    */
+  private async runCaseTool(toolId: string): Promise<boolean> {
+    const tool = this.caseRegistry?.get(toolId);
+    if (!tool) return false;
+    const result = await tool.execute({}, new AbortController().signal);
+    await this.trace.emit({
+      type: result.status === "ok" ? "tool.completed" : "tool.routed",
+      reasonCode: result.status === "ok" ? "policy_pass" : "not_authorized",
+      toolId: "case.entry.append",
+    });
+    return result.status === "ok";
+  }
+
   /** Dev-console only. Records authority state, then ingests two calendar envelopes. */
   async installCalendarFixture(): Promise<void> {
     if (!this.deps.allowFixture) throw new Error("fixture_disabled");

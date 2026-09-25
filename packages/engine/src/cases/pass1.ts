@@ -71,6 +71,10 @@ export type Pass1Deps = {
     selectedResources: readonly string[];
   } | null>;
   readonly openExecution?: () => Promise<string>;
+  readonly judgeChoice?: (
+    options: readonly string[],
+  ) => Promise<{ ok: true; choice: string; judgmentId: string } | { ok: false }>;
+  readonly runTool?: (toolId: string) => Promise<boolean>;
 };
 
 export class Pass1Foundation {
@@ -485,6 +489,21 @@ export class Pass1Foundation {
         durationMs: Date.now() - started,
       }), envelope, null);
     }
+    const toolOk = this.deps.runTool ? await this.deps.runTool("case.entry.append@1") : true;
+    if (!toolOk) {
+      return this.finish(this.result({
+        type: "failed",
+        summary: "Tool rejected the Case write.",
+        executionId,
+        projectCaseIds: caseIds,
+        reflexId: "reflex.rule-notice",
+        eventId: envelope.eventId,
+        authority: "denied",
+        receiptIds: [],
+        retained: false,
+        durationMs: Date.now() - started,
+      }), envelope, null);
+    }
     const current = await this.requireCase(targetId);
     const text = `${person} ${monthDay}`;
     if (!current.entries.some((entry) => entry.text === text)) {
@@ -558,12 +577,15 @@ export class Pass1Foundation {
       subjectKey: subjectKeyOf(text),
       text,
       updatedAt: at,
-      provenance: {
-        provider: item.sources[0]?.provider ?? "verify",
-        externalEventId: item.sources[0]?.externalEventId ?? item.verifyId,
-        revision: item.sources[0]?.revision ?? "1",
-        status: "accepted",
-      },
+      provenance:
+        decision === "correct"
+          ? { provider: "user", externalEventId: item.verifyId, revision: String(item.version), status: "accepted" }
+          : {
+              provider: item.sources[0]?.provider ?? "verify",
+              externalEventId: item.sources[0]?.externalEventId ?? item.verifyId,
+              revision: item.sources[0]?.revision ?? "1",
+              status: "accepted",
+            },
     });
     await this.persistCase(nextCase, `verify.${decision}`, current);
     const next = {
@@ -625,13 +647,24 @@ export class Pass1Foundation {
         });
       }
       if (senses.length > 1) {
-        const deferred = this.deps.jevAvailable === false;
+        const judged = this.deps.judgeChoice ? await this.deps.judgeChoice(senses.map((entry) => entry.entryId)) : null;
+        if (!judged || !judged.ok) {
+          return this.speechResult({
+            type: "deferred",
+            summary: "Jev unavailable. Sense not chosen.",
+            executionId,
+            reflexId: "reflex.acronym-context",
+            authority: "deferred",
+            projectCaseIds: ["case_acronyms"],
+            durationMs: Date.now() - started,
+          });
+        }
         return this.speechResult({
-          type: deferred ? "deferred" : "clarification_required",
-          summary: deferred ? "Jev unavailable. Sense not chosen." : "Which sense?",
+          type: "notification",
+          summary: "Jev selected a sense.",
           executionId,
           reflexId: "reflex.acronym-context",
-          authority: deferred ? "deferred" : "not_required",
+          authority: "not_required",
           projectCaseIds: ["case_acronyms"],
           durationMs: Date.now() - started,
         });
