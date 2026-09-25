@@ -36,6 +36,8 @@ export type RelayWorkbenchProps = {
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
+  readonly e2eFixture?: boolean;
+  readonly onE2eCalendar?: () => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
@@ -89,6 +91,8 @@ export function RelayWorkbench({
   onRollbackReflex,
   onDecideVerify,
   onRenameCase,
+  e2eFixture,
+  onE2eCalendar,
   onRejectCandidate,
   onSnoozeCandidate,
   typeSafeKeyStatus,
@@ -142,6 +146,8 @@ export function RelayWorkbench({
       {...(onRollbackReflex !== undefined ? { onRollbackReflex } : {})}
       {...(onDecideVerify !== undefined ? { onDecideVerify } : {})}
       {...(onRenameCase !== undefined ? { onRenameCase } : {})}
+      {...(e2eFixture !== undefined ? { e2eFixture } : {})}
+      {...(onE2eCalendar !== undefined ? { onE2eCalendar } : {})}
       {...(typeSafeKeyStatus !== undefined ? { typeSafeKeyStatus } : {})}
       {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
       {...(onImportTypeSafeKey !== undefined ? { onImportTypeSafeKey } : {})}

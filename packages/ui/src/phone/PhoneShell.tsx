@@ -69,6 +69,8 @@ type Props = {
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
+  readonly e2eFixture?: boolean;
+  readonly onE2eCalendar?: () => void;
   /** When false, render full-bleed product surface (Expo/mobile). Default true for desktop workbench. */
   readonly showBezel?: boolean;
 };
@@ -111,6 +113,8 @@ export function PhoneShell({
   onRollbackReflex,
   onDecideVerify,
   onRenameCase,
+  e2eFixture,
+  onE2eCalendar,
   showBezel = true,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -244,6 +248,18 @@ export function PhoneShell({
           );
         })}
       </View>
+
+      {e2eFixture && onE2eCalendar ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Inject calendar sample"
+          testID="relay-e2e-calendar"
+          onPress={onE2eCalendar}
+          style={styles.headerBtn}
+        >
+          <Text style={styles.headerBtnLabel}>Calendar sample</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.listenRow}>
         <Pressable

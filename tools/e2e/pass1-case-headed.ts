@@ -51,8 +51,55 @@ async function main(): Promise<void> {
     await writeFile(join(evidenceDir, "01-cases.txt"), body);
     if (!found) throw new Error(`Birthdays Case was not visible: ${body.slice(0, 500)}`);
     assertions.push("birthdays_visible");
-    const listening = await page.locator("body").innerText();
-    if (listening.includes("Listening for")) throw new Error("Listening turned on");
+    const sample = page.locator('[data-testid="relay-e2e-calendar"]');
+    if ((await sample.count()) === 0) throw new Error("Calendar sample control missing");
+    await sample.click();
+    const noted = await waitForText(page, ["Birthday noted", "Maya"], 20_000);
+    if (!noted) throw new Error("Birthday notice did not appear");
+    assertions.push("birthday_noted");
+    await page.screenshot({ path: join(evidenceDir, "02-birthday.png"), fullPage: true });
+    await page.locator('[data-testid="relay-nav-verify"]').click();
+    const conflict = await waitForText(page, ["Contradicted", "04-01"], 15_000);
+    if (!conflict) throw new Error("Verify conflict was not visible");
+    assertions.push("verify_conflict");
+    await page.screenshot({ path: join(evidenceDir, "03-verify.png"), fullPage: true });
+    await page.locator('[data-testid="relay-verify-accept"]').click();
+    await page.locator('[data-testid="relay-nav-cases"]').click();
+    const accepted = await waitForText(page, ["Maya 04-01"], 20_000);
+    if (!accepted) {
+      const after = await page.locator("body").innerText();
+      await writeFile(join(evidenceDir, "04-after-accept.txt"), after);
+      await page.screenshot({ path: join(evidenceDir, "04-after-accept.png"), fullPage: true });
+      throw new Error(`Accepted birthday was not visible: ${after.slice(0, 700)}`);
+    }
+    assertions.push("verify_accepted");
+    await page.screenshot({ path: join(evidenceDir, "04-accepted.png"), fullPage: true });
+    await browser.close();
+    browser = null;
+    if (child.exitCode == null) child.kill();
+    await waitForExit(child, 15_000);
+    child = spawn(binary, [], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        LOCALAPPDATA: profileRoot,
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${DEBUG_PORT}`,
+        RELAY_E2E: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: false,
+    });
+    browser = await connectCdp(DEBUG_PORT);
+    const reopened = await firstPage(browser);
+    await reopened.waitForSelector('[data-testid="relay-composer-input"]', { timeout: LAUNCH_TIMEOUT_MS });
+    await reopened.locator('[data-testid="relay-nav-cases"]').click();
+    const persisted = await waitForText(reopened, ["Maya 04-01"], 20_000);
+    const reopenedBody = await reopened.locator("body").innerText();
+    await reopened.screenshot({ path: join(evidenceDir, "05-restart.png"), fullPage: true });
+    await writeFile(join(evidenceDir, "05-restart.txt"), reopenedBody);
+    if (!persisted) throw new Error(`Accepted birthday did not survive restart: ${reopenedBody.slice(0, 500)}`);
+    assertions.push("restart_keeps_accepted");
+    if (reopenedBody.includes("Listening for")) throw new Error("Listening turned on");
     assertions.push("listening_off");
     await writeFile(
       join(evidenceDir, "result.json"),
@@ -128,6 +175,17 @@ async function gitSha(): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode != null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 async function waitForText(page: Page, needles: string[], timeoutMs: number): Promise<string | null> {

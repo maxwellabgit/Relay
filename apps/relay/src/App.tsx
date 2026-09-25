@@ -79,6 +79,7 @@ export function App() {
   );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [e2eFixture, setE2eFixture] = useState(false);
   const [phase, setPhase] = useState<"booting" | "failed" | "live">("booting");
   const [composerText, setComposerText] = useState("");
   const [composerSending, setComposerSending] = useState(false);
@@ -132,6 +133,7 @@ export function App() {
         handle = created;
         handleRef.current = created;
         clientRef.current = created.client;
+        setE2eFixture(created.e2eFixture === true);
         unsubscribe = created.client.subscribe((change) => {
           if (change.type === "SnapshotReplaced") {
             setSnapshot(change.snapshot);
@@ -327,6 +329,12 @@ export function App() {
           setModelDelivery(modelDeliveryRef.current.deleteLocal());
         }}
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
+        e2eFixture={e2eFixture}
+        onE2eCalendar={() => {
+          void handleRef.current?.engine.installCalendarFixture().catch((error: unknown) => {
+            setNotice(error instanceof Error ? error.message : "sample_failed");
+          });
+        }}
         onInjectSample={() => {
           void (async () => {
             const handle = handleRef.current;

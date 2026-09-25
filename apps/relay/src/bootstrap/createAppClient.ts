@@ -15,6 +15,7 @@ export type AppClientHandle = {
   readonly client: RelayClient;
   readonly engine: RelayEngine;
   readonly secrets: AppSecretControl;
+  readonly e2eFixture?: boolean;
   onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;

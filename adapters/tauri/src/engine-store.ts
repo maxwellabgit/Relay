@@ -313,6 +313,42 @@ export class TauriEngineStore implements EngineStore {
     return Number(await this.call({ op: "release_uncommitted_hosted_grants" }));
   }
 
+  async putFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void> {
+    await this.call({ op: "foundation_put", kind, id, version, payload, at });
+  }
+
+  async getFoundation(
+    kind: string,
+    id: string,
+  ): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null> {
+    const row = await this.call({ op: "foundation_get", kind, id });
+    if (!row || typeof row !== "object") return null;
+    return row as { id: string; version: number; payload: unknown; updatedAt: string };
+  }
+
+  async listFoundation(
+    kind: string,
+  ): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]> {
+    const rows = await this.call({ op: "foundation_list", kind });
+    return Array.isArray(rows)
+      ? (rows as { id: string; version: number; payload: unknown; updatedAt: string }[])
+      : [];
+  }
+
+  async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
+    const claimed = await this.call({ op: "foundation_claim", kind, id, version, payload, at });
+    return claimed === true;
+  }
+
+  async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
+    await this.call({ op: "link_execution_case", executionId, projectCaseId, at });
+  }
+
+  async listExecutionCases(executionId: string): Promise<readonly string[]> {
+    const rows = await this.call({ op: "list_execution_cases", executionId });
+    return Array.isArray(rows) ? rows.filter((item): item is string => typeof item === "string") : [];
+  }
+
   private async voidOp(op: Record<string, unknown>): Promise<void> {
     await this.call(op);
   }
@@ -641,42 +677,6 @@ class TauriLearning implements LearningStore {
 
   private async voidOp(op: Record<string, unknown>): Promise<void> {
     await this.call(op);
-  }
-
-  async putFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<void> {
-    await this.call({ op: "foundation_put", kind, id, version, payload, at });
-  }
-
-  async getFoundation(
-    kind: string,
-    id: string,
-  ): Promise<{ id: string; version: number; payload: unknown; updatedAt: string } | null> {
-    const row = await this.call({ op: "foundation_get", kind, id });
-    if (!row || typeof row !== "object") return null;
-    return row as { id: string; version: number; payload: unknown; updatedAt: string };
-  }
-
-  async listFoundation(
-    kind: string,
-  ): Promise<readonly { id: string; version: number; payload: unknown; updatedAt: string }[]> {
-    const rows = await this.call({ op: "foundation_list", kind });
-    return Array.isArray(rows)
-      ? (rows as { id: string; version: number; payload: unknown; updatedAt: string }[])
-      : [];
-  }
-
-  async claimFoundation(kind: string, id: string, version: number, payload: unknown, at: string): Promise<boolean> {
-    const claimed = await this.call({ op: "foundation_claim", kind, id, version, payload, at });
-    return claimed === true;
-  }
-
-  async linkExecutionCase(executionId: string, projectCaseId: string, at: string): Promise<void> {
-    await this.call({ op: "link_execution_case", executionId, projectCaseId, at });
-  }
-
-  async listExecutionCases(executionId: string): Promise<readonly string[]> {
-    const rows = await this.call({ op: "list_execution_cases", executionId });
-    return Array.isArray(rows) ? rows.filter((item): item is string => typeof item === "string") : [];
   }
 }
 

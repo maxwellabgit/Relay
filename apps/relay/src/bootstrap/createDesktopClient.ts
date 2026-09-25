@@ -60,6 +60,7 @@ export type DesktopClientHandle = {
   onHostBackground(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
+  readonly e2eFixture?: boolean;
 };
 
 type MutableHealth = { ok: boolean; detail: string; model?: string | null };
@@ -106,6 +107,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     },
   };
 
+  const e2eFixture = (await invoke("e2e_fixture_enabled").catch(() => false)) === true;
   const deps: EngineDeps = {
     store,
     artifacts,
@@ -123,7 +125,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
     publicSearch: createWikipediaPublicSearch(),
-    allowFixture: developerConsoleAllowed(readProcessEnv()),
+    allowFixture: developerConsoleAllowed(readProcessEnv()) || e2eFixture,
   };
 
   const engine = new RelayEngine(deps);
@@ -393,6 +395,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     engine,
     store,
     artifacts,
+    e2eFixture,
     secrets: {
       async status() {
         try {

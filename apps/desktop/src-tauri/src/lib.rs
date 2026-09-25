@@ -25,6 +25,7 @@ pub fn run() {
         .manage(Mutex::new(db))
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::e2e_fixture_enabled,
             secrets::secret_status,
             secrets::secret_import_staging_file,
             secrets::secret_delete,
