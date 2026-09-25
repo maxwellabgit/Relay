@@ -22,7 +22,7 @@ import { EngineTrace, resolveRunId } from "./engine-helpers.js";
 import { AmbientTriage } from "./ambient/AmbientTriage.js";
 import { buildHostedJudgmentGrant, grantAccountFor, HostedGrantLedger, sessionDisclosureView } from "./disclosure/hosted-grant.js";
 import { listHostedWaits, markHostedWaitResumed } from "./judgments/durable-wait.js";
-import { MemoryCaseFolder, type CaseFolderPort } from "./cases/case-folder.js";
+import { SealedCaseFolder, type CaseFolderPort } from "./cases/case-folder.js";
 import { foundationFromEngineStore, MemoryFoundationStore } from "./cases/foundation-store.js";
 import { Pass1Foundation } from "./cases/pass1.js";
 import { SourceIntake } from "./intake/SourceIntake.js";
@@ -65,6 +65,8 @@ export type EngineDeps = {
   readonly gitCommit?: string;
   readonly trace?: TraceSink;
   readonly caseFolder?: CaseFolderPort;
+  /** Internal test workbench only. Release clients leave this unset. */
+  readonly allowFixture?: boolean;
 };
 
 /**
@@ -152,9 +154,12 @@ export class RelayEngine {
       authority: this.authority,
     });
 
+    const caseRecords = foundationFromEngineStore(deps.store) ?? new MemoryFoundationStore();
     this.pass1 = new Pass1Foundation({
-      records: foundationFromEngineStore(deps.store) ?? new MemoryFoundationStore(),
-      folder: deps.caseFolder ?? new MemoryCaseFolder(),
+      records: caseRecords,
+      folder:
+        deps.caseFolder ??
+        new SealedCaseFolder(deps.artifacts, caseRecords, () => deps.clock.now().toISOString()),
       artifacts: deps.artifacts,
       clock: deps.clock,
       ids: deps.ids,
@@ -509,6 +514,7 @@ export class RelayEngine {
       case "FeedbackAmbientRecommendation":
         return this.ambient.feedbackRecommendation(command.recommendationId, command.feedback);
       case "IngestObservedEvent": {
+        if (!this.deps.allowFixture) return { ok: false, summary: "fixture_disabled", error: "fixture_disabled" };
         const executionId = this.deps.ids.next("case");
         await this.deps.store.createCase({
           caseId: executionId,
@@ -587,6 +593,7 @@ export class RelayEngine {
    */
   /** Dev-console only. Records authority state, then ingests two calendar envelopes. */
   async installCalendarFixture(): Promise<void> {
+    if (!this.deps.allowFixture) throw new Error("fixture_disabled");
     const at = this.deps.clock.now().toISOString();
     const resourceId = "calendar:birthdays";
     await this.authority.upsertConnection(
@@ -623,7 +630,7 @@ export class RelayEngine {
       reflexVersion: 1,
       connectionId: "connection_calendar_sample",
       resourceIds: [resourceId],
-      actionId: "case.entry.replace@1",
+      actionId: "case.entry.append@1",
       expiresAt: new Date(this.deps.clock.now().getTime() + 60 * 60 * 1000).toISOString(),
       maxPerHour: 4,
     });

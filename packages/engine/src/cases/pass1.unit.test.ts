@@ -1,6 +1,6 @@
 import { localOnlyPolicy } from "@relay/contracts";
 import { describe, expect, it } from "vitest";
-import { MemoryCaseFolder } from "./case-folder.js";
+import { MemoryCaseFolder, SealedCaseFolder } from "./case-folder.js";
 import { MemoryFoundationStore } from "./foundation-store.js";
 import { calendarEnvelope, Pass1Foundation } from "./pass1.js";
 
@@ -66,7 +66,7 @@ describe("Pass 1 case and calendar slice", () => {
       reflexVersion: 1,
       connectionId: "connection_sample",
       resourceIds: ["calendar:birthdays"],
-      actionId: "case.entry.replace@1",
+      actionId: "case.entry.append@1",
       expiresAt: "2026-09-24T18:00:00.000Z",
       maxPerHour: 4,
     });
@@ -201,9 +201,10 @@ describe("Pass 1 case and calendar slice", () => {
 
   it("reopens a sealed Case after the folder object is replaced", async () => {
     const { records, artifacts } = harness();
+    const folder = new SealedCaseFolder(artifacts, records);
     const first = new Pass1Foundation({
       records,
-      folder: new MemoryCaseFolder(),
+      folder,
       artifacts,
       clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
       ids: { next: (prefix) => `${prefix}_restart` },
@@ -216,7 +217,7 @@ describe("Pass 1 case and calendar slice", () => {
     await first.ensureSeeded();
     const second = new Pass1Foundation({
       records,
-      folder: new MemoryCaseFolder(),
+      folder,
       artifacts,
       clock: { now: () => new Date("2026-09-24T12:00:00.000Z") },
       ids: { next: (prefix) => `${prefix}_again` },
@@ -229,6 +230,8 @@ describe("Pass 1 case and calendar slice", () => {
       "case_self_improvement",
     ]);
     expect(view.projectCases.find((item) => item.projectCaseId === "case_birthdays")?.intent).toContain("birthday");
+    const markdown = new TextDecoder().decode((await folder.read("case_birthdays", "main.md")) ?? new Uint8Array());
+    expect(markdown.startsWith("## Case Intent")).toBe(true);
     const index = await records.get("project_case", "case_birthdays");
     expect(JSON.stringify(index?.payload).includes("Remember who")).toBe(false);
   });

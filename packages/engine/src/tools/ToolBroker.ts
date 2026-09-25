@@ -388,7 +388,7 @@ export class ToolBroker {
     const projection = await this.deps.authority.project();
     const connected = new Set(
       projection.connections
-        .filter((row) => row.connected || row.healthStatus === "authority_recorded")
+        .filter((row) => row.connected || (row.connector.id === "public-search" && row.healthStatus === "authority_recorded"))
         .map((row) => row.connector.id),
     );
     const scopes = new Set<string>();
@@ -402,7 +402,8 @@ export class ToolBroker {
       const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
       return (
         connection?.connector.id === "public-search" &&
-        (connection.connected || connection.healthStatus === "authority_recorded")
+        (connection.connected ||
+          (connection.connector.id === "public-search" && connection.healthStatus === "authority_recorded"))
       );
     });
     const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();
@@ -434,7 +435,7 @@ export class ToolBroker {
     const projection = await this.deps.authority.project();
     const connected = new Set(
       projection.connections
-        .filter((row) => row.connected || row.healthStatus === "authority_recorded")
+        .filter((row) => row.connected || (row.connector.id === "public-search" && row.healthStatus === "authority_recorded"))
         .map((row) => row.connector.id),
     );
     const hasPublicDisclosure = projection.disclosures.some((grant) => {
@@ -442,7 +443,8 @@ export class ToolBroker {
       const connection = projection.connections.find((row) => row.connectionId === grant.connectionId);
       return (
         connection?.connector.id === "public-search" &&
-        (connection.connected || connection.healthStatus === "authority_recorded")
+        (connection.connected ||
+          (connection.connector.id === "public-search" && connection.healthStatus === "authority_recorded"))
       );
     });
     const hostedEnabled = await this.deps.store.getHostedProcessingEnabled();

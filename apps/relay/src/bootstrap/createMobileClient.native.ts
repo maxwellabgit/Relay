@@ -6,7 +6,6 @@ import {
   type SecretStore,
 } from "@relay/adapter-expo";
 import { createExpoDocumentFiles, createExpoSecureSecretStore } from "@relay/adapter-expo/durable-host";
-import { SealedCaseFolder } from "@relay/engine";
 import {
   createProductionIds,
   createRelayClientFromEngine,
@@ -96,7 +95,6 @@ export async function createMobileClient(
     gitCommit: resolveBuildSha(),
     trace: createMobileTraceSink(files, runId),
     publicSearch: createWikipediaPublicSearch(),
-    caseFolder: new SealedCaseFolder(backend.artifacts),
   };
 
   const engine = new RelayEngine(deps);

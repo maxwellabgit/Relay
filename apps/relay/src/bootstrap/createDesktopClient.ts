@@ -13,7 +13,6 @@ import type {
 import { TauriArtifactStore } from "@relay/adapter-tauri/artifact-store";
 import { startLiveTranscriptPump, TauriAudioPort, type AudioStatus } from "@relay/adapter-tauri/audio";
 import { TauriEngineStore, type StoreInvoke } from "@relay/adapter-tauri/engine-store";
-import { SealedCaseFolder } from "@relay/engine";
 import { TauriLocalModelPort } from "@relay/adapter-tauri/local-model";
 import {
   applySpeechSuspend,
@@ -30,6 +29,7 @@ import {
 } from "@relay/engine";
 import { createProductionReflexes } from "@relay/reflexes";
 import { createBrowserTraceSink } from "./trace-log";
+import { developerConsoleAllowed, readProcessEnv } from "./dev-console";
 import { createWikipediaPublicSearch } from "./wikipedia-public-search";
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -123,7 +123,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     gitCommit: resolveBuildSha(),
     trace: createBrowserTraceSink(runId, directoryLabel),
     publicSearch: createWikipediaPublicSearch(),
-    caseFolder: new SealedCaseFolder(artifacts),
+    allowFixture: developerConsoleAllowed(readProcessEnv()),
   };
 
   const engine = new RelayEngine(deps);

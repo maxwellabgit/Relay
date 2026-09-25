@@ -373,6 +373,21 @@ export class Pass1Foundation {
     }
     const person = parsed[1] ?? "";
     const monthDay = parsed[2] ?? "";
+    if (!validMonthDay(monthDay)) {
+      const receiptId = await this.putReceipt(envelope, caseIds, executionId, null, "processed");
+      return this.finish(this.result({
+        type: "verification_required",
+        summary: "Invalid date.",
+        executionId,
+        projectCaseIds: caseIds,
+        reflexId: "reflex.rule-notice",
+        eventId: envelope.eventId,
+        authority: "denied",
+        receiptIds: [receiptId],
+        retained: true,
+        durationMs: Date.now() - started,
+      }), envelope, receiptId);
+    }
     const conflicts = await this.birthdayConflicts(caseIds, person, monthDay);
     if (conflicts.length > 0) {
       const verify = await this.openVerify({
@@ -385,6 +400,7 @@ export class Pass1Foundation {
         envelope,
         replaceEntryId: conflicts[0]?.entryId ?? null,
         acceptedText: conflicts[0]?.text ?? "",
+        connectionId: binding.connectionId,
       });
       for (const projectCaseId of caseIds) this.mark(projectCaseId, "verify", executionId ?? undefined, verify.verifyId);
       this.heads.push({
@@ -412,7 +428,7 @@ export class Pass1Foundation {
     const grant = await this.matchingGrant(
       "reflex.rule-notice",
       1,
-      "case.entry.replace@1",
+      "case.entry.append@1",
       envelope.resourceId,
       binding.connectionId,
     );
@@ -440,7 +456,7 @@ export class Pass1Foundation {
         durationMs: Date.now() - started,
       }), envelope, receiptId);
     }
-    if (Date.parse(grant.expiresAt) < Date.parse(this.now())) {
+    if (Date.parse(grant.expiresAt) < Date.parse(this.now()) || !(await this.consumeGrantUse(grant))) {
       return this.finish(this.result({
         type: "failed",
         summary: "Grant expired.",
@@ -677,10 +693,7 @@ export class Pass1Foundation {
     toolIds?: readonly string[];
   }): StandardReflexResult {
     const invocationId = input.invocationId ?? this.deps.ids.next("inv");
-    const receiptIds =
-      input.type === "action_completed" && input.receiptIds.length === 0
-        ? [invocationId]
-        : input.receiptIds;
+    const receiptIds = input.receiptIds;
     return assertStandardResult({
       type: input.type,
       summary: input.summary,
@@ -709,7 +722,7 @@ export class Pass1Foundation {
       if (existing && !existing.reflexInvocationId) {
         await this.deps.records.put(
           "event_receipt",
-          existing.receiptId,
+          envelope.dedupeKey,
           2,
           { ...existing, reflexInvocationId: result.invocationId },
           this.now(),
@@ -725,7 +738,7 @@ export class Pass1Foundation {
         1,
         {
           cursorId: `cursor:${envelope.provider}:${envelope.resourceId}`,
-          bindingId: envelope.resourceId,
+          bindingId: (await this.bindings()).find((item) => item.resourceId === envelope.resourceId)?.bindingId ?? "",
           provider: envelope.provider,
           resourceId: envelope.resourceId,
           token: envelope.revision,
@@ -785,6 +798,7 @@ export class Pass1Foundation {
     envelope: EventEnvelope;
     replaceEntryId?: string | null;
     acceptedText?: string;
+    connectionId?: string | null;
   }): Promise<VerifyItem> {
     const existing = (await this.verifyItems()).find((item) => item.dedupeKey === input.dedupeKey);
     const at = this.now();
@@ -838,7 +852,7 @@ export class Pass1Foundation {
       acceptedSha256: acceptedRef?.sha256 ?? null,
       proposedArtifactId: input.artifactId,
       proposedSha256: null,
-      connectionId: null,
+      connectionId: input.connectionId ?? null,
       resourceId: input.envelope.resourceId,
       createdAt: at,
       updatedAt: at,
@@ -878,7 +892,6 @@ export class Pass1Foundation {
       if (grant.reflexId !== reflexId || grant.reflexVersion !== reflexVersion || grant.actionId !== actionId) continue;
       if (grant.connectionId !== connectionId) continue;
       if (!grant.resourceIds.includes(resourceId) && !grant.resourceIds.includes("*")) continue;
-      if (!(await this.consumeGrantUse(grant))) continue;
       return grant;
     }
     return null;
@@ -1023,7 +1036,8 @@ export class Pass1Foundation {
   private async persistCase(next: StoredCase, op: string, before: StoredCase | null): Promise<void> {
     const at = next.updatedAt;
     const main = renderMain(next);
-    const mainRef = await this.deps.artifacts.put(this.encode(main), localOnlyPolicy());
+    const bytes = this.encode(main);
+    const mainRef = await this.deps.artifacts.put(bytes, localOnlyPolicy());
     const intentRef = await this.deps.artifacts.put(this.encode(next.intent), localOnlyPolicy());
     const entries = [];
     for (const entry of next.entries) {
@@ -1037,32 +1051,35 @@ export class Pass1Foundation {
         provenance: entry.provenance,
       });
     }
+    const sensitive = await this.deps.artifacts.put(
+      this.encode(JSON.stringify({ alias: next.alias, references: next.references, rules: next.rules })),
+      localOnlyPolicy(),
+    );
     const index = {
       projectCaseId: next.projectCaseId,
-      alias: next.alias,
       status: next.status,
       version: next.version,
       intentRef: { artifactId: intentRef.artifactId, sha256: intentRef.sha256 },
       mainRef: { artifactId: mainRef.artifactId, sha256: mainRef.sha256 },
+      sensitiveRef: { artifactId: sensitive.artifactId, sha256: sensitive.sha256 },
       entries,
-      references: next.references,
-      rules: next.rules,
       createdAt: next.createdAt,
       updatedAt: at,
     };
     const journalId = `${next.projectCaseId}:${next.version}`;
-    await this.deps.records.put("case_journal", journalId, next.version, { index, op }, at);
-    await this.deps.folder.writeAtomic(
-      next.projectCaseId,
-      "main.md",
-      this.encode(`artifact:${mainRef.artifactId}\nsha:${mainRef.sha256}\n`),
-    );
+    await this.deps.records.put("case_journal", journalId, next.version, { index, op, done: false }, at);
+    await this.deps.folder.writeAtomic(next.projectCaseId, "main.md", bytes);
     await this.deps.folder.writeAtomic(next.projectCaseId, "rules.json", this.encode(JSON.stringify(next.rules)));
     await this.deps.folder.writeAtomic(
       next.projectCaseId,
       "references.json",
       this.encode(JSON.stringify(next.references)),
     );
+    const readBack = new TextDecoder().decode((await this.deps.folder.read(next.projectCaseId, "main.md")) ?? new Uint8Array());
+    if (!readBack.startsWith("## Case Intent")) throw new Error("case_folder_unreadable");
+    const current = await this.deps.records.get("project_case", next.projectCaseId);
+    const currentVersion = (current?.payload as { version?: number } | undefined)?.version ?? 0;
+    if (currentVersion > next.version) throw new Error("stale_case_write");
     await this.deps.records.put("project_case", next.projectCaseId, next.version, index, at);
     const beforeIndex = before ? await this.indexOnly(before) : null;
     await this.deps.records.put(
@@ -1127,6 +1144,7 @@ export class Pass1Foundation {
       version?: number;
       intent?: string;
       intentRef?: { artifactId: string; sha256: string };
+      sensitiveRef?: { artifactId: string; sha256: string };
       entries?: Array<ProjectCaseEntry & { textRef?: { artifactId: string; sha256: string } }>;
       references?: StoredCase["references"];
       rules?: StoredCase["rules"];
@@ -1136,6 +1154,13 @@ export class Pass1Foundation {
     };
     if (!row.projectCaseId) throw new Error("case_missing");
     const intent = row.intentRef ? await this.readRef(row.intentRef) : row.intent ?? "";
+    const sensitive = row.sensitiveRef
+      ? (JSON.parse(await this.readRef(row.sensitiveRef)) as {
+          alias?: string;
+          references?: StoredCase["references"];
+          rules?: StoredCase["rules"];
+        })
+      : null;
     const entries: ProjectCaseEntry[] = [];
     for (const entry of row.entries ?? []) {
       const text = entry.textRef ? await this.readRef(entry.textRef) : entry.text;
@@ -1150,13 +1175,13 @@ export class Pass1Foundation {
     }
     return {
       projectCaseId: row.projectCaseId,
-      alias: row.alias ?? row.projectCaseId,
+      alias: sensitive?.alias ?? row.alias ?? row.projectCaseId,
       status: row.status ?? "active",
       version: row.version ?? 1,
       intent,
       entries,
-      references: row.references ?? [],
-      rules: row.rules ?? [],
+      references: sensitive?.references ?? row.references ?? [],
+      rules: sensitive?.rules ?? row.rules ?? [],
       createdAt: row.createdAt ?? this.now(),
       updatedAt: row.updatedAt ?? this.now(),
       mainSha: row.mainSha ?? "",
@@ -1277,6 +1302,16 @@ function toVerifyView(item: VerifyItem): VerifyItemView {
 function safeTraceId(value: string): string {
   const cleaned = value.replace(/[^a-z0-9._-]/gi, "").toLowerCase();
   return cleaned.startsWith("a") || /^[a-z]/.test(cleaned) ? cleaned.slice(0, 80) : `id_${cleaned}`.slice(0, 80);
+}
+
+function validMonthDay(value: string): boolean {
+  const match = /^(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const lengths = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12) return false;
+  return day >= 1 && day <= (lengths[month - 1] ?? 0);
 }
 
 function compareRevision(left: string, right: string): number {
