@@ -214,6 +214,16 @@ export function DeveloperConsole({
       ) : null}
 
       {tab === "events" ? (
+        <View>
+        <View style={styles.card}>
+          <Text style={styles.section}>Activity trace</Text>
+          {(snapshot.computerActivity?.trace ?? []).slice(0, 20).map((item) => (
+            <Text key={item.id} style={styles.meta}>{`${item.type} · ${item.message}`}</Text>
+          ))}
+          {(snapshot.computerActivity?.trace.length ?? 0) === 0 ? (
+            <Text style={styles.empty}>No computer-activity trace yet.</Text>
+          ) : null}
+        </View>
         <LogsPane
           snapshot={snapshot}
           chronological={chronological}
@@ -252,6 +262,7 @@ export function DeveloperConsole({
           {...(onRejectCandidate !== undefined ? { onRejectCandidate } : {})}
           {...(onSnoozeCandidate !== undefined ? { onSnoozeCandidate } : {})}
         />
+        </View>
       ) : null}
     </ScrollView>
   );

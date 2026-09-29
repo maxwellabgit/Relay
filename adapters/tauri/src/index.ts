@@ -1,3 +1,4 @@
+export * from "./activity-events.js";
 export * from "./commands.js";
 export * from "./halo-display.js";
 export * from "./artifact-store.js";

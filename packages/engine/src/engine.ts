@@ -41,6 +41,7 @@ import type { EngineStore } from "./store.js";
 import { registerBuiltinTools } from "./tools/builtins.js";
 import { ToolBroker } from "./tools/ToolBroker.js";
 import { ToolRegistry } from "./tools/ToolRegistry.js";
+import { ActivityObservationService } from "./activity/service.js";
 import type { TraceSink } from "./trace-sink.js";
 
 export type EngineDeps = {
@@ -100,6 +101,7 @@ export class RelayEngine {
   private readonly dispatcher: WorkDispatcher;
   private readonly projector: SnapshotProjector;
   private readonly pass1: Pass1Foundation;
+  private readonly activity: ActivityObservationService;
   private caseRegistry: ToolRegistry | null = null;
 
   constructor(private readonly deps: EngineDeps) {
@@ -204,6 +206,20 @@ export class RelayEngine {
           observationEnabled: connection.observationEnabled,
           selectedResources: connection.selectedResources,
         };
+      },
+    });
+
+    this.activity = new ActivityObservationService({
+      clock: deps.clock,
+      ids: deps.ids,
+      records: caseRecords,
+      listCases: async () => {
+        const view = await this.pass1.view(deps.clock.now().toISOString());
+        return view.projectCases.map((item) => ({
+          projectCaseId: item.projectCaseId,
+          alias: item.alias,
+          intent: item.intent,
+        }));
       },
     });
 
@@ -404,7 +420,10 @@ export class RelayEngine {
       getActiveEpisodeId: () => this.activeEpisodeId,
       runId: () => resolveRunId(this.deps.trace?.runId),
       emit: (change) => this.emit(change),
-      pass1View: () => this.pass1.view(deps.clock.now().toISOString()),
+      pass1View: async () => {
+        const view = await this.pass1.view(deps.clock.now().toISOString());
+        return { ...view, computerActivity: this.activity.view() };
+      },
     });
   }
 
@@ -422,6 +441,7 @@ export class RelayEngine {
       this.recorder.markSinkMissing();
     }
     this.loopPromise = this.dispatcher.runLoop(this.abort.signal);
+    await this.activity.load();
     await this.trace.emit({ type: "run.started", reasonCode: "start" });
     await this.armDailyRead(at);
     await this.projector.emitSnapshot();
@@ -434,6 +454,7 @@ export class RelayEngine {
     this.abort?.abort();
     await this.loopPromise;
     this.loopPromise = null;
+    await this.activity.shutdown();
     await this.trace.emit({ type: "run.ended", reasonCode: "completed" });
   }
 
@@ -634,6 +655,66 @@ export class RelayEngine {
       case "BindObservation":
       case "SetScopedGrant":
         return { ok: false, summary: "fixture_command_blocked", error: "fixture_command_blocked" };
+      case "SetActivityObservation": {
+        const result = await this.activity.applySettings(command.patch);
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "PermitActivityDomain": {
+        const result = await this.activity.permitDomain(command.domain);
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "RevokeActivityDomain": {
+        const result = await this.activity.revokeDomain(command.domain);
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "ClearActivityHistory": {
+        const result = await this.activity.clearHistory();
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "AssignActivityEpisode": {
+        let caseId = command.caseId;
+        let label: string | null = null;
+        if (command.createAlias) {
+          const created = await this.pass1.ensureAlias(
+            command.createAlias,
+            "Work collected from observed computer activity.",
+          );
+          caseId = created.projectCaseId;
+          label = created.alias;
+        }
+        const result = await this.activity.assign(command.episodeId, caseId, label);
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "IngestActivityObservation": {
+        const result = await this.activity.ingest(command.observation);
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "ReplayActivityFixture": {
+        const cases = await this.pass1.view(this.deps.clock.now().toISOString());
+        const result = await this.activity.replayJobApplication(
+          cases.projectCases.map((item) => ({
+            projectCaseId: item.projectCaseId,
+            alias: item.alias,
+            intent: item.intent,
+          })),
+        );
+        await this.projector.emitSnapshot();
+        return result;
+      }
+      case "SetActivityObserverStatus": {
+        const result = await this.activity.setObserverStatus({
+          ...(command.windows ? { windows: command.windows } : {}),
+          ...(command.chrome ? { chrome: command.chrome } : {}),
+        });
+        await this.projector.emitSnapshot();
+        return result;
+      }
       default: {
         const handled = await this.operations.execute(command);
         if (handled) return handled;

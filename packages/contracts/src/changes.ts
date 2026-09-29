@@ -1,5 +1,6 @@
 import type { ConnectorActionRef, ConnectorRef, ReflexRef } from "./artifacts.js";
 import type { ObservationBinding } from "./events.js";
+import type { ComputerActivityView } from "./activity-observation.js";
 import type { CaseActivity, HeadsUpNotice, ProjectCaseView } from "./project-cases.js";
 import type { VerifyItemView } from "./verify.js";
 
@@ -134,6 +135,8 @@ export type RelaySnapshot = {
   readonly caseActivity?: readonly CaseActivity[];
   readonly headsUp?: readonly HeadsUpNotice[];
   readonly observationBindings?: readonly ObservationBinding[];
+  /** Desktop + Chrome activity timeline. Absent until the activity service has projected. */
+  readonly computerActivity?: ComputerActivityView;
   readonly reflexInvocations?: readonly {
     readonly invocationId: string;
     readonly reflexId: string;

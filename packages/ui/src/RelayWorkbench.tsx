@@ -1,4 +1,4 @@
-import type { ActionCard, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, ModelDeliveryView, RelayCommand, RelaySnapshot } from "@relay/contracts";
 import type { ProductSurface } from "./assistant/product-surface.js";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -38,6 +38,7 @@ export type RelayWorkbenchProps = {
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   readonly e2eFixture?: boolean;
   readonly onE2eCalendar?: () => void;
+  readonly onActivityCommand?: (command: RelayCommand) => void;
   readonly onRejectCandidate?: (candidateId: string) => void;
   readonly onSnoozeCandidate?: (candidateId: string) => void;
   readonly typeSafeKeyStatus?: "present" | "disabled" | "unknown";
@@ -93,6 +94,7 @@ export function RelayWorkbench({
   onRenameCase,
   e2eFixture,
   onE2eCalendar,
+  onActivityCommand,
   onRejectCandidate,
   onSnoozeCandidate,
   typeSafeKeyStatus,
@@ -148,6 +150,7 @@ export function RelayWorkbench({
       {...(onRenameCase !== undefined ? { onRenameCase } : {})}
       {...(e2eFixture !== undefined ? { e2eFixture } : {})}
       {...(onE2eCalendar !== undefined ? { onE2eCalendar } : {})}
+      {...(onActivityCommand !== undefined ? { onActivityCommand } : {})}
       {...(typeSafeKeyStatus !== undefined ? { typeSafeKeyStatus } : {})}
       {...(onSetTypeSafeKey !== undefined ? { onSetTypeSafeKey } : {})}
       {...(onImportTypeSafeKey !== undefined ? { onImportTypeSafeKey } : {})}

@@ -1,4 +1,5 @@
 import type {
+  ActivitySettings,
   ArtifactStorePort,
   DiagnosticLiveSummary,
   JudgmentPort,
@@ -21,6 +22,7 @@ import {
   JevHealthTracker,
   reduceSpeechSession,
   observeDiagnostics,
+  hostEventToCommand,
   RelayEngine,
   runTypeSafeAttempts,
   wireTypeSafeBody,
@@ -135,6 +137,8 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   let acceptIntake = true;
   let handlingSourceFailure = false;
   let healthTimer: ReturnType<typeof setInterval> | null = null;
+  let stopActivity: (() => void) | null = null;
+  let activityApplied = "";
 
   const publishLiveSummary = (snapshot: RelaySnapshot): void => {
     const statusOf = (id: string) => snapshot.status.find((chip) => chip.id === id)?.detail ?? "not_observed";
@@ -258,6 +262,29 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   const client: RelayClient = {
     start: async () => {
       await inner.start();
+      stopActivity?.();
+      const unlisten = await listenActivityHost((payload) => {
+        const command = hostEventToCommand(payload);
+        if (!command) return;
+        void inner.execute(command);
+      }).catch(() => () => undefined);
+      const unsubscribe = inner.subscribe((change) => {
+        if (change.type !== "SnapshotReplaced" || !change.snapshot.computerActivity) return;
+        const settings = change.snapshot.computerActivity.settings;
+        const desired = JSON.stringify(settings);
+        if (desired === activityApplied) return;
+        activityApplied = desired;
+        void syncActivityNative(invoke, settings, (command) => inner.execute(command));
+      });
+      stopActivity = () => {
+        unlisten();
+        unsubscribe();
+      };
+      const initial = await inner.getSnapshot();
+      if (initial.computerActivity) {
+        activityApplied = JSON.stringify(initial.computerActivity.settings);
+        void syncActivityNative(invoke, initial.computerActivity.settings, (command) => inner.execute(command));
+      }
       stopPump?.();
       acceptIntake = true;
       stopPump = startLiveTranscriptPump({
@@ -314,6 +341,11 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       }
       stopPump?.();
       stopPump = null;
+      stopActivity?.();
+      stopActivity = null;
+      activityApplied = "";
+      await invoke("activity_observer_stop").catch(() => undefined);
+      await invoke("activity_bridge_stop").catch(() => undefined);
       stopLiveSummary?.();
       stopLiveSummary = null;
       try {
@@ -535,6 +567,43 @@ function resolveBuildSha(): string {
   const sha = process.env.EXPO_PUBLIC_GIT_SHA ?? process.env.GIT_COMMIT ?? process.env.GITHUB_SHA;
   if (sha && /^[0-9a-f]{7,40}$/i.test(sha)) return sha.toLowerCase();
   return "unknown";
+}
+
+async function listenActivityHost(handler: (payload: unknown) => void): Promise<() => void> {
+  const { listenActivityHost: listen } = await import("@relay/adapter-tauri");
+  return listen(handler);
+}
+
+async function syncActivityNative(
+  invoke: TauriInvoke,
+  settings: ActivitySettings,
+  execute: (command: RelayCommand) => Promise<RelayCommandResult>,
+): Promise<void> {
+  await invoke("activity_set_bridge_policy", {
+    policy: {
+      enabled: settings.enabled,
+      windowsEnabled: settings.windowsEnabled,
+      chromeEnabled: settings.chromeEnabled,
+      pageContentEnabled: settings.pageContentEnabled,
+      permittedDomains: [...settings.permittedDomains],
+    },
+  }).catch(() => undefined);
+  if (settings.enabled && settings.windowsEnabled) {
+    const status = (await invoke("activity_observer_start").catch(() => null)) as { state?: string } | null;
+    const state = status?.state;
+    if (state === "running" || state === "stopped" || state === "unavailable") {
+      await execute({ type: "SetActivityObserverStatus", windows: state });
+    }
+  } else {
+    await invoke("activity_observer_stop").catch(() => undefined);
+    await execute({ type: "SetActivityObserverStatus", windows: "stopped" });
+  }
+  if (settings.enabled && settings.chromeEnabled) {
+    await invoke("activity_bridge_start").catch(() => undefined);
+  } else {
+    await invoke("activity_bridge_stop").catch(() => undefined);
+    await execute({ type: "SetActivityObserverStatus", chrome: "stopped" });
+  }
 }
 
 function requireTauriInvoke(): TauriInvoke {

@@ -1,4 +1,4 @@
-import type { ActionCard, FeedItemSnapshot, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, FeedItemSnapshot, ModelDeliveryView, RelayCommand, RelaySnapshot } from "@relay/contracts";
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
@@ -15,6 +15,7 @@ import {
   type AmbientFeedback,
 } from "../assistant/AmbientRecommendationCard.js";
 import { Composer } from "../assistant/Composer.js";
+import { ActivityPane } from "../assistant/ActivityPane.js";
 import { CasesPane, VerifyPane } from "../assistant/CaseSurfaces.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
@@ -71,6 +72,7 @@ type Props = {
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   readonly e2eFixture?: boolean;
   readonly onE2eCalendar?: () => void;
+  readonly onActivityCommand?: (command: RelayCommand) => void;
   /** When false, render full-bleed product surface (Expo/mobile). Default true for desktop workbench. */
   readonly showBezel?: boolean;
 };
@@ -115,10 +117,11 @@ export function PhoneShell({
   onRenameCase,
   e2eFixture,
   onE2eCalendar,
+  onActivityCommand,
   showBezel = true,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [consumerView, setConsumerView] = useState<"messages" | "cases" | "verify">("messages");
+  const [consumerView, setConsumerView] = useState<"messages" | "today" | "cases" | "verify">("messages");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
@@ -181,6 +184,9 @@ export function PhoneShell({
           <Text style={styles.brand} accessibilityRole="header">
             RELAY
           </Text>
+          <Text testID="relay-observation-status" style={styles.headerBtnLabel}>
+            {snapshot.computerActivity?.settings.enabled ? "Observing" : "Observation off"}
+          </Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Health ${health.label}`}
@@ -231,7 +237,7 @@ export function PhoneShell({
       </View>
 
       <View style={styles.listenRow}>
-        {(["messages", "cases", "verify"] as const).map((item) => {
+        {(["messages", "today", "cases", "verify"] as const).map((item) => {
           const pending = snapshot.verifyItems?.filter((entry) => entry.disposition === "pending").length ?? 0;
           const label = item === "verify" && pending > 0 ? `Verify ${pending}` : item[0]?.toUpperCase() + item.slice(1);
           return (
@@ -287,7 +293,13 @@ export function PhoneShell({
           {notice.text}
         </Text>
       ))}
-      {consumerView === "cases" ? (
+      {consumerView === "today" ? (
+        <ActivityPane
+          activity={snapshot.computerActivity}
+          cases={snapshot.projectCases ?? []}
+          {...(onActivityCommand ? { onCommand: onActivityCommand } : {})}
+        />
+      ) : consumerView === "cases" ? (
         <CasesPane
           cases={snapshot.projectCases ?? []}
           activityIds={(snapshot.caseActivity ?? []).map((item) => item.projectCaseId)}

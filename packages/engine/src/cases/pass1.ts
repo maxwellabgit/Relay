@@ -173,6 +173,18 @@ export class Pass1Foundation {
     };
   }
 
+  async ensureAlias(alias: string, intent: string): Promise<StoredCase> {
+    await this.ensureSeeded();
+    const wanted = alias.trim();
+    if (!wanted) throw new Error("invalid_case_alias");
+    const existing = (await this.cases()).find((item) => item.alias.toLowerCase() === wanted.toLowerCase());
+    if (existing) return existing;
+    const at = this.now();
+    const created = this.emptyCase(this.deps.ids.next("case"), wanted, oneIntent(intent), at);
+    await this.persistCase(created, "create", null);
+    return created;
+  }
+
   async rename(projectCaseId: string, alias: string, expectedVersion: number): Promise<StoredCase> {
     const current = await this.requireCase(projectCaseId);
     if (current.version !== expectedVersion) throw new Error("case_version_conflict");

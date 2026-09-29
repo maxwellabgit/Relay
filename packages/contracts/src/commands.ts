@@ -270,6 +270,56 @@ export type SetScopedGrantCommand = {
   readonly grant: ScopedActionGrant;
 };
 
+export type ActivitySettingsPatch = {
+  readonly enabled?: boolean;
+  readonly windowsEnabled?: boolean;
+  readonly chromeEnabled?: boolean;
+  readonly pageContentEnabled?: boolean;
+  readonly retentionDays?: number;
+};
+
+export type SetActivityObservationCommand = {
+  readonly type: "SetActivityObservation";
+  readonly patch: ActivitySettingsPatch;
+};
+
+export type PermitActivityDomainCommand = {
+  readonly type: "PermitActivityDomain";
+  readonly domain: string;
+};
+
+export type RevokeActivityDomainCommand = {
+  readonly type: "RevokeActivityDomain";
+  readonly domain: string;
+};
+
+export type ClearActivityHistoryCommand = {
+  readonly type: "ClearActivityHistory";
+};
+
+export type AssignActivityEpisodeCommand = {
+  readonly type: "AssignActivityEpisode";
+  readonly episodeId: string;
+  readonly caseId: string | null;
+  readonly createAlias?: string;
+};
+
+export type IngestActivityObservationCommand = {
+  readonly type: "IngestActivityObservation";
+  readonly observation: unknown;
+};
+
+export type ReplayActivityFixtureCommand = {
+  readonly type: "ReplayActivityFixture";
+  readonly fixture: "job-application";
+};
+
+export type SetActivityObserverStatusCommand = {
+  readonly type: "SetActivityObserverStatus";
+  readonly windows?: "running" | "stopped" | "unavailable";
+  readonly chrome?: "connected" | "disconnected" | "stopped";
+};
+
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
@@ -312,7 +362,15 @@ export type RelayCommand =
   | DecideVerifyCommand
   | RenameProjectCaseCommand
   | BindObservationCommand
-  | SetScopedGrantCommand;
+  | SetScopedGrantCommand
+  | SetActivityObservationCommand
+  | PermitActivityDomainCommand
+  | RevokeActivityDomainCommand
+  | ClearActivityHistoryCommand
+  | AssignActivityEpisodeCommand
+  | IngestActivityObservationCommand
+  | ReplayActivityFixtureCommand
+  | SetActivityObserverStatusCommand;
 
 export type RelayCommandResult = {
   readonly ok: boolean;

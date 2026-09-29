@@ -330,6 +330,9 @@ export function App() {
         }}
         {...(isTauriHost() ? { onOpenLog: () => { void openRunFolder(); } } : {})}
         e2eFixture={e2eFixture}
+        onActivityCommand={(command) => {
+          void runCommand(command);
+        }}
         onE2eCalendar={() => {
           void handleRef.current?.engine.installCalendarFixture().catch((error: unknown) => {
             setNotice(error instanceof Error ? error.message : "sample_failed");
