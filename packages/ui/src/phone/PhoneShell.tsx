@@ -1,4 +1,4 @@
-import type { ActionCard, FeedItemSnapshot, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, FeedItemSnapshot, ModelDeliveryView, RelayCommand, RelaySnapshot } from "@relay/contracts";
 import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
@@ -16,6 +16,7 @@ import {
 } from "../assistant/AmbientRecommendationCard.js";
 import { Composer } from "../assistant/Composer.js";
 import { CasesPane, VerifyPane } from "../assistant/CaseSurfaces.js";
+import { WorkflowSurfaces } from "../assistant/WorkflowSurfaces.js";
 import { LibrarySheet } from "../assistant/LibrarySheet.js";
 import { SettingsSheet } from "../assistant/SettingsSheet.js";
 import {
@@ -68,6 +69,7 @@ type Props = {
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
+  readonly onWorkflow?: (command: RelayCommand) => void;
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   readonly e2eFixture?: boolean;
   readonly onE2eCalendar?: () => void;
@@ -112,13 +114,14 @@ export function PhoneShell({
   onPauseReflex,
   onRollbackReflex,
   onDecideVerify,
+  onWorkflow,
   onRenameCase,
   e2eFixture,
   onE2eCalendar,
   showBezel = true,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [consumerView, setConsumerView] = useState<"messages" | "cases" | "verify">("messages");
+  const [consumerView, setConsumerView] = useState<"messages" | "cases" | "verify" | "today" | "now" | "reflex" | "observe">("messages");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [listenElapsedSec, setListenElapsedSec] = useState(0);
   const listenStartedAt = useRef<number | null>(null);
@@ -231,9 +234,11 @@ export function PhoneShell({
       </View>
 
       <View style={styles.listenRow}>
-        {(["messages", "cases", "verify"] as const).map((item) => {
-          const pending = snapshot.verifyItems?.filter((entry) => entry.disposition === "pending").length ?? 0;
-          const label = item === "verify" && pending > 0 ? `Verify ${pending}` : item[0]?.toUpperCase() + item.slice(1);
+        {(["messages", "today", "now", "cases", "verify", "reflex", "observe"] as const).map((item) => {
+          const verifyPending = snapshot.verifyItems?.filter((entry) => entry.disposition === "pending").length ?? 0;
+          const workflowPending = snapshot.workflow?.proposals.filter((entry) => entry.state === "pending").length ?? 0;
+          const pending = item === "verify" ? verifyPending + workflowPending : 0;
+          const label = pending > 0 ? `Verify ${pending}` : item[0]?.toUpperCase() + item.slice(1);
           return (
             <Pressable
               key={item}
@@ -294,7 +299,22 @@ export function PhoneShell({
           {...(onRenameCase ? { onRename: onRenameCase } : {})}
         />
       ) : consumerView === "verify" ? (
-        <VerifyPane items={snapshot.verifyItems ?? []} {...(onDecideVerify ? { onDecide: onDecideVerify } : {})} />
+        <View style={{ flex: 1 }}>
+          <WorkflowSurfaces
+            mode="verify"
+            workflow={snapshot.workflow}
+            cases={snapshot.projectCases ?? []}
+            {...(onWorkflow ? { onCommand: onWorkflow } : {})}
+          />
+          <VerifyPane items={snapshot.verifyItems ?? []} {...(onDecideVerify ? { onDecide: onDecideVerify } : {})} />
+        </View>
+      ) : consumerView === "today" || consumerView === "now" || consumerView === "reflex" || consumerView === "observe" ? (
+        <WorkflowSurfaces
+          mode={consumerView}
+          workflow={snapshot.workflow}
+          cases={snapshot.projectCases ?? []}
+          {...(onWorkflow ? { onCommand: onWorkflow } : {})}
+        />
       ) : (
       <FlatList
         ref={threadRef}

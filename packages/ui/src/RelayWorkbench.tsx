@@ -1,4 +1,4 @@
-import type { ActionCard, ModelDeliveryView, RelaySnapshot } from "@relay/contracts";
+import type { ActionCard, ModelDeliveryView, RelayCommand, RelaySnapshot } from "@relay/contracts";
 import type { ProductSurface } from "./assistant/product-surface.js";
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -35,6 +35,7 @@ export type RelayWorkbenchProps = {
   readonly onPauseReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onRollbackReflex?: (reflexId: string, version: number, stateVersion: number) => void;
   readonly onDecideVerify?: (verifyId: string, decision: "accept" | "dismiss" | "correct", correction?: string) => void;
+  readonly onWorkflow?: (command: RelayCommand) => void;
   readonly onRenameCase?: (projectCaseId: string, alias: string, expectedVersion: number) => void;
   readonly e2eFixture?: boolean;
   readonly onE2eCalendar?: () => void;
@@ -90,6 +91,7 @@ export function RelayWorkbench({
   onPauseReflex,
   onRollbackReflex,
   onDecideVerify,
+  onWorkflow,
   onRenameCase,
   e2eFixture,
   onE2eCalendar,
@@ -145,6 +147,7 @@ export function RelayWorkbench({
       {...(onPauseReflex !== undefined ? { onPauseReflex } : {})}
       {...(onRollbackReflex !== undefined ? { onRollbackReflex } : {})}
       {...(onDecideVerify !== undefined ? { onDecideVerify } : {})}
+      {...(onWorkflow !== undefined ? { onWorkflow } : {})}
       {...(onRenameCase !== undefined ? { onRenameCase } : {})}
       {...(e2eFixture !== undefined ? { e2eFixture } : {})}
       {...(onE2eCalendar !== undefined ? { onE2eCalendar } : {})}

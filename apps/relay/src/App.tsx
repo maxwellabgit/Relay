@@ -297,6 +297,9 @@ export function App() {
             ...(correction ? { correction } : {}),
           });
         }}
+        onWorkflow={(command) => {
+          void runCommand(command);
+        }}
         onRenameCase={(projectCaseId, alias, expectedVersion) => {
           void runCommand({ type: "RenameProjectCase", projectCaseId, alias, expectedVersion });
         }}

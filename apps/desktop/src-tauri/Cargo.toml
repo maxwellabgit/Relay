@@ -9,6 +9,10 @@ edition = "2021"
 name = "relay_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "relay-browser-bridge"
+path = "src/bridge_main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -25,7 +29,11 @@ windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",
   "Win32_UI_Controls_Dialogs",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Threading",
 ] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 panic = "abort"

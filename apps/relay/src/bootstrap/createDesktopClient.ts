@@ -126,6 +126,18 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
     trace: createBrowserTraceSink(runId, directoryLabel),
     publicSearch: createWikipediaPublicSearch(),
     allowFixture: developerConsoleAllowed(readProcessEnv()) || e2eFixture,
+    workflowFiles: {
+      async readText(path) {
+        const text = await invoke("workflow_read_text", { path });
+        if (typeof text !== "string") throw new Error("master_unreadable");
+        return text;
+      },
+      async writeDraft(name, body) {
+        const written = await invoke("workflow_write_draft", { name, body });
+        if (typeof written !== "string") throw new Error("draft_writer_unavailable");
+        return written;
+      },
+    },
   };
 
   const engine = new RelayEngine(deps);
@@ -135,6 +147,82 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
   let acceptIntake = true;
   let handlingSourceFailure = false;
   let healthTimer: ReturnType<typeof setInterval> | null = null;
+  let workflowTimer: ReturnType<typeof setInterval> | null = null;
+
+  const syncWorkflowHost = async (): Promise<void> => {
+    const snapshot = await inner.getSnapshot().catch(() => null);
+    const settings = snapshot?.workflow?.settings;
+    if (!settings) return;
+    const watch = settings.setupComplete && !settings.paused && settings.windowsEnabled;
+    if (watch) await invoke("observation_start").catch(() => undefined);
+    else await invoke("observation_stop").catch(() => undefined);
+    await invoke("bridge_set_accept", {
+      accept: settings.setupComplete && !settings.paused && settings.chromeEnabled,
+    }).catch(() => undefined);
+    await invoke("workflow_remember_roots", {
+      folders: [...settings.allowedFolders],
+      master: settings.masterResumePath,
+    }).catch(() => undefined);
+  };
+
+  const pollWorkflow = async (): Promise<void> => {
+    const windows = (await invoke("observation_status").catch(() => null)) as
+      | { running?: boolean; detail?: string }
+      | null;
+    const chrome = (await invoke("bridge_status").catch(() => null)) as { connected?: boolean; detail?: string } | null;
+    const focus = (await invoke("observation_drain").catch(() => [])) as {
+      observedAtMs?: number;
+      application?: string;
+      title?: string;
+      durationMs?: number;
+    }[];
+    const inbox = (await invoke("bridge_drain").catch(() => [])) as Record<string, unknown>[];
+    const signals = [
+      ...focus.map((item) => ({
+        observedAt: new Date(item.observedAtMs ?? Date.now()).toISOString(),
+        sourceType: "desktop" as const,
+        provider: "windows",
+        eventType: "window.focus",
+        ...(item.application ? { application: item.application } : {}),
+        ...(item.title ? { title: item.title } : {}),
+        ...(typeof item.durationMs === "number" ? { durationMs: item.durationMs } : {}),
+        permission: "always" as const,
+      })),
+      ...inbox.flatMap((item) => {
+        if (item.kind !== "observation" || typeof item.eventType !== "string") return [];
+        return [
+          {
+            observedAt: typeof item.observedAt === "string" ? item.observedAt : new Date().toISOString(),
+            sourceType: "browser" as const,
+            provider: "chrome",
+            eventType: item.eventType,
+            ...(typeof item.url === "string" ? { url: item.url } : {}),
+            ...(typeof item.title === "string" ? { title: item.title } : {}),
+            ...(typeof item.excerpt === "string" ? { excerpt: item.excerpt } : {}),
+            application: "Google Chrome",
+            permission: item.permission === "session" ? ("session" as const) : ("always" as const),
+          },
+        ];
+      }),
+    ];
+    if (signals.length > 0) {
+      await inner.execute({ type: "Workflow", action: "ingest", signals }).catch(() => undefined);
+    }
+    const snapshot = await inner.getSnapshot().catch(() => null);
+    const paused = snapshot?.workflow?.settings.paused === true;
+    await inner
+      .execute({
+        type: "Workflow",
+        action: "host_status",
+        host: {
+          windows: paused ? "paused" : windows?.running ? "connected" : "stopped",
+          chrome: paused ? "paused" : chrome?.connected ? "connected" : "disconnected",
+          windowsDetail: windows?.detail || (windows?.running ? "Watching the foreground window." : "Windows observation is off."),
+          chromeDetail: chrome?.detail || "Chrome is not connected.",
+        },
+      })
+      .catch(() => undefined);
+  };
 
   const publishLiveSummary = (snapshot: RelaySnapshot): void => {
     const statusOf = (id: string) => snapshot.status.find((chip) => chip.id === id)?.detail ?? "not_observed";
@@ -305,6 +393,11 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       healthTimer = setInterval(() => {
         void refreshConfiguredHealthImpl();
       }, HEALTH_POLL_MS);
+      if (workflowTimer) clearInterval(workflowTimer);
+      void pollWorkflow();
+      workflowTimer = setInterval(() => {
+        void pollWorkflow();
+      }, 2_000);
     },
     stop: async () => {
       acceptIntake = false;
@@ -312,6 +405,11 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         clearInterval(healthTimer);
         healthTimer = null;
       }
+      if (workflowTimer) {
+        clearInterval(workflowTimer);
+        workflowTimer = null;
+      }
+      await invoke("observation_stop").catch(() => undefined);
       stopPump?.();
       stopPump = null;
       stopLiveSummary?.();
@@ -335,6 +433,12 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       if (command.type === "SetHostedProcessing") {
         const result = await inner.execute(command);
         await refreshConfiguredHealthImpl();
+        return result;
+      }
+
+      if (command.type === "Workflow") {
+        const result = await inner.execute(command);
+        await syncWorkflowHost();
         return result;
       }
 

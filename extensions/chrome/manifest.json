@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "RELAY",
+  "version": "0.1.0",
+  "description": "Sends permitted browsing activity to RELAY on this computer.",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArRGZYBxnH7SZFpdKt7R4RvL9vSx/H6NhHKK7YU70YF6id7V+6j+nLRs5oAJRSgU88Nk0IKdGRDxkqOu5un2KkFy6HqQbDNuRlcYxwbxPo7CnVxcc6r/Iq1nX288YvWhgK6ehNvviAJ9hCNRPr2x0ZBi04oQBa7eDyB64i2U5lsGsYdh5X339yRl/eBr4cTU9eLfzXGC8gq0EHCss/A9WemRqrG/FpJF14rp5n51Vg8fQ7k5g/mdhLyIxhM5aLRxRAcFgCaVmvk0EOQMsu75eZgv+caC3ocKhQHRPW9QsenozH2cnzNxu46o94x5acaexrnEL1A5K3wMNRKNzSCqagQIDAQAB",
+  "permissions": ["sidePanel", "nativeMessaging", "storage", "scripting", "activeTab"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "RELAY"
+  }
+}

@@ -1,11 +1,13 @@
 mod artifacts;
 mod audio;
+pub mod bridge;
 mod commands;
 mod diagnostics;
 mod grants;
 mod halo;
 mod hotkeys;
 mod local_model;
+mod observe;
 mod secrets;
 mod state;
 mod typesafe;
@@ -48,12 +50,23 @@ pub fn run() {
             typesafe::typesafe_judge,
             hotkeys::hotkey_status,
             halo::halo_status,
-            state::store_execute
+            state::store_execute,
+            commands::observation_start,
+            commands::observation_stop,
+            commands::observation_status,
+            commands::observation_drain,
+            commands::bridge_set_accept,
+            commands::bridge_drain,
+            commands::bridge_status,
+            commands::workflow_read_text,
+            commands::workflow_write_draft,
+            commands::workflow_remember_roots
         ])
         .build(tauri::generate_context!())
         .expect("error while building RELAY desktop")
         .run(|_app, event| {
             if let RunEvent::Exit = event {
+                observe::stop();
                 diagnostics::complete_active_run();
             }
         });
