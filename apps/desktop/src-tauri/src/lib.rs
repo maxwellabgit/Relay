@@ -1,3 +1,4 @@
+mod activity;
 mod artifacts;
 mod audio;
 mod commands;
@@ -48,12 +49,19 @@ pub fn run() {
             typesafe::typesafe_judge,
             hotkeys::hotkey_status,
             halo::halo_status,
-            state::store_execute
+            state::store_execute,
+            activity::activity_observer_start,
+            activity::activity_observer_stop,
+            activity::activity_observer_status,
+            activity::activity_bridge_start,
+            activity::activity_bridge_stop,
+            activity::activity_set_bridge_policy
         ])
         .build(tauri::generate_context!())
         .expect("error while building RELAY desktop")
         .run(|_app, event| {
             if let RunEvent::Exit = event {
+                activity::stop_activity_host();
                 diagnostics::complete_active_run();
             }
         });

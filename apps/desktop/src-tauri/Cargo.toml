@@ -21,10 +21,17 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 base64 = "0.22"
+relay-activity-bridge = { path = "../../../apps/native-host" }
+
+[target.'cfg(windows)'.dependencies]
+relay-windows-observer = { path = "../../../apps/windows-observer" }
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
   "Win32_UI_Controls_Dialogs",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 [profile.release]

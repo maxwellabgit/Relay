@@ -36,6 +36,8 @@ dist-types/
 coverage/
 *.tsbuildinfo
 apps/desktop/src-tauri/target/
+apps/native-host/target/
+apps/windows-observer/target/
 apps/relay/dist/
 runs/
 fixtures/private/**

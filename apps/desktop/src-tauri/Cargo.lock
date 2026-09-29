@@ -2631,10 +2631,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relay-activity-bridge"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "relay-desktop"
 version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
+ "relay-activity-bridge",
+ "relay-windows-observer",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2643,6 +2652,13 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "ureq",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "relay-windows-observer"
+version = "0.1.0"
+dependencies = [
  "windows 0.58.0",
 ]
 

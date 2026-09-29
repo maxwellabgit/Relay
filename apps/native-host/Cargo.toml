@@ -1,0 +1,13 @@
+[package]
+name = "relay-activity-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "RELAY Chrome native messaging host and observation message checks"
+publish = false
+
+[dependencies]
+serde_json = "1"
+
+[[bin]]
+name = "relay-native-host"
+path = "src/main.rs"
