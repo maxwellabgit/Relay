@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  font: 14px/1.4 system-ui, sans-serif;
+  background: #0e1622;
+  color: #e7eef8;
+}
+
+main {
+  padding: 16px;
+}
+
+h1,
+h2 {
+  margin: 0 0 8px;
+}
+
+#dot.offline {
+  color: #e06a6a;
+}
+
+#dot {
+  color: #3dce7a;
+}
+
+button,
+input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+}
+
+button {
+  background: #12343c;
+  color: #e7eef8;
+  border: 1px solid #2c415c;
+}

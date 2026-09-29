@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "RELAY",
+  "version": "0.1.0",
+  "description": "Observe explicitly permitted sites for RELAY Desktop.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "activeTab", "sidePanel", "nativeMessaging", "storage", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "RELAY"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

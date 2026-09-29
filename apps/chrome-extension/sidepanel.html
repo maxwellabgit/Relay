@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RELAY</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main>
+      <h1>RELAY</h1>
+      <p><span id="status">Disconnected</span> <span id="dot">●</span></p>
+      <section>
+        <h2>Current page</h2>
+        <p id="page">Waiting for a permitted site.</p>
+      </section>
+      <section>
+        <h2>Observed</h2>
+        <ul>
+          <li>Domain</li>
+          <li>Page title</li>
+          <li>Page structure</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Not observed</h2>
+        <ul>
+          <li>Passwords</li>
+          <li>Keystrokes</li>
+          <li>Unapproved sites</li>
+        </ul>
+      </section>
+      <label>
+        Domain
+        <input id="domain" type="text" autocomplete="off" spellcheck="false" />
+      </label>
+      <button id="permit" type="button">Permit site</button>
+      <button id="pause" type="button">Pause observation</button>
+    </main>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
