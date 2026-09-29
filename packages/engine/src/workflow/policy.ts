@@ -53,7 +53,7 @@ export function acceptSignal(signal: RawActivitySignal, context: PolicyContext):
   const host = hostname(url);
   const credential = AUTH_SURFACE.test(`${title ?? ""} ${url ?? ""}`);
   if (credential) excerpt = null;
-  if (/password\s*[:=]|[?&#](?:password|token|code|secret)=/i.test(`${url ?? ""} ${title ?? ""}`)) {
+  if (secretMaterial(`${url ?? ""} ${title ?? ""}`)) {
     return { ok: false, reason: "sensitive_blocked" };
   }
   if (signal.eventType === "page.semantic") {
@@ -113,6 +113,22 @@ function clean(value: string | undefined, max: number): string | null {
   const trimmed = value.split("\u0000").join("").trim();
   if (!trimmed) return null;
   return trimmed.slice(0, max);
+}
+
+function secretMaterial(value: string): boolean {
+  if (/password\s*[:=]/i.test(value) || /BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY/.test(value)) return true;
+  const match = value.match(/https?:\/\/\S+/i);
+  if (!match) return false;
+  try {
+    const parsed = new URL(match[0]);
+    const keys = [
+      ...parsed.searchParams.keys(),
+      ...new URLSearchParams(parsed.hash.replace(/^#/, "")).keys(),
+    ];
+    return keys.some((key) => /(password|token|secret|^code$|_code)$/i.test(key));
+  } catch {
+    return false;
+  }
 }
 
 function ownKeys(value: object): string[] {

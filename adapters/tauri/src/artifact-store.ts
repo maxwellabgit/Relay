@@ -57,7 +57,7 @@ export class TauriArtifactStore implements ArtifactStorePort {
   }
 
   async delete(artifactId: string): Promise<void> {
-    await this.invoke("artifact_delete", { artifact_id: artifactId });
+    await this.invoke("artifact_delete", { artifactId });
   }
 
   async get(ref: ArtifactRef): Promise<Uint8Array> {

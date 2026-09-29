@@ -62,5 +62,17 @@ describe("workflow privacy", () => {
       { settings, sessionSites: [], now: "2026-09-28T14:00:00.000Z" },
     );
     expect(secretUrl.ok).toBe(false);
+    const accessToken = acceptSignal(
+      {
+        observedAt: "2026-09-28T14:00:00.000Z",
+        sourceType: "browser",
+        provider: "chrome",
+        eventType: "browser.navigate",
+        url: "https://jobs.example.com/cb?access_token=abc",
+        title: "Callback",
+      },
+      { settings, sessionSites: [], now: "2026-09-28T14:00:00.000Z" },
+    );
+    expect(accessToken.ok).toBe(false);
   });
 });
