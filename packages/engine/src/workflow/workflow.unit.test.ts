@@ -141,6 +141,31 @@ describe("workflow observation", () => {
       action: "ingest",
       signals: [
         {
+          observedAt: at(1),
+          sourceType: "browser",
+          provider: "chrome",
+          eventType: "browser.navigate",
+          url: "https://www.linkedin.com/jobs/view/thank-you",
+          title: "Thank you for applying — Example",
+        },
+        {
+          observedAt: at(2),
+          sourceType: "desktop",
+          provider: "windows",
+          eventType: "window.focus",
+          application: "Code.exe",
+          title: "Relay",
+        },
+      ],
+    });
+    view = await service.view();
+    expect(view.episodes.every((item) => item.outcome !== "submitted" && item.classification !== "job_application")).toBe(true);
+
+    await service.execute({
+      type: "Workflow",
+      action: "ingest",
+      signals: [
+        {
           observedAt: at(5),
           sourceType: "desktop",
           provider: "windows",
@@ -160,10 +185,10 @@ describe("workflow observation", () => {
       ],
     });
     view = await service.view();
-    expect(view.episodes).toHaveLength(1);
-    expect(view.episodes[0]?.classification).toBe("job_application");
-    expect(view.episodes[0]?.outcome).toBe("in_progress");
-    expect(view.episodes[0]?.company).toBe("Example");
+    const job = view.episodes.find((item) => item.classification === "job_application");
+    expect(job?.outcome).toBe("in_progress");
+    expect(job?.company).toBe("Example");
+    expect(view.episodes.filter((item) => item.classification === "job_application")).toHaveLength(1);
   });
 
   it("corrects case assignment and proposes a reflex only after repeated applications", async () => {
@@ -235,7 +260,7 @@ describe("workflow observation", () => {
         return `C:/Users/me/AppData/Local/RELAY/drafts/${name}`;
       },
     };
-    const { service, at } = harness(files);
+    const { service, records, at } = harness(files);
     await enable(service);
     await service.execute({ type: "Workflow", action: "set_master_resume", path: "C:/Job/master.md" });
     await service.execute({
@@ -302,6 +327,9 @@ describe("workflow observation", () => {
     expect(shadow.reflex?.state).toBe("shadow");
     expect(shadow.shadowPreview?.resume).toContain("production ML inference");
     expect(shadow.shadowPreview?.resume).not.toContain("quantum piloting");
+    const storedPreview = JSON.stringify(await records.list("workflow_preview"));
+    expect(storedPreview).not.toContain("production ML");
+    expect(storedPreview).not.toContain("quantum");
     expect(shadow.shadowPreview?.resume).toContain("Not claimed");
     expect((await service.execute({ type: "Workflow", action: "activate_reflex" })).summary).toBe("reflex_active");
     const ran = await service.execute({ type: "Workflow", action: "run_draft", episodeId });

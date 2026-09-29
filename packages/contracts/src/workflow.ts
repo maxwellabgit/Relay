@@ -81,6 +81,7 @@ export type WorkflowSettings = {
   readonly allowedFolders: readonly string[];
   readonly masterResumePath: string | null;
   readonly patternSuppressed: boolean;
+  readonly historyDeletedAt?: string | null;
 };
 
 export type WorkflowHostStatus = {

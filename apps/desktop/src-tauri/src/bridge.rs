@@ -89,6 +89,14 @@ fn handle_message(text: &str) -> String {
     if !accepting() {
         return json!({ "ok": false, "error": "observation_paused" }).to_string();
     }
+    let lower = text.to_lowercase();
+    if lower.contains("password=")
+        || lower.contains("password:")
+        || lower.contains("begin private key")
+        || lower.contains("begin rsa private key")
+    {
+        return json!({ "ok": false, "error": "sensitive_blocked" }).to_string();
+    }
     if let Err(error) = append_inbox(text) {
         return json!({ "ok": false, "error": error }).to_string();
     }

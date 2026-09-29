@@ -53,6 +53,9 @@ export function acceptSignal(signal: RawActivitySignal, context: PolicyContext):
   const host = hostname(url);
   const credential = AUTH_SURFACE.test(`${title ?? ""} ${url ?? ""}`);
   if (credential) excerpt = null;
+  if (/password\s*[:=]|[?&#](?:password|token|code|secret)=/i.test(`${url ?? ""} ${title ?? ""}`)) {
+    return { ok: false, reason: "sensitive_blocked" };
+  }
   if (signal.eventType === "page.semantic") {
     if (!context.settings.pageContentEnabled || credential) {
       return { ok: false, reason: credential ? "sensitive_blocked" : "source_disabled" };
@@ -75,8 +78,8 @@ export function acceptSignal(signal: RawActivitySignal, context: PolicyContext):
       provider: clean(signal.provider, 40) ?? signal.sourceType,
       deviceId: clean(signal.deviceId, 80) ?? "local",
       eventType: signal.eventType as WorkflowEventType,
-      url,
-      title,
+      url: credential ? (host ? `https://${host}/` : null) : url,
+      title: credential ? "[redacted]" : title,
       application,
       excerpt: signal.eventType === "page.semantic" ? excerpt : excerpt && context.settings.pageContentEnabled ? excerpt : null,
       permission: signal.permission ?? "metadata",

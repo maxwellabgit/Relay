@@ -46,7 +46,21 @@ describe("workflow privacy", () => {
     expect(page.ok).toBe(true);
     if (page.ok) {
       expect(page.observation.excerpt).toBeNull();
+      expect(page.observation.url).toBe("https://jobs.example.com/");
+      expect(page.observation.title).toBe("[redacted]");
       expect(page.observation.sensitivity).toBe("credential_surface");
     }
+    const secretUrl = acceptSignal(
+      {
+        observedAt: "2026-09-28T14:00:00.000Z",
+        sourceType: "browser",
+        provider: "chrome",
+        eventType: "browser.navigate",
+        url: "https://jobs.example.com/login?password=hunter2",
+        title: "Sign in",
+      },
+      { settings, sessionSites: [], now: "2026-09-28T14:00:00.000Z" },
+    );
+    expect(secretUrl.ok).toBe(false);
   });
 });

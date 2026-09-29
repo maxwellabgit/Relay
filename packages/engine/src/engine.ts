@@ -218,6 +218,10 @@ export class RelayEngine {
       trace: (input) => this.trace.emit(input),
       ...(deps.workflowFiles ? { files: deps.workflowFiles } : {}),
       artifacts: deps.artifacts,
+      forget: async (artifactId) => {
+        const store = deps.artifacts as { delete?: (id: string) => Promise<void> };
+        if (store.delete) await store.delete(artifactId);
+      },
       judge: async () => {
         try {
           const response = await deps.judgments.judge(

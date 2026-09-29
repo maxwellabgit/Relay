@@ -12,7 +12,6 @@ const JOB_URL = /jobs?|career|greenhouse|lever\.co|myworkday|ashbyhq|linkedin\.c
 const CONFIRM = /application (received|submitted)|thank you for applying|we (have )?received your application/i;
 const APPLY = /\b(apply|application)\b/i;
 const RESUME = /resume|curriculum vitae|\bcv\b/i;
-const DOC_APP = /winword|microsoft word|word|acrobat|writer|notepad|code/i;
 
 export type Classification = {
   readonly classification: EpisodeClassification;
@@ -30,7 +29,7 @@ export function isJobListing(observation: StoredObservation): boolean {
 }
 
 export function isResumeActivity(observation: StoredObservation): boolean {
-  return RESUME.test(`${observation.title ?? ""} ${observation.url ?? ""}`) || DOC_APP.test(observation.application ?? "");
+  return RESUME.test(`${observation.title ?? ""} ${observation.url ?? ""}`);
 }
 
 export function isApplicationPage(observation: StoredObservation): boolean {
@@ -46,7 +45,10 @@ export function classifyObservations(observations: readonly StoredObservation[])
   const listing = observations.filter(isJobListing);
   const resume = observations.filter(isResumeActivity);
   const application = observations.filter(isApplicationPage);
-  const confirmation = observations.filter(isConfirmation);
+  const confirmation = observations.filter((item) => isConfirmation(item) && !isJobListing(item));
+  const sameHostConfirmation = confirmation.some((item) =>
+    observations.some((listing) => isJobListing(listing) && listing.observationId !== item.observationId && hostname(listing.url) === hostname(item.url) && hostname(item.url)),
+  );
   const position = positionFrom(listing[0] ?? application[0] ?? observations[0]);
   const company = companyFrom(listing[0] ?? application[0] ?? observations[0]);
   if (listing.length > 0 && resume.length === 0 && application.length === 0 && confirmation.length === 0) {
@@ -59,7 +61,7 @@ export function classifyObservations(observations: readonly StoredObservation[])
       position,
     };
   }
-  if (confirmation.length > 0 && (listing.length > 0 || application.length > 0)) {
+  if (sameHostConfirmation) {
     return {
       classification: "job_application",
       outcome: "submitted",
@@ -118,7 +120,10 @@ export function related(existing: readonly StoredObservation[], next: StoredObse
   if (isResumeActivity(next) && existing.some(isJobListing)) return true;
   if (isJobListing(next) && existing.some(isResumeActivity)) return true;
   if (isApplicationPage(next) && existing.some((item) => isJobListing(item) || isResumeActivity(item))) return true;
-  if (isConfirmation(next) && existing.some((item) => isJobListing(item) || isApplicationPage(item))) return true;
+  if (isConfirmation(next) && !isJobListing(next)) {
+    const host = hostname(next.url);
+    return Boolean(host && existing.some((item) => isJobListing(item) && hostname(item.url) === host));
+  }
   return false;
 }
 
@@ -151,12 +156,14 @@ export function positionFrom(observation: StoredObservation | undefined): string
 
 export const PATTERN_MINIMUM = 3;
 
-export function commonSteps(episodes: readonly { evidence: readonly EpisodeEvidence[]; classification: EpisodeClassification }[]): string[] {
+export function commonSteps(
+  episodes: readonly { evidence: readonly EpisodeEvidence[]; classification: EpisodeClassification; outcome?: string }[],
+): string[] {
   const steps = ["inspect job description"];
   if (episodes.some((episode) => episode.evidence.some((item) => RESUME.test(item.label)))) steps.push("open master resume");
   if (episodes.some((episode) => episode.evidence.some((item) => /resume|cv/i.test(item.label) && !/master/i.test(item.label)))) {
     steps.push("create tailored copy");
   }
-  steps.push("submit application");
+  if (episodes.some((episode) => "outcome" in episode && episode.outcome === "submitted")) steps.push("submit application");
   return steps;
 }

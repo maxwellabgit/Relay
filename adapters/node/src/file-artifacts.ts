@@ -46,6 +46,14 @@ export class FileArtifactStore implements ArtifactStorePort {
     if (parsed?.artifactId && parsed.sha256 && parsed.policy) this.seals.load(parsed);
   }
 
+  async delete(artifactId: string): Promise<void> {
+    if (!/^artifact_[a-f0-9]{24}$/.test(artifactId)) return;
+    for (const suffix of [".bin", ".prov.json"]) {
+      const path = join(this.rootDir, `${artifactId}${suffix}`);
+      if (existsSync(path)) unlinkSync(path);
+    }
+  }
+
   async get(ref: ArtifactRef): Promise<Uint8Array> {
     const path = join(this.rootDir, `${ref.artifactId}.bin`);
     if (!existsSync(path)) throw new Error(`artifact_missing:${ref.artifactId}`);

@@ -269,9 +269,9 @@ function ReflexView({ workflow, onCommand }: { readonly workflow: WorkflowView; 
       {reflex.runs.map((run) => (
         <Text key={run.receiptId} style={{ color: colors.textMuted }}>{`${run.at} receipt ${run.receiptId} ${run.resumePath}`}</Text>
       ))}
-      {reflex.state === "shadow" ? (
+      {reflex.state === "shadow" || reflex.state === "paused" ? (
         <Pressable accessibilityRole="button" onPress={() => onCommand?.({ type: "Workflow", action: "activate_reflex" })}>
-          <Text style={{ color: colors.accent }}>Approve and activate</Text>
+          <Text style={{ color: colors.accent }}>{reflex.state === "paused" ? "Resume Reflex" : "Approve and activate"}</Text>
         </Pressable>
       ) : null}
       {reflex.state === "active" ? (

@@ -33,6 +33,7 @@ pub fn run() {
             secrets::secret_delete,
             artifacts::artifact_put,
             artifacts::artifact_get,
+            artifacts::artifact_delete,
             artifacts::artifact_provenance,
             local_model::local_model_status,
             local_model::local_model_generate,
@@ -67,6 +68,7 @@ pub fn run() {
         .run(|_app, event| {
             if let RunEvent::Exit = event {
                 observe::stop();
+                let _ = bridge::set_accept(false);
                 diagnostics::complete_active_run();
             }
         });

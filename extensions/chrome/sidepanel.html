@@ -4,18 +4,47 @@
     <meta charset="utf-8" />
     <title>RELAY</title>
     <style>
-      body { font: 14px/1.4 "Segoe UI", sans-serif; margin: 16px; color: #e7eef8; background: #0b1220; }
-      button { margin: 4px 4px 4px 0; padding: 8px 10px; border: 0; border-radius: 8px; background: #12343c; color: #3ec6e0; }
-      input { width: 100%; box-sizing: border-box; margin: 8px 0; padding: 8px; border-radius: 8px; border: 1px solid #1e2c40; background: #0a1018; color: #e7eef8; }
-      .muted { color: #8ea0b8; }
-      .warn { color: #e0b34a; }
+      body {
+        font:
+          14px/1.4 "Segoe UI",
+          sans-serif;
+        margin: 16px;
+        color: #e7eef8;
+        background: #0b1220;
+      }
+      button {
+        margin: 4px 4px 4px 0;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 8px;
+        background: #12343c;
+        color: #3ec6e0;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 8px 0;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid #1e2c40;
+        background: #0a1018;
+        color: #e7eef8;
+      }
+      .muted {
+        color: #8ea0b8;
+      }
+      .warn {
+        color: #e0b34a;
+      }
     </style>
   </head>
   <body>
     <h1>RELAY</h1>
     <p id="status" class="muted">Checking the desktop bridge…</p>
     <p id="site" class="muted">No site detected yet.</p>
-    <p class="muted">Page text is sent only after you allow the site. Passwords and form fields are not collected.</p>
+    <p class="muted">
+      Page text is sent only after you allow the site. Passwords and form fields are not collected.
+    </p>
     <input id="host" placeholder="www.example.com" />
     <button id="always" type="button">Always</button>
     <button id="session" type="button">This session</button>

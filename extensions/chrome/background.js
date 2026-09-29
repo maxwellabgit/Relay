@@ -24,7 +24,10 @@ function connect() {
   }
   port.onMessage.addListener((message) => {
     connected = Boolean(message && message.ok);
-    lastError = message && message.ok ? "Chrome is connected." : message?.error || "The bridge rejected a message.";
+    lastError =
+      message && message.ok
+        ? "Chrome is connected."
+        : message?.error || "The bridge rejected a message.";
   });
   port.onDisconnect.addListener(() => {
     connected = false;
@@ -73,15 +76,15 @@ async function refreshScripts() {
   }
   if (matches.length === 0) return;
   try {
-  await chrome.scripting.registerContentScripts([
-    {
-      id: SCRIPT_ID,
-      js: ["content.js"],
-      matches,
-      runAt: "document_idle",
-      persistAcrossSessions: true,
-    },
-  ]);
+    await chrome.scripting.registerContentScripts([
+      {
+        id: SCRIPT_ID,
+        js: ["content.js"],
+        matches,
+        runAt: "document_idle",
+        persistAcrossSessions: true,
+      },
+    ]);
   } catch {
     /* host permission is not granted yet */
   }
@@ -121,13 +124,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "refresh") {
-    void refreshScripts().then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: String(error) }));
+    void refreshScripts()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
   if (message?.type !== "semantic") return false;
   const url = sender.tab?.url || "";
   const title = sender.tab?.title || "";
   if (sender.id !== chrome.runtime.id) return false;
-  void forward("page.semantic", url, title, typeof message.excerpt === "string" ? message.excerpt : "");
+  void forward(
+    "page.semantic",
+    url,
+    title,
+    typeof message.excerpt === "string" ? message.excerpt : "",
+  );
   return false;
 });

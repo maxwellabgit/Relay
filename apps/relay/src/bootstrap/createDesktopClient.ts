@@ -410,6 +410,7 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
         workflowTimer = null;
       }
       await invoke("observation_stop").catch(() => undefined);
+      await invoke("bridge_set_accept", { accept: false }).catch(() => undefined);
       stopPump?.();
       stopPump = null;
       stopLiveSummary?.();
@@ -437,6 +438,10 @@ export async function createDesktopClient(options: DesktopClientOptions = {}): P
       }
 
       if (command.type === "Workflow") {
+        if (command.action === "delete_observations") {
+          await invoke("bridge_drain").catch(() => undefined);
+          await invoke("observation_drain").catch(() => undefined);
+        }
         const result = await inner.execute(command);
         await syncWorkflowHost();
         return result;

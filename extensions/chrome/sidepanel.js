@@ -41,7 +41,9 @@ async function grant(kind) {
     const session = await chrome.storage.session.get({ session: [] });
     await chrome.storage.session.set({ session: session.session.filter((item) => item !== host) });
   } else {
-    const granted = await chrome.permissions.request({ origins: [`https://${host}/*`, `http://${host}/*`] });
+    const granted = await chrome.permissions.request({
+      origins: [`https://${host}/*`, `http://${host}/*`],
+    });
     if (!granted) {
       site.textContent = `Chrome did not grant access to ${host}.`;
       return;
@@ -62,7 +64,8 @@ document.querySelector("#always").addEventListener("click", () => void grant("al
 document.querySelector("#session").addEventListener("click", () => void grant("session"));
 document.querySelector("#no").addEventListener("click", () => void grant("no"));
 document.querySelector("#open").addEventListener("click", () => {
-  site.textContent = "Switch to the RELAY window. Today shows episodes after the desktop app is running.";
+  site.textContent =
+    "Switch to the RELAY window. Today shows episodes after the desktop app is running.";
 });
 void render();
 setInterval(() => void render(), 3000);

@@ -79,6 +79,7 @@ export type WorkflowServiceDeps = {
   readonly files?: WorkflowFiles;
   readonly judge?: WorkflowJudge;
   readonly artifacts?: ArtifactStorePort;
+  readonly forget?: (artifactId: string) => Promise<void>;
 };
 
 type CorrectionRecord = {
@@ -92,6 +93,7 @@ type CorrectionRecord = {
 export class WorkflowService {
   private readonly sessionSites = new Set<string>();
   private lastDraft: WorkflowView["lastDraft"] = null;
+  private shadow: WorkflowView["shadowPreview"] = null;
 
   constructor(private readonly deps: WorkflowServiceDeps) {}
 
@@ -102,7 +104,7 @@ export class WorkflowService {
     const observations = await this.observations();
     const latest = [...observations].sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0];
     const currentEpisode = latest ? episodes.find((item) => item.episodeId === latest.episodeId) : undefined;
-    const preview = await this.deps.records.get(PREVIEW, LOCAL);
+    const preview = this.shadow ?? (await this.loadPreview());
     const judgment = await this.deps.records.get(JUDGMENT, LOCAL);
     return {
       settings,
@@ -137,7 +139,7 @@ export class WorkflowService {
       })),
       proposals: await this.proposals(),
       reflex: await this.reflex(),
-      shadowPreview: (preview?.payload as WorkflowView["shadowPreview"]) ?? null,
+      shadowPreview: preview,
       lastDraft: this.lastDraft,
       judgment: (judgment?.payload as WorkflowView["judgment"]) ?? null,
     };
@@ -214,8 +216,13 @@ export class WorkflowService {
   private async ingest(signals: readonly RawActivitySignal[]): Promise<{ ok: boolean; summary: string }> {
     await this.expire();
     const settings = await this.settings();
+    const deletedAt = settings.historyDeletedAt ? Date.parse(settings.historyDeletedAt) : 0;
     let kept = 0;
     for (const signal of signals) {
+      if (deletedAt && Date.parse(signal.observedAt) <= deletedAt) {
+        await this.trace("source.rejected", "source.accept", "history_deleted", "completed");
+        continue;
+      }
       const decision = acceptSignal(signal, { settings, sessionSites: [...this.sessionSites], now: this.now() });
       if (!decision.ok) {
         await this.trace("source.rejected", "source.accept", decision.reason, "failed");
@@ -400,7 +407,12 @@ export class WorkflowService {
   private async preview(episodeId: string): Promise<{ ok: boolean; summary: string }> {
     const built = await this.compose(episodeId, false);
     if (!built.ok) return built;
-    await this.deps.records.put(PREVIEW, LOCAL, 1, { resume: built.resume, coverLetter: built.coverLetter, notClaimed: built.notClaimed }, this.now());
+    this.shadow = { resume: built.resume, coverLetter: built.coverLetter, notClaimed: built.notClaimed };
+    if (this.deps.artifacts) {
+      const resumeRef = await this.deps.artifacts.put(new TextEncoder().encode(built.resume), localOnlyPolicy());
+      const letterRef = await this.deps.artifacts.put(new TextEncoder().encode(built.coverLetter), localOnlyPolicy());
+      await this.deps.records.put(PREVIEW, LOCAL, 1, { resumeRef, letterRef }, this.now());
+    }
     await this.trace("policy.evaluated", "policy.evaluate", "shadow_preview", "completed", episodeId, "reflex.job-application");
     return { ok: true, summary: "shadow_preview" };
   }
@@ -558,9 +570,15 @@ export class WorkflowService {
     const rows = await this.deps.records.list(OBSERVATION);
     const at = this.now();
     for (const row of rows) {
+      await this.forgetPayload(row.payload);
       await this.deps.records.put(OBSERVATION, row.id, row.version + 1, { deleted: true }, at);
     }
+    const preview = await this.deps.records.get(PREVIEW, LOCAL);
+    if (preview) await this.forgetPayload(preview.payload);
+    this.shadow = null;
     await this.deps.records.put(PREVIEW, LOCAL, 1, null, at);
+    const settings = await this.settings();
+    await this.deps.records.put(SETTINGS, LOCAL, 1, { ...settings, historyDeletedAt: at }, at);
     await this.trace("policy.evaluated", "policy.evaluate", "history_deleted");
     return { ok: true, summary: `deleted_${rows.length}` };
   }
@@ -618,6 +636,7 @@ export class WorkflowService {
       const observation = row.payload as StoredObservation;
       if (!observation?.observedAt) continue;
       if (Date.parse(observation.observedAt) < cutoff || Date.parse(observation.retentionUntil) < Date.parse(this.now())) {
+        await this.forgetPayload(row.payload);
         await this.deps.records.put(OBSERVATION, row.id, row.version + 1, { deleted: true }, this.now());
       }
     }
@@ -676,6 +695,34 @@ export class WorkflowService {
   private async host(): Promise<WorkflowHostStatus> {
     const row = await this.deps.records.get(HOST, LOCAL);
     return row ? { ...DEFAULT_HOST, ...(row.payload as WorkflowHostStatus) } : DEFAULT_HOST;
+  }
+
+  private async loadPreview(): Promise<WorkflowView["shadowPreview"]> {
+    const row = await this.deps.records.get(PREVIEW, LOCAL);
+    const payload = row?.payload as {
+      resumeRef?: { artifactId: string; sha256: string };
+      letterRef?: { artifactId: string; sha256: string };
+    } | null;
+    if (!payload?.resumeRef || !payload.letterRef || !this.deps.artifacts) return null;
+    try {
+      const resume = new TextDecoder().decode(await this.deps.artifacts.get({ ...payload.resumeRef, policy: localOnlyPolicy() }));
+      const coverLetter = new TextDecoder().decode(await this.deps.artifacts.get({ ...payload.letterRef, policy: localOnlyPolicy() }));
+      return { resume, coverLetter, notClaimed: [] };
+    } catch {
+      return null;
+    }
+  }
+
+  private async forgetPayload(payload: unknown): Promise<void> {
+    if (!payload || typeof payload !== "object" || !this.deps.forget) return;
+    const record = payload as {
+      excerptRef?: { artifactId?: string };
+      resumeRef?: { artifactId?: string };
+      letterRef?: { artifactId?: string };
+    };
+    for (const ref of [record.excerptRef, record.resumeRef, record.letterRef]) {
+      if (ref?.artifactId) await this.deps.forget(ref.artifactId);
+    }
   }
 
   private async seal(observation: StoredObservation): Promise<StoredObservation> {

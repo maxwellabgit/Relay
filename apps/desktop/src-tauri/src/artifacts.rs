@@ -226,6 +226,24 @@ pub fn put_plain_bytes(plain: &[u8]) -> Result<ArtifactPutResult, String> {
 }
 
 #[tauri::command]
+pub fn artifact_delete(artifact_id: String) -> Result<(), String> {
+    if !artifact_id.starts_with("artifact_")
+        || artifact_id.contains("..")
+        || artifact_id.contains('/')
+        || artifact_id.contains('\\')
+    {
+        return Err("malformed_observation".into());
+    }
+    for suffix in [".bin", ".prov.json"] {
+        let path = objects_dir()?.join(format!("{artifact_id}{suffix}"));
+        if path.exists() {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn artifact_get(request: ArtifactGetRequest) -> Result<ArtifactGetResult, String> {
     let path = objects_dir()?.join(format!("{}.bin", request.artifact_id));
     if !path.exists() {
