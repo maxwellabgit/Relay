@@ -10,6 +10,8 @@ const ALLOWED_TYPES: &[&str] = &[
     "chrome.page.classified",
     "chrome.permission.changed",
     "chrome.hello",
+    "observation.pause",
+    "observation.resume",
 ];
 
 const FORBIDDEN_KEYS: &[&str] = &[
@@ -39,6 +41,7 @@ const FORBIDDEN_KEYS: &[&str] = &[
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClientMessage {
     Hello,
+    Control(bool),
     Observation(Value),
 }
 
@@ -57,6 +60,12 @@ pub fn validate_client_json(bytes: &[u8]) -> Result<ClientMessage, &'static str>
     }
     if kind == "chrome.hello" {
         return Ok(ClientMessage::Hello);
+    }
+    if kind == "observation.pause" {
+        return Ok(ClientMessage::Control(false));
+    }
+    if kind == "observation.resume" {
+        return Ok(ClientMessage::Control(true));
     }
     let observation = row.get("observation").and_then(|item| item.as_object()).ok_or("observation")?;
     let event_type = observation.get("eventType").and_then(|item| item.as_str()).ok_or("event_type")?;

@@ -34,7 +34,8 @@ export function classifyEpisode(episode: Pick<WorkEpisode, "evidence" | "started
   if (span >= JOB_APPLICATION_MIN_SPAN_MS) why.push("The sequence lasted several minutes.");
   if (
     jobPage &&
-    (resume || application) &&
+    application &&
+    (resume || span >= JOB_APPLICATION_MIN_SPAN_MS) &&
     resources >= 2 &&
     episode.observationIds.length >= 3 &&
     span >= JOB_APPLICATION_MIN_SPAN_MS

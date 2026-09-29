@@ -13,6 +13,7 @@ import type {
 } from "@relay/contracts";
 import type { FoundationStore } from "../cases/foundation-store.js";
 import type { Clock, IdFactory } from "../scheduler.js";
+import { EPISODE_GAP_MS } from "./bounds.js";
 import { classificationDisplay } from "./classify.js";
 import { type CaseHint } from "./cases.js";
 import { normalizeDomain } from "./domains.js";
@@ -20,7 +21,7 @@ import { emptyDocument, isDocument, pruneDocument, pushTrace, type ActivityDocum
 import { JOB_APPLICATION_SETTINGS, jobApplicationObservations } from "./fixture.js";
 import { validateNativeMessage } from "./native-message.js";
 import { applyObservationPolicy } from "./policy.js";
-import { closeOpenEpisodes, ingestReduced } from "./reduce.js";
+import { closeOpenEpisodes, closeStaleEpisodes, ingestReduced } from "./reduce.js";
 import { isDuplicate, validateObservation } from "./validate.js";
 
 const KIND = "activity.observation";
@@ -74,7 +75,7 @@ export class ActivityObservationService {
   }
 
   view(): ComputerActivityView {
-    return project(this.doc);
+    return project(this.doc, this.deps.clock.now());
   }
 
   settings(): ActivitySettings {
@@ -335,6 +336,7 @@ export class ActivityObservationService {
         },
         this.deps.clock.now(),
       );
+      closeStaleEpisodes(this.doc, this.deps.clock.now().getTime(), this.deps.ids, this.deps.clock.now().toISOString());
       this.version = row.version;
     }
     this.loaded = true;
@@ -377,15 +379,17 @@ function permissionGrant(input: unknown): string | null {
   return typeof domain === "string" ? normalizeDomain(domain) : null;
 }
 
-function project(doc: ActivityDocument): ComputerActivityView {
+function project(doc: ActivityDocument, now: Date): ComputerActivityView {
   const open = [...doc.episodes].reverse().find((item) => item.status === "open" && item.origin === "live") ?? null;
+  const fresh =
+    open != null && now.getTime() - Date.parse(open.endedAt ?? open.startedAt) < EPISODE_GAP_MS;
   const episodes = [...doc.episodes].filter((item) => item.origin === "live").sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
   return {
     settings: doc.settings,
     retentionLabel: `Raw observations ${doc.settings.retentionDays || DEFAULT_ACTIVITY_SETTINGS.retentionDays} days · episodes ${ACTIVITY_EPISODE_RETENTION_DAYS} days`,
     windowsObserver: doc.windowsObserver,
     chromeConnection: doc.chromeConnection,
-    current: open ? currentFrom(open, doc.settings) : null,
+    current: open && fresh ? currentFrom(open, doc.settings) : null,
     episodes,
     example: doc.example,
     trace: [...doc.trace].reverse(),

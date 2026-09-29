@@ -24,7 +24,9 @@ function clock(iso: string): string {
 }
 
 function range(episode: WorkEpisode): string {
-  const end = episode.status === "open" ? "now" : clock(episode.endedAt ?? episode.startedAt);
+  const endMs = Date.parse(episode.endedAt ?? episode.startedAt);
+  const live = episode.status === "open" && Number.isFinite(endMs) && Date.now() - endMs < 15 * 60 * 1000;
+  const end = live ? "now" : clock(episode.endedAt ?? episode.startedAt);
   return `${clock(episode.startedAt)}–${end}`;
 }
 

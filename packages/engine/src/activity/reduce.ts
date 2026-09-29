@@ -1,5 +1,5 @@
 import type { Observation, WorkEpisode } from "@relay/contracts";
-import { CORRELATION_MS, EPISODE_GAP_MS, MAX_TITLE } from "./bounds.js";
+import { CORRELATION_MS, EPISODE_BLIP_MS, EPISODE_GAP_MS, MAX_TITLE } from "./bounds.js";
 import { associateEpisode, type CaseHint } from "./cases.js";
 import { classifyEpisode } from "./classify.js";
 import { pushTrace, type ActivityDocument } from "./document.js";
@@ -270,6 +270,17 @@ export function ingestReduced(
     traceClassification(doc, ids, at, before, next);
     return { episodeId: next.id, correlated: false };
   }
+  const resumed = open && !continues(open, observation) ? resumeAfterBlip(doc, open, observation) : null;
+  if (resumed) {
+    doc.episodes = doc.episodes.filter((item) => item.id !== open?.id);
+    const next = attach({ ...resumed, status: "open" }, observation, cases);
+    replaceEpisode(doc, next);
+    const self = doc.observations.findIndex((item) => item.id === observation.id);
+    if (self >= 0) doc.observations[self] = { ...observation, episodeId: next.id };
+    pushTrace(doc, ids.next("trace"), at, "episode.updated", next.title, { episodeId: next.id });
+    traceClassification(doc, ids, at, resumed, next);
+    return { episodeId: next.id, correlated: false };
+  }
   if (open) {
     const closed = { ...open, status: "closed" as const };
     replaceEpisode(doc, closed);
@@ -307,6 +318,28 @@ export function ingestReduced(
   pushTrace(doc, ids.next("trace"), at, "episode.started", opened.title, { episodeId: opened.id });
   traceClassification(doc, ids, at, null, opened);
   return { episodeId: opened.id, correlated: Boolean(windowsMatch) };
+}
+
+function resumeAfterBlip(doc: ActivityDocument, open: WorkEpisode, observation: Observation): WorkEpisode | null {
+  const at = Date.parse(observation.timestamp);
+  const openStart = Date.parse(open.startedAt);
+  if (!Number.isFinite(at) || !Number.isFinite(openStart) || at - openStart >= EPISODE_BLIP_MS) return null;
+  const prior = [...doc.episodes].reverse().find((item) => item.origin === "live" && item.id !== open.id && item.status === "closed");
+  if (!prior) return null;
+  const gap = at - Date.parse(prior.endedAt ?? prior.startedAt);
+  if (!Number.isFinite(gap) || gap < 0 || gap >= EPISODE_GAP_MS) return null;
+  if (!continues(prior, observation)) return null;
+  return prior;
+}
+
+export function closeStaleEpisodes(doc: ActivityDocument, nowMs: number, ids: IdFactory, at: string): void {
+  for (const episode of doc.episodes) {
+    if (episode.status !== "open" || episode.origin !== "live") continue;
+    const end = Date.parse(episode.endedAt ?? episode.startedAt);
+    if (!Number.isFinite(end) || nowMs - end < EPISODE_GAP_MS) continue;
+    replaceEpisode(doc, { ...episode, status: "closed" });
+    pushTrace(doc, ids.next("trace"), at, "episode.closed", episode.title, { episodeId: episode.id });
+  }
 }
 
 export function closeOpenEpisodes(doc: ActivityDocument, ids: IdFactory, at: string): void {

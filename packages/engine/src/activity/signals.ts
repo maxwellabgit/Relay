@@ -50,7 +50,7 @@ export function readSignals(observation: Observation): ActivitySignals {
   const jobPath = /\/(jobs?|careers|apply|application)(\/|$|\?)/i.test(uri);
   const role = /\b(engineer|designer|manager|scientist|analyst|developer|director)\b/i.test(`${title} ${heading}`);
   const careers = /\bcareers\b/i.test(`${title} ${heading} ${uri}`);
-  const applicationPage = /\/apply(\/|$|\?)|\bapplication\b|\bapply\b/i.test(`${title} ${heading} ${uri}`);
+  const applicationPage = /\/apply(\/|$|\?)|\bapply\b|\bapplication form\b/i.test(`${title} ${heading} ${uri}`);
   const resume = /\b(resume|curriculum vitae)\b|\bcv\.(?:docx|pdf|doc|txt)\b/i.test(path);
   const jobDescription =
     text.length > 80 && (jobHost || jobPath || /\b(qualifications|responsibilities|job description)\b/i.test(text));

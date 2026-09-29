@@ -12,6 +12,8 @@ let port = null;
 let policy = { ...DEFAULT_POLICY, permittedDomains: [] };
 let paused = false;
 let policyFromDesktop = false;
+let bridgeReady = false;
+let localControlAt = 0;
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 
@@ -23,7 +25,7 @@ chrome.storage.local.get(["policy", "paused"], (stored) => {
 
 function saveState() {
   chrome.storage.local.set({ policy, paused });
-  chrome.runtime.sendMessage({ type: "relay.state", policy, paused, connected: Boolean(port) }).catch(() => undefined);
+  chrome.runtime.sendMessage({ type: "relay.state", policy, paused, connected: Boolean(port) && bridgeReady }).catch(() => undefined);
 }
 
 function connect() {
@@ -35,6 +37,7 @@ function connect() {
     return;
   }
   port.onMessage.addListener((message) => {
+    bridgeReady = Boolean(message && message.ok !== false && message.error !== "relay_unavailable");
     if (message && message.policy) {
       policyFromDesktop = true;
       policy = {
@@ -43,11 +46,13 @@ function connect() {
         pageContentEnabled: message.policy.pageContentEnabled === true,
         permittedDomains: Array.isArray(message.policy.permittedDomains) ? message.policy.permittedDomains : [],
       };
+      if (Date.now() - localControlAt > 4000) paused = policy.enabled !== true;
       saveState();
     }
   });
   port.onDisconnect.addListener(() => {
     port = null;
+    bridgeReady = false;
     saveState();
   });
   post({ type: "chrome.hello" });
@@ -138,19 +143,24 @@ chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type === "relay.state") return false;
   if (message.type === "relay.getState") {
-    sendResponse({ policy, paused, connected: Boolean(port) });
+    sendResponse({ policy, paused, connected: Boolean(port) && bridgeReady });
     return false;
   }
   if (message.type === "relay.pause") {
+    localControlAt = Date.now();
     paused = true;
     saveState();
+    connect();
+    post({ type: "observation.pause" });
     sendResponse({ ok: true });
     return false;
   }
   if (message.type === "relay.resume") {
+    localControlAt = Date.now();
     paused = false;
     saveState();
     connect();
+    post({ type: "observation.resume" });
     sendResponse({ ok: true });
     return false;
   }
@@ -181,4 +191,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 connect();
-setInterval(connect, 5000);
+setInterval(() => {
+  connect();
+  if (port) post({ type: "chrome.hello" });
+}, 3000);

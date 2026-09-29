@@ -243,6 +243,13 @@ fn handle_client(stream: std::net::TcpStream, token: String, app: AppHandle) {
                 );
                 let _ = writeln!(write, "{}", json!({ "ok": true, "policy": policy }));
             }
+            Ok(ClientMessage::Control(enabled)) => {
+                let _ = app.emit(
+                    "activity-observation",
+                    json!({ "kind": "observation-control", "enabled": enabled }),
+                );
+                let _ = writeln!(write, "{}", json!({ "ok": true, "policy": policy }));
+            }
             Ok(ClientMessage::Observation(value)) => {
                 let observation = value.get("observation").cloned().unwrap_or(Value::Null);
                 let _ = app.emit(

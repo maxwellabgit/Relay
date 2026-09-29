@@ -8,6 +8,8 @@ export const CORRELATION_MS = 20_000;
 export const DEDUPE_MS = 2_000;
 /** A focus gap at least this long closes the open episode. */
 export const EPISODE_GAP_MS = 15 * 60 * 1000;
+/** A switch away shorter than this is folded back into the surrounding episode. */
+export const EPISODE_BLIP_MS = 3 * 60 * 1000;
 export const JOB_APPLICATION_MIN_SPAN_MS = 3 * 60 * 1000;
 
 const FORBIDDEN_KEYS = new Set([

@@ -8,6 +8,8 @@ const ALLOWED = new Set([
   "chrome.page.classified",
   "chrome.permission.changed",
   "chrome.hello",
+  "observation.pause",
+  "observation.resume",
 ]);
 
 export type NativeDecision =
@@ -24,6 +26,9 @@ export function validateNativeMessage(input: unknown, byteLength: number): Nativ
     return { ok: false, reason: "forbidden_field" };
   }
   if (row.type === "chrome.hello") return { ok: true, kind: "hello" };
+  if (row.type === "observation.pause" || row.type === "observation.resume") {
+    return { ok: true, kind: "hello" };
+  }
   const observation = plainObject(row.observation);
   if (!observation) return { ok: false, reason: "observation" };
   if (observation.eventType !== row.type) return { ok: false, reason: "event_type" };
@@ -43,6 +48,9 @@ export function hostEventToCommand(payload: unknown): RelayCommand | null {
   const row = plainObject(payload);
   if (!row || typeof row.kind !== "string") return null;
   if (row.kind === "tool.execute" || row.kind === "command" || row.kind === "shell") return null;
+  if (row.kind === "observation-control" && typeof row.enabled === "boolean") {
+    return { type: "SetActivityObservation", patch: { enabled: row.enabled } };
+  }
   if (row.kind === "observation") {
     return { type: "IngestActivityObservation", observation: row.observation };
   }

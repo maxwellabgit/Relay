@@ -180,7 +180,7 @@ export class Pass1Foundation {
     const existing = (await this.cases()).find((item) => item.alias.toLowerCase() === wanted.toLowerCase());
     if (existing) return existing;
     const at = this.now();
-    const created = this.emptyCase(this.deps.ids.next("case"), wanted, oneIntent(intent), at);
+    const created = { ...this.emptyCase(this.deps.ids.next("case"), wanted, oneIntent(intent), at), rules: [] };
     await this.persistCase(created, "create", null);
     return created;
   }

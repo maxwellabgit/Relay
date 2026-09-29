@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryFoundationStore } from "../cases/foundation-store.js";
 import { hostEventToCommand, validateNativeMessage } from "./native-message.js";
 import { ActivityObservationService } from "./service.js";
+import { readSignals } from "./signals.js";
 import { nextForegroundEvent } from "./windows-foreground.js";
 
 function service(cases: readonly { projectCaseId: string; alias: string; intent: string }[] = []) {
@@ -122,6 +123,23 @@ describe("activity observation", () => {
     });
     await second.load();
     expect(second.view().episodes.some((item) => item.applications.includes("Cursor"))).toBe(true);
+  });
+
+  it("does not treat a job title containing Application as an application page", () => {
+    const signals = readSignals({
+      id: "obs_title",
+      timestamp: "2026-09-29T15:00:00.000Z",
+      source: { type: "chrome", provider: "extension" },
+      eventType: "chrome.navigation",
+      application: { processName: "chrome.exe" },
+      resource: {
+        uri: "https://jobs.example.com/1",
+        domain: "jobs.example.com",
+        title: "Application Engineer — Acme",
+      },
+    });
+    expect(signals.applicationPage).toBe(false);
+    expect(signals.jobPosting).toBe(true);
   });
 
   it("dedupes foreground samples before they are emitted", () => {

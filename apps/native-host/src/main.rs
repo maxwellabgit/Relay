@@ -37,6 +37,8 @@ fn forward(message: ClientMessage) -> Value {
     };
     let body = match message {
         ClientMessage::Hello => json!({ "type": "chrome.hello" }),
+        ClientMessage::Control(false) => json!({ "type": "observation.pause" }),
+        ClientMessage::Control(true) => json!({ "type": "observation.resume" }),
         ClientMessage::Observation(value) => value,
     };
     let request = json!({ "token": bridge.token, "body": body });
