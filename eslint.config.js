@@ -39,6 +39,18 @@ export default tseslint.config(
       "apps/relay/index.js",
     ],
   },
+  {
+    files: ["extensions/chrome/**/*.js"],
+    languageOptions: {
+      globals: {
+        chrome: "readonly",
+        document: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        setInterval: "readonly",
+      },
+    },
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
