@@ -1,4 +1,5 @@
 import type { ConnectorActionRef, ConnectorRef, ReflexRef } from "./artifacts.js";
+import type { WorkflowView } from "./workflow.js";
 import type { ObservationBinding } from "./events.js";
 import type { CaseActivity, HeadsUpNotice, ProjectCaseView } from "./project-cases.js";
 import type { VerifyItemView } from "./verify.js";
@@ -134,6 +135,7 @@ export type RelaySnapshot = {
   readonly caseActivity?: readonly CaseActivity[];
   readonly headsUp?: readonly HeadsUpNotice[];
   readonly observationBindings?: readonly ObservationBinding[];
+  readonly workflow?: WorkflowView;
   readonly reflexInvocations?: readonly {
     readonly invocationId: string;
     readonly reflexId: string;

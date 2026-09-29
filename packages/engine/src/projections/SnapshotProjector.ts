@@ -30,6 +30,7 @@ export type SnapshotProjectorDeps = {
   readonly emit: (change: RelayChange) => void;
   readonly now?: () => string;
   readonly pass1View?: () => Promise<Partial<RelaySnapshot>>;
+  readonly workflowView?: () => Promise<Partial<RelaySnapshot>>;
 };
 
 export class SnapshotProjector {
@@ -112,6 +113,7 @@ export class SnapshotProjector {
       connections: this.deps.authority.toConnectionSnapshots(authority.connections),
       reflexes: authority.reflexes,
       ...(this.deps.pass1View ? await this.deps.pass1View() : {}),
+      ...(this.deps.workflowView ? await this.deps.workflowView() : {}),
     };
   }
 

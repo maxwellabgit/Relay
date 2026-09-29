@@ -126,6 +126,20 @@ const REASON_CODES = new Set([
   "pass",
   "fail",
   "none",
+  "observation_kept",
+  "site_denied",
+  "sensitive_blocked",
+  "observation_paused",
+  "malformed_observation",
+  "oversized_observation",
+  "source_disabled",
+  "episode_classified",
+  "pattern_proposed",
+  "reflex_activated",
+  "draft_written",
+  "history_deleted",
+  "not_active",
+  "shadow_preview",
 ]);
 
 const ID_FIELDS = [

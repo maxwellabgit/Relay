@@ -1,5 +1,6 @@
 import type { ConnectorActionRef, ConnectorRef, ReflexRef } from "./artifacts.js";
 import type { EventEnvelope, ObservationBinding, ScopedActionGrant } from "./events.js";
+import type { EpisodeClassification, RawActivitySignal, WorkflowHostStatus } from "./workflow.js";
 
 export type SubmitTextCommand = {
   readonly type: "SubmitText";
@@ -270,6 +271,68 @@ export type SetScopedGrantCommand = {
   readonly grant: ScopedActionGrant;
 };
 
+export type WorkflowCommand =
+  | {
+      readonly type: "Workflow";
+      readonly action: "configure";
+      readonly setupComplete?: boolean;
+      readonly paused?: boolean;
+      readonly windowsEnabled?: boolean;
+      readonly chromeEnabled?: boolean;
+      readonly pageContentEnabled?: boolean;
+      readonly retentionDays?: number;
+      readonly allowedSites?: readonly string[];
+      readonly allowedFolders?: readonly string[];
+      readonly allowSessionSite?: string;
+    }
+  | { readonly type: "Workflow"; readonly action: "ingest"; readonly signals: readonly RawActivitySignal[] }
+  | {
+      readonly type: "Workflow";
+      readonly action: "correct";
+      readonly episodeId: string;
+      readonly classification?: EpisodeClassification;
+      readonly startedAt?: string;
+      readonly endedAt?: string;
+      readonly company?: string;
+      readonly position?: string;
+    }
+  | { readonly type: "Workflow"; readonly action: "assign_case"; readonly episodeId: string; readonly caseId: string | null }
+  | { readonly type: "Workflow"; readonly action: "ensure_job_case" }
+  | {
+      readonly type: "Workflow";
+      readonly action: "decide_proposal";
+      readonly proposalId: string;
+      readonly decision: "accept" | "reject" | "suppress";
+    }
+  | { readonly type: "Workflow"; readonly action: "preview_draft"; readonly episodeId: string }
+  | { readonly type: "Workflow"; readonly action: "run_draft"; readonly episodeId: string }
+  | { readonly type: "Workflow"; readonly action: "activate_reflex" }
+  | { readonly type: "Workflow"; readonly action: "pause_reflex" }
+  | {
+      readonly type: "Workflow";
+      readonly action: "record_outcome";
+      readonly episodeId: string;
+      readonly outcome: "submitted" | "in_progress" | "research";
+    }
+  | {
+      readonly type: "Workflow";
+      readonly action: "record_correction";
+      readonly episodeId: string;
+      readonly before: string;
+      readonly after: string;
+    }
+  | {
+      readonly type: "Workflow";
+      readonly action: "decide_improvement";
+      readonly proposalId: string;
+      readonly decision: "accept" | "reject" | "suppress" | "edit";
+      readonly preference?: string;
+    }
+  | { readonly type: "Workflow"; readonly action: "delete_observations" }
+  | { readonly type: "Workflow"; readonly action: "host_status"; readonly host: WorkflowHostStatus }
+  | { readonly type: "Workflow"; readonly action: "set_master_resume"; readonly path: string }
+  | { readonly type: "Workflow"; readonly action: "judge_episode"; readonly episodeId: string };
+
 export type RelayCommand =
   | SubmitTextCommand
   | SetListeningCommand
@@ -312,7 +375,8 @@ export type RelayCommand =
   | DecideVerifyCommand
   | RenameProjectCaseCommand
   | BindObservationCommand
-  | SetScopedGrantCommand;
+  | SetScopedGrantCommand
+  | WorkflowCommand;
 
 export type RelayCommandResult = {
   readonly ok: boolean;

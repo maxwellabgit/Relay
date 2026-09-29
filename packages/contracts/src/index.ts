@@ -17,5 +17,6 @@ export * from "./ports.js";
 export * from "./provenance-index.js";
 export * from "./reflexes.js";
 export * from "./tools.js";
+export * from "./workflow.js";
 export * from "./trace.js";
 export * from "./transcript.js";
